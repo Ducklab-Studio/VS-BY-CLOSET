@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Reverse proxy com HTTPS automático (Let's Encrypt).
+#
+# O Caddy emite e renova o certificado sozinho — sem certbot, sem cron.
+# Requisito: o DNS do domínio já apontando para o IP do servidor, portas 80/443
+# abertas. A porta 80 precisa ficar aberta mesmo em site só-HTTPS: é por ela que
+# o desafio ACME é validado.
+# ─────────────────────────────────────────────────────────────────────────────
+
+{
+	email {$ACME_EMAIL}
+	# Descomente para testar sem gastar a cota de emissão do Let's Encrypt:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN}, www.{$DOMAIN} {
+	encode zstd gzip
+
+	# Redireciona www → domínio raiz (canônico para SEO).
+	@www host www.{$DOMAIN}
+	redir @www https://{$DOMAIN}{uri} permanent
+
+	# ── API ───────────────────────────────────────────────────────────────────
+	# Roteia direto para o container da API. Passar pelo Next funcionaria, mas
+	# adicionaria um salto de rede a cada chamada e faria o front virar gargalo
+	# do tráfego de API.
+	handle /api/v1/* {
+		reverse_proxy api:3333 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# ── Frontend ──────────────────────────────────────────────────────────────
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# Cabeçalhos de segurança na borda. O Next também os envia; aqui garante
+	# cobertura de qualquer resposta servida fora dele (erro do proxy, etc.).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

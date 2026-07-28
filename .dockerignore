@@ -1,0 +1,39 @@
+# Contexto de build enxuto = build mais rápido e imagem sem segredo dentro.
+
+**/node_modules
+**/.next
+**/dist
+**/build
+**/out
+**/*.tsbuildinfo
+
+# Segredos — nunca devem entrar na imagem.
+.env
+.env.*
+!.env.example
+
+# Git e CI
+.git
+.github
+.gitignore
+
+# Docs e artefatos locais
+docs
+*.md
+!README.md
+coverage
+**/*.log
+.pnpm-store
+
+# Editor / SO
+.vscode
+.idea
+.claude
+.DS_Store
+Thumbs.db
+
+# Docker (evita invalidação de cache desnecessária)
+docker-compose*.yml
+Dockerfile*
+**/Dockerfile
+Caddyfile

@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# O painel administrativo não deve ser indexado.
+Disallow: /admin
+Disallow: /conta
+Disallow: /carrinho
+Disallow: /checkout
+
+Sitemap: /sitemap.xml

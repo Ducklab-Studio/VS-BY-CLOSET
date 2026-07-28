@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  // O seed roda via tsx e não precisa ir para o pacote publicado.
+  "include": ["src/**/*.ts"]
+}

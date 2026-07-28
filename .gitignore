@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Env — segredos nunca versionados
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.production.example
+
+# Backups de banco (contêm dados de clientes)
+backups/
+
+# Certificados
+*.pem
+*.key
+!**/prisma/**
+
+# Prisma
+packages/database/prisma/migrations/dev.db*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Uploads (local dev storage)
+uploads/
+
+# Coverage
+coverage/
