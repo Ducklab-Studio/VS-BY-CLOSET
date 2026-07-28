@@ -12,8 +12,8 @@ export default function PrivacyPage() {
       </p>
       <h2>1. Dados que coletamos</h2>
       <p>
-        Nome, e-mail, telefone, CPF, endereço de entrega e histórico de pedidos — dados necessários
-        para processar suas compras e entregas.
+        Nome, e-mail, telefone, CPF, endereço de entrega e histórico de reservas — dados necessários
+        para processar suas locações, entregas e devoluções.
       </p>
       <h2>2. Como usamos seus dados</h2>
       <p>

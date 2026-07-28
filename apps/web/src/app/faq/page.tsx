@@ -4,7 +4,7 @@ import { LegalPage } from '@/components/layout/LegalPage';
 export const metadata: Metadata = {
   title: 'Perguntas frequentes (FAQ)',
   description:
-    'Dúvidas sobre aluguel de roupa de neve: prazos, tamanhos, higienização, caução, danos e compra de peças.',
+    'Dúvidas sobre aluguel de roupa de neve: prazos, tamanhos, higienização, caução e danos.',
 };
 
 const faqs = [
@@ -33,8 +33,8 @@ const faqs = [
     a: 'Em algumas peças, sim. Quando houver, o valor aparece no checkout antes de você confirmar. A caução é liberada em até 7 dias após a devolução ser conferida.',
   },
   {
-    q: 'Posso comprar em vez de alugar?',
-    a: 'Pode. Parte da coleção está disponível para compra, sinalizada no catálogo. Peças de uso pessoal como luvas, meias e óculos costumam ser só para venda, por questão de higiene.',
+    q: 'As peças são higienizadas entre um cliente e outro?',
+    a: 'Sempre. Toda peça passa por higienização profissional e inspeção antes de sair para o próximo cliente. Itens que não permitem higienização adequada não entram na nossa locação.',
   },
   {
     q: 'Posso estender o período do aluguel?',

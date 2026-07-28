@@ -35,7 +35,7 @@ export function Footer() {
             VALLE<span className="text-white/50">SHOWROOM</span>
           </span>
           <p className="mt-3 text-sm text-white/50">
-            Aluguel e venda de roupa de neve premium. Você viaja leve; a gente cuida do resto.
+            Aluguel de roupa de neve premium. Você viaja leve; a gente cuida do resto.
           </p>
           <div className="mt-4 flex gap-3">
             <a href="#" aria-label="Instagram" className="text-white/50 hover:text-white">

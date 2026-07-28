@@ -4,7 +4,7 @@ import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
 export const metadata: Metadata = {
   title: 'Coleção',
   description:
-    'Macacões, jaquetas, calças, botas e acessórios de neve para alugar ou comprar. Escolha suas datas e veja o que está disponível.',
+    'Macacões, jaquetas, calças, botas e acessórios de neve para alugar. Escolha suas datas e veja o que está disponível.',
 };
 
 export default function CatalogoPage() {
@@ -13,8 +13,7 @@ export default function CatalogoPage() {
       <header className="border-b border-white/10 pb-8">
         <h1 className="font-heading text-3xl">Coleção</h1>
         <p className="mt-2 max-w-2xl text-sm text-white/50">
-          Defina o período da viagem para ver disponibilidade e preço reais. Peças marcadas para
-          venda podem ser compradas em vez de alugadas.
+          Defina o período da viagem para ver disponibilidade e preço reais de cada peça.
         </p>
       </header>
 

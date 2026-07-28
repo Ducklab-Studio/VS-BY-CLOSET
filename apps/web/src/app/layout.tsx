@@ -25,14 +25,14 @@ export const metadata: Metadata = {
     template: '%s | Valle Showroom',
   },
   description:
-    'Alugue roupa de neve premium para sua viagem — ou leve a peça para casa. Macacões, jaquetas, botas e acessórios com curadoria.',
+    'Alugue roupa de neve premium pelo período exato da sua viagem. Macacões, jaquetas, botas e acessórios com curadoria — receba em casa e devolva sem lavar.',
   keywords: [
     'aluguel de roupa de neve',
+    'locação de roupa de neve',
     'macacão de neve',
     'jaqueta de neve',
     'moon boots',
     'roupa para esqui',
-    'locação de roupa',
   ],
   openGraph: {
     type: 'website',

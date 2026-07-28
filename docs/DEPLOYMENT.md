@@ -33,18 +33,17 @@ Antes de subir o site, a conta precisa existir e ter produtos.
 1. Crie a conta em [booqable.com](https://booqable.com). O plano **Start**
    ($29/mês) já cobre esta integração — API só é necessária em cenários
    headless, que não é o caso aqui.
-2. Cadastre os produtos. Para cada peça, defina se é **item de aluguel** ou
-   **item de venda** (*sales item*), conforme o seu modelo.
+2. Cadastre os produtos como **itens de aluguel** (*rental products*), não
+   como *sales items* — a operação é exclusivamente de locação.
 3. Vá em **Settings → Online Bookings → Website integration → Custom
    websites** e copie o identificador da conta (a parte antes de
    `.booqable.com`).
 4. Em **Settings → Online Bookings**, adicione o domínio do site à lista de
    domínios permitidos — sem isso os componentes não carregam em produção.
 
-> **Item de venda ainda exige datas.** Por desenho do Booqable, todo pedido
-> carrega data de retirada e devolução, mesmo quando só há itens de compra.
-> Se isso incomodar no fluxo de venda pura, a saída é orientar o cliente no
-> texto da página ou tratar a compra por um canal separado.
+> Operação só de locação joga a favor: o Booqable é desenhado para isso, e a
+> exigência de datas em todo pedido — que atrapalharia uma venda avulsa —
+> aqui é exatamente o comportamento desejado.
 
 ## 2. Preparar o servidor
 

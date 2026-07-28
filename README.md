@@ -1,7 +1,7 @@
 # 🏔️ Valle Showroom
 
-Site de **aluguel e venda de roupa de neve**. Next.js na frente, **Booqable**
-como plataforma de locação por trás.
+Site de **aluguel de roupa de neve**. Next.js na frente, **Booqable** como
+plataforma de locação por trás.
 
 ---
 
@@ -104,5 +104,3 @@ Passo a passo completo em [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
   Bookings_), senão os componentes não carregam em produção.
 - **O CSP libera explicitamente os domínios do Booqable** em `next.config.mjs`.
   Se os componentes sumirem, esse é o primeiro lugar a olhar.
-- **Item de venda ainda exige datas.** Por desenho do Booqable, todo pedido
-  carrega data de retirada e devolução — inclusive quando só há itens de compra.

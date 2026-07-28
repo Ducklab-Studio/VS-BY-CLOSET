@@ -5,7 +5,7 @@ import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
 export const metadata: Metadata = {
   title: 'Como funciona',
   description:
-    'Entenda como alugar roupa de neve: escolha as datas, receba em casa, use na viagem e devolva sem lavar. Peças também disponíveis para compra.',
+    'Entenda como alugar roupa de neve: escolha as datas, receba em casa, use na viagem e devolva sem lavar.',
 };
 
 const passos = [
@@ -17,7 +17,7 @@ const passos = [
   {
     titulo: 'Monte o look',
     texto:
-      'Macacão, jaqueta, calça, botas, luvas e óculos. Cada peça pode ser alugada ou, quando disponível para venda, comprada de vez.',
+      'Macacão, jaqueta, calça, botas, luvas e óculos. Monte o conjunto completo ou alugue só o que está faltando.',
   },
   {
     titulo: 'Confirme a reserva',
@@ -60,26 +60,24 @@ export default function ComoFuncionaPage() {
         ))}
       </ol>
 
-      {/* ── Alugar x comprar ────────────────────────────────────────────── */}
+      {/* ── Por que alugar ──────────────────────────────────────────────── */}
       <section className="mt-16 rounded-2xl border border-white/10 bg-dusk p-8">
-        <h2 className="font-heading text-lg">Alugar ou comprar?</h2>
+        <h2 className="font-heading text-lg">Por que alugar faz mais sentido</h2>
         <div className="mt-6 grid gap-8 sm:grid-cols-2">
           <div>
-            <h3 className="font-heading text-sm tracking-widest text-white/80">Alugue quando</h3>
+            <h3 className="font-heading text-sm tracking-widest text-white/80">Custo</h3>
             <ul className="mt-3 space-y-2 text-sm text-white/55">
-              <li>· Vai à neve uma ou duas vezes por ano</li>
-              <li>· Quer peça premium sem pagar o preço cheio</li>
-              <li>· Está com criança que cresce a cada temporada</li>
-              <li>· Não tem onde guardar macacão o ano inteiro</li>
+              <li>· Um macacão bom custa mais que a viagem inteira de aluguel</li>
+              <li>· Você usa uma semana por ano, no máximo duas</li>
+              <li>· Sem custo de manutenção e impermeabilização</li>
             </ul>
           </div>
           <div>
-            <h3 className="font-heading text-sm tracking-widest text-white/80">Compre quando</h3>
+            <h3 className="font-heading text-sm tracking-widest text-white/80">Praticidade</h3>
             <ul className="mt-3 space-y-2 text-sm text-white/55">
-              <li>· Viaja para a neve todo ano</li>
-              <li>· Quer peça de uso pessoal, como luvas e óculos</li>
-              <li>· Se apaixonou pela peça que alugou</li>
-              <li>· Pratica esqui ou snowboard com frequência</li>
+              <li>· Nada ocupando armário o ano inteiro</li>
+              <li>· Criança cresce e o tamanho acompanha</li>
+              <li>· Peça sempre atual, sem desgaste de temporadas antigas</li>
             </ul>
           </div>
         </div>

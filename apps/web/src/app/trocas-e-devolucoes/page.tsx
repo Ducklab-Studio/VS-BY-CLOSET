@@ -11,8 +11,8 @@ export default function ReturnsPage() {
   return (
     <LegalPage title="Devoluções, trocas e cancelamentos" updatedAt="Julho de 2026">
       <p>
-        Esta política cobre dois casos distintos: peças <strong>alugadas</strong>, que voltam para
-        nós ao fim do período, e peças <strong>compradas</strong>, que ficam com você.
+        Trabalhamos exclusivamente com locação: todas as peças voltam para nós ao fim do período.
+        Abaixo, como funcionam devolução, cancelamento, troca de tamanho e danos.
       </p>
 
       <h2>1. Devolução das peças alugadas</h2>
@@ -64,25 +64,14 @@ export default function ReturnsPage() {
         proporcional ao reparo. Em perda ou dano irreparável, cobra-se o valor de reposição da peça.
       </p>
 
-      <h2>5. Peças compradas</h2>
-      <p>
-        Para itens adquiridos, vale o Código de Defesa do Consumidor: <strong>7 dias corridos</strong>{' '}
-        de direito de arrependimento a contar do recebimento e <strong>30 dias</strong> para troca
-        por defeito de fabricação. A peça deve estar sem uso, com etiquetas e na embalagem original.
-      </p>
-      <p>
-        Itens de uso pessoal — luvas, meias, toucas e protetores — não são elegíveis a troca por
-        arrependimento, por questão de higiene, salvo defeito de fabricação.
-      </p>
-
-      <h2>6. Como solicitar</h2>
+      <h2>5. Como solicitar</h2>
       <p>
         Fale conosco pela página de <strong>Contato</strong> ou responda o e-mail de confirmação do
         pedido, informando o número da reserva e, quando houver, fotos do problema. Respondemos em
         até 1 dia útil.
       </p>
 
-      <h2>7. Reembolsos</h2>
+      <h2>6. Reembolsos</h2>
       <p>
         Aprovado o reembolso, o valor volta pela mesma forma de pagamento em até 10 dias úteis.
         Cauções são liberadas em até 7 dias após a conferência da devolução.

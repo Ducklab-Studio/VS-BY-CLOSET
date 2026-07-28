@@ -9,7 +9,7 @@ export default function HomePage() {
       <section className="border-b border-white/10 px-4 py-20 sm:py-28">
         <div className="mx-auto max-w-5xl text-center">
           <p className="text-xs uppercase tracking-[0.3em] text-white/50">
-            Aluguel e venda de roupa de neve
+            Aluguel de roupa de neve
           </p>
           <h1 className="font-heading mt-5 text-4xl leading-tight sm:text-6xl">
             A neve não espera
@@ -17,8 +17,8 @@ export default function HomePage() {
             seu guarda-roupa
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base text-white/60 sm:text-lg">
-            Alugue macacões, jaquetas e botas premium pelo período exato da sua viagem. Gostou da
-            peça? Você também pode comprar.
+            Macacões, jaquetas e botas premium pelo período exato da sua viagem. Você usa uma semana
+            por ano — não faz sentido comprar.
           </p>
 
           {/* O seletor de datas define o período e faz todo o catálogo passar a
@@ -50,7 +50,7 @@ export default function HomePage() {
             {
               icon: Package,
               title: 'Monte o look',
-              text: 'Macacão, jaqueta, calça, botas e acessórios. Alugue ou compre cada peça.',
+              text: 'Macacão, jaqueta, calça, botas e acessórios — tudo que a viagem pede.',
             },
             {
               icon: Truck,
