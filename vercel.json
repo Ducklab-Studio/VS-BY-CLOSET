@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+
+  "// monorepo": "O app fica em apps/web, mas o install roda da raiz para o pnpm resolver o workspace.",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @loja/web build",
+  "outputDirectory": "apps/web/.next",
+
+  "// regiao": "gru1 = São Paulo. Reduz latência para o público brasileiro.",
+  "regions": ["gru1"],
+
+  "github": {
+    "silent": true
+  }
+}

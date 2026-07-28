@@ -1,125 +1,142 @@
-# Deploy em produção
+# Deploy
 
-O site é um container Next.js atrás de um proxy reverso com HTTPS automático.
-Não há banco de dados nem API própria: o **Booqable** é o backend de negócio.
+O site e o Booqable são **duas coisas separadas**, hospedadas em lugares
+diferentes, que se conversam por um script no navegador.
 
 ```
-Internet ──► Caddy :443 ──► web :3000 ──► (navegador fala com o Booqable)
-             (SSL auto)
+   SEU SITE                                    BOOQABLE
+   Next.js → Vercel                            já no ar em booqable.com
+   (este repositório)                          (você só configura a conta)
+        │                                             │
+        └─────────────── script JS ───────────────────┘
+                    carregado no navegador
+                       do visitante
 ```
 
-Como o site é stateless, deploy nunca corre risco de perder dado e escalar é
-só subir mais réplicas.
-
-## Divisão de responsabilidades
-
-| No Booqable | Neste site |
-| --- | --- |
-| Catálogo e fotos dos produtos | Design, marca e navegação |
-| Estoque e disponibilidade por data | Páginas institucionais e FAQ |
-| Carrinho, checkout e pagamento | SEO e performance |
-| Clientes, pedidos e contratos | Textos de política e contato |
-| Preço por período e caução | — |
-
-Você administra a loja pelo painel do Booqable. Este repositório não tem
-painel administrativo.
+Você **não sobe nada para dentro do Booqable**. Ele já existe como serviço; o
+que se faz lá é cadastrar produtos e autorizar o domínio.
 
 ---
 
-## 1. Configurar o Booqable
-
-Antes de subir o site, a conta precisa existir e ter produtos.
+## Parte 1 — Configurar o Booqable
 
 1. Crie a conta em [booqable.com](https://booqable.com). O plano **Start**
-   ($29/mês) já cobre esta integração — API só é necessária em cenários
-   headless, que não é o caso aqui.
-2. Cadastre os produtos como **itens de aluguel** (*rental products*), não
-   como *sales items* — a operação é exclusivamente de locação.
-3. Vá em **Settings → Online Bookings → Website integration → Custom
-   websites** e copie o identificador da conta (a parte antes de
-   `.booqable.com`).
-4. Em **Settings → Online Bookings**, adicione o domínio do site à lista de
-   domínios permitidos — sem isso os componentes não carregam em produção.
+   ($29/mês) atende — API só é necessária em cenário headless, que não é o caso.
+2. Cadastre os produtos como **itens de aluguel** (_rental products_), não como
+   _sales items_. A operação é exclusivamente de locação.
+3. Em **Settings → Online Bookings → Website integration → Custom websites**,
+   copie o identificador da conta (a parte antes de `.booqable.com`).
+4. Ainda em **Online Bookings**, adicione o domínio do site à lista de domínios
+   permitidos.
 
-> Operação só de locação joga a favor: o Booqable é desenhado para isso, e a
-> exigência de datas em todo pedido — que atrapalharia uma venda avulsa —
-> aqui é exatamente o comportamento desejado.
+> O passo 4 é o que mais pega gente desprevenida: sem ele o site funciona
+> localmente e os componentes somem em produção.
 
-## 2. Preparar o servidor
+---
 
-Requisitos: 1 vCPU e 1 GB de RAM bastam — o site é estático em essência.
-Ubuntu 22.04 ou 24.04.
+## Parte 2 — Publicar o site na Vercel
+
+A Vercel é a empresa que criou o Next.js — o encaixe é nativo, e um site
+deste tamanho cabe no plano gratuito.
+
+### 1. Subir o código para o GitHub
 
 ```bash
-curl -fsSL https://get.docker.com | sh
+gh repo create valle-showroom --private --source=. --push
+```
+
+Ou crie o repositório pela interface do GitHub e faça o push manual.
+
+### 2. Importar na Vercel
+
+Em [vercel.com/new](https://vercel.com/new), conecte o GitHub e selecione o
+repositório. O `vercel.json` na raiz já define build, install e região
+(São Paulo) — não é preciso configurar nada na interface.
+
+### 3. Definir as variáveis de ambiente
+
+Em **Settings → Environment Variables**, adicione:
+
+| Variável | Valor |
+| --- | --- |
+| `NEXT_PUBLIC_BOOQABLE_COMPANY` | o identificador copiado no passo 3 acima |
+| `NEXT_PUBLIC_SITE_URL` | `https://seudominio.com.br` |
+
+> Variáveis `NEXT_PUBLIC_*` são **embutidas no bundle durante o build**. Alterar
+> qualquer uma exige um novo deploy — mudar o valor e salvar não basta.
+
+### 4. Ligar o domínio
+
+Em **Settings → Domains**, adicione o domínio. A Vercel mostra os registros DNS
+a criar no seu provedor:
+
+| Tipo | Nome | Valor |
+| --- | --- | --- |
+| A | `@` | `76.76.21.21` |
+| CNAME | `www` | `cname.vercel-dns.com` |
+
+O HTTPS é emitido e renovado automaticamente.
+
+### 5. Voltar ao Booqable
+
+Autorize o domínio final em **Settings → Online Bookings** (o passo 4 da
+Parte 1). Sem isso, os componentes não carregam no site publicado.
+
+### Deploys seguintes
+
+```bash
+git push
+```
+
+A Vercel constrói e publica sozinha. Cada pull request ganha uma URL de preview
+própria.
+
+**Mudanças de catálogo, preço ou disponibilidade não exigem deploy** — são
+feitas no painel do Booqable e aparecem no site imediatamente.
+
+---
+
+## Alternativa — VPS com Docker
+
+O repositório também traz uma stack Docker completa, caso você prefira servidor
+próprio.
+
+```
+Internet ──► Caddy :443 ──► web :3000
+             (SSL automático)
 ```
 
 ```bash
-sudo usermod -aG docker $USER && newgrp docker
+cp .env.production.example .env
 ```
 
-```bash
-sudo ufw allow 22,80,443/tcp && sudo ufw enable
-```
-
-A porta 80 precisa ficar aberta mesmo em site só-HTTPS: é por ela que o
-Let's Encrypt valida o domínio.
-
-## 3. Apontar o domínio
-
-| Tipo | Nome  | Valor            |
-| ---- | ----- | ---------------- |
-| A    | `@`   | `IP_DO_SERVIDOR` |
-| A    | `www` | `IP_DO_SERVIDOR` |
-
-Confirme a propagação antes de seguir:
-
-```bash
-dig +short valleshowroom.com.br
-```
-
-## 4. Configurar e subir
-
-```bash
-git clone <seu-repo> /opt/valle && cd /opt/valle && cp .env.production.example .env
-```
-
-Preencha `DOMAIN`, `ACME_EMAIL` e `BOOQABLE_COMPANY`. Depois:
+Preencha `DOMAIN`, `ACME_EMAIL` e `BOOQABLE_COMPANY`, aponte o DNS para o IP do
+servidor e execute:
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-> `BOOQABLE_COMPANY` é embutida no bundle em tempo de build. Trocar a conta
-> exige **rebuild** (`docker compose build`), não apenas restart.
-
-## 5. Verificar
-
-```bash
-curl -I https://valleshowroom.com.br
-```
-
-Abra o site e confirme que o catálogo carrega. Se aparecerem espaços vazios no
-lugar dos produtos, veja a tabela de diagnóstico no fim desta página.
-
----
-
-## Atualizações
+Atualizações depois disso:
 
 ```bash
 git pull && ./scripts/deploy.sh
 ```
 
-O script reconstrói a imagem e só reporta sucesso depois que o healthcheck
-passa. Alterações de catálogo e preço não precisam de deploy — são feitas no
-painel do Booqable e aparecem na hora.
+Requisitos: 1 vCPU e 1 GB de RAM bastam. Portas 80 e 443 abertas — a 80
+precisa ficar aberta mesmo em site só-HTTPS, pois é por ela que o Let's Encrypt
+valida o domínio.
+
+**Quando escolher esta opção:** exigência de manter tudo em infraestrutura
+própria. Para o caso comum, a Vercel sai mais simples e mais barata, já que o
+site não tem backend nem banco.
 
 ---
 
-## Onde cada componente é usado
+## Onde cada componente do Booqable é usado
 
-Os componentes do Booqable são divs com classe própria que o script deles
-hidrata. Estão encapsulados em `<BooqableEmbed>`:
+São divs com classe própria que o script deles hidrata, encapsuladas em
+`<BooqableEmbed>`:
 
 | Componente | Página | Papel |
 | --- | --- | --- |
@@ -130,7 +147,7 @@ hidrata. Estão encapsulados em `<BooqableEmbed>`:
 | `sort` | Catálogo | Ordenação |
 | `sidebar` | Header | Carrinho |
 
-Para adicionar em outra página:
+Para usar em outra página:
 
 ```tsx
 import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
@@ -139,7 +156,7 @@ import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
 ```
 
 Sem `NEXT_PUBLIC_BOOQABLE_COMPANY` definida, cada um renderiza um placeholder
-identificado em vez de espaço vazio — útil durante o desenvolvimento.
+identificado em vez de espaço vazio.
 
 ---
 
@@ -147,8 +164,8 @@ identificado em vez de espaço vazio — útil durante o desenvolvimento.
 
 | Sintoma | Causa provável |
 | --- | --- |
-| Componentes aparecem como placeholder | `NEXT_PUBLIC_BOOQABLE_COMPANY` não definida, ou definida sem rebuild da imagem. |
-| Espaço vazio no lugar dos produtos | O script não carregou. Abra o console: bloqueio de CSP aponta para `next.config.mjs`; erro 404 no script indica identificador de conta errado. |
+| Componentes aparecem como placeholder | `NEXT_PUBLIC_BOOQABLE_COMPANY` não definida, ou definida sem novo deploy. |
+| Funciona local, quebra em produção | Domínio não autorizado no Booqable (Settings → Online Bookings). |
+| Espaço vazio no lugar dos produtos | O script não carregou. Veja o console: bloqueio de CSP aponta para `next.config.mjs`; 404 no script indica identificador errado. |
 | Funciona na home, quebra ao navegar | Reinit do Booqable falhou na navegação client-side. Veja `refreshBooqable()` em `src/lib/booqable.ts` — os nomes de método são tentativas, pois a API não é documentada. |
-| Componentes somem em produção mas funcionam local | Domínio não autorizado no Booqable (Settings → Online Bookings). |
-| Certificado não emite | DNS não propagou ou porta 80 fechada. |
+| Domínio não valida na Vercel | DNS ainda propagando. Confira com `dig +short seudominio.com.br`. |

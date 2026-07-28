@@ -27,8 +27,7 @@ Booqable. Alterações de catálogo e preço aparecem no site na hora, sem deplo
 | --- | --- |
 | Frontend | Next.js 15 (App Router), React 18, TypeScript, Tailwind |
 | Comércio | Booqable — componentes embedados |
-| Infra | Docker + Caddy (HTTPS automático) |
-| Deploy | Qualquer VPS com Docker — ver [DEPLOYMENT](docs/DEPLOYMENT.md) |
+| Deploy | Vercel (recomendado) ou Docker + Caddy em VPS |
 
 Sem banco de dados e sem API própria: o site é stateless.
 
@@ -90,11 +89,19 @@ genérica.
 
 ## 📦 Deploy
 
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
+O site vai para a **Vercel**; o Booqable é serviço separado que já está no ar.
+Você não sobe nada para dentro dele — só cadastra os produtos e autoriza o
+domínio no painel.
 
-Passo a passo completo em [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+1. Suba o repositório para o GitHub
+2. Importe em [vercel.com/new](https://vercel.com/new) — o `vercel.json` já
+   configura build e região
+3. Defina `NEXT_PUBLIC_BOOQABLE_COMPANY` e `NEXT_PUBLIC_SITE_URL` nas variáveis
+   de ambiente
+4. Ligue o domínio e autorize-o no painel do Booqable
+
+Depois disso, `git push` publica. Alternativa em VPS com Docker e passo a passo
+completo em [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## ⚠️ Pontos de atenção
 
