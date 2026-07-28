@@ -8,6 +8,7 @@ build/
 .next/
 out/
 *.tsbuildinfo
+.vercel
 
 # Env — segredos nunca versionados
 .env

@@ -96,6 +96,58 @@ feitas no painel do Booqable e aparecem no site imediatamente.
 
 ---
 
+## Alternativa — Hostinger
+
+Funciona, mas o plano importa. Node.js não está disponível em todos eles.
+
+| Plano | Node.js | Como publicar |
+| --- | --- | --- |
+| Premium (compartilhada) | ❌ Não | Só pelo **build estático** (abaixo) |
+| Business / Cloud | ✅ Sim | Node.js gerenciado, deploy pelo GitHub |
+| VPS | ✅ Sim | Docker (seção seguinte) ou Node direto |
+
+### Build estático — funciona em qualquer plano
+
+Este site não busca nada no servidor: todo o comércio acontece no navegador,
+via Booqable. Isso permite gerar **HTML puro**, que roda até na hospedagem
+compartilhada mais barata — sem Node, sem processo para cair.
+
+```bash
+pnpm --filter @loja/web build:static
+```
+
+Gera `apps/web/out/` (~1,5 MB). Suba o **conteúdo** dessa pasta para
+`public_html` via Gerenciador de Arquivos ou FTP.
+
+O `.htaccess` vai junto e já configura HTTPS obrigatório, redirecionamento de
+`www`, cabeçalhos de segurança e cache. Confirme que arquivos ocultos estão
+visíveis no gerenciador, senão ele não é enviado.
+
+> Defina `NEXT_PUBLIC_SITE_URL` e `NEXT_PUBLIC_BOOQABLE_COMPANY` **antes** de
+> gerar o build — as duas são gravadas no HTML nesse momento:
+>
+> ```bash
+> NEXT_PUBLIC_SITE_URL=https://seudominio.com.br NEXT_PUBLIC_BOOQABLE_COMPANY=suaconta pnpm --filter @loja/web build:static
+> ```
+
+**O que se perde:** cada alteração do site exige gerar e subir tudo de novo, na
+mão. Não há deploy automático por `git push` nem preview de branch. Mudanças de
+catálogo e preço continuam instantâneas, porque vêm do Booqable.
+
+### Business ou Cloud — Node.js gerenciado
+
+Em **hPanel → Websites → Node.js**, aponte para o repositório do GitHub e
+configure:
+
+- Comando de build: `pnpm --filter @loja/web build`
+- Diretório da aplicação: `apps/web`
+- Comando de start: `pnpm --filter @loja/web start`
+
+Defina `NEXT_PUBLIC_BOOQABLE_COMPANY` e `NEXT_PUBLIC_SITE_URL` nas variáveis de
+ambiente do painel.
+
+---
+
 ## Alternativa — VPS com Docker
 
 O repositório também traz uma stack Docker completa, caso você prefira servidor
