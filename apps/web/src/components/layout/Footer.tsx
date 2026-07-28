@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Instagram, Facebook, Mail } from 'lucide-react';
+import { BOOQABLE_ACCOUNT_URL, hasCustomerPortal } from '@/lib/booqable';
 
 const columns = [
   {
@@ -15,6 +16,9 @@ const columns = [
     links: [
       { href: '/contato', label: 'Fale conosco' },
       { href: '/trocas-e-devolucoes', label: 'Devoluções e trocas' },
+      ...(hasCustomerPortal
+        ? [{ href: BOOQABLE_ACCOUNT_URL, label: 'Minhas reservas' }]
+        : []),
     ],
   },
   {

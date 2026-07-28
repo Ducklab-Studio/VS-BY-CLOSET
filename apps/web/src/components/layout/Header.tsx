@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, User } from 'lucide-react';
 import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
+import { BOOQABLE_ACCOUNT_URL, hasCustomerPortal } from '@/lib/booqable';
 
 const navLinks = [
   { href: '/catalogo', label: 'Coleção' },
@@ -48,7 +49,16 @@ export function Header() {
 
         {/* Carrinho e conta ficam por conta do Booqable: ele guarda o período
             da reserva junto dos itens, coisa que um carrinho nosso não saberia. */}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-4">
+          {hasCustomerPortal && (
+            <a
+              href={BOOQABLE_ACCOUNT_URL}
+              className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-white/70 transition hover:text-white"
+            >
+              <User size={18} />
+              <span className="hidden sm:inline">Minha conta</span>
+            </a>
+          )}
           <BooqableEmbed component="sidebar" />
         </div>
       </div>

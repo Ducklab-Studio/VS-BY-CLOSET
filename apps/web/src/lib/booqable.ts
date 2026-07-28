@@ -29,6 +29,19 @@ export const BOOQABLE_SCRIPT_URL =
     : '');
 
 /**
+ * Portal do cliente — histórico de pedidos, reservas, faturas e endereços.
+ *
+ * Fica hospedado pelo Booqable, então o cliente sai do site ao acessar. A URL
+ * aparece no painel depois de ativar contas em Settings → Online Bookings;
+ * mapeando um subdomínio próprio (CNAME) a troca de domínio fica invisível.
+ *
+ * Vazio = o link "Minha conta" não é exibido.
+ */
+export const BOOQABLE_ACCOUNT_URL = process.env.NEXT_PUBLIC_BOOQABLE_ACCOUNT_URL ?? '';
+
+export const hasCustomerPortal = BOOQABLE_ACCOUNT_URL.length > 0;
+
+/**
  * Global injetado pelo script. Não é documentado publicamente, então tratamos
  * cada método como opcional e nunca assumimos que existe.
  */

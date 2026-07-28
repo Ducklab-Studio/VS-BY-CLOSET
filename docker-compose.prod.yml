@@ -43,6 +43,7 @@ services:
         # Mudar a conta do Booqable exige rebuild, não só restart.
         NEXT_PUBLIC_BOOQABLE_COMPANY: ${BOOQABLE_COMPANY:?defina BOOQABLE_COMPANY no .env}
         NEXT_PUBLIC_BOOQABLE_SCRIPT_URL: ${BOOQABLE_SCRIPT_URL:-}
+        NEXT_PUBLIC_BOOQABLE_ACCOUNT_URL: ${BOOQABLE_ACCOUNT_URL:-}
     restart: unless-stopped
     environment:
       NODE_ENV: production
