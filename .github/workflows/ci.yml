@@ -31,76 +31,30 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # @loja/database precisa estar compilado: o typecheck da API resolve os
-      # tipos por dist/index.d.ts, que só existe depois do build.
-      - run: pnpm --filter @loja/database build
-
-      - name: Typecheck da API
-        run: pnpm --filter @loja/api exec tsc --noEmit
-
-      - name: Typecheck do Web
+      - name: Typecheck
         run: pnpm --filter @loja/web exec tsc --noEmit
 
       - name: Lint
         run: pnpm lint
         continue-on-error: true
 
-  migrations:
-    name: Validar migrações
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: loja
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: loja_ci
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports: ['5432:5432']
-    env:
-      DATABASE_URL: postgresql://loja:ci@localhost:5432/loja_ci?schema=public
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      # Aplica as migrações num banco limpo: pega migração quebrada antes do deploy.
-      - name: Aplicar migrações
-        working-directory: packages/database
-        run: npx prisma migrate deploy
-
-      # Falha se o schema.prisma tiver mudado sem uma migração correspondente.
-      - name: Conferir schema x migrações
-        working-directory: packages/database
-        run: npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code
-
   build:
-    name: Build das imagens Docker
+    name: Build da imagem Docker
     runs-on: ubuntu-latest
     needs: [quality]
-    strategy:
-      matrix:
-        app: [api, web]
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build ${{ matrix.app }}
+      - name: Build web
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/${{ matrix.app }}/Dockerfile
+          file: apps/web/Dockerfile
           push: false
-          # Cache no registro de artefatos do Actions: build incremental entre runs.
-          cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,scope=${{ matrix.app }},mode=max
+          # Placeholder: o build não deve depender da conta real de produção.
+          build-args: |
+            NEXT_PUBLIC_BOOQABLE_COMPANY=ci-placeholder
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max

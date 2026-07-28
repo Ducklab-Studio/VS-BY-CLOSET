@@ -1,103 +1,108 @@
-# 🛍️ Loja E-commerce de Roupas
+# 🏔️ Valle Showroom
 
-E-commerce profissional, moderno, responsivo e escalável. Monorepo com frontend
-**Next.js**, backend **NestJS** e banco **PostgreSQL** via **Prisma**.
-
-> **Status:** Fundação de produção (Fase 1) pronta e executável. As demais features
-> seguem o [ROADMAP](docs/ROADMAP.md) — a arquitetura já está preparada para todas elas.
+Site de **aluguel e venda de roupa de neve**. Next.js na frente, **Booqable**
+como plataforma de locação por trás.
 
 ---
 
+## Como funciona
+
+O Booqable é o backend de negócio. Ele resolve a parte difícil de locação —
+disponibilidade por intervalo de datas, preço por período, caução, contratos —
+e este repositório é a camada de marca em volta disso.
+
+| No Booqable | Neste repositório |
+| --- | --- |
+| Catálogo, fotos e preços | Design, marca e navegação |
+| Estoque e disponibilidade por data | Páginas institucionais e FAQ |
+| Carrinho, checkout e pagamento | SEO e performance |
+| Clientes, pedidos e contratos | Textos de política e contato |
+
+**Não há painel administrativo aqui.** A loja é operada pelo painel do
+Booqable. Alterações de catálogo e preço aparecem no site na hora, sem deploy.
+
 ## 🧱 Stack
 
-| Camada        | Tecnologias                                            |
-| ------------- | ------------------------------------------------------ |
-| Frontend      | Next.js 15 (App Router), React 18, TypeScript, Tailwind |
-| Backend       | NestJS 10, TypeScript, Passport JWT, class-validator    |
-| Banco         | PostgreSQL 16 + Prisma ORM 5                            |
-| Auth          | JWT (access) + Refresh Token rotativo, Argon2           |
-| Infra (dev)   | Docker Compose (Postgres + Redis)                       |
-| Deploy        | VPS Hostinger (PM2 + Nginx) — ver [DEPLOYMENT](docs/DEPLOYMENT.md) |
+| Camada | Tecnologia |
+| --- | --- |
+| Frontend | Next.js 15 (App Router), React 18, TypeScript, Tailwind |
+| Comércio | Booqable — componentes embedados |
+| Infra | Docker + Caddy (HTTPS automático) |
+| Deploy | Qualquer VPS com Docker — ver [DEPLOYMENT](docs/DEPLOYMENT.md) |
 
-## 📁 Estrutura do monorepo
+Sem banco de dados e sem API própria: o site é stateless.
+
+## 📁 Estrutura
 
 ```
 .
-├── apps/
-│   ├── api/          # Backend NestJS (REST /api/v1)
-│   └── web/          # Frontend Next.js
-├── packages/
-│   └── database/     # Schema Prisma + client compartilhado + seed
-├── docs/             # Arquitetura, deploy, roadmap
-├── docker-compose.yml
-└── .env.example
+├── apps/web/                    # Aplicação Next.js
+│   └── src/
+│       ├── app/                 # Rotas (App Router)
+│       ├── components/
+│       │   ├── booqable/        # Integração com o Booqable
+│       │   └── layout/          # Header, Footer, páginas legais
+│       └── lib/booqable.ts      # Configuração e reinit da integração
+├── docker-compose.prod.yml      # Caddy + web
+├── Caddyfile                    # Proxy reverso com SSL automático
+└── docs/
 ```
 
-## 🚀 Começando (desenvolvimento)
-
-Pré-requisitos: **Node 20+**, **pnpm 10+**, **Docker** (ou um Postgres local).
+## 🚀 Rodando localmente
 
 ```bash
-# 1. Instalar dependências
 pnpm install
+```
 
-# 2. Configurar variáveis de ambiente
-cp .env.example .env        # Windows: copy .env.example .env
+```bash
+cp .env.example .env
+```
 
-# 3. Subir o banco (Postgres + Redis)
-pnpm docker:up
+Preencha `NEXT_PUBLIC_BOOQABLE_COMPANY` com o identificador da sua conta —
+encontrado em _Settings → Online Bookings → Website integration_.
 
-# 4. Gerar o client e aplicar o schema
-pnpm db:generate
-pnpm db:migrate             # cria as tabelas
-pnpm db:seed                # popula admin, produtos e cupom demo
-
-# 5. Rodar tudo (API :3333 + Web :3000)
+```bash
 pnpm dev
 ```
 
-Acesse:
+Abre em http://localhost:3000.
 
-- 🛍️ Loja: <http://localhost:3000>
-- 🔌 API: <http://localhost:3333/api/v1/health>
-- 🗄️ Prisma Studio: `pnpm db:studio`
+Sem a variável preenchida o site roda normalmente, mas os componentes de
+catálogo, datas e carrinho aparecem como placeholders identificados — dá para
+trabalhar o design sem conta configurada.
 
-### Credenciais do seed
+## 🧩 Usando os componentes do Booqable
 
-| Papel   | E-mail                  | Senha        |
-| ------- | ----------------------- | ------------ |
-| Admin   | admin@loja.com.br       | `Admin@123`  |
-| Cliente | cliente@loja.com.br     | `Cliente@123`|
+```tsx
+import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
 
-## 📜 Scripts úteis
+<BooqableEmbed component="product-list" limit={8} perPage={8} />
+<BooqableEmbed component="datepicker" />
+<BooqableEmbed component="collections" />
+```
 
-| Comando            | Descrição                              |
-| ------------------ | -------------------------------------- |
-| `pnpm dev`         | Sobe API + Web em paralelo             |
-| `pnpm build`       | Build de produção de todos os pacotes  |
-| `pnpm db:migrate`  | Cria/aplica migrations                 |
-| `pnpm db:seed`     | Popula dados de exemplo                |
-| `pnpm db:studio`   | Abre o Prisma Studio                   |
-| `pnpm lint`        | Lint em todos os pacotes               |
-| `pnpm format`      | Formata com Prettier                   |
+Disponíveis: `product-list`, `product-search`, `datepicker`, `collections`,
+`sidebar`, `sort`, `bar`.
 
-## 🔐 Segurança implementada
+O `datepicker` é o mais importante: ele define o período da reserva e faz todo
+o catálogo passar a mostrar disponibilidade e preço reais em vez de vitrine
+genérica.
 
-- Senhas com **Argon2**
-- **JWT + Refresh Token** com rotação e hash em banco
-- **Rate limiting** global e reforçado em rotas de auth
-- **Helmet** (cabeçalhos seguros), **CORS** restrito, cookies `httpOnly`
-- **Validação** estrita de DTOs (whitelist anti mass-assignment)
-- Proteção contra **SQL Injection** (Prisma parametrizado) e **XSS** (React + headers)
-- **RBAC** por papel: Administrador, Gerente, Atendente, Cliente
-- **Auditoria** completa (`AuditLog`) de ações sensíveis
+## 📦 Deploy
 
-## 📚 Documentação
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
 
-- [Arquitetura](docs/ARCHITECTURE.md)
-- [Deploy na VPS Hostinger](docs/DEPLOYMENT.md)
-- [Roadmap de features](docs/ROADMAP.md)
+Passo a passo completo em [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## 📄 Licença
+## ⚠️ Pontos de atenção
 
-Projeto privado. Todos os direitos reservados.
+- **`NEXT_PUBLIC_BOOQABLE_COMPANY` é embutida no build.** Trocar a conta exige
+  rebuild da imagem, não apenas restart.
+- **O domínio precisa estar autorizado no Booqable** (_Settings → Online
+  Bookings_), senão os componentes não carregam em produção.
+- **O CSP libera explicitamente os domínios do Booqable** em `next.config.mjs`.
+  Se os componentes sumirem, esse é o primeiro lugar a olhar.
+- **Item de venda ainda exige datas.** Por desenho do Booqable, todo pedido
+  carrega data de retirada e devolução — inclusive quando só há itens de compra.

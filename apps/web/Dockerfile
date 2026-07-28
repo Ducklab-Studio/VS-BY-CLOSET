@@ -16,24 +16,22 @@ WORKDIR /app
 # ── Dependências ─────────────────────────────────────────────────────────────
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
-COPY packages/database/package.json ./packages/database/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
 # ── Build ────────────────────────────────────────────────────────────────────
 FROM deps AS build
-COPY packages/database ./packages/database
 COPY apps/web ./apps/web
 
 # Variáveis NEXT_PUBLIC_* são embutidas no bundle em tempo de build, não lidas
-# em runtime. Só passe alguma aqui se for usar API em domínio separado — no
-# modo proxy (padrão) o cliente usa caminho relativo e nada precisa ser fixado.
+# em runtime — trocar a conta do Booqable exige rebuild, não só restart.
 ARG NEXT_PUBLIC_SITE_URL
-ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_BOOQABLE_COMPANY
+ARG NEXT_PUBLIC_BOOQABLE_SCRIPT_URL
 ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_BOOQABLE_COMPANY=${NEXT_PUBLIC_BOOQABLE_COMPANY}
+ENV NEXT_PUBLIC_BOOQABLE_SCRIPT_URL=${NEXT_PUBLIC_BOOQABLE_SCRIPT_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 # Ativa o output standalone (ver comentário em next.config.mjs).

@@ -1,17 +1,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stack de produção — sobe em qualquer host com Docker.
+# Stack de produção.
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Topologia (mesmo domínio, sem CORS):
+#   Internet ──► Caddy :443 ──► web :3000
+#                (SSL auto)
 #
-#   Internet ──► Caddy :443  ──┬── /api/v1/*  ──► api  :3333
-#                (SSL auto)    └── /*         ──► web  :3000
-#
-# Só o Caddy publica porta. Postgres, Redis, API e Web ficam na rede interna.
+# Não há banco nem API: o Booqable é o backend. Catálogo, disponibilidade,
+# carrinho, checkout, pagamento, clientes e pedidos vivem lá. Este site é a
+# camada de marca e conteúdo, e é stateless — pode escalar à vontade.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: loja
+name: valle
 
 services:
   caddy:
@@ -22,16 +22,14 @@ services:
       - '443:443'
       - '443:443/udp' # HTTP/3
     environment:
-      DOMAIN: ${DOMAIN:?defina DOMAIN no .env (ex: loja.com.br)}
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env (ex: valleshowroom.com.br)}
       ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL para os avisos do certificado}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data # certificados — perder isso = re-emitir tudo
+      - caddy_data:/data # certificados — perder isso obriga a reemitir
       - caddy_config:/config
     depends_on:
       web:
-        condition: service_healthy
-      api:
         condition: service_healthy
     networks: [edge, internal]
 
@@ -41,109 +39,34 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_SITE_URL: https://${DOMAIN}
+        # Variáveis NEXT_PUBLIC_* são embutidas no bundle em tempo de build.
+        # Mudar a conta do Booqable exige rebuild, não só restart.
+        NEXT_PUBLIC_BOOQABLE_COMPANY: ${BOOQABLE_COMPANY:?defina BOOQABLE_COMPANY no .env}
+        NEXT_PUBLIC_BOOQABLE_SCRIPT_URL: ${BOOQABLE_SCRIPT_URL:-}
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 3000
-      # Usado só no SSR; o navegador fala com /api/v1 na mesma origem.
-      API_INTERNAL_URL: http://api:3333
-    depends_on:
-      api:
-        condition: service_healthy
     networks: [internal]
     healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       start_period: 30s
       retries: 3
 
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    restart: unless-stopped
-    environment:
-      NODE_ENV: production
-      PORT: 3333
-      DATABASE_URL: postgresql://${POSTGRES_USER:-loja}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-loja}?schema=public&sslmode=disable&connection_limit=10
-      REDIS_URL: redis://redis:6379
-      # Proxy de mesmo domínio: sem CORS, cookie same-site.
-      SAME_ORIGIN_PROXY: 'true'
-      CORS_ORIGIN: ''
-      COOKIE_SAMESITE: lax
-      COOKIE_SECURE: 'true'
-      TRUST_PROXY: 'true'
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?gere com openssl rand -base64 48}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?gere com openssl rand -base64 48}
-      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-900}
-      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-604800}
-      RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
-      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
-      RUN_SEED: ${RUN_SEED:-false}
-      # Object storage (Cloudflare R2 / AWS S3) — opcional.
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_REGION: ${S3_REGION:-auto}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks: [internal]
-    healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3333/api/v1/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      start_period: 40s
-      retries: 3
-
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-loja}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-loja}
-      # Acelera muito o restore de dump e o seed inicial.
-      POSTGRES_INITDB_ARGS: '--data-checksums'
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./backups:/backups
-    networks: [internal]
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-loja} -d ${POSTGRES_DB:-loja}']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    # appendonly garante que o contador de rate limit sobreviva a restart.
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redisdata:/data
-    networks: [internal]
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
 networks:
-  # Só o Caddy fica nas duas: nada mais é alcançável de fora.
+  # Só o Caddy fica nas duas: o container do site não é alcançável de fora.
   edge:
   internal:
     internal: true
 
 volumes:
-  pgdata:
-  redisdata:
   caddy_data:
   caddy_config:

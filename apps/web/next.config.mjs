@@ -1,34 +1,41 @@
 /**
  * Configuração do Next para produção em container.
  *
- * Estratégia de mesmo domínio: o navegador fala com `/api/v1/...` na própria
- * origem e o Next repassa para o container da API pela rede interna. Isso
- * elimina CORS, permite cookie `sameSite=lax` (imune ao bloqueio de cookie de
- * terceiros do Safari/Brave) e mantém a API fora da internet pública.
+ * O site é estático em essência: todo o comércio (catálogo, disponibilidade,
+ * carrinho, checkout) roda pelos componentes embedados do Booqable. Não há API
+ * própria nem banco.
  */
-
-/** URL interna da API — nome do serviço no compose, não acessível de fora. */
-const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://localhost:3333';
-
-/** Origem pública da API. Só é definida quando NÃO se usa o proxy. */
-const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const isProd = process.env.NODE_ENV === 'production';
 
 /**
- * CSP. `unsafe-inline` em script-src é exigido pelo runtime do Next (hidratação
- * e boot dos chunks); o resto fica fechado.
+ * Origens do Booqable liberadas no CSP.
+ *
+ * Sem isso o navegador bloqueia o script da integração e o site fica sem
+ * catálogo — o CSP é a primeira coisa a conferir se os componentes não
+ * aparecerem. `booqable.com` cobre o script; o subdomínio da conta é onde ficam
+ * as chamadas de dados e as imagens dos produtos.
  */
+const BOOQABLE_ORIGINS = [
+  'https://booqable.com',
+  'https://*.booqable.com',
+  'https://*.booqablecdn.com',
+];
+
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isProd ? '' : " 'unsafe-eval'"}`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  // 'unsafe-inline' é exigido pelo runtime do Next (hidratação) e pelo próprio
+  // snippet do Booqable, que injeta configuração inline.
+  `script-src 'self' 'unsafe-inline' ${BOOQABLE_ORIGINS.join(' ')}${isProd ? '' : " 'unsafe-eval'"}`,
+  `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com ${BOOQABLE_ORIGINS.join(' ')}`,
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https:",
+  `connect-src 'self' ${BOOQABLE_ORIGINS.join(' ')}`,
+  // O checkout do Booqable pode abrir em iframe.
+  `frame-src 'self' ${BOOQABLE_ORIGINS.join(' ')}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  `form-action 'self' ${BOOQABLE_ORIGINS.join(' ')}`,
   ...(isProd ? ['upgrade-insecure-requests'] : []),
 ].join('; ');
 
@@ -37,33 +44,17 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
-  // Bundle autocontido com só as dependências alcançadas: a imagem cai de
-  // ~1.2 GB para ~150 MB. Ligado só no build da imagem (o Dockerfile define a
-  // variável) porque o tracing usa symlink, e o Windows barra symlink sem modo
-  // desenvolvedor — deixar ligado sempre quebraria o `pnpm build` local.
+  // Bundle autocontido para a imagem Docker. Ligado só no build da imagem
+  // porque o tracing usa symlink, e o Windows barra symlink sem modo
+  // desenvolvedor — deixar sempre ligado quebraria o `pnpm build` local.
   ...(process.env.NEXT_OUTPUT_STANDALONE === 'true' && { output: 'standalone' }),
 
-  // O typecheck e o lint rodam no CI; repetir aqui só deixa o build lento.
   eslint: { ignoreDuringBuilds: true },
 
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '**' },
-      ...(isProd ? [] : [{ protocol: 'http', hostname: 'localhost' }]),
-    ],
+    remotePatterns: [{ protocol: 'https', hostname: '**' }],
     formats: ['image/avif', 'image/webp'],
     minimumCacheTTL: 60,
-  },
-
-  async rewrites() {
-    // Em modo cross-domain o navegador fala direto com a API — sem proxy.
-    if (PUBLIC_API_URL) return [];
-    return [
-      {
-        source: '/api/v1/:path*',
-        destination: `${API_INTERNAL_URL}/api/v1/:path*`,
-      },
-    ];
   },
 
   async headers() {
@@ -73,18 +64,12 @@ const nextConfig = {
         headers: [
           { key: 'Content-Security-Policy', value: csp },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
           ...(isProd
             ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
             : []),
         ],
-      },
-      {
-        // O painel nunca deve ser cacheado por CDN ou proxy intermediário.
-        source: '/admin/:path*',
-        headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }],
       },
     ];
   },

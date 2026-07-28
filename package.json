@@ -1,37 +1,27 @@
 {
-  "name": "loja-ecommerce",
-  "version": "0.1.0",
+  "name": "valle-showroom",
+  "version": "0.2.0",
   "private": true,
-  "description": "E-commerce de roupas — monorepo (Next.js + NestJS + Prisma + PostgreSQL)",
+  "description": "Site de aluguel e venda de roupa de neve — Next.js + Booqable",
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @loja/database build && pnpm -r --parallel dev",
-    "dev:api": "pnpm --filter @loja/api dev",
-    "dev:web": "pnpm --filter @loja/web dev",
-    "build": "pnpm --filter @loja/database build && pnpm --filter @loja/api --filter @loja/web build",
+    "dev": "pnpm --filter @loja/web dev",
+    "build": "pnpm --filter @loja/web build",
+    "start": "pnpm --filter @loja/web start",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "db:generate": "pnpm --filter @loja/database generate",
-    "db:migrate": "pnpm --filter @loja/database migrate",
-    "db:push": "pnpm --filter @loja/database push",
-    "db:seed": "pnpm --filter @loja/database seed",
-    "db:studio": "pnpm --filter @loja/database studio",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:up": "docker compose -f docker-compose.prod.yml up -d",
+    "docker:down": "docker compose -f docker-compose.prod.yml down"
   },
   "devDependencies": {
     "prettier": "^3.3.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@nestjs/core",
-      "@prisma/client",
-      "@prisma/engines",
-      "prisma",
-      "argon2",
       "esbuild",
       "sharp",
       "unrs-resolver"

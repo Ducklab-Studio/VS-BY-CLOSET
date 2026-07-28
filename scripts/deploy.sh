@@ -4,8 +4,8 @@
 #
 #   ./scripts/deploy.sh
 #
-# Faz backup do banco antes de qualquer coisa, constrói as imagens novas e
-# troca os containers. As migrações rodam no entrypoint da API.
+# O site é stateless — não há banco para migrar nem backup a fazer antes. Todo
+# o dado de negócio vive no Booqable.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -18,26 +18,19 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-echo "▸ Backup do banco antes do deploy…"
-./scripts/backup.sh || {
-  echo "✗ Backup falhou — deploy abortado." >&2
-  exit 1
-}
-
-echo "▸ Construindo imagens…"
+echo "▸ Construindo imagem…"
 $COMPOSE build
 
 echo "▸ Subindo containers…"
-# --wait bloqueia até os healthchecks passarem; sem isso o script "termina com
-# sucesso" enquanto a API ainda pode estar quebrando no boot.
+# --wait bloqueia até o healthcheck passar; sem isso o script reportaria
+# sucesso enquanto o site ainda poderia estar quebrando no boot.
 $COMPOSE up -d --wait --remove-orphans
 
 echo "▸ Limpando imagens órfãs…"
 docker image prune -f >/dev/null
 
-echo "▸ Estado atual:"
 $COMPOSE ps
 
 echo ""
 echo "✓ Deploy concluído."
-echo "  Logs:  $COMPOSE logs -f api web"
+echo "  Logs:  $COMPOSE logs -f web"

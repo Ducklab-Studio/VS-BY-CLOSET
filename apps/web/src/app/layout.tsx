@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Poppins, Cinzel } from 'next/font/google';
 import './globals.css';
 import { SiteChrome } from '@/components/layout/SiteChrome';
+import { BooqableScript } from '@/components/booqable/BooqableScript';
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -20,16 +21,23 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'Minha Loja — Moon Boots e acessórios de neve',
-    template: '%s | Minha Loja',
+    default: 'Valle Showroom — Aluguel de roupa de neve',
+    template: '%s | Valle Showroom',
   },
   description:
-    'Moon Boots e acessórios premium para a neve. Qualidade, conforto térmico e entrega rápida.',
-  keywords: ['moon boots', 'botas de neve', 'acessórios de neve', 'e-commerce', 'loja online'],
+    'Alugue roupa de neve premium para sua viagem — ou leve a peça para casa. Macacões, jaquetas, botas e acessórios com curadoria.',
+  keywords: [
+    'aluguel de roupa de neve',
+    'macacão de neve',
+    'jaqueta de neve',
+    'moon boots',
+    'roupa para esqui',
+    'locação de roupa',
+  ],
   openGraph: {
     type: 'website',
     locale: 'pt_BR',
-    siteName: 'Minha Loja',
+    siteName: 'Valle Showroom',
   },
   robots: { index: true, follow: true },
 };
@@ -42,6 +50,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           Pular para o conteúdo
         </a>
         <SiteChrome>{children}</SiteChrome>
+        {/* Precisa viver no layout raiz: montado por página, cada navegação
+            recarregaria a integração e zeraria o carrinho. */}
+        <BooqableScript />
       </body>
     </html>
   );
