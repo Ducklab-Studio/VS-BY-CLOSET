@@ -1,0 +1,19 @@
+{% comment %}
+  Converte as configurações do painel em CSS custom properties.
+  Único lugar que precisa mudar quando a identidade visual definitiva chegar.
+{% endcomment %}
+<style>
+  :root {
+    --color-background: {{ settings.color_background }};
+    --color-surface: {{ settings.color_surface }};
+    --color-text: {{ settings.color_text }};
+    --color-text-muted: {{ settings.color_text_muted }};
+    --color-accent: {{ settings.color_accent }};
+    --color-border: {{ settings.color_border }};
+    --page-width: {{ settings.page_width }}px;
+    --font-heading-family: {{ settings.font_heading.family }}, serif;
+    --font-body-family: {{ settings.font_body.family }}, sans-serif;
+  }
+</style>
+{{ settings.font_heading | font_face }}
+{{ settings.font_body | font_face }}

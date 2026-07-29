@@ -1,0 +1,57 @@
+<header class="site-header" style="border-bottom: 1px solid var(--color-border); background: var(--color-background);">
+  <div class="page-width" style="display: flex; align-items: center; gap: 1rem; padding-block: 1rem;">
+    <button
+      class="header__menu-toggle"
+      aria-label="{{ 'sections.header.menu' | t }}"
+      aria-expanded="false"
+      aria-controls="HeaderMobileMenu"
+      style="display: none;"
+    >
+      ☰
+    </button>
+
+    <a href="{{ routes.root_url }}" style="font-family: var(--font-heading-family), serif; font-size: 1.1rem; letter-spacing: 0.08em; text-transform: uppercase;">
+      {{ shop.name }}
+    </a>
+
+    {%- if section.settings.menu != blank -%}
+      <nav aria-label="{{ 'sections.header.navigation' | t }}" style="display: flex; gap: 1.5rem; margin-left: 1rem;">
+        {%- for link in section.settings.menu.links -%}
+          <a
+            href="{{ link.url }}"
+            style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted);"
+            {% if link.active %}aria-current="page"{% endif %}
+          >
+            {{ link.title }}
+          </a>
+        {%- endfor -%}
+      </nav>
+    {%- endif -%}
+
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 1rem;">
+      <a href="{{ routes.account_url }}" aria-label="{{ 'customer.account.title' | t }}" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">
+        {{ 'customer.account.title' | t }}
+      </a>
+      <a href="{{ routes.cart_url }}" aria-label="{{ 'general.cart.title' | t }}" style="position: relative;">
+        {{ 'general.cart.title' | t }}
+        {%- if cart.item_count > 0 -%}
+          <span aria-hidden="true">({{ cart.item_count }})</span>
+        {%- endif -%}
+      </a>
+    </div>
+  </div>
+</header>
+
+{% schema %}
+{
+  "name": "Cabeçalho",
+  "settings": [
+    {
+      "type": "link_list",
+      "id": "menu",
+      "label": "Menu",
+      "default": "main-menu"
+    }
+  ]
+}
+{% endschema %}

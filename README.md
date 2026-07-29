@@ -1,113 +1,71 @@
 # 🏔️ Valle's Closet
 
-Site de **aluguel de roupa de neve**. Next.js na frente, **Booqable** como
-plataforma de locação por trás.
+Aluguel de roupa de neve. Cliente reserva online no Brasil, retira e devolve
+numa loja física no Chile.
+
+**Stack: Shopify + tema custom + Product Rentals Pro.**
 
 ---
 
 ## Como funciona
 
-O Booqable é o backend de negócio. Ele resolve a parte difícil de locação —
-disponibilidade por intervalo de datas, preço por período, caução, contratos —
-e este repositório é a camada de marca em volta disso.
-
-| No Booqable | Neste repositório |
+| No Shopify | No app Product Rentals Pro |
 | --- | --- |
-| Catálogo, fotos e preços | Design, marca e navegação |
-| Estoque e disponibilidade por data | Páginas institucionais e FAQ |
-| Carrinho, checkout e pagamento | SEO e performance |
-| Clientes, pedidos e contratos | Textos de política e contato |
+| Catálogo, fotos, preços | Calendário de retirada e devolução |
+| Conta de cliente, login, histórico | Disponibilidade por período |
+| Carrinho, checkout, pagamento | Buffer de limpeza entre locações |
+| Domínio, hospedagem, admin | Caução, multa por atraso/dano |
 
-**Não há painel administrativo aqui.** A loja é operada pelo painel do
-Booqable. Alterações de catálogo e preço aparecem no site na hora, sem deploy.
-
-## 🧱 Stack
-
-| Camada | Tecnologia |
-| --- | --- |
-| Frontend | Next.js 15 (App Router), React 18, TypeScript, Tailwind |
-| Comércio | Booqable — componentes embedados |
-| Deploy | Vercel (recomendado) ou Docker + Caddy em VPS |
-
-Sem banco de dados e sem API própria: o site é stateless.
+O tema (`theme/`) é 100% nosso — visual, textos, estrutura de página. O
+Shopify cuida de cliente e pagamento; o PRP cuida do ciclo de locação.
 
 ## 📁 Estrutura
 
 ```
 .
-├── apps/web/                    # Aplicação Next.js
-│   └── src/
-│       ├── app/                 # Rotas (App Router)
-│       ├── components/
-│       │   ├── booqable/        # Integração com o Booqable
-│       │   └── layout/          # Header, Footer, páginas legais
-│       └── lib/booqable.ts      # Configuração e reinit da integração
-├── docker-compose.prod.yml      # Caddy + web
-├── Caddyfile                    # Proxy reverso com SSL automático
-└── docs/
+├── theme/                  # Tema Shopify (produção) — ver theme/README.md
+│   ├── config/             # Configurações editáveis pelo painel
+│   ├── layout/
+│   ├── locales/            # pt-BR (principal) e es (Chile)
+│   ├── sections/
+│   └── templates/
+│       └── customers/      # Login, cadastro, conta, pedidos, endereços
+│
+└── apps/web/                — Next.js + Booqable
 ```
 
-## 🚀 Rodando localmente
+> **`apps/web/` é código legado.** O projeto passou por duas arquiteturas
+> antes desta (backend próprio em NestJS, depois Booqable embedado em
+> Next.js). Cada pivô está preservado no histórico do git. `theme/` é a
+> versão atual e a única em desenvolvimento.
+
+## 🚀 Rodando o tema
 
 ```bash
-pnpm install
+npm install -g @shopify/cli @shopify/theme
 ```
 
 ```bash
-cp .env.example .env
+cd theme
+shopify theme dev --store=sua-loja.myshopify.com
 ```
 
-Preencha `NEXT_PUBLIC_BOOQABLE_COMPANY` com o identificador da sua conta —
-encontrado em _Settings → Online Bookings → Website integration_.
+Detalhes de estrutura, App Block do PRP e sistema de tradução em
+[theme/README.md](theme/README.md).
 
-```bash
-pnpm dev
-```
+## ⚠️ Estado atual
 
-Abre em http://localhost:3000.
+- Estrutura do tema pronta; **identidade visual ainda não definida** — cores,
+  fontes e imagens estão como placeholder em `config/settings_schema.json`.
+- Loja Shopify e app PRP ainda não foram criados.
+- Domínio (`vallescloset.*`) ainda não registrado.
 
-Sem a variável preenchida o site roda normalmente, mas os componentes de
-catálogo, datas e carrinho aparecem como placeholders identificados — dá para
-trabalhar o design sem conta configurada.
+## Pontos de atenção para quando a loja existir
 
-## 🧩 Usando os componentes do Booqable
-
-```tsx
-import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
-
-<BooqableEmbed component="product-list" limit={8} perPage={8} />
-<BooqableEmbed component="datepicker" />
-<BooqableEmbed component="collections" />
-```
-
-Disponíveis: `product-list`, `product-search`, `datepicker`, `collections`,
-`sidebar`, `sort`, `bar`.
-
-O `datepicker` é o mais importante: ele define o período da reserva e faz todo
-o catálogo passar a mostrar disponibilidade e preço reais em vez de vitrine
-genérica.
-
-## 📦 Deploy
-
-O site vai para a **Vercel**; o Booqable é serviço separado que já está no ar.
-Você não sobe nada para dentro dele — só cadastra os produtos e autoriza o
-domínio no painel.
-
-1. Suba o repositório para o GitHub
-2. Importe em [vercel.com/new](https://vercel.com/new) — o `vercel.json` já
-   configura build e região
-3. Defina `NEXT_PUBLIC_BOOQABLE_COMPANY` e `NEXT_PUBLIC_SITE_URL` nas variáveis
-   de ambiente
-4. Ligue o domínio e autorize-o no painel do Booqable
-
-Depois disso, `git push` publica. Alternativa em VPS com Docker e passo a passo
-completo em [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-
-## ⚠️ Pontos de atenção
-
-- **`NEXT_PUBLIC_BOOQABLE_COMPANY` é embutida no build.** Trocar a conta exige
-  rebuild da imagem, não apenas restart.
-- **O domínio precisa estar autorizado no Booqable** (_Settings → Online
-  Bookings_), senão os componentes não carregam em produção.
-- **O CSP libera explicitamente os domínios do Booqable** em `next.config.mjs`.
-  Se os componentes sumirem, esse é o primeiro lugar a olhar.
+- **Shopify Payments não está disponível no Chile.** Use um gateway local
+  (Mercado Pago Chile, Transbank ou Flow).
+- **Loja em CLP.** Como o estoque é físico e fica só no Chile, uma loja com
+  moeda única evita risco de dupla reserva — mostrar estimativa em BRL na
+  vitrine é só cosmético, o cliente paga em peso.
+- **PRP substitui variant picker e buy button** na página de produto — já
+  refletido em `sections/main-product.liquid`.

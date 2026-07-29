@@ -1,0 +1,8 @@
+{
+  "sections": {
+    "hero": { "type": "hero" },
+    "how-it-works": { "type": "how-it-works" },
+    "featured": { "type": "featured-collection" }
+  },
+  "order": ["hero", "how-it-works", "featured"]
+}

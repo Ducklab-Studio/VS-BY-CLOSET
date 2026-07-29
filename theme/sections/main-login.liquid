@@ -1,0 +1,36 @@
+<section class="main-login page-width" style="max-width: 24rem; padding-block: 4rem;">
+  <h1 style="font-size: 1.5rem; text-align: center;">{{ 'customer.login.title' | t }}</h1>
+
+  {%- form 'customer_login' -%}
+    {{ form.errors | default_errors }}
+
+    <label for="CustomerEmail" style="display: block; margin-top: 1.5rem; font-size: 0.8rem;">
+      {{ 'customer.login.email' | t }}
+    </label>
+    <input type="email" name="customer[email]" id="CustomerEmail" autocomplete="email" required
+      style="width: 100%; padding: 0.75rem; background: transparent; color: var(--color-text); border: 1px solid var(--color-border); margin-top: 0.5rem;">
+
+    {%- if form.password_needed -%}
+      <label for="CustomerPassword" style="display: block; margin-top: 1rem; font-size: 0.8rem;">
+        {{ 'customer.login.password' | t }}
+      </label>
+      <input type="password" name="customer[password]" id="CustomerPassword" autocomplete="current-password" required
+        style="width: 100%; padding: 0.75rem; background: transparent; color: var(--color-text); border: 1px solid var(--color-border); margin-top: 0.5rem;">
+    {%- endif -%}
+
+    <button type="submit" class="btn btn--solid" style="width: 100%; margin-top: 1.5rem;">
+      {{ 'customer.login.sign_in' | t }}
+    </button>
+
+    <div style="display: flex; justify-content: space-between; margin-top: 1rem; font-size: 0.8rem;">
+      <a href="{{ routes.account_recover_url }}">{{ 'customer.login.forgot_password' | t }}</a>
+      <a href="{{ routes.account_register_url }}">{{ 'customer.login.create_account' | t }}</a>
+    </div>
+  {%- endform -%}
+</section>
+
+{% schema %}
+{
+  "name": "Login"
+}
+{% endschema %}

@@ -1,0 +1,32 @@
+<section class="main-collection page-width" style="padding-block: 3rem;">
+  <header style="border-bottom: 1px solid var(--color-border); padding-bottom: 1.5rem;">
+    <h1 style="font-size: 1.75rem;">{{ collection.title }}</h1>
+    {%- if collection.description != blank -%}
+      <p style="color: var(--color-text-muted); margin-top: 0.5rem;">{{ collection.description }}</p>
+    {%- endif -%}
+  </header>
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
+    {%- paginate collection.products by 24 -%}
+      {%- for product in collection.products -%}
+        <a href="{{ product.url }}" style="display: block;">
+          {{ product.featured_media | image_url: width: 600 | image_tag: loading: 'lazy' }}
+          <p style="margin-top: 0.75rem; font-size: 0.875rem;">{{ product.title }}</p>
+          <p style="font-size: 0.8rem; color: var(--color-text-muted);">{{ product.price | money }}</p>
+        </a>
+      {%- else -%}
+        <p style="color: var(--color-text-muted);">{{ 'sections.collection.empty' | t }}</p>
+      {%- endfor -%}
+
+      {%- if paginate.pages > 1 -%}
+        {{ paginate | default_pagination }}
+      {%- endif -%}
+    {%- endpaginate -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Coleção"
+}
+{% endschema %}

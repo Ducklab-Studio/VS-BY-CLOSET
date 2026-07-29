@@ -1,0 +1,19 @@
+{% comment %}
+  Shopify gera essas páginas automaticamente a partir de Settings → Policies
+  (termos, privacidade, reembolso/trocas). page_title e page_content vêm
+  prontos do Shopify — não precisam ser buscados manualmente.
+{% endcomment %}
+<section class="main-policy page-width" style="max-width: 44rem; padding-block: 3rem;">
+  <h1 style="font-size: 1.75rem; border-bottom: 1px solid var(--color-border); padding-bottom: 1.5rem;">
+    {{ page_title }}
+  </h1>
+  <div style="margin-top: 2rem; color: var(--color-text-muted); line-height: 1.7;">
+    {{ page_content }}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Política"
+}
+{% endschema %}

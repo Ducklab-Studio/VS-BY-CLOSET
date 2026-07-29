@@ -1,0 +1,10 @@
+{
+  "settings_schema": {
+    "colors": {
+      "name": "Colores"
+    },
+    "typography": {
+      "name": "Tipografía"
+    }
+  }
+}

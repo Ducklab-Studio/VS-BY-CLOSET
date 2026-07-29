@@ -1,0 +1,39 @@
+<section class="main-order page-width" style="padding-block: 3rem;">
+  <a href="{{ routes.account_url }}" style="font-size: 0.8rem; color: var(--color-text-muted);">
+    &larr; {{ 'customer.account.title' | t }}
+  </a>
+
+  <h1 style="font-size: 1.5rem; margin-top: 1rem;">{{ 'customer.order.title' | t: name: order.name }}</h1>
+  <p style="color: var(--color-text-muted);">{{ order.created_at | date: '%d/%m/%Y' }}</p>
+
+  <table style="width: 100%; margin-top: 2rem; border-collapse: collapse;">
+    <tbody>
+      {%- for line_item in order.line_items -%}
+        <tr style="border-bottom: 1px solid var(--color-border);">
+          <td style="padding: 1rem 0; display: flex; gap: 1rem; align-items: center;">
+            {{ line_item.image | image_url: width: 120 | image_tag: loading: 'lazy' }}
+            <span>{{ line_item.title }}</span>
+          </td>
+          <td style="text-align: right;">{{ line_item.final_line_price | money }}</td>
+        </tr>
+      {%- endfor -%}
+    </tbody>
+  </table>
+
+  <div style="display: flex; justify-content: space-between; margin-top: 1.5rem;">
+    <p>{{ 'customer.order.total' | t }}</p>
+    <p>{{ order.total_price | money }}</p>
+  </div>
+
+  {%- if order.fulfillment_status != blank -%}
+    <p style="margin-top: 1rem; font-size: 0.8rem; color: var(--color-text-muted);">
+      {{ 'customer.order.fulfillment_status' | t }}: {{ order.fulfillment_status_label }}
+    </p>
+  {%- endif -%}
+</section>
+
+{% schema %}
+{
+  "name": "Pedido"
+}
+{% endschema %}

@@ -1,0 +1,51 @@
+<section class="featured-collection page-width" style="padding-block: 4rem;">
+  {%- if section.settings.heading != blank -%}
+    <h2 style="text-align: center; font-size: 1.5rem; margin-bottom: 2.5rem;">{{ section.settings.heading }}</h2>
+  {%- endif -%}
+
+  {%- assign collection = collections[section.settings.collection] -%}
+  {%- if collection != blank -%}
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem;">
+      {%- for product in collection.products limit: section.settings.products_to_show -%}
+        <a href="{{ product.url }}" style="display: block;">
+          {{ product.featured_media | image_url: width: 600 | image_tag: loading: 'lazy' }}
+          <p style="margin-top: 0.75rem; font-size: 0.875rem;">{{ product.title }}</p>
+          <p style="font-size: 0.8rem; color: var(--color-text-muted);">{{ product.price | money }}</p>
+        </a>
+      {%- else -%}
+        <p style="color: var(--color-text-muted);">{{ 'sections.featured_collection.empty' | t }}</p>
+      {%- endfor -%}
+    </div>
+  {%- endif -%}
+</section>
+
+{% schema %}
+{
+  "name": "Coleção em destaque",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Título",
+      "default": "Mais alugados"
+    },
+    {
+      "type": "collection",
+      "id": "collection",
+      "label": "Coleção"
+    },
+    {
+      "type": "range",
+      "id": "products_to_show",
+      "label": "Produtos exibidos",
+      "min": 4,
+      "max": 12,
+      "step": 1,
+      "default": 8
+    }
+  ],
+  "presets": [
+    { "name": "Coleção em destaque" }
+  ]
+}
+{% endschema %}

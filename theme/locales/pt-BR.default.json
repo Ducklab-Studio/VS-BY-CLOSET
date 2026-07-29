@@ -1,0 +1,96 @@
+{
+  "accessibility": {
+    "skip_to_content": "Pular para o conteúdo"
+  },
+  "general": {
+    "meta": {
+      "tags": "Marcado com \"{{ tags }}\"",
+      "page": "Página {{ page }}"
+    },
+    "cart": {
+      "title": "Carrinho",
+      "empty": "Seu carrinho está vazio.",
+      "continue_shopping": "Ver coleção",
+      "quantity": "Quantidade",
+      "total": "Total",
+      "checkout": "Finalizar reserva"
+    },
+    "search": {
+      "results_for": "Resultados para \"{{ terms }}\"",
+      "no_results": "Nenhum resultado para \"{{ terms }}\""
+    }
+  },
+  "sections": {
+    "header": {
+      "menu": "Abrir menu",
+      "navigation": "Menu principal"
+    },
+    "footer": {
+      "rights_reserved": "Todos os direitos reservados."
+    },
+    "404": {
+      "title": "Página não encontrada",
+      "text": "O endereço que você tentou acessar não existe.",
+      "link": "Voltar à home"
+    },
+    "collection": {
+      "empty": "Nenhum produto disponível para as datas selecionadas."
+    },
+    "featured_collection": {
+      "empty": "Nenhum produto disponível no momento."
+    }
+  },
+  "customer": {
+    "log_out": "Sair",
+    "account": {
+      "title": "Minha conta"
+    },
+    "orders": {
+      "title": "Minhas reservas",
+      "none": "Você ainda não fez nenhuma reserva.",
+      "order_number": "Reserva",
+      "date": "Data",
+      "payment_status": "Pagamento",
+      "total": "Total"
+    },
+    "addresses": {
+      "title": "Endereços",
+      "manage": "Gerenciar endereços",
+      "none": "Nenhum endereço cadastrado."
+    },
+    "login": {
+      "title": "Entrar",
+      "email": "E-mail",
+      "password": "Senha",
+      "sign_in": "Entrar",
+      "forgot_password": "Esqueci minha senha",
+      "create_account": "Criar conta"
+    },
+    "register": {
+      "title": "Criar conta",
+      "name": "Nome",
+      "email": "E-mail",
+      "password": "Senha",
+      "submit": "Criar conta"
+    },
+    "order": {
+      "title": "Reserva {{ name }}",
+      "total": "Total",
+      "fulfillment_status": "Status"
+    },
+    "recover_password": {
+      "title": "Recuperar senha",
+      "subtext": "Enviaremos um link de redefinição para o seu e-mail.",
+      "email": "E-mail",
+      "submit": "Enviar link",
+      "success": "Se o e-mail existir na nossa base, você receberá um link em instantes."
+    },
+    "activate_account": {
+      "title": "Ativar conta",
+      "subtext": "Crie uma senha para ativar sua conta.",
+      "password": "Senha",
+      "password_confirm": "Confirme a senha",
+      "submit": "Ativar conta"
+    }
+  }
+}

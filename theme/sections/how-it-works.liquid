@@ -1,0 +1,56 @@
+<section class="how-it-works page-width" style="padding-block: 4rem;">
+  {%- if section.settings.heading != blank -%}
+    <h2 style="text-align: center; font-size: 1.5rem;">{{ section.settings.heading }}</h2>
+  {%- endif -%}
+
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 2rem; margin-top: 2.5rem;">
+    {%- for block in section.blocks -%}
+      <div {{ block.shopify_attributes }}>
+        <span style="font-family: var(--font-heading-family), serif; font-size: 1.5rem; color: var(--color-text-muted);">
+          0{{ forloop.index }}
+        </span>
+        <h3 style="font-size: 0.85rem; letter-spacing: 0.06em; margin-top: 0.75rem;">
+          {{ block.settings.title }}
+        </h3>
+        <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-top: 0.5rem;">
+          {{ block.settings.text }}
+        </p>
+      </div>
+    {%- endfor -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Como funciona",
+  "settings": [
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Título",
+      "default": "Como funciona"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "step",
+      "name": "Passo",
+      "settings": [
+        { "type": "text", "id": "title", "label": "Título" },
+        { "type": "textarea", "id": "text", "label": "Texto" }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Como funciona",
+      "blocks": [
+        { "type": "step", "settings": { "title": "Escolha as datas", "text": "Informe ida e volta da viagem." } },
+        { "type": "step", "settings": { "title": "Monte o look", "text": "Macacão, jaqueta, calça, botas e acessórios." } },
+        { "type": "step", "settings": { "title": "Retire no Chile", "text": "As peças já estarão separadas no seu tamanho." } },
+        { "type": "step", "settings": { "title": "Devolva na loja", "text": "Sem correio, sem risco de extravio." } }
+      ]
+    }
+  ]
+}
+{% endschema %}

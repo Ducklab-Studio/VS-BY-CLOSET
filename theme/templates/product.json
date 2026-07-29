@@ -1,0 +1,12 @@
+{
+  "sections": {
+    "main": {
+      "type": "main-product",
+      "blocks": {
+        "price": { "type": "price" }
+      },
+      "block_order": ["price"]
+    }
+  },
+  "order": ["main"]
+}

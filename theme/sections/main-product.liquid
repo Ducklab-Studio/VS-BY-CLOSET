@@ -1,0 +1,47 @@
+<section class="main-product page-width" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 3rem; padding-block: 3rem;">
+  <div class="product__media">
+    {%- for media in product.media -%}
+      {{ media | image_url: width: 1000 | image_tag: loading: 'lazy' }}
+    {%- endfor -%}
+  </div>
+
+  <div class="product__info">
+    <h1 style="font-size: 1.75rem;">{{ product.title }}</h1>
+    <p style="color: var(--color-text-muted); margin-top: 0.5rem;">{{ product.description }}</p>
+
+    {%- for block in section.blocks -%}
+      {%- case block.type -%}
+        {%- when '@app' -%}
+          {%- comment -%}
+            Reservado para o widget de aluguel do Product Rentals Pro. Depois
+            de instalar o app, adicione o bloco dele aqui pelo editor de temas
+            — é isso que este placeholder "@app" habilita.
+
+            O PRP substitui seleção de tamanho e botão de compra: por isso não
+            há variant-picker nem buy-buttons neste template.
+          {%- endcomment -%}
+          {% render block %}
+        {%- when 'price' -%}
+          <p style="font-size: 1.25rem; margin-top: 1.5rem;" {{ block.shopify_attributes }}>
+            {{ product.price | money }}
+          </p>
+      {%- endcase -%}
+    {%- endfor -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Produto",
+  "blocks": [
+    {
+      "type": "price",
+      "name": "Preço",
+      "limit": 1
+    },
+    {
+      "type": "@app"
+    }
+  ]
+}
+{% endschema %}

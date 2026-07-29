@@ -1,0 +1,20 @@
+<div class="announcement-bar" style="border-bottom: 1px solid var(--color-border); padding: 0.5rem 0; text-align: center; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted);">
+  {{ section.settings.message }}
+</div>
+
+{% schema %}
+{
+  "name": "Barra de aviso",
+  "settings": [
+    {
+      "type": "text",
+      "id": "message",
+      "label": "Mensagem",
+      "default": "Retire no Chile · Reserve online"
+    }
+  ],
+  "presets": [
+    { "name": "Barra de aviso" }
+  ]
+}
+{% endschema %}

@@ -1,0 +1,96 @@
+{
+  "accessibility": {
+    "skip_to_content": "Saltar al contenido"
+  },
+  "general": {
+    "meta": {
+      "tags": "Etiquetado \"{{ tags }}\"",
+      "page": "Página {{ page }}"
+    },
+    "cart": {
+      "title": "Carrito",
+      "empty": "Tu carrito está vacío.",
+      "continue_shopping": "Ver colección",
+      "quantity": "Cantidad",
+      "total": "Total",
+      "checkout": "Finalizar reserva"
+    },
+    "search": {
+      "results_for": "Resultados para \"{{ terms }}\"",
+      "no_results": "Sin resultados para \"{{ terms }}\""
+    }
+  },
+  "sections": {
+    "header": {
+      "menu": "Abrir menú",
+      "navigation": "Menú principal"
+    },
+    "footer": {
+      "rights_reserved": "Todos los derechos reservados."
+    },
+    "404": {
+      "title": "Página no encontrada",
+      "text": "La dirección que intentaste visitar no existe.",
+      "link": "Volver al inicio"
+    },
+    "collection": {
+      "empty": "No hay productos disponibles para las fechas seleccionadas."
+    },
+    "featured_collection": {
+      "empty": "No hay productos disponibles por el momento."
+    }
+  },
+  "customer": {
+    "log_out": "Cerrar sesión",
+    "account": {
+      "title": "Mi cuenta"
+    },
+    "orders": {
+      "title": "Mis reservas",
+      "none": "Todavía no has hecho ninguna reserva.",
+      "order_number": "Reserva",
+      "date": "Fecha",
+      "payment_status": "Pago",
+      "total": "Total"
+    },
+    "addresses": {
+      "title": "Direcciones",
+      "manage": "Gestionar direcciones",
+      "none": "No hay direcciones guardadas."
+    },
+    "login": {
+      "title": "Iniciar sesión",
+      "email": "Correo electrónico",
+      "password": "Contraseña",
+      "sign_in": "Iniciar sesión",
+      "forgot_password": "Olvidé mi contraseña",
+      "create_account": "Crear cuenta"
+    },
+    "register": {
+      "title": "Crear cuenta",
+      "name": "Nombre",
+      "email": "Correo electrónico",
+      "password": "Contraseña",
+      "submit": "Crear cuenta"
+    },
+    "order": {
+      "title": "Reserva {{ name }}",
+      "total": "Total",
+      "fulfillment_status": "Estado"
+    },
+    "recover_password": {
+      "title": "Recuperar contraseña",
+      "subtext": "Te enviaremos un enlace de restablecimiento a tu correo.",
+      "email": "Correo electrónico",
+      "submit": "Enviar enlace",
+      "success": "Si el correo existe en nuestra base, recibirás un enlace en breve."
+    },
+    "activate_account": {
+      "title": "Activar cuenta",
+      "subtext": "Crea una contraseña para activar tu cuenta.",
+      "password": "Contraseña",
+      "password_confirm": "Confirma la contraseña",
+      "submit": "Activar cuenta"
+    }
+  }
+}

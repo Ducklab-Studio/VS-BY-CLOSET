@@ -1,0 +1,99 @@
+[
+  {
+    "name": "theme_info",
+    "theme_name": "Valle's Closet",
+    "theme_version": "0.1.0",
+    "theme_author": "Claude Code"
+  },
+  {
+    "name": "Cores",
+    "settings": [
+      {
+        "type": "header",
+        "content": "Placeholder — trocar quando a identidade visual chegar"
+      },
+      {
+        "type": "color",
+        "id": "color_background",
+        "label": "Fundo",
+        "default": "#050505"
+      },
+      {
+        "type": "color",
+        "id": "color_surface",
+        "label": "Superfície (cards, header)",
+        "default": "#171717"
+      },
+      {
+        "type": "color",
+        "id": "color_text",
+        "label": "Texto principal",
+        "default": "#ffffff"
+      },
+      {
+        "type": "color",
+        "id": "color_text_muted",
+        "label": "Texto secundário",
+        "default": "#a3a3a3"
+      },
+      {
+        "type": "color",
+        "id": "color_accent",
+        "label": "Destaque (botões, links)",
+        "default": "#ffffff"
+      },
+      {
+        "type": "color",
+        "id": "color_border",
+        "label": "Bordas",
+        "default": "#262626"
+      }
+    ]
+  },
+  {
+    "name": "Tipografia",
+    "settings": [
+      {
+        "type": "header",
+        "content": "Placeholder — trocar quando a identidade visual chegar"
+      },
+      {
+        "type": "font_picker",
+        "id": "font_heading",
+        "label": "Fonte de títulos",
+        "default": "cinzel_n4"
+      },
+      {
+        "type": "font_picker",
+        "id": "font_body",
+        "label": "Fonte de texto",
+        "default": "poppins_n4"
+      }
+    ]
+  },
+  {
+    "name": "Layout",
+    "settings": [
+      {
+        "type": "range",
+        "id": "page_width",
+        "label": "Largura máxima do conteúdo",
+        "min": 1000,
+        "max": 1600,
+        "step": 50,
+        "unit": "px",
+        "default": 1280
+      }
+    ]
+  },
+  {
+    "name": "Favicon",
+    "settings": [
+      {
+        "type": "image_picker",
+        "id": "favicon",
+        "label": "Favicon"
+      }
+    ]
+  }
+]

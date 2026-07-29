@@ -1,0 +1,63 @@
+<section class="hero page-width" style="text-align: center; padding-block: 5rem 3rem;">
+  {%- if section.settings.eyebrow != blank -%}
+    <p style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.25em; color: var(--color-text-muted);">
+      {{ section.settings.eyebrow }}
+    </p>
+  {%- endif -%}
+
+  <h1 style="font-size: clamp(2.5rem, 5vw, 4rem); line-height: 1.1; margin-top: 1rem;">
+    {{ section.settings.heading }}
+  </h1>
+
+  {%- if section.settings.subheading != blank -%}
+    <p style="max-width: 40rem; margin: 1.5rem auto 0; color: var(--color-text-muted);">
+      {{ section.settings.subheading }}
+    </p>
+  {%- endif -%}
+
+  {%- if section.settings.button_label != blank -%}
+    <a href="{{ section.settings.button_url }}" class="btn btn--solid" style="margin-top: 2rem;">
+      {{ section.settings.button_label }}
+    </a>
+  {%- endif -%}
+</section>
+
+{% schema %}
+{
+  "name": "Hero",
+  "settings": [
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Texto de apoio (acima do título)",
+      "default": "Aluguel de roupa de neve"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Título",
+      "default": "A neve não espera seu guarda-roupa"
+    },
+    {
+      "type": "textarea",
+      "id": "subheading",
+      "label": "Subtítulo",
+      "default": "Reserve online. Retire ao chegar no Chile."
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Texto do botão",
+      "default": "Ver coleção"
+    },
+    {
+      "type": "url",
+      "id": "button_url",
+      "label": "Link do botão"
+    }
+  ],
+  "presets": [
+    { "name": "Hero" }
+  ]
+}
+{% endschema %}
