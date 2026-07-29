@@ -21,8 +21,8 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'Valle Showroom — Aluguel de roupa de neve',
-    template: '%s | Valle Showroom',
+    default: "Valle's Closet — Aluguel de roupa de neve",
+    template: "%s | Valle's Closet",
   },
   description:
     'Alugue roupa de neve premium pelo período exato da sua viagem. Macacões, jaquetas, botas e acessórios com curadoria — receba em casa e devolva sem lavar.',
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'pt_BR',
-    siteName: 'Valle Showroom',
+    siteName: "Valle's Closet",
   },
   robots: { index: true, follow: true },
 };

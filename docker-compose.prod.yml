@@ -11,7 +11,7 @@
 # camada de marca e conteúdo, e é stateless — pode escalar à vontade.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: valle
+name: valles-closet
 
 services:
   caddy:
@@ -22,7 +22,7 @@ services:
       - '443:443'
       - '443:443/udp' # HTTP/3
     environment:
-      DOMAIN: ${DOMAIN:?defina DOMAIN no .env (ex: valleshowroom.com.br)}
+      DOMAIN: ${DOMAIN:?defina DOMAIN no .env (ex: vallescloset.com.br)}
       ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL para os avisos do certificado}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

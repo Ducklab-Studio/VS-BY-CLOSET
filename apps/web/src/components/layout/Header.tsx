@@ -32,7 +32,7 @@ export function Header() {
         </button>
 
         <Link href="/" className="font-heading text-xl tracking-widest text-white">
-          VALLE<span className="text-white/60">SHOWROOM</span>
+          VALLE&apos;S<span className="text-white/60">CLOSET</span>
         </Link>
 
         <nav className="hidden flex-1 items-center gap-6 md:flex" aria-label="Principal">

@@ -42,7 +42,7 @@ deste tamanho cabe no plano gratuito.
 ### 1. Subir o código para o GitHub
 
 ```bash
-gh repo create valle-showroom --private --source=. --push
+gh repo create valles-closet --private --source=. --push
 ```
 
 Ou crie o repositório pela interface do GitHub e faça o push manual.

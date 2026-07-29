@@ -36,7 +36,7 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl grid-cols-2 gap-8 px-4 py-12 md:grid-cols-4">
         <div>
           <span className="font-heading text-lg text-white">
-            VALLE<span className="text-white/50">SHOWROOM</span>
+            VALLE&apos;S<span className="text-white/50">CLOSET</span>
           </span>
           <p className="mt-3 text-sm text-white/50">
             Aluguel de roupa de neve premium. Você viaja leve; a gente cuida do resto.
@@ -74,7 +74,7 @@ export function Footer() {
 
       <div className="border-t border-white/10 py-6">
         <p className="text-center text-xs text-white/40">
-          © {new Date().getFullYear()} Valle Showroom. Todos os direitos reservados. CNPJ
+          © {new Date().getFullYear()} Valle&apos;s Closet. Todos os direitos reservados. CNPJ
           00.000.000/0001-00
         </p>
       </div>

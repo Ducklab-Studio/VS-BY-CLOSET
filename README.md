@@ -1,4 +1,4 @@
-# 🏔️ Valle Showroom
+# 🏔️ Valle's Closet
 
 Site de **aluguel de roupa de neve**. Next.js na frente, **Booqable** como
 plataforma de locação por trás.

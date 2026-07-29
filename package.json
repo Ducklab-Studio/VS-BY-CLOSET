@@ -1,8 +1,8 @@
 {
-  "name": "valle-showroom",
+  "name": "valles-closet",
   "version": "0.2.0",
   "private": true,
-  "description": "Site de aluguel e venda de roupa de neve — Next.js + Booqable",
+  "description": "Site de aluguel de roupa de neve — Next.js + Booqable",
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=20.0.0"
