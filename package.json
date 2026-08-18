@@ -1,21 +1,19 @@
 {
   "name": "valles-closet",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Site de aluguel de roupa de neve — Next.js + Booqable",
+  "description": "Aluguel de roupa de neve — Next.js (vitrine) + Shopify/PRP (produto, carrinho, checkout)",
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @loja/web dev",
-    "build": "pnpm --filter @loja/web build",
-    "start": "pnpm --filter @loja/web start",
+    "dev": "pnpm --filter @valle/marketing dev",
+    "build": "pnpm --filter @valle/marketing build",
+    "start": "pnpm --filter @valle/marketing start",
+    "theme:dev": "cd theme && shopify theme dev",
     "lint": "pnpm -r lint",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "docker:build": "docker compose -f docker-compose.prod.yml build",
-    "docker:up": "docker compose -f docker-compose.prod.yml up -d",
-    "docker:down": "docker compose -f docker-compose.prod.yml down"
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,liquid}\""
   },
   "devDependencies": {
     "prettier": "^3.3.3"

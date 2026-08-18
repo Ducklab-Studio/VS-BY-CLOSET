@@ -3,69 +3,102 @@
 Aluguel de roupa de neve. Cliente reserva online no Brasil, retira e devolve
 numa loja física no Chile.
 
-**Stack: Shopify + tema custom + Product Rentals Pro.**
+**Stack: Next.js (vitrine) + Shopify/tema Liquid + Product Rentals Pro.**
 
 ---
 
-## Como funciona
+## Como funciona — arquitetura híbrida
 
-| No Shopify | No app Product Rentals Pro |
+```
+Next.js (apps/marketing)          Shopify (theme/)
+─────────────────────────         ─────────────────────────
+Home, institucional, R3F/GSAP     Produto + widget do PRP
+Lê catálogo via Storefront API    Carrinho, checkout, pagamento
+        │                          Conta de cliente, histórico
+        └── botão "Reservar" ────► (o cliente entra aqui)
+```
+
+Motivo de ser dois apps, não um: o widget de aluguel do **Product Rentals
+Pro usa App Blocks — mecanismo que só existe dentro do tema Liquid**. Um
+front headless em React não tem como carregá-lo (confirmado com o próprio
+fabricante do app). Por isso a vitrine (visual pesado, 3D, animação) fica em
+Next.js, e tudo que envolve reservar — produto, carrinho, checkout, conta —
+fica no tema Shopify.
+
+| Camada | Onde |
 | --- | --- |
-| Catálogo, fotos, preços | Calendário de retirada e devolução |
-| Conta de cliente, login, histórico | Disponibilidade por período |
-| Carrinho, checkout, pagamento | Buffer de limpeza entre locações |
-| Domínio, hospedagem, admin | Caução, multa por atraso/dano |
-
-O tema (`theme/`) é 100% nosso — visual, textos, estrutura de página. O
-Shopify cuida de cliente e pagamento; o PRP cuida do ciclo de locação.
+| Home, textos institucionais, navegação | `apps/marketing` (Next.js) |
+| Cena 3D / animações | `apps/marketing` (R3F, Three.js, GSAP, Framer Motion) |
+| Catálogo (leitura) | `apps/marketing` via Storefront API |
+| Produto + calendário de aluguel | `theme/` (Shopify + PRP) |
+| Carrinho, checkout, pagamento | `theme/` (Shopify) |
+| Conta, login, histórico de reservas | `theme/` (Shopify nativo) |
 
 ## 📁 Estrutura
 
 ```
 .
-├── theme/                  # Tema Shopify (produção) — ver theme/README.md
-│   ├── config/             # Configurações editáveis pelo painel
-│   ├── layout/
-│   ├── locales/            # pt-BR (principal) e es (Chile)
-│   ├── sections/
-│   └── templates/
-│       └── customers/      # Login, cadastro, conta, pedidos, endereços
+├── apps/
+│   ├── marketing/           # Vitrine Next.js — ver apps/marketing (sem README próprio ainda)
+│   └── web/                 # Legado: Next.js + Booqable (não é mais produção)
 │
-└── apps/web/                — Next.js + Booqable
+└── theme/                   # Tema Shopify — ver theme/README.md
+    ├── config/               # Configurações editáveis pelo painel
+    ├── locales/               # pt-BR (principal) e es (Chile)
+    ├── sections/
+    └── templates/
+        └── customers/         # Login, cadastro, conta, pedidos, endereços
 ```
 
-> **`apps/web/` é código legado.** O projeto passou por duas arquiteturas
-> antes desta (backend próprio em NestJS, depois Booqable embedado em
-> Next.js). Cada pivô está preservado no histórico do git. `theme/` é a
-> versão atual e a única em desenvolvimento.
+> O projeto passou por três arquiteturas: backend próprio em NestJS, depois
+> Booqable embedado em Next.js (`apps/web`, legado), agora este híbrido.
+> Cada pivô está preservado no histórico do git.
 
-## 🚀 Rodando o tema
+## 🚀 Rodando localmente
+
+**Vitrine (Next.js):**
+
+```bash
+pnpm install
+cp apps/marketing/.env.example apps/marketing/.env
+pnpm dev
+```
+
+**Tema (Shopify):**
 
 ```bash
 npm install -g @shopify/cli @shopify/theme
+cd theme && shopify theme dev --store=sua-loja.myshopify.com
 ```
 
-```bash
-cd theme
-shopify theme dev --store=sua-loja.myshopify.com
-```
-
-Detalhes de estrutura, App Block do PRP e sistema de tradução em
-[theme/README.md](theme/README.md).
+Detalhes de cada um em [theme/README.md](theme/README.md).
 
 ## ⚠️ Estado atual
 
-- Estrutura do tema pronta; **identidade visual ainda não definida** — cores,
-  fontes e imagens estão como placeholder em `config/settings_schema.json`.
-- Loja Shopify e app PRP ainda não foram criados.
+- Estrutura dos dois apps pronta e **buildando sem erro** — typecheck e
+  `next build` (Turbopack) validados, incluindo o pipeline R3F/Three.
+- **Identidade visual ainda não definida** — cores, fontes e a cena 3D estão
+  como placeholder (`Hero3D.tsx`, `tailwind.config.ts` do marketing;
+  `settings_schema.json` do tema).
+- Loja Shopify, app PRP e token da Storefront API ainda não existem.
 - Domínio (`vallescloset.*`) ainda não registrado.
+
+## Decisão pendente — domínio
+
+`apps/marketing/.env.example` assume um **subdomínio dedicado ao Shopify**
+(`loja.vallescloset.com.br`), porque o Shopify precisa ser a origem do
+domínio/subdomínio que aponta para ele — não dá para colocá-lo atrás de um
+proxy reverso arbitrário como fizemos com o Booqable. Ainda não foi
+confirmado com o cliente; é só trocar a variável quando decidir.
 
 ## Pontos de atenção para quando a loja existir
 
-- **Shopify Payments não está disponível no Chile.** Use um gateway local
+- **Shopify Payments não está disponível no Chile.** Usar gateway local
   (Mercado Pago Chile, Transbank ou Flow).
-- **Loja em CLP.** Como o estoque é físico e fica só no Chile, uma loja com
-  moeda única evita risco de dupla reserva — mostrar estimativa em BRL na
-  vitrine é só cosmético, o cliente paga em peso.
+- **Loja em CLP.** Estoque físico só no Chile → moeda única evita risco de
+  dupla reserva. Estimativa em BRL na vitrine é só cosmética.
 - **PRP substitui variant picker e buy button** na página de produto — já
-  refletido em `sections/main-product.liquid`.
+  refletido em `theme/sections/main-product.liquid`.
+- **A vitrine em Next.js só lê produto (Storefront API).** Não tenta
+  reproduzir carrinho, checkout ou o widget do PRP — isso é o que o
+  `theme/` existe para fazer.

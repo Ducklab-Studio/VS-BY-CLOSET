@@ -2,10 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
 
-  "// monorepo": "O app fica em apps/web, mas o install roda da raiz para o pnpm resolver o workspace.",
+  "// monorepo": "A vitrine fica em apps/marketing; o install roda da raiz para o pnpm resolver o workspace. O tema Shopify (theme/) não passa por aqui — vai por 'shopify theme push'.",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm --filter @loja/web build",
-  "outputDirectory": "apps/web/.next",
+  "buildCommand": "pnpm --filter @valle/marketing build",
+  "outputDirectory": "apps/marketing/.next",
 
   "// regiao": "gru1 = São Paulo. Reduz latência para o público brasileiro.",
   "regions": ["gru1"],
