@@ -18,7 +18,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
-      <body className="font-body antialiased">
+      {/* suppressHydrationWarning: extensões de navegador (ex.: Bitdefender)
+          injetam atributos como bis_skin_checked no <body> antes do React
+          hidratar. Isso não é bug do site — o conteúdo renderizado é sempre
+          igual entre servidor e cliente, só esses atributos de terceiros
+          divergem. Recomendação oficial do Next.js para esse cenário. */}
+      <body className="font-body antialiased" suppressHydrationWarning>
         <Header />
         <main>{children}</main>
         <Footer />
