@@ -5,10 +5,12 @@ export const metadata: Metadata = { title: 'Política de Privacidade' };
 
 /**
  * Rascunho de boa-fé alinhado à arquitetura real (dados de checkout e conta
- * processados pelo Shopify, pagamento pelo Mercado Pago Chile) — não
- * substitui revisão jurídica. Empresa sediada no Chile, maioria dos
- * clientes no Brasil: vale confirmar com advogado a aplicação conjunta da
- * LGPD (Lei nº 13.709/2018) e da Ley 19.628 chilena antes de publicar.
+ * processados pelo Shopify, cobrança em reais por gateway brasileiro ainda
+ * não escolhido — ver README) — não substitui revisão jurídica. Cobrança em
+ * BRL, mas retirada/devolução acontecem fisicamente no Chile: vale confirmar
+ * com advogado se isso implica aplicação da Ley 19.628 chilena além da LGPD
+ * (Lei nº 13.709/2018), e qual jurisdição rege o negócio conforme onde a
+ * empresa for registrada.
  */
 export default function PrivacyPage() {
   return (
@@ -22,7 +24,7 @@ export default function PrivacyPage() {
       <p>
         Nome, e-mail, telefone e histórico de reservas — coletados no checkout, hospedado e
         processado pela nossa plataforma de comércio (Shopify). Dados de pagamento são processados
-        diretamente pelo Mercado Pago Chile; não temos acesso ao número do seu cartão.
+        diretamente pelo gateway de pagamento; não temos acesso ao número do seu cartão.
       </p>
 
       <h2>2. Como usamos seus dados</h2>
@@ -34,7 +36,7 @@ export default function PrivacyPage() {
       <h2>3. Compartilhamento</h2>
       <p>
         Compartilhamos dados apenas com parceiros essenciais à operação — Shopify (checkout e conta)
-        e Mercado Pago Chile (pagamento) — e quando exigido por lei.
+        e o gateway de pagamento — e quando exigido por lei.
       </p>
 
       <h2>4. Seus direitos</h2>

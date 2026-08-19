@@ -21,7 +21,7 @@ const passos = [
   {
     titulo: 'Confirme a reserva',
     texto:
-      'Finalize com pagamento seguro em CLP — o cartão brasileiro converte pra BRL na fatura, como qualquer gasto de viagem. Você recebe a confirmação por e-mail.',
+      'Finalize com pagamento seguro em reais — cartão, Pix ou boleto. Você recebe a confirmação por e-mail.',
   },
   {
     titulo: 'Retire na loja, no Chile',

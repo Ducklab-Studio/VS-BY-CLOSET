@@ -25,8 +25,8 @@ export default function TermsPage() {
 
       <h2>2. Reserva e pagamento</h2>
       <p>
-        A reserva só é confirmada após a aprovação do pagamento, processado em pesos chilenos (CLP)
-        via Mercado Pago Chile. Até a confirmação, a peça permanece disponível para outros clientes.
+        A reserva só é confirmada após a aprovação do pagamento, processado em reais (BRL) por
+        gateway certificado. Até a confirmação, a peça permanece disponível para outros clientes.
         Pedidos com indícios de fraude podem ser cancelados.
       </p>
 
@@ -67,9 +67,8 @@ export default function TermsPage() {
 
       <h2>7. Preços</h2>
       <p>
-        Os valores de locação são exibidos em CLP e podem ser alterados sem aviso prévio,
-        respeitando-se o preço vigente no momento da confirmação da reserva. A estimativa em reais
-        exibida na vitrine é apenas informativa — o valor cobrado é o de CLP no checkout.
+        Os valores de locação são exibidos e cobrados em reais (BRL) e podem ser alterados sem
+        aviso prévio, respeitando-se o preço vigente no momento da confirmação da reserva.
       </p>
 
       <h2>8. Cancelamento</h2>

@@ -42,11 +42,11 @@ const faqs = [
   },
   {
     q: 'Em que moeda eu pago?',
-    a: 'O checkout é em pesos chilenos (CLP), com estimativa em reais exibida ao lado do preço. Se você paga com cartão brasileiro, a conversão acontece automaticamente na fatura — como em qualquer gasto de viagem internacional.',
+    a: 'Em reais (BRL). Mesmo a retirada sendo no Chile, o checkout é todo em real — sem conversão, sem surpresa na fatura do cartão.',
   },
   {
     q: 'Quais as formas de pagamento?',
-    a: 'Cartão de crédito via Mercado Pago Chile. O processamento é feito por gateway certificado — não armazenamos dados do seu cartão.',
+    a: 'Cartão de crédito, Pix e boleto. O processamento é feito por gateway certificado — não armazenamos dados do seu cartão.',
   },
   {
     q: 'Posso cancelar a reserva?',

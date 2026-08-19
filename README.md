@@ -93,12 +93,31 @@ confirmado com o cliente; é só trocar a variável quando decidir.
 
 ## Pontos de atenção para quando a loja existir
 
-- **Shopify Payments não está disponível no Chile.** Usar gateway local
-  (Mercado Pago Chile, Transbank ou Flow).
-- **Loja em CLP.** Estoque físico só no Chile → moeda única evita risco de
-  dupla reserva. Estimativa em BRL na vitrine é só cosmética.
+- **Shopify Payments não está disponível nem no Brasil nem no Chile.**
+  Multimoeda de verdade (cada cliente pagando na própria moeda) exige
+  Shopify Payments ou Adyen — como nenhum dos dois cobre esses países, a
+  loja usa **uma moeda única com gateway terceiro**, de qualquer forma.
+- **Loja em BRL.** Decidido porque a esmagadora maioria dos clientes é
+  brasileira — cobrar em BRL habilita Pix, boleto e parcelamento nativos,
+  em vez de forçar cartão internacional em peso chileno. O estoque físico
+  segue só no Chile (retirada/devolução presenciais); Shopify permite
+  registrar a loja num país e ter a inventory Location em outro, então isso
+  não conflita.
+- **Gateway de pagamento ainda não escolhido.** Candidatos com app oficial
+  na Shopify e taxa pública (sem precisar negociar por volume): Mercado
+  Pago (cartão 4,99%, Pix 0,99%, boleto R$3,49) ou PagBank/PagSeguro (Pix
+  grátis pra receber, mesma faixa nas outras taxas). Nenhum dos dois está
+  fixado em código — troque `NEXT_PUBLIC_SHOPIFY_STORE_URL` e configure o
+  gateway direto no painel do Shopify quando decidir.
+- **Jurisdição/legal ainda em aberto.** Cobrar em BRL não decide sozinho em
+  que país a empresa deve ser registrada — como a operação física
+  (retirada, devolução, possível funcionário) acontece no Chile, vale
+  confirmar com contador/advogado se isso exige registro ou obrigação
+  tributária lá, independente de onde a Shopify estiver sediada.
 - **PRP substitui variant picker e buy button** na página de produto — já
   refletido em `theme/sections/main-product.liquid`.
 - **A vitrine em Next.js só lê produto (Storefront API).** Não tenta
   reproduzir carrinho, checkout ou o widget do PRP — isso é o que o
-  `theme/` existe para fazer.
+  `theme/` existe para fazer. O preço exibido já vem no formato/moeda que a
+  API devolver (`FeaturedProducts.tsx` usa `currencyCode` dinâmico) — não
+  há BRL nem CLP hardcoded em lugar nenhum do código.
