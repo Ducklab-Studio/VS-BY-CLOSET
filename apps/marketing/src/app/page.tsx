@@ -12,20 +12,20 @@ export default function HomePage() {
   return (
     <>
       <section className="px-4 pt-16 text-center">
-        <p className="text-xs uppercase tracking-[0.3em] text-muted">Aluguel de roupa de neve</p>
+        <p className="text-xs uppercase tracking-[0.3em] text-ink/60">Aluguel de roupa de neve</p>
         <h1 className="mt-5 font-heading text-4xl uppercase tracking-wide sm:text-6xl">
           A neve não espera
           <br />
           seu guarda-roupa
         </h1>
-        <p className="mx-auto mt-6 max-w-xl text-muted">
+        <p className="mx-auto mt-6 max-w-xl text-ink/60">
           Reserve online. Retire ao chegar no Chile.
         </p>
 
         {SHOPIFY_STORE_URL && (
           <a
             href={`${SHOPIFY_STORE_URL}/collections/all`}
-            className="mt-8 inline-flex rounded-full border border-white/30 px-6 py-3 text-xs uppercase tracking-widest transition hover:bg-white hover:text-ink"
+            className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
           >
             Ver coleção
           </a>

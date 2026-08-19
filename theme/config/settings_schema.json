@@ -10,43 +10,49 @@
     "settings": [
       {
         "type": "header",
-        "content": "Placeholder — trocar quando a identidade visual chegar"
+        "content": "Paleta oficial da marca (cliente, 2026)"
       },
       {
         "type": "color",
         "id": "color_background",
         "label": "Fundo",
-        "default": "#050505"
+        "default": "#FFFCF6"
       },
       {
         "type": "color",
         "id": "color_surface",
         "label": "Superfície (cards, header)",
-        "default": "#171717"
+        "default": "#F2E5C6"
       },
       {
         "type": "color",
         "id": "color_text",
         "label": "Texto principal",
-        "default": "#ffffff"
+        "default": "#1F1D1C"
       },
       {
         "type": "color",
         "id": "color_text_muted",
         "label": "Texto secundário",
-        "default": "#a3a3a3"
+        "default": "#79746F"
       },
       {
         "type": "color",
         "id": "color_accent",
         "label": "Destaque (botões, links)",
-        "default": "#ffffff"
+        "default": "#53131E"
       },
       {
         "type": "color",
         "id": "color_border",
         "label": "Bordas",
-        "default": "#262626"
+        "default": "#DDDBD5"
+      },
+      {
+        "type": "color",
+        "id": "color_support_gold",
+        "label": "Apoio — dourado (tags, divisores)",
+        "default": "#F2D9A0"
       }
     ]
   },

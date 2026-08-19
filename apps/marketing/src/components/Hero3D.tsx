@@ -17,11 +17,13 @@ export function Hero3D() {
     <div className="h-[480px] w-full">
       <Canvas camera={{ position: [0, 0, 4], fov: 45 }}>
         <Suspense fallback={null}>
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[3, 3, 3]} intensity={1.2} />
+          {/* Fundo do Canvas fica transparente por padrão, então a cena já
+              herda o creme da página atrás dela — sem precisar de <color>. */}
+          <ambientLight intensity={0.9} />
+          <directionalLight position={[3, 3, 3]} intensity={1.4} />
           <mesh rotation={[0.4, 0.4, 0]}>
             <torusKnotGeometry args={[1, 0.3, 128, 16]} />
-            <meshStandardMaterial color="#ffffff" roughness={0.3} metalness={0.2} />
+            <meshStandardMaterial color="#53131E" roughness={0.35} metalness={0.15} />
           </mesh>
           <Environment preset="city" />
         </Suspense>
