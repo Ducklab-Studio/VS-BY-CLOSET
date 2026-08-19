@@ -99,12 +99,20 @@ export async function getProductByHandle(handle: string): Promise<StorefrontProd
   return data.product;
 }
 
+/** Loja configurada? Usado pra esconder nav/CTA em vez de linkar pra lugar nenhum. */
+export const isStoreUrlConfigured = STORE_URL.length > 0;
+
 /**
- * Link para a página de produto no tema Liquid — onde o widget do PRP, o
- * carrinho e o checkout realmente funcionam. Esta vitrine nunca tenta
- * reproduzir esse fluxo.
+ * Monta uma URL absoluta para o tema Liquid — onde produto, carrinho, conta
+ * e checkout realmente funcionam. Esta vitrine nunca tenta reproduzir esse
+ * fluxo, só linka pra lá.
  */
-export function productUrl(handle: string): string {
+export function storeUrl(path = '/'): string {
   if (!STORE_URL) return '#';
-  return `${STORE_URL}/products/${handle}`;
+  return `${STORE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+/** Link para a página de produto específico no tema Liquid. */
+export function productUrl(handle: string): string {
+  return storeUrl(`/products/${handle}`);
 }

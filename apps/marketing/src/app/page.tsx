@@ -1,7 +1,6 @@
 import { Hero3D } from '@/components/Hero3D';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
-
-const SHOPIFY_STORE_URL = (process.env.NEXT_PUBLIC_SHOPIFY_STORE_URL ?? '').replace(/\/$/, '');
+import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
 
 /**
  * Home placeholder — estrutura pronta para receber a identidade visual.
@@ -22,9 +21,9 @@ export default function HomePage() {
           Reserve online. Retire ao chegar no Chile.
         </p>
 
-        {SHOPIFY_STORE_URL && (
+        {isStoreUrlConfigured && (
           <a
-            href={`${SHOPIFY_STORE_URL}/collections/all`}
+            href={storeUrl('/collections/all')}
             className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
           >
             Ver coleção
