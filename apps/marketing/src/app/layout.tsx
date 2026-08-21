@@ -8,8 +8,8 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Valle's Closet — Aluguel de roupa de neve",
-    template: "%s | Valle's Closet",
+    default: 'VS by Closet — Aluguel de roupa de neve',
+    template: '%s | VS by Closet',
   },
   description: 'Reserve online. Retire ao chegar no Chile.',
   robots: { index: true, follow: true },

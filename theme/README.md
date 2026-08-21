@@ -1,4 +1,4 @@
-# Tema Shopify — Valle's Closet
+# Tema Shopify — VS by Closet
 
 Tema Online Store 2.0 construído do zero para receber o **Product Rentals Pro**
 (App Block na página de produto) e as contas de cliente nativas do Shopify.

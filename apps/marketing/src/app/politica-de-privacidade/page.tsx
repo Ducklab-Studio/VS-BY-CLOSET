@@ -17,7 +17,7 @@ export default function PrivacyPage() {
     <LegalPage title="Política de Privacidade" updatedAt="Agosto de 2026">
       <p>
         Esta Política descreve como coletamos, usamos e protegemos seus dados pessoais ao reservar
-        uma locação na Valle&apos;s Closet.
+        uma locação na VS by Closet.
       </p>
 
       <h2>1. Dados que coletamos</h2>

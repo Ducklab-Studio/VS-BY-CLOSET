@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { Instagram, MessageCircle, Mail } from 'lucide-react';
 import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
 
@@ -31,9 +32,13 @@ export function Footer() {
     <footer className="border-t border-ink/10 bg-sand/40">
       <div className="mx-auto grid max-w-7xl grid-cols-2 gap-8 px-4 py-12 md:grid-cols-4">
         <div>
-          <span className="font-heading text-lg text-marsala">
-            VALLE&apos;S<span className="text-ink">CLOSET</span>
-          </span>
+          <Image
+            src="/brand/logo-horizontal-marsala.png"
+            alt="VS by Closet"
+            width={216}
+            height={216}
+            className="h-12 w-12 object-contain"
+          />
           <p className="mt-3 text-sm text-ink/60">
             Aluguel de roupa de neve premium. Reserve no Brasil, retire ao chegar no Chile.
           </p>
@@ -81,7 +86,7 @@ export function Footer() {
 
       <div className="border-t border-ink/10 py-6">
         <p className="text-center text-xs text-ink/40">
-          © {new Date().getFullYear()} Valle&apos;s Closet. Todos os direitos reservados.
+          © {new Date().getFullYear()} VS by Closet. Todos os direitos reservados.
         </p>
       </div>
     </footer>

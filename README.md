@@ -1,4 +1,4 @@
-# 🏔️ Valle's Closet
+# 🏔️ VS by Closet
 
 Aluguel de roupa de neve. Cliente reserva online no Brasil, retira e devolve
 numa loja física no Chile.
@@ -77,16 +77,34 @@ Detalhes de cada um em [theme/README.md](theme/README.md).
 
 - Estrutura dos dois apps pronta e **buildando sem erro** — typecheck e
   `next build` (Turbopack) validados, incluindo o pipeline R3F/Three.
-- **Identidade visual ainda não definida** — cores, fontes e a cena 3D estão
-  como placeholder (`Hero3D.tsx`, `tailwind.config.ts` do marketing;
-  `settings_schema.json` do tema).
+- **Identidade visual recebida e aplicada**: paleta marsala (`#53131E`) +
+  creme (`#FFFCF6`), logo real (monograma V+S com silhueta de montanha) nos
+  dois sistemas. Fontes e a cena 3D do `Hero3D.tsx` ainda são placeholder —
+  o kit de marca não trouxe tipografia definida.
 - Loja Shopify, app PRP e token da Storefront API ainda não existem.
-- Domínio (`vallescloset.*`) ainda não registrado.
+- Domínio (`vsbycloset.*`) ainda não registrado.
+
+## 🎨 Identidade visual
+
+Kit de marca em `Identidade visual - VS BY CLOSET - Copia/` (arquivos
+originais, PNG/JPEG/PDF em todas as variações — não versionado no git por
+serem arquivos de design brutos). Os recortes já prontos para uso web
+(fundo transparente, renomeados) estão em:
+
+- `apps/marketing/public/brand/` — consumidos pela vitrine Next.js
+- `theme/assets/` — consumidos pelo tema Shopify
+
+Seis arquivos em cada pasta: `logo-{horizontal,stacked,mark}-{marsala,cream}.png`.
+Use a variante **marsala** sobre fundo claro (nosso caso, `bg-cream`) e a
+variante **cream** se algum dia existir uma seção de fundo escuro. A pasta
+"Marca d'água" do kit original é a única com transparência real — as
+pastas "Logotipo"/"Ícone"/"Secundária" têm cor sólida "assada" na imagem e
+não servem para uso direto em UI.
 
 ## Decisão pendente — domínio
 
 `apps/marketing/.env.example` assume um **subdomínio dedicado ao Shopify**
-(`loja.vallescloset.com.br`), porque o Shopify precisa ser a origem do
+(`loja.vsbycloset.com.br`), porque o Shopify precisa ser a origem do
 domínio/subdomínio que aponta para ele — não dá para colocá-lo atrás de um
 proxy reverso arbitrário como fizemos com o Booqable. Ainda não foi
 confirmado com o cliente; é só trocar a variável quando decidir.

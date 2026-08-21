@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState } from 'react';
 import { Menu, X, User, ShoppingBag } from 'lucide-react';
 import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
@@ -34,8 +35,18 @@ export function Header() {
           {mobileOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
 
-        <Link href="/" className="font-heading text-xl tracking-widest text-marsala">
-          VALLE&apos;S<span className="text-ink">CLOSET</span>
+        <Link href="/" aria-label="VS by Closet" className="shrink-0">
+          {/* Arquivo é um canvas quadrado com bastante respiro ao redor da
+              marca — por isso a caixa generosa (h-14) em vez do tamanho
+              "real" do logotipo. object-contain evita distorcer. */}
+          <Image
+            src="/brand/logo-horizontal-marsala.png"
+            alt="VS by Closet"
+            width={216}
+            height={216}
+            priority
+            className="h-14 w-14 object-contain"
+          />
         </Link>
 
         <nav className="hidden flex-1 items-center gap-6 md:flex" aria-label="Principal">

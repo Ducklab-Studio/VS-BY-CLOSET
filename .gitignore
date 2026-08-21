@@ -46,3 +46,8 @@ uploads/
 
 # Coverage
 coverage/
+
+# Kit de identidade visual bruto (PDF/JPEG/PNG em alta resolução, entregue
+# pelo cliente). Os recortes já prontos para web ficam versionados em
+# apps/marketing/public/brand/ e theme/assets/ — isso aqui só infla o repo.
+Identidade visual*/

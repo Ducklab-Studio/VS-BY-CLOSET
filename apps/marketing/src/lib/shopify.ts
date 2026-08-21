@@ -14,7 +14,7 @@ const API_VERSION = '2025-01';
 
 /**
  * URL pública da loja (o tema Liquid), usada para montar o link de "Reservar".
- * Ex.: https://loja.vallescloset.com.br — ver README para a decisão de domínio.
+ * Ex.: https://loja.vsbycloset.com.br — ver README para a decisão de domínio.
  */
 const STORE_URL = (process.env.NEXT_PUBLIC_SHOPIFY_STORE_URL ?? '').replace(/\/$/, '');
 

@@ -3,7 +3,7 @@ import { MessageCircle, Mail, MapPin } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Contato',
-  description: 'Fale com a Valle\'s Closet pelo WhatsApp ou e-mail.',
+  description: 'Fale com a VS by Closet pelo WhatsApp ou e-mail.',
 };
 
 /**
@@ -32,13 +32,13 @@ export default function ContactPage() {
         </a>
 
         <a
-          href="mailto:contato@vallescloset.com"
+          href="mailto:contato@vsbycloset.com"
           className="flex items-start gap-3 rounded-2xl border border-ink/10 bg-sand/40 p-6 transition hover:border-marsala"
         >
           <Mail className="shrink-0 text-marsala" />
           <div>
             <p className="font-medium text-ink">E-mail</p>
-            <p className="mt-1 text-sm text-ink/60">contato@vallescloset.com</p>
+            <p className="mt-1 text-sm text-ink/60">contato@vsbycloset.com</p>
           </div>
         </a>
       </div>

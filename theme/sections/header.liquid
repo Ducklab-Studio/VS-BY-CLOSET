@@ -10,8 +10,8 @@
       ☰
     </button>
 
-    <a href="{{ routes.root_url }}" style="font-family: var(--font-heading-family), serif; font-size: 1.1rem; letter-spacing: 0.08em; text-transform: uppercase;">
-      {{ shop.name }}
+    <a href="{{ routes.root_url }}" aria-label="{{ shop.name }}" style="display: flex; align-items: center;">
+      {{ 'logo-horizontal-marsala.png' | asset_url | image_tag: alt: shop.name, height: 56, style: 'height: 3.5rem; width: auto; object-fit: contain;' }}
     </a>
 
     {%- if section.settings.menu != blank -%}

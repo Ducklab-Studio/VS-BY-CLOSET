@@ -12,7 +12,7 @@ export default function TermsPage() {
     <LegalPage title="Termos de locação" updatedAt="Agosto de 2026">
       <p>
         Ao reservar uma peça neste site, você celebra um <strong>contrato de locação</strong> — não
-        de compra. As peças permanecem propriedade da Valle&apos;s Closet e devem ser devolvidas ao
+        de compra. As peças permanecem propriedade da VS by Closet e devem ser devolvidas ao
         fim do período contratado, na mesma loja onde foram retiradas. Leia com atenção antes de
         confirmar a reserva.
       </p>
