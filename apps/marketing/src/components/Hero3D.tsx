@@ -1,33 +1,55 @@
 'use client';
 
-import { Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Environment, OrbitControls } from '@react-three/drei';
+import { Suspense, useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { useTexture } from '@react-three/drei';
+import * as THREE from 'three';
 
 /**
- * Prova de que o pipeline R3F/Three/Drei está funcionando de ponta a ponta.
+ * O monograma real (V+S com a montanha no negativo) como card 3D flutuante.
  *
- * A forma e o material aqui são deliberadamente genéricos — o objeto 3D real
- * (peça de roupa, cena de neve, o que a identidade visual pedir) substitui
- * este placeholder quando a marca chegar. O que importa hoje é confirmar que
- * Canvas monta, renderiza e não quebra o SSR do Next.
+ * A arte veio como PNG/PDF, sem malha 3D nem SVG vetorial — extrudar a marca
+ * de verdade (dar volume às letras) exigiria um caminho vetorial que não
+ * temos. Em vez de fingir profundidade que não existe, uso a arte real como
+ * textura numa placa fina que gira devagar no espaço: honesto sobre o que é,
+ * e ainda assim prova o pipeline R3F/Three funcionando ponta a ponta.
  */
+function LogoCard() {
+  const texture = useTexture('/brand/logo-mark-marsala.png');
+  // Three.js (r152+) não assume mais sRGB nas texturas carregadas — sem isso
+  // o marsala sai escurecido/dessaturado em vez da cor real da marca.
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    meshRef.current.rotation.y = clock.elapsedTime * 0.5;
+    meshRef.current.position.y = Math.sin(clock.elapsedTime * 0.8) * 0.08;
+  });
+
+  return (
+    <mesh ref={meshRef}>
+      {/* Arte fonte é ~quadrada (1080×1081) — plano quadrado sem distorcer. */}
+      <planeGeometry args={[2.2, 2.2]} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        alphaTest={0.1}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
 export function Hero3D() {
   return (
     <div className="h-[480px] w-full">
       <Canvas camera={{ position: [0, 0, 4], fov: 45 }}>
+        {/* Fundo do Canvas fica transparente por padrão, então a cena já
+            herda o creme da página atrás dela — sem precisar de <color>. */}
         <Suspense fallback={null}>
-          {/* Fundo do Canvas fica transparente por padrão, então a cena já
-              herda o creme da página atrás dela — sem precisar de <color>. */}
-          <ambientLight intensity={0.9} />
-          <directionalLight position={[3, 3, 3]} intensity={1.4} />
-          <mesh rotation={[0.4, 0.4, 0]}>
-            <torusKnotGeometry args={[1, 0.3, 128, 16]} />
-            <meshStandardMaterial color="#53131E" roughness={0.35} metalness={0.15} />
-          </mesh>
-          <Environment preset="city" />
+          <LogoCard />
         </Suspense>
-        <OrbitControls enableZoom={false} autoRotate autoRotateSpeed={0.6} />
       </Canvas>
     </div>
   );
