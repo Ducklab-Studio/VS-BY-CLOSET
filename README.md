@@ -109,6 +109,24 @@ domínio/subdomínio que aponta para ele — não dá para colocá-lo atrás de 
 proxy reverso arbitrário como fizemos com o Booqable. Ainda não foi
 confirmado com o cliente; é só trocar a variável quando decidir.
 
+## Modelo de operação (confirmado pelo cliente)
+
+- **Baixa temporada — fluxo aprovado.** Cliente brasileiro reserva/aluga
+  pelo site e retira a roupa presencialmente na loja do Chile. É exatamente
+  o que está construído (vitrine + tema Shopify + PRP).
+- **A partir de maio, o modelo será reavaliado** — principalmente se vale a
+  pena manter reserva online durante a **alta temporada**. Ou seja: o que
+  construímos até aqui é validado pra baixa temporada; não vale investir em
+  infraestrutura pesada demais pra um fluxo de alta temporada que ainda
+  pode mudar.
+- **Moeda: BRL e CLP, mas o "como" ainda está em aberto.** O cliente quer as
+  duas moedas na operação. Ainda não definimos se isso é (a) só o site
+  online em BRL + CLP separado pra quem paga presencial na loja do Chile
+  [nesse caso nada muda no código], ou (b) o checkout online precisando
+  cobrar nas duas moedas de fato [esbarra na limitação já documentada
+  abaixo — Shopify Payments não cobre Brasil nem Chile]. Não construir nada
+  em cima dessa ambiguidade até resolver.
+
 ## Pontos de atenção para quando a loja existir
 
 - **Shopify Payments não está disponível nem no Brasil nem no Chile.**
