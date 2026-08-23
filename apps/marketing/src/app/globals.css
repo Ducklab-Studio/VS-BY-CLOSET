@@ -6,3 +6,20 @@ body {
   background: theme('colors.cream');
   color: theme('colors.ink');
 }
+
+/* Neve ambiente — ver src/components/Snowfall.tsx. Queda + balanço lateral
+   combinados numa animação só; --drift é setado por floco via inline style. */
+@keyframes snow-fall {
+  from {
+    transform: translateY(0) translateX(0);
+  }
+  to {
+    transform: translateY(120vh) translateX(var(--drift, 20px));
+  }
+}
+
+.animate-snow-fall {
+  animation-name: snow-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}

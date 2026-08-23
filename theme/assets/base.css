@@ -106,3 +106,40 @@ button {
   color: var(--color-background);
   border-color: var(--color-accent);
 }
+
+/* Neve ambiente — camada decorativa de "inverno mágico". Equivalente ao
+   Snowfall.tsx da vitrine Next.js; ver snippets/snowfall.liquid para os
+   flocos. Marsala continua sendo a única cor de destaque — frost aparece
+   só aqui, nunca em texto/botão/logo. */
+.snowfall {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.snowfall__flake {
+  position: absolute;
+  top: -10%;
+  border-radius: 50%;
+  background: var(--color-frost);
+  animation-name: snow-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes snow-fall {
+  from {
+    transform: translateY(0) translateX(0);
+  }
+  to {
+    transform: translateY(120vh) translateX(var(--drift, 20px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snowfall {
+    display: none;
+  }
+}
