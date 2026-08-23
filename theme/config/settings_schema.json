@@ -53,18 +53,6 @@
         "id": "color_support_gold",
         "label": "Apoio — dourado (tags, divisores)",
         "default": "#F2D9A0"
-      },
-      {
-        "type": "color",
-        "id": "color_frost",
-        "label": "Apoio — gelo (neve ambiente, decorativo)",
-        "default": "#E4EEF2"
-      },
-      {
-        "type": "checkbox",
-        "id": "show_snowfall",
-        "label": "Mostrar neve ambiente no site",
-        "default": true
       }
     ]
   },

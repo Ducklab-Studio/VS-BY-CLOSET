@@ -19,10 +19,6 @@ const config: Config = {
         ink: '#1F1D1C',
         sand: '#F2E5C6',
         gold: '#F2D9A0',
-        // Camada decorativa de "inverno mágico" (neve/gelo) — nunca em texto,
-        // botão ou logo. Marsala continua sendo a única cor de destaque; frost
-        // é só ambientação, então fica sempre discreto/baixa opacidade.
-        frost: '#E4EEF2',
       },
       fontFamily: {
         heading: ['var(--font-heading)', 'serif'],

@@ -2,7 +2,7 @@
 
 import { Suspense, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Sparkles, useTexture } from '@react-three/drei';
+import { useTexture } from '@react-three/drei';
 import * as THREE from 'three';
 
 /**
@@ -49,19 +49,6 @@ export function Hero3D() {
             herda o creme da página atrás dela — sem precisar de <color>. */}
         <Suspense fallback={null}>
           <LogoCard />
-          {/* Brilho de "inverno mágico" ao redor da marca — camada decorativa
-              discreta, cor frost (nunca marsala/dourado, pra não competir com
-              a identidade real). Sparkles é primitivo pronto do drei: sem
-              shader escrito na mão, GPU-instanced, testado pela comunidade. */}
-          <Sparkles
-            count={60}
-            scale={[4, 3, 2]}
-            size={2.5}
-            speed={0.25}
-            opacity={0.6}
-            color="#E4EEF2"
-            noise={1}
-          />
         </Suspense>
       </Canvas>
     </div>

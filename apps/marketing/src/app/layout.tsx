@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
-import { Snowfall } from '@/components/Snowfall';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
@@ -25,7 +24,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           igual entre servidor e cliente, só esses atributos de terceiros
           divergem. Recomendação oficial do Next.js para esse cenário. */}
       <body className="font-body antialiased" suppressHydrationWarning>
-        <Snowfall />
         <Header />
         <main>{children}</main>
         <Footer />
