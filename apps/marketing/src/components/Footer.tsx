@@ -35,9 +35,9 @@ export function Footer() {
           <Image
             src="/brand/logo-horizontal-marsala.png"
             alt="VS by Closet"
-            width={216}
-            height={216}
-            className="h-12 w-12 object-contain"
+            width={1200}
+            height={320}
+            className="h-8 w-auto object-contain"
           />
           <p className="mt-3 text-sm text-ink/60">
             Aluguel de roupa de neve premium. Reserve no Brasil, retire ao chegar no Chile.

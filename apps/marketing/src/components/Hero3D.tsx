@@ -29,8 +29,9 @@ function LogoCard() {
 
   return (
     <mesh ref={meshRef}>
-      {/* Arte fonte é ~quadrada (1080×1081) — plano quadrado sem distorcer. */}
-      <planeGeometry args={[2.2, 2.2]} />
+      {/* Marca real é 705×800 (levemente vertical, por causa da haste do S)
+          — plano na mesma proporção pra não esticar a arte. */}
+      <planeGeometry args={[2.2, 2.2 / (705 / 800)]} />
       <meshBasicMaterial
         map={texture}
         transparent

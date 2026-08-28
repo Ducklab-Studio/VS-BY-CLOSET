@@ -36,16 +36,16 @@ export function Header() {
         </button>
 
         <Link href="/" aria-label="VS by Closet" className="shrink-0">
-          {/* Arquivo é um canvas quadrado com bastante respiro ao redor da
-              marca — por isso a caixa generosa (h-14) em vez do tamanho
-              "real" do logotipo. object-contain evita distorcer. */}
+          {/* Arquivo real é 1200×320 (marca + "BY CLOSET" lado a lado) — a
+              caixa segue a altura e deixa a largura livre (w-auto), então a
+              proporção nunca distorce mesmo se o arquivo fonte mudar. */}
           <Image
             src="/brand/logo-horizontal-marsala.png"
             alt="VS by Closet"
-            width={216}
-            height={216}
+            width={1200}
+            height={320}
             priority
-            className="h-14 w-14 object-contain"
+            className="h-9 w-auto object-contain"
           />
         </Link>
 

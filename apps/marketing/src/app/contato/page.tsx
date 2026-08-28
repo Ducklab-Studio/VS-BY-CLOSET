@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import { MessageCircle, Mail, MapPin } from 'lucide-react';
 
 export const metadata: Metadata = {
@@ -43,14 +44,24 @@ export default function ContactPage() {
         </a>
       </div>
 
-      <div className="mt-6 flex items-start gap-3 rounded-2xl border border-ink/10 p-6">
+      <div className="mt-6 flex items-start gap-6 rounded-2xl border border-ink/10 p-6">
         <MapPin className="shrink-0 text-marsala" />
-        <div>
+        <div className="flex-1">
           <p className="font-medium text-ink">Loja no Chile</p>
           <p className="mt-1 text-sm text-ink/60">
             Endereço divulgado na confirmação da reserva.
           </p>
         </div>
+        {/* Selo oficial da marca para a operação chilena — reforça, com a
+            própria identidade visual, que a retirada é numa loja física de
+            verdade, não só uma promessa no texto. */}
+        <Image
+          src="/brand/logo-badge-chile-marsala.png"
+          alt="VS by Closet · Chile"
+          width={890}
+          height={900}
+          className="hidden h-20 w-auto shrink-0 object-contain opacity-90 sm:block"
+        />
       </div>
     </div>
   );

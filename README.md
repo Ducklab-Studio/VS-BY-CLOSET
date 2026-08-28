@@ -94,12 +94,24 @@ serem arquivos de design brutos). Os recortes já prontos para uso web
 - `apps/marketing/public/brand/` — consumidos pela vitrine Next.js
 - `theme/assets/` — consumidos pelo tema Shopify
 
-Seis arquivos em cada pasta: `logo-{horizontal,stacked,mark}-{marsala,cream}.png`.
+Dez arquivos em cada pasta: `logo-{mark,stacked,horizontal,badge,badge-chile}-{marsala,cream}.png`.
+
+| Variante | O que é | Onde é usado |
+| --- | --- | --- |
+| `mark` | Só o monograma V+S | Favicon (`app/icon.png`), Hero3D |
+| `stacked` | Monograma acima de "BY CLOSET" | Disponível para uso maior (hero, about) |
+| `horizontal` | Monograma ao lado de "BY CLOSET" | Header, Footer |
+| `badge` | Selo circular "VS BY CLOSET" | Disponível para uso pontual |
+| `badge-chile` | Mesmo selo + "CHILE" na borda | Página de Contato, ao lado do card da loja física |
+
 Use a variante **marsala** sobre fundo claro (nosso caso, `bg-cream`) e a
 variante **cream** se algum dia existir uma seção de fundo escuro. A pasta
 "Marca d'água" do kit original é a única com transparência real — as
-pastas "Logotipo"/"Ícone"/"Secundária" têm cor sólida "assada" na imagem e
-não servem para uso direto em UI.
+pastas "Logotipo"/"Ícone"/"Secundária"/"Submarca" têm cor sólida "assada"
+na imagem e não servem para uso direto em UI. Os arquivos em
+`public/brand/` e `theme/assets/` já vêm recortados rente à marca
+(`sharp().trim()`) e redimensionados — os masters do kit são canvas
+4320px quadrados com bastante respiro ao redor da arte.
 
 ## Decisão pendente — domínio
 

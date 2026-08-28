@@ -20,7 +20,8 @@
     "gsap": "^3.13.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.4",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.460.0",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
