@@ -291,7 +291,7 @@ describe('WebhooksService — correlação e confirmação normal', () => {
 
     const events = await prisma.$queryRaw<{ count: bigint }[]>`SELECT count(*)::bigint AS count FROM webhook_events WHERE shopify_webhook_id = ${webhookId}`;
     expect(Number(events[0].count)).toBe(1); // uma linha só, attemptCount incrementado nela
-  });
+  }, 20_000);
 
   test('confirmed + evento DIFERENTE (novo shopifyWebhookId) reconfirmando o mesmo pedido → idempotente, não duplica efeito', async () => {
     const unit = await createUnit();

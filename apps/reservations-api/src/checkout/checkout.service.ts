@@ -50,9 +50,12 @@ export class CheckoutService {
     // Expira com o MESMO mecanismo oficial do HoldsService (UPDATE
     // guardado por status+expires_at) — nunca cria carrinho pra um HOLD
     // vencido, mesmo que o status ainda esteja "hold" no banco (a
-    // expiração é lazy, não por cron).
-    if (reservation.status === 'hold' && reservation.expiresAt && reservation.expiresAt.getTime() <= Date.now()) {
-      await this.expireThisReservation(reservation.id);
+    // expiração é lazy, não por cron). O Postgres é a ÚNICA fonte de
+    // verdade sobre "isso já venceu?" — nunca comparamos reservation.expiresAt
+    // contra Date.now() (relógio do processo Node): os dois relógios podem
+    // divergir, e essa comparação já causou um falso-negativo real (achado
+    // rodando a suíte completa, não suposto — ver expireHoldIfDue).
+    if (reservation.status === 'hold' && (await this.expireHoldIfDue(reservation.id))) {
       throw new GoneException('Este HOLD expirou.');
     }
 
@@ -208,12 +211,22 @@ export class CheckoutService {
     }
   }
 
-  private async expireThisReservation(reservationId: string): Promise<void> {
+  /** "Esse HOLD venceu?" é decidido só pelo Postgres — o UPDATE abaixo só
+   *  afeta uma linha se `status='hold' AND expires_at <= now()` for
+   *  verdade NA HORA que o próprio banco avalia, nunca por uma comparação
+   *  feita no relógio do processo Node. `$executeRaw` devolve a contagem
+   *  de linhas afetadas — 1 linha = estava vencido, 0 linhas = não estava
+   *  (ou já não estava mais em 'hold' por outro motivo). O WHERE guardado
+   *  por status também é a proteção de concorrência: se duas chamadas
+   *  corressem ao mesmo tempo pra este mesmo reservationId, só uma
+   *  encontraria a linha ainda em 'hold' pra atualizar. */
+  private async expireHoldIfDue(reservationId: string): Promise<boolean> {
     try {
-      await this.prisma.$executeRaw`
+      const updated = await this.prisma.$executeRaw`
         UPDATE reservations SET status = 'expired'
         WHERE id = ${reservationId}::uuid AND status = 'hold' AND expires_at <= now()
       `;
+      return updated > 0;
     } catch (err) {
       this.logger.error(`Falha ao expirar reserva ${reservationId}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível processar o checkout no momento.');
