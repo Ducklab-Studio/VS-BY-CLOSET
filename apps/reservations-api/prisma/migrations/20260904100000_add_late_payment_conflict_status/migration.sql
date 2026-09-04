@@ -1,0 +1,15 @@
+-- Fase 7 — achado real durante os testes, não planejado de antemão: usar
+-- `problem` genérico pra conflito de late payment quebra na prática,
+-- porque `problem` está em OCCUPYING_RESERVATION_STATUSES (precisa
+-- continuar assim pros outros casos — ex.: refund em reserva confirmed
+-- deve continuar bloqueando a unidade durante revisão). Mas um conflito
+-- de late payment significa exatamente o OPOSTO: a capacidade já foi
+-- pra outra reserva, então o trigger propagando `problem` (ocupante)
+-- pro ReservationItem colide de verdade com a EXCLUDE constraint contra
+-- a reserva que REALMENTE tem a unidade — provado rodando o teste real,
+-- não deduzido em tese.
+--
+-- Migration A de 2 (só o enum) — mesma restrição de sempre: um valor
+-- novo de enum não pode ser USADO (WHERE, DEFAULT, comparação) na MESMA
+-- transação em que foi adicionado.
+ALTER TYPE "reservation_status" ADD VALUE IF NOT EXISTS 'late_payment_conflict';

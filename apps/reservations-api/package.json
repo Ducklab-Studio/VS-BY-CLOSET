@@ -1,0 +1,42 @@
+{
+  "name": "@valle/reservations-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fonte central de verdade das reservas — sincroniza Shopify BR e Shopify CL contra a mesma disponibilidade. Não depende do PRP: escuta os webhooks nativos da Shopify (orders/paid, orders/cancelled, refunds/create).",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:concurrency": "tsx test/concurrency.manual.ts",
+    "test:real-shopify": "tsx test/real-shopify-cart.manual.ts",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.4",
+    "@nestjs/config": "^3.2.3",
+    "@nestjs/core": "^10.4.4",
+    "@nestjs/platform-express": "^10.4.4",
+    "@nestjs/throttler": "^6.2.1",
+    "@prisma/client": "^5.22.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "helmet": "^8.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.5",
+    "@types/node": "^22.9.0",
+    "eslint": "^9.15.0",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.15.0",
+    "vitest": "^2.1.4"
+  }
+}

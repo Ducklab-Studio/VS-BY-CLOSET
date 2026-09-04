@@ -1,2 +1,8 @@
 packages:
   - "apps/*"
+  # apps/shopify-app fica de fora de propósito: o template da Shopify traz o
+  # próprio pnpm-workspace.yaml (pra gerenciar extensions/*) e o Shopify CLI
+  # roda pnpm de dentro dele. Workspace aninhado no pnpm resolve dependência
+  # de um jeito ou de outro dependendo de onde o comando foi disparado — e o
+  # CLI dispara de lá. Deixar ele se gerenciar sozinho evita esse conflito.
+  - "!apps/shopify-app"

@@ -1,0 +1,54 @@
+# Configuração do app VS BY CLOSET — sistema de aluguel.
+# Doc: https://shopify.dev/docs/apps/tools/cli/configuration
+#
+# ⚠️ ATENÇÃO: o `shopify app dev` reescreve este arquivo quando cria ou
+# reconecta o app (ele puxa a config remota por cima da local). Já aconteceu
+# uma vez: os scopes abaixo foram zerados. Se você abrir este arquivo e os
+# scopes estiverem vazios, foi isso — restaure, não invente.
+#
+# Como vamos ter DOIS apps de produção (um por loja, porque app de
+# distribuição custom só instala numa loja), cada um vai ter seu próprio
+# arquivo: shopify.app.br.toml e shopify.app.cl.toml, apontando pro mesmo
+# código. Este aqui é o de desenvolvimento.
+
+client_id = "f495cfa706c4990968148dee065ef1e4"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+name = "VS BY CLOSET Aluguel DEV"
+
+[access_scopes]
+# Princípio do menor privilégio — só o que o sistema de aluguel usa:
+#
+#   read_products  → achar o SKU a partir do produto/variante. É o SKU que
+#                    liga a mesma peça física entre a loja BR e a CL.
+#   read_orders    → ler o pedido quando o webhook chega (confirmar reserva).
+#   write_orders   → cancelar/estornar quando uma reserva não puder ser
+#                    honrada. Raro (a trava do banco evita), mas precisa
+#                    existir, senão o cliente paga e fica sem peça e sem
+#                    dinheiro.
+#
+# Não pedimos escrita em produto: quem cadastra roupa é o Anderson, pelo
+# admin da Shopify. O template original pedia write_products e
+# write_metaobjects — eram da página de demonstração, que foi removida.
+scopes = "read_products,read_orders,write_orders"
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  # Os webhooks do aluguel (orders/paid, orders/cancelled, refunds/create)
+  # entram aqui na fase de webhooks. Declarar antes de existir a rota que
+  # recebe só geraria entrega falhando e ruído no log.
+
+[auth]
+redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+
+[build]
+automatically_update_urls_on_dev = true

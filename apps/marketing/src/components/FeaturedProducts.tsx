@@ -1,9 +1,10 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import { isShopifyConfigured, listFeaturedProducts, productUrl } from '@/lib/shopify';
 
 /**
- * Vitrine somente leitura. O clique em cada card leva ao tema Shopify — lá,
- * e só lá, o widget de aluguel do PRP e o checkout funcionam.
+ * Destaque da home. O clique leva à página da peça neste mesmo site, onde
+ * o cliente escolhe a data e aluga — não mais ao tema Shopify.
  */
 export async function FeaturedProducts() {
   if (!isShopifyConfigured) {
@@ -33,7 +34,7 @@ export async function FeaturedProducts() {
   return (
     <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
       {products.map((product) => (
-        <a key={product.id} href={productUrl(product.handle)} className="group block">
+        <Link key={product.id} href={productUrl(product.handle)} className="group block">
           {product.featuredImage && (
             <div className="aspect-[3/4] overflow-hidden rounded-xl bg-sand">
               <Image
@@ -52,7 +53,7 @@ export async function FeaturedProducts() {
               currency: product.priceRange.minVariantPrice.currencyCode,
             }).format(Number(product.priceRange.minVariantPrice.amount))}
           </p>
-        </a>
+        </Link>
       ))}
     </div>
   );

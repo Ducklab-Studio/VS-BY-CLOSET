@@ -1,0 +1,46 @@
+{
+  "rental": {
+    "calendar": {
+      "loading": "Cargando disponibilidad…",
+      "prev_month": "Mes anterior",
+      "next_month": "Mes siguiente",
+      "aria_grid": "Calendario de fechas de retiro"
+    },
+    "legend": {
+      "free": "Disponible",
+      "busy": "Ocupado",
+      "selected": "Seleccionado"
+    },
+    "summary": {
+      "pickup": "Retiro",
+      "return": "Devolución",
+      "period": "Período",
+      "price": "Valor",
+      "day": "día",
+      "days": "días",
+      "duration_note": "El período se define por la cantidad de prendas ({count} en total). Al agregar más prendas, la devolución se recalcula."
+    },
+    "status": {
+      "available": "Disponible para retiro en esta fecha.",
+      "busy": "ocupado",
+      "unavailable": "no disponible",
+      "demo_mode": "Fechas de demostración — la disponibilidad real aún no está conectada.",
+      "load_error": "No fue posible consultar la disponibilidad.",
+      "load_error_help": "No pudimos cargar las fechas ahora. Contáctanos para confirmar la disponibilidad.",
+      "cart_error": "No fue posible agregar al carrito. Inténtalo de nuevo.",
+      "month_full": "No hay fechas disponibles este mes. Contáctanos para ver otras opciones."
+    },
+    "contact": {
+      "cta": "Hablar con atención",
+      "message": "¡Hola! Me gustaría arrendar {product} (código {sku}). ¿Pueden verificar la disponibilidad?"
+    },
+    "property": {
+      "pickup": "Retiro",
+      "return": "Devolución"
+    },
+    "setup": {
+      "no_sku_title": "Producto sin código (SKU)",
+      "no_sku_body": "Registra un SKU en esta variante para habilitar el arriendo. El SKU es lo que identifica la prenda física entre las tiendas de Brasil y Chile."
+    }
+  }
+}

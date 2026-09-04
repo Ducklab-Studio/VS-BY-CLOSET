@@ -1,8 +1,8 @@
+import Link from 'next/link';
 import { Hero3D } from '@/components/Hero3D';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { HeroIntro } from '@/components/HeroIntro';
 import { ScrollReveal } from '@/components/ScrollReveal';
-import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
 
 /**
  * Home placeholder — estrutura pronta para receber a identidade visual.
@@ -29,15 +29,17 @@ export default function HomePage() {
             Reserve online. Retire ao chegar no Chile.
           </p>
 
-          {isStoreUrlConfigured && (
-            <a
-              data-hero-item
-              href={storeUrl('/collections/all')}
-              className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
-            >
-              Ver coleção
-            </a>
-          )}
+          {/* Sem guarda de configuração: o catálogo é rota interna agora,
+              existe mesmo com a Shopify fora do ar (a página cuida do
+              estado vazio). Esconder o CTA principal da home por causa de
+              variável de ambiente era pior que mostrá-lo. */}
+          <Link
+            data-hero-item
+            href="/pecas"
+            className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
+          >
+            Ver peças
+          </Link>
         </section>
       </HeroIntro>
 

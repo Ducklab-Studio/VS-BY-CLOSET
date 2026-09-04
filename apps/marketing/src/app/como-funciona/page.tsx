@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Como funciona',
@@ -84,17 +84,15 @@ export default function ComoFuncionaPage() {
       </section>
 
       {/* ── CTA ─────────────────────────────────────────────────────────── */}
-      {isStoreUrlConfigured && (
-        <section className="mt-12 text-center">
-          <h2 className="font-heading text-xl text-ink">Quando é sua viagem?</h2>
-          <a
-            href={storeUrl('/collections/all')}
-            className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
-          >
-            Ver a coleção
-          </a>
-        </section>
-      )}
+      <section className="mt-12 text-center">
+        <h2 className="font-heading text-xl text-ink">Quando é sua viagem?</h2>
+        <Link
+          href="/pecas"
+          className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
+        >
+          Ver as peças
+        </Link>
+      </section>
     </div>
   );
 }

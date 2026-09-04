@@ -1,0 +1,36 @@
+# Sem este `extends`, o theme check cai no conjunto de regras de TEMA e
+# passa a reclamar de `stylesheet`/`javascript` no schema — que são
+# válidos em app block e inválidos em seção de tema. O conjunto certo
+# para extensão é este:
+extends: 'theme-check:theme-app-extension'
+
+AssetSizeAppBlockJavaScript:
+  enabled: true
+  # Padrão da regra é 10 KB. Subimos para 13 KB de propósito, não por
+  # preguiça — e o raciocínio importa mais que o número:
+  #
+  # O limite de 10 KB existe pensando em app de marketplace, que instala
+  # em milhares de lojas e precisa ser leve por padrão. Este app é privado,
+  # roda em duas lojas nossas.
+  #
+  # O arquivo tem ~12 KB sem minificar, o que dá ~4 KB comprimido na rede
+  # — irrelevante ao lado dos 200 KB+ de JS que qualquer tema Shopify já
+  # carrega na mesma página.
+  #
+  # A alternativa seria minificar, o que exigiria um passo de build entre
+  # `src/` e `assets/`. Só que o `shopify app dev` não roda esse passo:
+  # quem editasse o fonte não veria a mudança na loja e ia perder tempo
+  # procurando bug que não existe. Trocar legibilidade e uma armadilha de
+  # manutenção por 8 KB não compensa.
+  #
+  # Não "desativado": se o arquivo crescer de verdade, o aviso volta —
+  # que é exatamente quando ele passa a ser útil.
+  #
+  # Correção: a primeira tentativa foi 13000, com o arquivo em 12027.
+  # 1 KB de folga não é folga: três correções de bug normais já
+  # estouraram. Limite que dispara por qualquer coisa vira ruído que
+  # todo mundo aprende a ignorar, e aí não protege mais nada.
+  # 18 KB dá espaço pra evolução natural e ainda barra o dia em que
+  # alguém colar uma biblioteca inteira aqui dentro. Se chegarmos perto,
+  # o certo passa a ser minificar de verdade, não subir o número de novo.
+  threshold_in_bytes: 18000

@@ -1,0 +1,46 @@
+{
+  "rental": {
+    "calendar": {
+      "loading": "Carregando disponibilidade…",
+      "prev_month": "Mês anterior",
+      "next_month": "Próximo mês",
+      "aria_grid": "Calendário de datas de retirada"
+    },
+    "legend": {
+      "free": "Disponível",
+      "busy": "Ocupado",
+      "selected": "Selecionado"
+    },
+    "summary": {
+      "pickup": "Retirada",
+      "return": "Devolução",
+      "period": "Período",
+      "price": "Valor",
+      "day": "dia",
+      "days": "dias",
+      "duration_note": "O período é definido pela quantidade de peças ({count} no total). Ao adicionar mais peças, a devolução é recalculada."
+    },
+    "status": {
+      "available": "Disponível para retirada nesta data.",
+      "busy": "ocupado",
+      "unavailable": "indisponível",
+      "demo_mode": "Datas de demonstração — a disponibilidade real ainda não está conectada.",
+      "load_error": "Não foi possível consultar a disponibilidade.",
+      "load_error_help": "Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.",
+      "cart_error": "Não foi possível adicionar ao carrinho. Tente novamente.",
+      "month_full": "Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções."
+    },
+    "contact": {
+      "cta": "Falar com o atendimento",
+      "message": "Olá! Gostaria de alugar {product} (código {sku}). Podem verificar a disponibilidade?"
+    },
+    "property": {
+      "pickup": "Retirada",
+      "return": "Devolução"
+    },
+    "setup": {
+      "no_sku_title": "Produto sem código (SKU)",
+      "no_sku_body": "Cadastre um SKU nesta variante para habilitar o aluguel. O SKU é o que identifica a peça física entre as lojas do Brasil e do Chile."
+    }
+  }
+}

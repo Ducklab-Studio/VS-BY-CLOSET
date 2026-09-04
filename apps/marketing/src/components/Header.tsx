@@ -50,14 +50,13 @@ export function Header() {
         </Link>
 
         <nav className="hidden flex-1 items-center gap-6 md:flex" aria-label="Principal">
-          {isStoreUrlConfigured && (
-            <a
-              href={storeUrl('/collections/all')}
-              className="text-xs font-medium uppercase tracking-widest text-ink/70 transition hover:text-marsala"
-            >
-              Coleção
-            </a>
-          )}
+          {/* Rota interna: o catálogo é deste site agora, não do tema Shopify. */}
+          <Link
+            href="/pecas"
+            className="text-xs font-medium uppercase tracking-widest text-ink/70 transition hover:text-marsala"
+          >
+            Peças
+          </Link>
           {navLinks.map((link) => (
             <Link
               key={link.href}
@@ -70,37 +69,38 @@ export function Header() {
         </nav>
 
         <div className="ml-auto flex items-center gap-4">
+          {/* Conta continua na Shopify — é ela que guarda cliente e pedido,
+              e não vale reimplementar login pra isso. */}
           {isStoreUrlConfigured && (
-            <>
-              <a
-                href={storeUrl('/account')}
-                aria-label="Minha conta"
-                className="text-ink/70 transition hover:text-marsala"
-              >
-                <User size={20} />
-              </a>
-              <a
-                href={storeUrl('/cart')}
-                aria-label="Carrinho"
-                className="text-ink/70 transition hover:text-marsala"
-              >
-                <ShoppingBag size={20} />
-              </a>
-            </>
+            <a
+              href={storeUrl('/account')}
+              aria-label="Minha conta"
+              className="text-ink/70 transition hover:text-marsala"
+            >
+              <User size={20} />
+            </a>
           )}
+          {/* Carrinho é nosso: precisa mostrar as datas do aluguel, coisa
+              que o carrinho padrão da Shopify não sabe apresentar. */}
+          <Link
+            href="/carrinho"
+            aria-label="Carrinho"
+            className="text-ink/70 transition hover:text-marsala"
+          >
+            <ShoppingBag size={20} />
+          </Link>
         </div>
       </div>
 
       {mobileOpen && (
         <nav className="border-t border-ink/10 bg-cream px-4 py-3 md:hidden" aria-label="Mobile">
-          {isStoreUrlConfigured && (
-            <a
-              href={storeUrl('/collections/all')}
-              className="block py-2 text-sm font-medium uppercase tracking-widest text-ink/70"
-            >
-              Coleção
-            </a>
-          )}
+          <Link
+            href="/pecas"
+            onClick={() => setMobileOpen(false)}
+            className="block py-2 text-sm font-medium uppercase tracking-widest text-ink/70"
+          >
+            Peças
+          </Link>
           {navLinks.map((link) => (
             <Link
               key={link.href}

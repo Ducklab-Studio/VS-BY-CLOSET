@@ -41,6 +41,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
+# Claude Code — config/conveniência local por máquina, não é pra versionar
+.claude/
+
 # Uploads (local dev storage)
 uploads/
 
@@ -51,3 +54,6 @@ coverage/
 # pelo cliente). Os recortes já prontos para web ficam versionados em
 # apps/marketing/public/brand/ e theme/assets/ — isso aqui só infla o repo.
 Identidade visual*/
+.preview/
+
+.vercel

@@ -1,0 +1,352 @@
+// Fonte central de verdade das reservas.
+//
+// `daterange` (tipo nativo do Postgres) não tem representação no DSL do
+// Prisma, então `ReservationItem.blockedRange` é `Unsupported("daterange")`
+// — o Prisma Client sabe que ela existe mas não constrói query normal em
+// cima dela. Toda leitura/escrita de reservation_items passa por SQL cru
+// ($queryRaw/$executeRaw). É o preço de usar a garantia mais forte que
+// existe (a constraint EXCLUDE do banco), em troca de não confiar em lock
+// de aplicação.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ReservationStatus {
+  // `pending`/`completed` — de fato legado da Fase 1, sem uso desde a
+  // Fase 4. Mantidos só porque o Postgres não remove valor de enum de
+  // forma simples.
+  pending
+  completed
+
+  // `confirmed`/`cancelled` NÃO são legado — achado da auditoria da
+  // Fase 7: estavam listados como legado nos comentários da Fase 4
+  // porque nenhuma fase anterior escrevia neles ainda (a Fase 6 parava
+  // em pending_payment). A Fase 7 é a primeira a escrevê-los de
+  // verdade: `confirmed` quando o webhook confirma pagamento,
+  // `cancelled` quando a Shopify informa cancelamento antes da
+  // retirada. Corrigido aqui pra o comentário não continuar enganando.
+  confirmed
+  cancelled
+
+  // Ciclo de vida real, a partir da Fase 4/5.
+  hold
+  pending_payment
+  preparing
+  ready_for_pickup
+  picked_up
+  returned
+  cleaning
+  expired
+  problem
+
+  /// Achado real (não planejado) ao testar late payment: `problem`
+  /// genérico está em OCCUPYING_RESERVATION_STATUSES (correto pros
+  /// outros casos — ex.: refund em reserva confirmed continua
+  /// bloqueando a unidade). Mas conflito de late payment é o OPOSTO —
+  /// a capacidade já foi pra outra reserva — e usar `problem` ali
+  /// colidia de verdade com a EXCLUDE constraint contra a reserva que
+  /// realmente tem a unidade (rodei o teste, não deduzi em tese). Este
+  /// status é deliberadamente EXCLUÍDO de OCCUPYING_RESERVATION_STATUSES.
+  late_payment_conflict
+
+  @@map("reservation_status")
+}
+
+/// Estado da criação do carrinho Shopify pra uma Reservation — ver o
+/// comentário em Reservation.checkoutState. `none` é o estado inicial de
+/// todo HOLD (nenhuma tentativa de checkout ainda); `failed` é
+/// re-tentável (POST /checkout de novo tenta criar um cart novo).
+enum CheckoutState {
+  none
+  creating
+  ready
+  failed
+
+  @@map("checkout_state")
+}
+
+enum WebhookStatus {
+  processed
+  failed
+  ignored
+
+  @@map("webhook_status")
+}
+
+/// Cada loja Shopify.
+model Store {
+  id            String   @id
+  shopifyDomain String   @unique @map("shopify_domain")
+  currency      String
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservations  Reservation[]
+  webhookEvents WebhookEvent[]
+
+  @@map("stores")
+}
+
+/// Uma peça física — a unidade que de fato é emprestada. `id` (UUID) é a
+/// identidade real; `code` é o identificador legível (ex.: VS-SOB-001),
+/// único mas não é mais a chave primária.
+///
+/// `shopifyProductId`/`shopifyVariantId` não são UNIQUE de propósito: uma
+/// variante Shopify pode ter várias RentalUnits (mesmo modelo, várias
+/// peças físicas) — é o padrão "Sobretudo Preto → VS-SOB-001, VS-SOB-002".
+model RentalUnit {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code String @unique
+
+  name String
+  /// Legado — caução hoje é fixa (R$1000/pessoa, presencial), não por
+  /// peça. Mantido, não removido, até confirmar se algum dia varia.
+  depositAmount Decimal? @map("deposit_amount") @db.Decimal(10, 2)
+
+  shopifyProductId String? @map("shopify_product_id")
+  shopifyVariantId String? @map("shopify_variant_id")
+  shopifySku       String? @map("shopify_sku")
+
+  /// Acessório = false. Sobretudo/jaqueta/bota = true (padrão). Checado
+  /// no servidor antes de qualquer reserva — nunca confia no que o
+  /// frontend mandou.
+  reservableOnline           Boolean @default(true) @map("reservable_online")
+  countsTowardRentalDuration Boolean @default(true) @map("counts_toward_rental_duration")
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservationItems ReservationItem[]
+
+  @@index([shopifyVariantId])
+  @@index([active])
+  @@map("rental_units")
+}
+
+/// A reserva. `pickupDate`/`returnDate` são datas civis (sem hora) — ver
+/// o motor de regras em src/rental-rules. `status` é a fonte da verdade;
+/// `ReservationItem.status` é espelho garantido por trigger (nunca
+/// escrito direto pela aplicação).
+model Reservation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  status ReservationStatus @default(hold)
+
+  pickupDate DateTime? @map("pickup_date") @db.Date
+  returnDate DateTime? @map("return_date") @db.Date
+
+  /// Só tem valor enquanto status = hold. Não é o que garante a trava —
+  /// isso é a EXCLUDE constraint. É usado pra leitura/UI.
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  originStoreId String @map("origin_store_id")
+  /// Opcionais: um HOLD ainda não tem pedido Shopify — só ganha os dois
+  /// quando vira pending_payment.
+  shopifyOrderId  String? @map("shopify_order_id")
+  shopifyOrderGid String? @map("shopify_order_gid")
+  customerEmail   String? @map("customer_email")
+
+  termsAcceptedAt DateTime? @map("terms_accepted_at") @db.Timestamptz(6)
+  termsVersion    String?   @map("terms_version")
+
+  /// SHA-256 do capability token devolvido ao cliente na criação do HOLD
+  /// — nunca o token em si (ver src/holds/hold-token.ts). Prova de posse
+  /// pra qualquer operação sensível sobre este HOLD (Fase 6: iniciar
+  /// checkout). `reservationId` sozinho nunca é suficiente.
+  holdTokenHash String? @map("hold_token_hash")
+
+  /// Estado da criação do carrinho Shopify — modelado explicitamente
+  /// porque não existe transação ACID entre Postgres e Shopify (ver
+  /// CheckoutService, seção "chamada externa + transação" do relatório
+  /// da Fase 6). `creating` é o estado transitório enquanto a chamada à
+  /// Storefront API está em voo; `updatedAt` (abaixo) é usado pra
+  /// detectar um `creating` "preso" (processo caiu no meio) e permitir
+  /// nova tentativa depois de um tempo curto, sem precisar de coluna
+  /// extra só pra isso.
+  checkoutState      CheckoutState @default(none) @map("checkout_state")
+  /// UNIQUE: um cart Shopify não pode pertencer a duas Reservations —
+  /// nulo é permitido múltiplas vezes (Postgres trata cada NULL como
+  /// distinto), só o VALOR, quando existe, precisa ser único.
+  shopifyCartId       String?      @unique @map("shopify_cart_id")
+  /// Endurecimento pedido antes de continuar a Fase 7 — nonce público
+  /// (não é segredo) que entra na assinatura HMAC do binding
+  /// Order↔Reservation (ver src/reservation-binding.ts). Gravado só o
+  /// id, NUNCA a assinatura (recomputada sempre no servidor a partir
+  /// deste id + itens reais + datas — nunca confiada de um valor
+  /// armazenado) e NUNCA o segredo HMAC.
+  reservationBindingId String?     @unique @map("reservation_binding_id")
+  checkoutUrl         String?      @map("checkout_url")
+  checkoutCreatedAt   DateTime?    @map("checkout_created_at") @db.Timestamptz(6)
+  /// Fim da janela de pagamento (PAYMENT_WINDOW_MINUTES após o checkout
+  /// ficar pronto) — política explícita da Fase 6, não uma regra
+  /// silenciosa. Ver seção 10/11 do relatório: um checkout Shopify pode
+  /// continuar "pagável" depois disso — é o que a Fase 7 (late payment)
+  /// precisa tratar.
+  paymentExpiresAt    DateTime?    @map("payment_expires_at") @db.Timestamptz(6)
+
+  /// Só gravado quando o webhook confirma pagamento de verdade (Fase 7)
+  /// — nunca por redirect do cliente, nunca pelo frontend. Ver
+  /// WebhooksService.
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+
+  // Legado (Fase 1) — não usado por reserva nova. Mantido até uma
+  // migration de limpeza futura, depois que nada mais ler/escrever aqui.
+  sku       String?                    @map("sku")
+  dateRange Unsupported("daterange")?  @map("date_range")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  originStore Store             @relation(fields: [originStoreId], references: [id])
+  items       ReservationItem[]
+  idempotencyKeys HoldIdempotencyKey[]
+  webhookEvents   WebhookEvent[]
+  events          ReservationEvent[]
+
+  @@unique([originStoreId, shopifyOrderId])
+  @@index([status])
+  @@map("reservations")
+}
+
+/// Garante que POST /holds seja seguro contra double-click / retry de rede
+/// / reenvio do frontend: a MESMA `key` (header `Idempotency-Key`, escolhida
+/// pelo cliente) sempre devolve o mesmo HOLD, nunca cria dois. `key` é a
+/// própria chave primária — não um índice auxiliar — porque é o Postgres
+/// (via violação de PK) que arbitra a corrida quando duas requisições com a
+/// mesma chave chegam ao mesmo tempo (ver HoldsService), não um lock de
+/// aplicação. `requestHash` existe pra detectar reuso indevido: mesma chave
+/// com payload DIFERENTE é um erro do chamador, não um replay legítimo.
+model HoldIdempotencyKey {
+  key           String   @id
+  requestHash   String   @map("request_hash")
+  reservationId String   @map("reservation_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  @@map("hold_idempotency_keys")
+}
+
+/// Uma peça física dentro de uma reserva — é aqui que a trava
+/// anti-double-booking vive de verdade (ver migration
+/// 20260903120100_rental_units_and_items pela EXCLUDE constraint).
+model ReservationItem {
+  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationId String @map("reservation_id") @db.Uuid
+  rentalUnitId  String @map("rental_unit_id") @db.Uuid
+
+  status ReservationStatus @map("status")
+
+  /// Janela de ocupação já com preparo+higienização embutidos —
+  /// calculada e gravada na criação, não derivada depois.
+  blockedRange Unsupported("daterange") @map("blocked_range")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+  rentalUnit  RentalUnit  @relation(fields: [rentalUnitId], references: [id])
+
+  @@index([reservationId])
+  @@index([rentalUnitId, status])
+  @@map("reservation_items")
+}
+
+/// Configuração das regras de aluguel — singleton (uma linha só, id
+/// fixo "default"). Espelha src/rental-rules/rental-rule-config.ts;
+/// quando a API de disponibilidade lê daqui em vez do fallback local, o
+/// Anderson passa a poder ajustar os números sem precisar de mim.
+model RentalRuleConfig {
+  id String @id @default("default")
+
+  minAdvanceDays Int @default(15) @map("min_advance_days")
+  prepDays       Int @default(3) @map("prep_days")
+  cleaningDays   Int @default(2) @map("cleaning_days")
+
+  blackoutStart String @default("06-01") @map("blackout_start")
+  blackoutEnd   String @default("09-30") @map("blackout_end")
+
+  maxPieces Int @default(6) @map("max_pieces")
+
+  /// [{"upTo":2,"days":2},{"upTo":4,"days":3},{"upTo":6,"days":4}]
+  piecesToDaysTable Json @map("pieces_to_days_table")
+
+  timezone String @default("America/Santiago")
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("rental_rule_config")
+}
+
+/// Todo webhook recebido, com o id que a Shopify manda (X-Shopify-Webhook-Id)
+/// — garante idempotência: a UNIQUE em `shopifyWebhookId` é quem arbitra
+/// duas entregas simultâneas do mesmo evento (mesmo padrão de
+/// hold_idempotency_keys/reservations_shopify_cart_id_key — Postgres
+/// árbitro, não lock de aplicação). Ver WebhooksService pra semântica
+/// exata de status: `processed` (mudança real aplicada, ou duplicata
+/// legítima), `ignored` (verificado e válido, mas não-acionável de
+/// forma permanente — ex.: sem reservation_id — reprocessar não muda
+/// nada), `failed` (erro inesperado/transitório — RETENTÁVEL; ver
+/// item 15 da Fase 7: a transação de negócio nunca commita junto com um
+/// status `processed` quando algo dá errado no meio).
+///
+/// `reservationId`/`orderId` são REDUNDANTES de propósito — o vínculo
+/// "de verdade" mora em `Reservation.shopifyOrderId`; aqui é só pra
+/// auditoria/consulta rápida sem precisar abrir o payload JSON.
+model WebhookEvent {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyWebhookId String        @unique @map("shopify_webhook_id")
+  storeId          String        @map("store_id")
+  topic            String
+  payload          Json
+  status           WebhookStatus
+  errorMessage     String?       @map("error_message")
+  /// Quantas vezes este MESMO shopifyWebhookId chegou aqui (Shopify
+  /// reenvia em retry, ou duas entregas quase simultâneas) — 1 na
+  /// primeira vez, incrementado a cada nova chegada (mesmo quando
+  /// idempotentemente ignorada).
+  attemptCount     Int           @default(1) @map("attempt_count")
+  reservationId    String?       @map("reservation_id") @db.Uuid
+  orderId          String?       @map("order_id")
+  processedAt      DateTime      @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  store       Store        @relation(fields: [storeId], references: [id])
+  reservation Reservation? @relation(fields: [reservationId], references: [id])
+  events      ReservationEvent[]
+
+  @@index([storeId, topic])
+  @@index([reservationId])
+  @@map("webhook_events")
+}
+
+/// Trilha de auditoria de negócio — item 14 da Fase 7. Deliberadamente
+/// uma tabela SEPARADA de WebhookEvent (não duplica a responsabilidade
+/// dela): WebhookEvent é "o que a Shopify entregou, uma vez, deduplicado
+/// por shopifyWebhookId" (granularidade = 1 entrega); ReservationEvent é
+/// "o que aconteceu com a reserva" (granularidade = 1 acontecimento de
+/// negócio — um ÚNICO webhook de orders/paid pode gerar vários:
+/// ORDER_LINKED + PAYMENT_CONFIRMED + RESERVATION_STATUS_CHANGED juntos,
+/// e um evento como WEBHOOK_INVALID_SIGNATURE pode nem ter Reservation
+/// nenhuma pra vincular). `reservationId` nullable de propósito por
+/// causa desse último caso.
+model ReservationEvent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationId  String?  @map("reservation_id") @db.Uuid
+  webhookEventId String?  @map("webhook_event_id") @db.Uuid
+  type           String
+  /// Sempre sanitizado antes de gravar (nunca token/secret/payload
+  /// financeiro cru) — ver WebhooksService.
+  detail         Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservation  Reservation?  @relation(fields: [reservationId], references: [id])
+  webhookEvent WebhookEvent? @relation(fields: [webhookEventId], references: [id])
+
+  @@index([reservationId])
+  @@index([type])
+  @@map("reservation_events")
+}

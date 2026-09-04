@@ -1,0 +1,14 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "pnpm --filter @valle/reservations-api run db:generate && pnpm --filter @valle/reservations-api run build"
+  },
+  "deploy": {
+    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate"],
+    "startCommand": "pnpm --filter @valle/reservations-api exec node dist/main.js",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 30,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
+  }
+}

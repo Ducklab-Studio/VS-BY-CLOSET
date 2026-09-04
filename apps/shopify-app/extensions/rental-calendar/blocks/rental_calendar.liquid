@@ -1,0 +1,301 @@
+{%- comment -%}
+  VS BY CLOSET — bloco de aluguel.
+
+  O que este bloco NÃO faz de propósito:
+
+  1. Não deixa o cliente escolher a data de devolução. Pela regra do
+     Anderson, a duração vem da QUANTIDADE de peças no carrinho
+     (1-2 peças = 2 dias, 3-4 = 3 dias...), não da vontade do cliente.
+     Então ele escolhe só a retirada, e a devolução é calculada — e muda
+     sozinha se ele adicionar mais peças depois.
+
+  2. Não calcula preço. O preço é fixo por peça e a Shopify já soma no
+     carrinho (bota 120 + jaqueta 150 + ...). Zero conta em JS = zero
+     risco de o bloco mostrar um valor e o checkout cobrar outro.
+
+  3. Não decide disponibilidade sozinho. O que este bloco mostra é
+     conveniência visual; quem garante que duas pessoas não peguem a
+     mesma peça é a constraint do banco central, no servidor. Cliente
+     esperto que editar o HTML não consegue furar nada.
+{%- endcomment -%}
+
+{%- liquid
+  assign p = block.settings.product
+  assign variant = p.selected_or_first_available_variant
+  assign sku = variant.sku
+-%}
+
+<div
+  class="vsc-rental"
+  data-vsc-rental
+  data-sku="{{ sku | escape }}"
+  data-variant-id="{{ variant.id }}"
+  data-product-id="{{ p.id }}"
+  data-product-title="{{ p.title | escape }}"
+  data-availability-url="{{ block.settings.availability_url | escape }}"
+  data-min-advance-days="{{ block.settings.min_advance_days }}"
+  data-blackout-start="{{ block.settings.blackout_start | escape }}"
+  data-blackout-end="{{ block.settings.blackout_end | escape }}"
+  data-whatsapp="{{ block.settings.whatsapp_number | escape }}"
+  data-locale="{{ request.locale.iso_code }}"
+  style="
+    --vsc-accent: {{ block.settings.accent_color }};
+    --vsc-surface: {{ block.settings.surface_color }};
+    --vsc-ink: {{ block.settings.text_color }};
+    --vsc-radius: {{ block.settings.corner_radius }}px;
+  "
+>
+  {%- if sku == blank -%}
+    {%- comment -%}
+      Sem SKU não existe reserva: é o SKU que liga a mesma peça física
+      entre a loja BR e a CL. Melhor avisar o Anderson do que renderizar
+      um calendário que nunca vai conseguir reservar nada.
+    {%- endcomment -%}
+    <div class="vsc-rental__setup">
+      <strong>{{ 'rental.setup.no_sku_title' | t }}</strong>
+      <p>{{ 'rental.setup.no_sku_body' | t }}</p>
+    </div>
+  {%- else -%}
+
+  <div class="vsc-rental__head">
+    <h2 class="vsc-rental__title">{{ block.settings.heading }}</h2>
+    {%- if block.settings.subheading != blank -%}
+      <p class="vsc-rental__sub">{{ block.settings.subheading }}</p>
+    {%- endif -%}
+  </div>
+
+  <div class="vsc-cal" data-vsc-cal>
+    <div class="vsc-cal__bar">
+      <button
+        type="button"
+        class="vsc-cal__nav"
+        data-vsc-prev
+        aria-label="{{ 'rental.calendar.prev_month' | t }}"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="vsc-cal__month" data-vsc-month aria-live="polite"></div>
+      <button
+        type="button"
+        class="vsc-cal__nav"
+        data-vsc-next
+        aria-label="{{ 'rental.calendar.next_month' | t }}"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <div class="vsc-cal__weekdays" data-vsc-weekdays aria-hidden="true"></div>
+
+    <div
+      class="vsc-cal__grid"
+      data-vsc-grid
+      role="grid"
+      aria-label="{{ 'rental.calendar.aria_grid' | t }}"
+    >
+      <div class="vsc-cal__loading" data-vsc-loading>
+        <span class="vsc-spin" aria-hidden="true"></span>
+        {{ 'rental.calendar.loading' | t }}
+      </div>
+    </div>
+
+    <div class="vsc-cal__legend">
+      <span><i class="vsc-dot vsc-dot--free"></i>{{ 'rental.legend.free' | t }}</span>
+      <span><i class="vsc-dot vsc-dot--busy"></i>{{ 'rental.legend.busy' | t }}</span>
+      <span><i class="vsc-dot vsc-dot--pick"></i>{{ 'rental.legend.selected' | t }}</span>
+    </div>
+  </div>
+
+  <dl class="vsc-sum" data-vsc-summary hidden>
+    <div class="vsc-sum__row">
+      <dt>{{ 'rental.summary.pickup' | t }}</dt>
+      <dd data-vsc-pickup>—</dd>
+    </div>
+    <div class="vsc-sum__row">
+      <dt>{{ 'rental.summary.return' | t }}</dt>
+      <dd data-vsc-return>—</dd>
+    </div>
+    <div class="vsc-sum__row">
+      <dt>{{ 'rental.summary.period' | t }}</dt>
+      <dd data-vsc-period>—</dd>
+    </div>
+    <div class="vsc-sum__row vsc-sum__row--total">
+      <dt>{{ 'rental.summary.price' | t }}</dt>
+      <dd>{{ variant.price | money }}</dd>
+    </div>
+  </dl>
+
+  {%- comment -%}
+    A nota de duração só aparece depois que o cliente escolhe a data,
+    porque antes disso ela é ruído. Ela existe porque a devolução muda
+    quando ele adiciona outra peça — e cliente odeia número que muda
+    sozinho sem explicação.
+  {%- endcomment -%}
+  <p class="vsc-note" data-vsc-note hidden></p>
+
+  <div class="vsc-status" data-vsc-status hidden role="status"></div>
+
+  <button
+    type="button"
+    class="vsc-btn"
+    data-vsc-submit
+    disabled
+  >
+    <span data-vsc-btn-label>{{ block.settings.button_label }}</span>
+    <span class="vsc-spin vsc-spin--btn" aria-hidden="true" hidden data-vsc-btn-spin></span>
+  </button>
+
+  {%- comment -%}
+    Saída pro atendimento. Aparece quando reservar não é possível —
+    dentro dos 15 dias ou no período de alta temporada. O Anderson foi
+    explícito: nesse caso não é "não pode", é "fala com a gente" e a
+    funcionária resolve na mão.
+  {%- endcomment -%}
+  <a
+    class="vsc-btn vsc-btn--ghost"
+    data-vsc-contact
+    href="#"
+    target="_blank"
+    rel="noopener"
+    hidden
+  >
+    {{ 'rental.contact.cta' | t }}
+  </a>
+
+  {%- endif -%}
+</div>
+
+{%- comment -%}
+  Ponte entre o Liquid e o JS. Os textos que o JS escreve em tempo de
+  execução (status, avisos, nomes das propriedades no carrinho) precisam
+  sair dos mesmos arquivos de tradução do resto do bloco — senão a loja
+  do Chile mostraria metade em espanhol e metade em português.
+
+  `| t | json` — o json escapa aspas e acento corretamente; sem ele, um
+  apóstrofo numa tradução quebraria o script inteiro.
+{%- endcomment -%}
+<script>
+  window.VSC_RENTAL_I18N = {
+    available: {{ 'rental.status.available' | t | json }},
+    busy: {{ 'rental.status.busy' | t | json }},
+    unavailable: {{ 'rental.status.unavailable' | t | json }},
+    demo_mode: {{ 'rental.status.demo_mode' | t | json }},
+    load_error: {{ 'rental.status.load_error' | t | json }},
+    load_error_help: {{ 'rental.status.load_error_help' | t | json }},
+    cart_error: {{ 'rental.status.cart_error' | t | json }},
+    month_full: {{ 'rental.status.month_full' | t | json }},
+    day: {{ 'rental.summary.day' | t | json }},
+    days: {{ 'rental.summary.days' | t | json }},
+    duration_note: {{ 'rental.summary.duration_note' | t | json }},
+    whatsapp_message: {{ 'rental.contact.message' | t | json }},
+    prop_pickup: {{ 'rental.property.pickup' | t | json }},
+    prop_return: {{ 'rental.property.return' | t | json }}
+  };
+</script>
+
+{% schema %}
+{
+  "name": "VS BY CLOSET — Aluguel",
+  "target": "section",
+  "stylesheet": "rental-calendar.css",
+  "javascript": "rental-calendar.js",
+  "settings": [
+    {
+      "type": "product",
+      "id": "product",
+      "label": "Produto",
+      "autofill": true
+    },
+    {
+      "type": "header",
+      "content": "Textos"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Título",
+      "default": "Escolha seu período"
+    },
+    {
+      "type": "text",
+      "id": "subheading",
+      "label": "Subtítulo",
+      "default": "Selecione a data de retirada. A devolução é calculada pela quantidade de peças."
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "Texto do botão",
+      "default": "Alugar agora"
+    },
+    {
+      "type": "header",
+      "content": "Regras de reserva",
+      "info": "Estes valores são a rede de segurança visual. A regra que vale de verdade é a do servidor — mudar aqui não libera reserva bloqueada."
+    },
+    {
+      "type": "number",
+      "id": "min_advance_days",
+      "label": "Antecedência mínima (dias)",
+      "default": 15
+    },
+    {
+      "type": "text",
+      "id": "blackout_start",
+      "label": "Início do período sem reserva (MM-DD)",
+      "default": "06-01",
+      "info": "Alta temporada: atendimento só na loja."
+    },
+    {
+      "type": "text",
+      "id": "blackout_end",
+      "label": "Fim do período sem reserva (MM-DD)",
+      "default": "09-30"
+    },
+    {
+      "type": "text",
+      "id": "whatsapp_number",
+      "label": "WhatsApp do atendimento",
+      "info": "Só números, com código do país. Ex: 5511999999999"
+    },
+    {
+      "type": "url",
+      "id": "availability_url",
+      "label": "URL da API de disponibilidade",
+      "info": "Deixe vazio durante o desenvolvimento — o bloco usa datas de demonstração."
+    },
+    {
+      "type": "header",
+      "content": "Aparência"
+    },
+    {
+      "type": "color",
+      "id": "accent_color",
+      "label": "Cor principal",
+      "default": "#53131E"
+    },
+    {
+      "type": "color",
+      "id": "surface_color",
+      "label": "Cor de fundo",
+      "default": "#FFFCF6"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Cor do texto",
+      "default": "#1F1D1C"
+    },
+    {
+      "type": "range",
+      "id": "corner_radius",
+      "label": "Arredondamento",
+      "min": 0,
+      "max": 24,
+      "step": 2,
+      "unit": "px",
+      "default": 12
+    }
+  ]
+}
+{% endschema %}

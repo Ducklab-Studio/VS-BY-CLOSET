@@ -2,6 +2,8 @@
   "name": "@valle/marketing",
   "version": "0.1.0",
   "private": true,
+  "//packageManager": "Repetido aqui (já existe na raiz) porque a Vercel faz deploy só desta pasta e não enxerga o package.json do monorepo. Sem isto ela usa um pnpm antigo que quebra com Node 20+ (ERR_INVALID_THIS ao consultar o registry).",
+  "packageManager": "pnpm@10.30.3",
   "description": "Vitrine em Next.js — home, institucional e navegação. Produto, carrinho e checkout ficam no tema Shopify (../../theme).",
   "scripts": {
     "dev": "next dev -p 3000",
