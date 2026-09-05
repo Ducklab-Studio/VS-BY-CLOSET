@@ -126,21 +126,37 @@ export function RentalCalendar({
     [locale],
   );
 
-  const { days, freeCount, padCount } = useMemo(() => {
+  const { days, freeCount, padCount, isBlackoutSeason } = useMemo(() => {
     const y = view.getFullYear();
     const m = view.getMonth();
     const pad = new Date(y, m, 1).getDay();
     const total = new Date(y, m + 1, 0).getDate();
     const out: { date: Date; info: AvailabilityDay | undefined }[] = [];
     let free = 0;
+    let known = 0;
+    let blackout = 0;
 
     for (let i = 1; i <= total; i++) {
       const date = new Date(y, m, i);
       const info = dayMap.get(toISO(date));
       if (info?.bookable) free++;
+      if (info) {
+        known++;
+        if (info.reason === 'pickup_outside_online_season') blackout++;
+      }
       out.push({ date, info });
     }
-    return { days: out, freeCount: free, padCount: pad };
+    // Fase 10, item 14 — nenhum dia reservável no mês E a temporada é
+    // (ao menos parte de) o motivo, não "sem estoque"/"erro técnico":
+    // mensagem de negócio dedicada em vez da genérica "não há datas
+    // disponíveis". Não exige que TODO dia seja exatamente por
+    // temporada — achado real testando: perto da virada de mês, alguns
+    // dias caem por antecedência insuficiente e outros por temporada ao
+    // mesmo tempo (as duas janelas se sobrepõem), mas a causa raiz do
+    // mês inteiro estar fechado continua sendo a temporada. `reason` já
+    // vem calculado pelo motor real (GET /availability) — só
+    // reapresentado aqui, nunca uma segunda regra.
+    return { days: out, freeCount: free, padCount: pad, isBlackoutSeason: known > 0 && free === 0 && blackout > 0 };
   }, [view, dayMap]);
 
   const atFirstMonth = view.getFullYear() === today.getFullYear() && view.getMonth() === today.getMonth();
@@ -179,7 +195,8 @@ export function RentalCalendar({
         pickupLabel: selected.toLocaleDateString(locale),
         returnLabel: returnDate.toLocaleDateString(locale),
       });
-      window.location.href = '/carrinho';
+      window.dispatchEvent(new Event('closet:cart-added'));
+      setSubmitting(false);
     } catch {
       setError('Não foi possível adicionar ao carrinho. Tente novamente.');
       setSubmitting(false);
@@ -359,11 +376,13 @@ export function RentalCalendar({
       >
         {loadFailed
           ? 'Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.'
-          : freeCount === 0 && !loading
-            ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
-            : selected && selectedInfo?.bookable
-              ? 'Disponível para retirada nesta data.'
-              : null}
+          : isBlackoutSeason
+            ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
+            : freeCount === 0 && !loading
+              ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
+              : selected && selectedInfo?.bookable
+                ? 'Disponível para retirada nesta data.'
+                : null}
       </Status>
 
       {error && <Status tone="error">{error}</Status>}
@@ -378,9 +397,13 @@ export function RentalCalendar({
         Alugar agora
       </button>
 
-      {/* Saída pro atendimento: dentro dos 15 dias ou na alta temporada,
-          reservar não é possível — mas não é beco sem saída. A funcionária
-          cria a reserva à mão, e ela passa pela mesma trava do banco. */}
+      {/* Saída pro atendimento: dentro dos 15 dias, na alta temporada, ou
+          bloqueio de negócio (feriado/manutenção), reservar não é
+          possível — mas não é beco sem saída. A funcionária cria a
+          reserva à mão, e ela passa pela mesma trava do banco. Texto do
+          botão muda pra "Consultar em loja" especificamente no caso de
+          temporada bloqueada (item 14 da Fase 10) — não é a mesma coisa
+          que "falar com atendimento" por falta de estoque pontual. */}
       {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && (
         <a
           href={whatsappHref}
@@ -388,7 +411,7 @@ export function RentalCalendar({
           rel="noopener"
           className="mt-3 flex w-full items-center justify-center rounded-xl border border-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5"
         >
-          Falar com o atendimento
+          {isBlackoutSeason ? 'Consultar em loja' : 'Falar com o atendimento'}
         </a>
       )}
     </section>

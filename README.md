@@ -1,171 +1,175 @@
-# 🏔️ VS by Closet
+# 🏔️ VS BY CLOSET
 
-Aluguel de roupa de neve. Cliente reserva online no Brasil, retira e devolve
-numa loja física no Chile.
+Aluguel de roupa de neve. Cliente reserva online, retira e devolve numa loja
+física no Chile.
 
-**Stack: Next.js (vitrine) + Shopify/tema Liquid + Product Rentals Pro.**
+**Stack real e ativa: Next.js (vitrine + ClosetAdmin) + NestJS/Prisma/Postgres
+(reservations-api) + Shopify (produtos, pedidos, pagamento).**
+
+> Este README foi reescrito na Fase 10 para refletir a arquitetura que
+> realmente está em produção. A versão anterior descrevia um plano baseado em
+> Product Rentals Pro (app de terceiros) + Booqable, abandonado antes da
+> Fase 1 — ver [Histórico e legado](#histórico-e-legado) no fim deste arquivo.
 
 ---
 
-## Como funciona — arquitetura híbrida
+## Arquitetura
 
 ```
-Next.js (apps/marketing)          Shopify (theme/)
-─────────────────────────         ─────────────────────────
-Home, institucional, R3F/GSAP     Produto + widget do PRP
-Lê catálogo via Storefront API    Carrinho, checkout, pagamento
-        │                          Conta de cliente, histórico
-        └── botão "Reservar" ────► (o cliente entra aqui)
+                         cliente (navegador)
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │   apps/marketing          │   Next.js — Vercel
+                    │   (vitrine pública)        │
+                    │   /, /pecas, /carrinho...   │
+                    └──────────┬──────────────┘
+                               │ HOLD / checkout
+                               ▼
+                    ┌─────────────────────────┐        ┌───────────────┐
+                    │  apps/reservations-api    │◄──────┤   Shopify       │
+                    │  (NestJS) — Railway        │ webhooks orders/paid, │
+                    │  fonte de verdade das       │ orders/cancelled,     │
+                    │  reservas, Postgres/Neon    │ refunds/create        │
+                    └──────────┬──────────────┘        └───────┬───────┘
+                               │ server-to-server (ADMIN_API_TOKEN)
+                               │                                │ Storefront API
+                    ┌──────────▼──────────────┐                │ (produto, carrinho,
+                    │  apps/marketing            │                │ checkout, pagamento)
+                    │  /closetadmin (equipe)     │                ▼
+                    │  auth própria + RBAC        │        cliente finaliza
+                    └─────────────────────────┘        a compra na Shopify
 ```
 
-Motivo de ser dois apps, não um: o widget de aluguel do **Product Rentals
-Pro usa App Blocks — mecanismo que só existe dentro do tema Liquid**. Um
-front headless em React não tem como carregá-lo (confirmado com o próprio
-fabricante do app). Por isso a vitrine (visual pesado, 3D, animação) fica em
-Next.js, e tudo que envolve reservar — produto, carrinho, checkout, conta —
-fica no tema Shopify.
+Um único processo Next.js (`apps/marketing`) serve dois públicos completamente
+diferentes:
 
-| Camada | Onde |
+- as rotas públicas (`/`, `/pecas/*`, `/carrinho`, etc.) — a vitrine, com o
+  calendário de disponibilidade real;
+- `/closetadmin/*` — o **ClosetAdmin**, painel interno da equipe, com sua
+  própria autenticação (nome + telefone + PIN) e sessão, isolado
+  estruturalmente das páginas públicas.
+
+`apps/reservations-api` é a **fonte central de verdade das reservas** — é ele
+quem garante, via uma constraint `EXCLUDE` no Postgres, que a mesma peça
+física nunca é reservada duas vezes no mesmo período. Shopify nunca decide
+isso sozinho.
+
+### O que pertence a cada peça
+
+| Responsabilidade | Onde vive |
 | --- | --- |
-| Home, textos institucionais, navegação | `apps/marketing` (Next.js) |
-| Cena 3D / animações | `apps/marketing` (R3F, Three.js, GSAP, Framer Motion) |
-| Catálogo (leitura) | `apps/marketing` via Storefront API |
-| Produto + calendário de aluguel | `theme/` (Shopify + PRP) |
-| Carrinho, checkout, pagamento | `theme/` (Shopify) |
-| Conta, login, histórico de reservas | `theme/` (Shopify nativo) |
+| Produto, preço, foto, descrição | **Shopify** (Admin) |
+| Catálogo (leitura no site) | `apps/marketing` via Storefront API |
+| Disponibilidade real, regras de aluguel, HOLD | `apps/reservations-api` |
+| Carrinho, checkout, pagamento, pedido | **Shopify** (Storefront API + checkout nativo) |
+| Confirmação/cancelamento de pedido, reembolso | **Shopify**, refletido via webhook em `apps/reservations-api` |
+| Conta de cliente, histórico de pedidos | **Shopify** (nativo) |
+| Reserva manual, calendário operacional, bloqueios, auditoria, peças físicas (RentalUnits) | **ClosetAdmin** (`/closetadmin`, dentro de `apps/marketing`) |
+| Exportação em PDF (reserva, período, operacional) | **ClosetAdmin** — gerada sob demanda, nunca fonte de verdade |
+
+**Regra fixa do projeto:** o ClosetAdmin é só apoio operacional do aluguel —
+nunca recria produto/preço/pedido/pagamento/refund do Shopify, e nunca vira um
+sistema financeiro paralelo.
+
+---
 
 ## 📁 Estrutura
 
 ```
 .
 ├── apps/
-│   ├── marketing/           # Vitrine Next.js — ver apps/marketing (sem README próprio ainda)
-│   └── web/                 # Legado: Next.js + Booqable (não é mais produção)
+│   ├── marketing/          # Next.js — vitrine pública + /closetadmin (ATIVO)
+│   ├── reservations-api/   # NestJS + Prisma — fonte de verdade das reservas (ATIVO)
+│   ├── shopify-app/        # Configuração do app Shopify real (webhooks, scopes) (ATIVO)
+│   └── web/                # LEGADO — Next.js + Booqable, abandonado antes da Fase 1
 │
-└── theme/                   # Tema Shopify — ver theme/README.md
-    ├── config/               # Configurações editáveis pelo painel
-    ├── locales/               # pt-BR (principal) e es (Chile)
-    ├── sections/
-    └── templates/
-        └── customers/         # Login, cadastro, conta, pedidos, endereços
+├── theme/                  # LEGADO — tema Shopify Liquid pensado para o Product
+│                            # Rentals Pro, abandonado antes da Fase 1
+│
+└── docs/
+    ├── DEPLOYMENT.md                     # Deploy real: Railway + Vercel + Shopify
+    ├── CLOSETADMIN-GUIA-OPERACIONAL.md   # Guia do dia a dia para a equipe
+    └── FASE10-AUDITORIA.md               # Auditoria de segurança/performance/observabilidade
 ```
 
-> O projeto passou por três arquiteturas: backend próprio em NestJS, depois
-> Booqable embedado em Next.js (`apps/web`, legado), agora este híbrido.
-> Cada pivô está preservado no histórico do git.
+`apps/web` e `theme/` continuam no repositório por histórico, mas não recebem
+mais trabalho e não estão em produção — ver [Histórico e legado](#histórico-e-legado).
+
+## O que já existe (Fases 1–10)
+
+| Fase | Entregou |
+| --- | --- |
+| 1–4 | Disponibilidade real, `RentalUnit`s (peça física), motor de regras de aluguel (`RentalPlanEngine`), proteção `EXCLUDE` contra double booking |
+| 5–6 | HOLD (bloqueio temporário real no Postgres) + checkout Shopify vinculado ao HOLD |
+| 7 | Webhooks Shopify em produção (`orders/paid`, `orders/cancelled`, `refunds/create`), binding assinado Order↔Reservation, late payment |
+| 8 | Reservas manuais pela equipe (API), com override nomeado e auditável |
+| 9 | **ClosetAdmin**: autenticação própria (nome+telefone+PIN), sessão HttpOnly, RBAC (ADMIN/STAFF), calendário, reservas, peças, regras, bloqueios operacionais, auditoria |
+| 10 | Exportação em **PDF** sob demanda (reserva individual, relatório por período, relatório operacional), correção de UX de temporada bloqueada, auditoria de segurança/performance final |
+
+Regras de negócio vigentes (aplicadas por `RentalPlanEngine`, nunca duplicadas
+no frontend): 1–2 peças = 2 dias, 3–4 = 3 dias, 5–6 = 4 dias · máximo 6 peças
+· antecedência mínima 15 dias · preparação 3 dias · limpeza 2 dias · bloqueio
+online de 1º de junho a 30 de setembro (loja física continua funcionando) ·
+domingo fechado · fuso `America/Santiago`.
+
+### E-mail operacional — opcional/pendente
+
+Nenhum e-mail automático existe hoje, em nenhum ambiente — não há schema,
+migration nem código relacionado no repositório. Chegou a ser desenhado
+durante a Fase 10 e deliberadamente removido antes de qualquer coisa ser
+commitada em `prisma/migrations/`, justamente para não correr o risco de o
+Railway aplicar uma migration de uma funcionalidade ainda não decidida no
+próximo `prisma migrate deploy` automático. Fica como funcionalidade futura,
+para quando o provedor de envio for escolhido.
+
+### Google Sheets — não faz parte da arquitetura
+
+Uma integração com Google Sheets chegou a ser desenhada como redundância
+operacional, mas foi **substituída por exportação em PDF** antes de qualquer
+código ou schema chegar a produção. Não há, e não está planejada, nenhuma
+sincronização com planilhas.
+
+---
 
 ## 🚀 Rodando localmente
 
-**Vitrine (Next.js):**
+**reservations-api** (precisa de um Postgres — recomendado Neon, free tier):
 
 ```bash
-pnpm install
-cp apps/marketing/.env.example apps/marketing/.env
-pnpm dev
+cp apps/reservations-api/.env.example apps/reservations-api/.env
+pnpm --filter @valle/reservations-api db:generate
+pnpm --filter @valle/reservations-api db:migrate:dev
+pnpm --filter @valle/reservations-api dev
 ```
 
-**Tema (Shopify):**
+**marketing** (vitrine + ClosetAdmin):
 
 ```bash
-npm install -g @shopify/cli @shopify/theme
-cd theme && shopify theme dev --store=sua-loja.myshopify.com
+cp apps/marketing/.env.example apps/marketing/.env.local
+pnpm --filter @valle/marketing dev
 ```
 
-Detalhes de cada um em [theme/README.md](theme/README.md).
+Com os dois no ar, a vitrine fica em `http://localhost:3000` e o painel da
+equipe em `http://localhost:3000/closetadmin/login`.
 
-## ⚠️ Estado atual
+Deploy real (Railway + Vercel + Shopify): ver [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Uso do dia a dia do ClosetAdmin: ver [`docs/CLOSETADMIN-GUIA-OPERACIONAL.md`](docs/CLOSETADMIN-GUIA-OPERACIONAL.md).
+Auditoria de segurança/performance da Fase 10: ver [`docs/FASE10-AUDITORIA.md`](docs/FASE10-AUDITORIA.md).
 
-- Estrutura dos dois apps pronta e **buildando sem erro** — typecheck e
-  `next build` (Turbopack) validados, incluindo o pipeline R3F/Three.
-- **Identidade visual recebida e aplicada**: paleta marsala (`#53131E`) +
-  creme (`#FFFCF6`), logo real (monograma V+S com silhueta de montanha) nos
-  dois sistemas. Fontes e a cena 3D do `Hero3D.tsx` ainda são placeholder —
-  o kit de marca não trouxe tipografia definida.
-- Loja Shopify, app PRP e token da Storefront API ainda não existem.
-- Domínio (`vsbycloset.*`) ainda não registrado.
+---
 
-## 🎨 Identidade visual
+## Histórico e legado
 
-Kit de marca em `Identidade visual - VS BY CLOSET - Copia/` (arquivos
-originais, PNG/JPEG/PDF em todas as variações — não versionado no git por
-serem arquivos de design brutos). Os recortes já prontos para uso web
-(fundo transparente, renomeados) estão em:
+O projeto passou por arquiteturas diferentes antes de chegar à atual:
 
-- `apps/marketing/public/brand/` — consumidos pela vitrine Next.js
-- `theme/assets/` — consumidos pelo tema Shopify
+1. **Booqable embedado em Next.js** (`apps/web`) — abandonado.
+2. **Vitrine Next.js + tema Shopify Liquid com Product Rentals Pro** (`theme/`)
+   — planejado, chegou a ter identidade visual aplicada, mas nunca foi para
+   produção; abandonado antes da Fase 1 em favor de um backend de reservas
+   próprio.
+3. **Atual, em produção**: `apps/marketing` (Next.js) + `apps/reservations-api`
+   (NestJS/Postgres) + Shopify como autoridade comercial — documentada acima.
 
-Dez arquivos em cada pasta: `logo-{mark,stacked,horizontal,badge,badge-chile}-{marsala,cream}.png`.
-
-| Variante | O que é | Onde é usado |
-| --- | --- | --- |
-| `mark` | Só o monograma V+S | Favicon (`app/icon.png`), Hero3D |
-| `stacked` | Monograma acima de "BY CLOSET" | Disponível para uso maior (hero, about) |
-| `horizontal` | Monograma ao lado de "BY CLOSET" | Header, Footer |
-| `badge` | Selo circular "VS BY CLOSET" | Disponível para uso pontual |
-| `badge-chile` | Mesmo selo + "CHILE" na borda | Página de Contato, ao lado do card da loja física |
-
-Use a variante **marsala** sobre fundo claro (nosso caso, `bg-cream`) e a
-variante **cream** se algum dia existir uma seção de fundo escuro. A pasta
-"Marca d'água" do kit original é a única com transparência real — as
-pastas "Logotipo"/"Ícone"/"Secundária"/"Submarca" têm cor sólida "assada"
-na imagem e não servem para uso direto em UI. Os arquivos em
-`public/brand/` e `theme/assets/` já vêm recortados rente à marca
-(`sharp().trim()`) e redimensionados — os masters do kit são canvas
-4320px quadrados com bastante respiro ao redor da arte.
-
-## Decisão pendente — domínio
-
-`apps/marketing/.env.example` assume um **subdomínio dedicado ao Shopify**
-(`loja.vsbycloset.com.br`), porque o Shopify precisa ser a origem do
-domínio/subdomínio que aponta para ele — não dá para colocá-lo atrás de um
-proxy reverso arbitrário como fizemos com o Booqable. Ainda não foi
-confirmado com o cliente; é só trocar a variável quando decidir.
-
-## Modelo de operação (confirmado pelo cliente)
-
-- **Baixa temporada — fluxo aprovado.** Cliente brasileiro reserva/aluga
-  pelo site e retira a roupa presencialmente na loja do Chile. É exatamente
-  o que está construído (vitrine + tema Shopify + PRP).
-- **A partir de maio, o modelo será reavaliado** — principalmente se vale a
-  pena manter reserva online durante a **alta temporada**. Ou seja: o que
-  construímos até aqui é validado pra baixa temporada; não vale investir em
-  infraestrutura pesada demais pra um fluxo de alta temporada que ainda
-  pode mudar.
-- **Moeda: BRL e CLP, mas o "como" ainda está em aberto.** O cliente quer as
-  duas moedas na operação. Ainda não definimos se isso é (a) só o site
-  online em BRL + CLP separado pra quem paga presencial na loja do Chile
-  [nesse caso nada muda no código], ou (b) o checkout online precisando
-  cobrar nas duas moedas de fato [esbarra na limitação já documentada
-  abaixo — Shopify Payments não cobre Brasil nem Chile]. Não construir nada
-  em cima dessa ambiguidade até resolver.
-
-## Pontos de atenção para quando a loja existir
-
-- **Shopify Payments não está disponível nem no Brasil nem no Chile.**
-  Multimoeda de verdade (cada cliente pagando na própria moeda) exige
-  Shopify Payments ou Adyen — como nenhum dos dois cobre esses países, a
-  loja usa **uma moeda única com gateway terceiro**, de qualquer forma.
-- **Loja em BRL.** Decidido porque a esmagadora maioria dos clientes é
-  brasileira — cobrar em BRL habilita Pix, boleto e parcelamento nativos,
-  em vez de forçar cartão internacional em peso chileno. O estoque físico
-  segue só no Chile (retirada/devolução presenciais); Shopify permite
-  registrar a loja num país e ter a inventory Location em outro, então isso
-  não conflita.
-- **Gateway de pagamento ainda não escolhido.** Candidatos com app oficial
-  na Shopify e taxa pública (sem precisar negociar por volume): Mercado
-  Pago (cartão 4,99%, Pix 0,99%, boleto R$3,49) ou PagBank/PagSeguro (Pix
-  grátis pra receber, mesma faixa nas outras taxas). Nenhum dos dois está
-  fixado em código — troque `NEXT_PUBLIC_SHOPIFY_STORE_URL` e configure o
-  gateway direto no painel do Shopify quando decidir.
-- **Jurisdição/legal ainda em aberto.** Cobrar em BRL não decide sozinho em
-  que país a empresa deve ser registrada — como a operação física
-  (retirada, devolução, possível funcionário) acontece no Chile, vale
-  confirmar com contador/advogado se isso exige registro ou obrigação
-  tributária lá, independente de onde a Shopify estiver sediada.
-- **PRP substitui variant picker e buy button** na página de produto — já
-  refletido em `theme/sections/main-product.liquid`.
-- **A vitrine em Next.js só lê produto (Storefront API).** Não tenta
-  reproduzir carrinho, checkout ou o widget do PRP — isso é o que o
-  `theme/` existe para fazer. O preço exibido já vem no formato/moeda que a
-  API devolver (`FeaturedProducts.tsx` usa `currencyCode` dinâmico) — não
-  há BRL nem CLP hardcoded em lugar nenhum do código.
+Cada pivô está preservado no histórico do git e nas pastas `apps/web`/`theme/`,
+mas nenhum dos dois recebe mais trabalho.

@@ -1,60 +1,13 @@
-import Image from 'next/image';
 import Link from 'next/link';
-import { isShopifyConfigured, listFeaturedProducts, productUrl } from '@/lib/shopify';
+import { isShopifyConfigured, listFeaturedProducts } from '@/lib/shopify';
+import { ProductCard } from '@/components/ProductCard';
 
-/**
- * Destaque da home. O clique leva à página da peça neste mesmo site, onde
- * o cliente escolhe a data e aluga — não mais ao tema Shopify.
- */
 export async function FeaturedProducts() {
-  if (!isShopifyConfigured) {
-    return (
-      <div className="rounded-2xl border border-dashed border-ink/15 p-8 text-center text-sm text-ink/40">
-        Storefront API não configurada — defina NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN e
-        NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN no .env para carregar os produtos.
-      </div>
-    );
-  }
-
   let products: Awaited<ReturnType<typeof listFeaturedProducts>> = [];
-  try {
-    products = await listFeaturedProducts(8);
-  } catch (err) {
-    return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-        Não foi possível carregar os produtos: {(err as Error).message}
-      </div>
-    );
+  let failed = false;
+  if (isShopifyConfigured) {
+    try { products = await listFeaturedProducts(4); } catch { failed = true; }
   }
-
-  if (products.length === 0) {
-    return <p className="text-center text-sm text-ink/40">Nenhum produto publicado ainda.</p>;
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-      {products.map((product) => (
-        <Link key={product.id} href={productUrl(product.handle)} className="group block">
-          {product.featuredImage && (
-            <div className="aspect-[3/4] overflow-hidden rounded-xl bg-sand">
-              <Image
-                src={product.featuredImage.url}
-                alt={product.featuredImage.altText ?? product.title}
-                width={600}
-                height={800}
-                className="h-full w-full object-cover transition group-hover:scale-105"
-              />
-            </div>
-          )}
-          <p className="mt-3 text-sm">{product.title}</p>
-          <p className="text-xs text-ink/60">
-            {new Intl.NumberFormat('pt-BR', {
-              style: 'currency',
-              currency: product.priceRange.minVariantPrice.currencyCode,
-            }).format(Number(product.priceRange.minVariantPrice.amount))}
-          </p>
-        </Link>
-      ))}
-    </div>
-  );
+  if (!products.length) return <div className="collection-empty"><p>{failed ? 'Não foi possível carregar a seleção agora.' : 'Novas peças estão chegando ao closet.'}</p><Link href="/pecas" className="editorial-link">Explorar catálogo</Link></div>;
+  return <div className="product-grid">{products.map(product => <ProductCard key={product.id} product={product} />)}</div>;
 }

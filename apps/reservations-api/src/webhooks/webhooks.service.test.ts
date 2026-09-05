@@ -265,6 +265,47 @@ describe('WebhooksService — correlação e confirmação normal', () => {
     expect(reservation.shopifyOrderGid).toBe(`gid://shopify/Order/${orderId}`);
   });
 
+  test('30) confirmação com e-mail no pedido → Reservation.customerEmail passa a existir (Fase 10 — achado: reserva online nunca tinha e-mail)', async () => {
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'pending_payment', 130);
+    await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, { id: nextOrderId(), email: 'cliente-fase10@example.com' }),
+    });
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerEmail).toBe('cliente-fase10@example.com');
+  });
+
+  test('31) sem "email" mas com "contact_email" (checkout como visitante) → usa o fallback oficial da Shopify', async () => {
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'pending_payment', 131);
+    await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, { id: nextOrderId(), email: null, contact_email: 'visitante-fase10@example.com' }),
+    });
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerEmail).toBe('visitante-fase10@example.com');
+  });
+
+  test('32) sem "email" nem "contact_email" → customerEmail continua null, não quebra a confirmação', async () => {
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'pending_payment', 132);
+    const res = await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, { id: nextOrderId() }),
+    });
+    expect(res.outcome).toBe('processed');
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerEmail).toBeNull();
+    expect(reservation.status).toBe('confirmed');
+  });
+
   test('22) ReservationItem segue o trigger — nunca é escrito diretamente, mas reflete o status novo', async () => {
     const unit = await createUnit();
     const fixture = await createReservation([unit], 'pending_payment', 102);

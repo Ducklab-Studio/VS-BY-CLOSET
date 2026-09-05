@@ -73,6 +73,7 @@ export interface StorefrontProduct {
   description: string;
   /** Campo "Tipo de produto" da Shopify — é o nicho (ver RENTAL_CATEGORIES). */
   productType: string;
+  images?: { nodes: { url: string; altText: string | null }[] };
   featuredImage: { url: string; altText: string | null } | null;
   priceRange: {
     minVariantPrice: { amount: string; currencyCode: string };
@@ -93,7 +94,7 @@ export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct
   const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
     `query FeaturedProducts($first: Int!) {
       products(first: $first, sortKey: BEST_SELLING) {
-        nodes { ${PRODUCT_FIELDS} }
+        nodes { ${PRODUCT_FIELDS} images(first: 2) { nodes { url altText } } }
       }
     }`,
     { first },
@@ -179,7 +180,7 @@ export interface StorefrontVariant {
   price: { amount: string; currencyCode: string };
 }
 
-export interface StorefrontProductDetail extends StorefrontProduct {
+export interface StorefrontProductDetail extends Omit<StorefrontProduct, 'images'> {
   descriptionHtml: string;
   images: { url: string; altText: string | null }[];
   variants: StorefrontVariant[];

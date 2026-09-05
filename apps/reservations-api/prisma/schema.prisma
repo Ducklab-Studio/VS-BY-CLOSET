@@ -79,6 +79,130 @@ enum WebhookStatus {
   @@map("webhook_status")
 }
 
+/// Fase 9 — papel do funcionário no ClosetAdmin. RBAC sempre validado
+/// server-side (guard), nunca por esconder botão no frontend.
+enum AdminRole {
+  ADMIN
+  STAFF
+
+  @@map("admin_role")
+}
+
+/// Fase 9 — login simples (nome + telefone + PIN). Nome NUNCA é fator de
+/// segurança (só identificação); `phone` (normalizado antes de gravar e
+/// antes de comparar) é a chave real de busca; `pinHash` é o segredo de
+/// verdade — nunca gravado em texto puro, nunca devolvido ao frontend.
+model AdminUser {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  phone     String    @unique
+  pinHash   String    @map("pin_hash")
+  role      AdminRole
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sessions           AdminSession[]
+  auditEvents        AdminAuditEvent[]
+  createdBlocks      OperationalBlock[]
+
+  @@map("admin_users")
+}
+
+/// Fase 9 — sessão real, revogável (logout de verdade, não só apagar
+/// cookie no navegador). `id` é uma identidade própria (UUID), separada
+/// do segredo — `tokenHash` é o HASH do token que vai no cookie HttpOnly
+/// (mesmo padrão de `hold_token_hash`: o valor puro nunca toca o banco).
+model AdminSession {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId String    @map("admin_user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@map("admin_sessions")
+}
+
+/// Fase 9 — auditoria de ações do painel que NÃO pertencem naturalmente
+/// a uma Reservation (login, logout, regra alterada, peça ativada/
+/// desativada, bloqueio criado/removido). Ações que JÁ são de uma
+/// Reservation (criar/cancelar manual, override) continuam em
+/// `ReservationEvent` — ganham só `adminUserId` no `detail`, sem
+/// duplicar a responsabilidade dessa tabela aqui.
+model AdminAuditEvent {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Nullable: uma tentativa de login que falhou (usuário não
+  /// encontrado/inativo/PIN errado) não tem um AdminUser real pra
+  /// vincular, mas ainda precisa ser auditável.
+  adminUserId   String?  @map("admin_user_id") @db.Uuid
+  /// Denormalizado de propósito — o nome no momento da ação, pra o
+  /// registro de auditoria continuar legível mesmo se o AdminUser for
+  /// renomeado ou desativado depois.
+  adminUserName String?  @map("admin_user_name")
+  action        String
+  entityType    String?  @map("entity_type")
+  entityId      String?  @map("entity_id")
+  before        Json?
+  after         Json?
+  detail        Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  adminUser AdminUser? @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_audit_events")
+}
+
+/// Fase 9 — escopo de um bloqueio operacional: a loja inteira (fechada,
+/// manutenção, evento) ou uma peça específica (fora de operação).
+enum BlockScope {
+  STORE_WIDE
+  UNIT
+
+  @@map("block_scope")
+}
+
+/// Fase 9 — bloqueio real, precisa afetar disponibilidade/calendário/
+/// reserva manual/fluxo público (nunca só visual). `rentalUnitId` nulo
+/// quando `scope = STORE_WIDE`. `removedAt` marca quando foi levantado;
+/// QUEM levantou fica em AdminAuditEvent (BLOCK_REMOVED), não duplicado
+/// aqui como uma segunda FK.
+model OperationalBlock {
+  id                   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scope                BlockScope
+  rentalUnitId         String?    @map("rental_unit_id") @db.Uuid
+  startDate            DateTime   @map("start_date") @db.Date
+  endDate              DateTime   @map("end_date") @db.Date
+  reason               String
+  createdByAdminUserId String     @map("created_by_admin_user_id") @db.Uuid
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  removedAt            DateTime?  @map("removed_at") @db.Timestamptz(6)
+
+  rentalUnit RentalUnit? @relation(fields: [rentalUnitId], references: [id])
+  createdBy  AdminUser   @relation(fields: [createdByAdminUserId], references: [id])
+
+  @@index([rentalUnitId])
+  @@index([startDate, endDate])
+  @@map("operational_blocks")
+}
+
+/// Fase 8 — de onde a reserva veio. `online` é o default (cobre toda
+/// reserva já existente, feita pelo checkout público das Fases 4-7);
+/// `manual_admin` é criada pela equipe via POST /admin/reservations/manual,
+/// nunca passa por HOLD/checkout Shopify.
+enum ReservationSource {
+  online
+  manual_admin
+
+  @@map("reservation_source")
+}
+
 /// Cada loja Shopify.
 model Store {
   id            String   @id
@@ -121,7 +245,8 @@ model RentalUnit {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  reservationItems ReservationItem[]
+  reservationItems  ReservationItem[]
+  operationalBlocks OperationalBlock[]
 
   @@index([shopifyVariantId])
   @@index([active])
@@ -150,6 +275,18 @@ model Reservation {
   shopifyOrderId  String? @map("shopify_order_id")
   shopifyOrderGid String? @map("shopify_order_gid")
   customerEmail   String? @map("customer_email")
+
+  /// Fase 8 — de onde esta reserva veio. DEFAULT online cobre toda linha
+  /// existente sem backfill (ver migration 20260904200000).
+  source ReservationSource @default(online)
+  /// Só preenchidos em reserva manual (`source = manual_admin`) — o
+  /// checkout público nunca coleta nome/telefone, o cliente nem se
+  /// autentica. Nulos em toda reserva online.
+  customerName  String? @map("customer_name")
+  customerPhone String? @map("customer_phone")
+  /// Observação interna da equipe — nunca exposta em endpoint público
+  /// (GET /reservations/:id/status não a devolve).
+  internalNote  String? @map("internal_note")
 
   termsAcceptedAt DateTime? @map("terms_accepted_at") @db.Timestamptz(6)
   termsVersion    String?   @map("terms_version")
@@ -204,9 +341,10 @@ model Reservation {
 
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
-  idempotencyKeys HoldIdempotencyKey[]
-  webhookEvents   WebhookEvent[]
-  events          ReservationEvent[]
+  idempotencyKeys       HoldIdempotencyKey[]
+  manualIdempotencyKeys ManualReservationIdempotencyKey[]
+  webhookEvents         WebhookEvent[]
+  events                ReservationEvent[]
 
   @@unique([originStoreId, shopifyOrderId])
   @@index([status])
@@ -230,6 +368,22 @@ model HoldIdempotencyKey {
   reservation Reservation @relation(fields: [reservationId], references: [id])
 
   @@map("hold_idempotency_keys")
+}
+
+/// Fase 8 — mesmo mecanismo técnico de HoldIdempotencyKey (a PK arbitra
+/// a corrida, não um lock de aplicação), mas em tabela PRÓPRIA: pedido
+/// explícito pra não misturar o espaço de chaves do HOLD público com o
+/// da criação manual — uma Idempotency-Key do painel administrativo
+/// nunca deve poder colidir com uma do carrinho público.
+model ManualReservationIdempotencyKey {
+  key           String   @id
+  requestHash   String   @map("request_hash")
+  reservationId String   @map("reservation_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  @@map("manual_reservation_idempotency_keys")
 }
 
 /// Uma peça física dentro de uma reserva — é aqui que a trava

@@ -1,67 +1,44 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
-import { MessageCircle, Mail, MapPin } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowUpRight, ArrowLeft, MessageCircle, Mail, MapPin, MoveUpRight } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Contato',
-  description: 'Fale com a VS by Closet pelo WhatsApp ou e-mail.',
+  description: 'Tire suas dúvidas sobre peças, tamanhos e reservas com a VS by Closet.',
 };
 
-/**
- * Sem formulário: sem backend próprio para receber o envio, um form aqui
- * ficaria bonito e não faria nada. WhatsApp é o canal natural — a operação
- * irmã (Valle Showroom) já atende só por lá.
- */
 export default function ContactPage() {
+  const phone = process.env.NEXT_PUBLIC_WHATSAPP?.replace(/\D/g, '');
+  const whatsapp = phone && phone !== '56900000000' ? `https://wa.me/${phone}` : null;
+  const email = 'mailto:contato@vsbycloset.com';
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16">
-      <h1 className="font-heading text-3xl text-ink">Fale conosco</h1>
-      <p className="mt-2 text-ink/60">Dúvidas sobre tamanho, disponibilidade ou sua reserva.</p>
-
-      <div className="mt-10 grid gap-6 sm:grid-cols-2">
-        <a
-          href="https://wa.me/56900000000"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-start gap-3 rounded-2xl border border-ink/10 bg-sand/40 p-6 transition hover:border-marsala"
-        >
-          <MessageCircle className="shrink-0 text-marsala" />
-          <div>
-            <p className="font-medium text-ink">WhatsApp</p>
-            <p className="mt-1 text-sm text-ink/60">Resposta mais rápida — chame a qualquer hora.</p>
+    <div className="contact-editorial">
+      <div className="contact-container">
+        <Link href="/" className="contact-back"><ArrowLeft size={15} /> Voltar ao início</Link>
+        <header className="contact-intro">
+          <div><p className="contact-kicker">Estamos por aqui</p><h1>Sua viagem começa<br />com uma <em>conversa.</em></h1></div>
+          <p>O tamanho certo. A peça ideal.<br />Conte com a gente para preparar<br className="contact-desktop-break" /> seu próximo inverno.</p>
+        </header>
+        <div className="contact-cards">
+          <a href={whatsapp ?? email} target={whatsapp ? '_blank' : undefined} rel={whatsapp ? 'noopener noreferrer' : undefined} className="contact-primary">
+            <div className="contact-card-top"><span className="contact-icon">{whatsapp ? <MessageCircle size={26} strokeWidth={1.4} /> : <Mail size={26} strokeWidth={1.4} />}</span><span className="contact-channel">{whatsapp ? 'Pelo WhatsApp' : 'Por e-mail'}</span></div>
+            <h2>Vamos encontrar<br /><em>o seu próximo look?</em></h2>
+            <p>Tire suas dúvidas sobre tamanhos, disponibilidade e os detalhes da sua reserva.</p>
+            <div className="contact-card-action"><span>{whatsapp ? 'Conversar no WhatsApp' : 'Falar com nosso time'}</span><span className="contact-action-arrow"><ArrowUpRight size={24} strokeWidth={1.5} /></span></div>
+          </a>
+          <div className="contact-secondary">
+            <div className="contact-card-top"><span className="contact-icon"><Mail size={23} strokeWidth={1.4} /></span><span className="contact-channel">Cada detalhe importa</span></div>
+            <h2>Prefere escrever<br />com calma?</h2>
+            <p>Envie sua mensagem e conte como podemos ajudar com a sua viagem.</p>
+            <a href={email} className="contact-email">contato@vsbycloset.com <ArrowUpRight size={18} /></a>
+            <Link href="/faq" className="contact-faq"><span>Dúvidas rápidas?<strong>Veja as perguntas frequentes</strong></span><ArrowUpRight size={20} strokeWidth={1.5} /></Link>
           </div>
-        </a>
-
-        <a
-          href="mailto:contato@vsbycloset.com"
-          className="flex items-start gap-3 rounded-2xl border border-ink/10 bg-sand/40 p-6 transition hover:border-marsala"
-        >
-          <Mail className="shrink-0 text-marsala" />
-          <div>
-            <p className="font-medium text-ink">E-mail</p>
-            <p className="mt-1 text-sm text-ink/60">contato@vsbycloset.com</p>
-          </div>
-        </a>
-      </div>
-
-      <div className="mt-6 flex items-start gap-6 rounded-2xl border border-ink/10 p-6">
-        <MapPin className="shrink-0 text-marsala" />
-        <div className="flex-1">
-          <p className="font-medium text-ink">Loja no Chile</p>
-          <p className="mt-1 text-sm text-ink/60">
-            Endereço divulgado na confirmação da reserva.
-          </p>
         </div>
-        {/* Selo oficial da marca para a operação chilena — reforça, com a
-            própria identidade visual, que a retirada é numa loja física de
-            verdade, não só uma promessa no texto. */}
-        <Image
-          src="/brand/logo-badge-chile-marsala.png"
-          alt="VS by Closet · Chile"
-          width={890}
-          height={900}
-          className="hidden h-20 w-auto shrink-0 object-contain opacity-90 sm:block"
-        />
+        <section className="contact-chile" aria-labelledby="contact-chile-title">
+          <div className="contact-chile-copy"><p className="contact-kicker"><MapPin size={14} strokeWidth={1.5} /> Nos encontramos no Chile</p><h2 id="contact-chile-title">A sua próxima parada.<br /><em>O nosso closet.</em></h2><p>Reserve online e retire suas peças ao chegar.<br />O endereço da loja é enviado na confirmação da reserva.</p><Link href="/como-funciona">Saiba como funciona <MoveUpRight size={17} /></Link></div>
+          <div className="contact-brand-seal"><Image src="/brand/logo-badge-chile-marsala.png" alt="VS by Closet · Chile" width={890} height={900} /><span>BRASIL → CHILE</span></div>
+        </section>
       </div>
     </div>
   );

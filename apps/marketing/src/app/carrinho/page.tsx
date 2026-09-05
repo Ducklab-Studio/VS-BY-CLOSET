@@ -140,7 +140,7 @@ export default function CarrinhoPage() {
       <Shell>
         <p className="text-ink/60">Seu carrinho está vazio.</p>
         <Link
-          href="/"
+          href="/pecas"
           className="mt-6 inline-flex rounded-xl border border-marsala px-6 py-3 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5"
         >
           Ver peças
@@ -369,9 +369,10 @@ function derivePickupDate(lines: CartLine[]): string | null {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <h1 className="mb-8 font-heading text-3xl">Seu carrinho</h1>
+    <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
+      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
       {children}
     </div>
   );
 }
+

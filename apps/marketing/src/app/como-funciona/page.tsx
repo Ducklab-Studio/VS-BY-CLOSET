@@ -37,18 +37,18 @@ const passos = [
 
 export default function ComoFuncionaPage() {
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12">
-      <header className="border-b border-ink/10 pb-8">
-        <h1 className="font-heading text-3xl text-ink">Como funciona</h1>
+    <div className="how-editorial">
+      <header className="guide-heading">
+        <p className="privacy-eyebrow">Como funciona</p><h1>Você escolhe o look.<br /><em>A gente cuida do closet.</em></h1>
         <p className="mt-2 text-sm text-ink/60">
           Aluguel de roupa de neve em cinco passos — sem frete, sem alfândega, sem comprar peça que
           você usaria uma semana por ano.
         </p>
       </header>
 
-      <ol className="mt-12 space-y-10">
+      <ol className="how-steps">
         {passos.map((passo, i) => (
-          <li key={passo.titulo} className="flex gap-6">
+          <li key={passo.titulo} className="how-step">
             <span className="font-heading shrink-0 text-3xl text-ink/20">
               {String(i + 1).padStart(2, '0')}
             </span>
@@ -61,7 +61,7 @@ export default function ComoFuncionaPage() {
       </ol>
 
       {/* ── Por que alugar ──────────────────────────────────────────────── */}
-      <section className="mt-16 rounded-2xl border border-ink/10 bg-sand/40 p-8">
+      <section className="how-benefits">
         <h2 className="font-heading text-lg text-ink">Por que alugar faz mais sentido</h2>
         <div className="mt-6 grid gap-8 sm:grid-cols-2">
           <div>
@@ -84,7 +84,7 @@ export default function ComoFuncionaPage() {
       </section>
 
       {/* ── CTA ─────────────────────────────────────────────────────────── */}
-      <section className="mt-12 text-center">
+      <section className="guide-cta">
         <h2 className="font-heading text-xl text-ink">Quando é sua viagem?</h2>
         <Link
           href="/pecas"
@@ -96,3 +96,4 @@ export default function ComoFuncionaPage() {
     </div>
   );
 }
+

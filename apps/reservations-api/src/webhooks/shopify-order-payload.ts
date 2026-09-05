@@ -28,6 +28,12 @@ export interface ShopifyOrderPayload {
   readonly cancel_reason?: string | null;
   readonly note_attributes?: readonly ShopifyNoteAttribute[];
   readonly line_items?: readonly ShopifyOrderLineItem[];
+  /// `email` costuma vir preenchido; `contact_email` é o fallback oficial
+  /// da Shopify pra pedidos sem conta de cliente (checkout como
+  /// visitante). Só usado pra e-mail OPERACIONAL (Fase 10) — nunca pra
+  /// nada de checkout/pagamento, que continua sendo só a Shopify.
+  readonly email?: string | null;
+  readonly contact_email?: string | null;
 }
 
 export interface ShopifyRefundTransaction {
@@ -62,6 +68,21 @@ export function extractReservationId(order: ShopifyOrderPayload): string | null 
 export function extractNoteAttribute(order: ShopifyOrderPayload, name: string): string | null {
   const attr = order.note_attributes?.find((a) => a.name === name);
   const value = attr?.value?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Fase 10 — achado da auditoria: `Reservation.customerEmail` nunca era
+ * preenchido pra reserva ONLINE (só a manual grava, e é opcional lá) —
+ * o HOLD público nunca coleta e-mail, então o único lugar onde ele
+ * existe de verdade é no próprio Order da Shopify. `email` é o padrão;
+ * `contact_email` é o fallback oficial da Shopify pra checkout como
+ * visitante. `null` (nunca string vazia) quando nenhum dos dois vem —
+ * e-mails operacionais simplesmente não são enviados pra essa reserva,
+ * não é tratado como erro.
+ */
+export function extractCustomerEmail(order: ShopifyOrderPayload): string | null {
+  const value = (order.email ?? order.contact_email)?.trim();
   return value ? value : null;
 }
 

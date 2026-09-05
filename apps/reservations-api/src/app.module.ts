@@ -9,6 +9,10 @@ import { HoldsModule } from './holds/holds.module';
 import { CheckoutModule } from './checkout/checkout.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { AdminReservationsModule } from './admin-reservations/admin-reservations.module';
+import { AdminAuthModule } from './admin-auth/admin-auth.module';
+import { AdminPanelModule } from './admin-panel/admin-panel.module';
+import { PdfModule } from './pdf/pdf.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -25,6 +29,10 @@ import { AppController } from './app.controller';
     CheckoutModule,
     WebhooksModule,
     ReservationsModule,
+    AdminReservationsModule,
+    AdminAuthModule,
+    AdminPanelModule,
+    PdfModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

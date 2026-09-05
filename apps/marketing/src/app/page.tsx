@@ -1,60 +1,42 @@
 import Link from 'next/link';
-import { Hero3D } from '@/components/Hero3D';
+import Image from 'next/image';
+import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
-import { HeroIntro } from '@/components/HeroIntro';
-import { ScrollReveal } from '@/components/ScrollReveal';
+import { EditorialMotion } from '@/components/EditorialMotion';
+import { Hero3D } from '@/components/Hero3D';
 
-/**
- * Home placeholder — estrutura pronta para receber a identidade visual.
- * Textos, cores e a cena 3D do Hero3D são o primeiro lugar a trocar quando
- * a marca definitiva chegar.
- */
 export default function HomePage() {
   return (
-    <>
-      <HeroIntro>
-        <section className="px-4 pt-16 text-center">
-          <p data-hero-item className="text-xs uppercase tracking-[0.3em] text-ink/60">
-            Aluguel de roupa de neve
-          </p>
-          <h1
-            data-hero-item
-            className="mt-5 font-heading text-4xl uppercase tracking-wide sm:text-6xl"
-          >
-            A neve não espera
-            <br />
-            seu guarda-roupa
-          </h1>
-          <p data-hero-item className="mx-auto mt-6 max-w-xl text-ink/60">
-            Reserve online. Retire ao chegar no Chile.
-          </p>
-
-          {/* Sem guarda de configuração: o catálogo é rota interna agora,
-              existe mesmo com a Shopify fora do ar (a página cuida do
-              estado vazio). Esconder o CTA principal da home por causa de
-              variável de ambiente era pior que mostrá-lo. */}
-          <Link
-            data-hero-item
-            href="/pecas"
-            className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
-          >
-            Ver peças
-          </Link>
-        </section>
-      </HeroIntro>
-
-      <Hero3D />
-
-      <section className="px-4 py-16">
-        <ScrollReveal className="mx-auto max-w-6xl">
-          <h2 className="text-center font-heading text-2xl uppercase tracking-wide">
-            Mais alugados
-          </h2>
-          <div className="mt-10">
-            <FeaturedProducts />
-          </div>
-        </ScrollReveal>
+    <EditorialMotion>
+      <section className="editorial-hero">
+        <div className="hero-copy">
+          <p data-intro className="eyebrow">VS by Closet · Chile</p>
+          <h1 data-intro>O inverno.<br />O seu <em>estilo.</em></h1>
+          <p data-intro className="hero-description">Uma viagem para lembrar.<br />Um closet à altura.</p>
+          <Link data-intro href="/pecas" className="editorial-button">Explore as peças <ArrowUpRight size={19} /></Link>
+          <p data-intro className="hero-note">Alugue online. Retire ao chegar no Chile.</p>
+        </div>
+        <div className="hero-photo">
+          <Image src="/editorial/winter-campaign.webp" alt="Editorial de inverno: look claro em uma paisagem de montanhas nevadas" fill priority sizes="(max-width: 760px) 100vw, 58vw" className="campaign-image" />
+          <div className="photo-caption"><span>THE WINTER EDIT</span><span>Estilo em qualquer altitude.</span></div>
+          <span className="photo-credit">Imagem editorial ilustrativa</span>
+        </div>
+        <a className="scroll-cue" href="#colecao"><ArrowDown size={16} /> Descubra seu próximo inverno</a>
       </section>
-    </>
+      <div className="editorial-strip"><span>Menos bagagem.</span><span aria-hidden="true">✳</span><span>Mais histórias.</span><span aria-hidden="true">✳</span><span>Seu closet no Chile.</span></div>
+      <section className="brand-story" aria-labelledby="story-title">
+        <div className="story-copy"><p className="eyebrow">Feito para viver lá fora</p><h2 id="story-title">Leve a viagem.<br /><em>Deixe o closet<br />com a gente.</em></h2><p>Do primeiro passeio ao último dia de frio. Encontre as peças que combinam com você e reserve para as datas da sua viagem.</p><Link href="/como-funciona" className="editorial-link">Descubra como funciona <ArrowUpRight size={18} /></Link></div>
+        <div className="story-mark"><span className="mark-orbit" aria-hidden="true" /><Hero3D /><span className="mark-caption">VS BY CLOSET / A SUA ASSINATURA NO INVERNO</span></div>
+      </section>
+      <section id="colecao" className="collection-section">
+        <div className="collection-heading" data-reveal><div><p className="eyebrow">A seleção do closet</p><h2>Prontas para a sua<br /><em>próxima história.</em></h2></div><Link href="/pecas" className="editorial-link">Ver todas as peças <ArrowUpRight size={18} /></Link></div>
+        <FeaturedProducts />
+      </section>
+      <section className="winter-story" aria-labelledby="winter-title">
+        <div className="winter-image"><Image src="/editorial/winter-campaign.webp" alt="Montanhas cobertas de neve em um editorial de inverno" fill sizes="100vw" className="campaign-image" /></div>
+        <div className="winter-content"><p className="eyebrow">A sua próxima parada</p><h2 id="winter-title">Viva o frio.<br /><em>Colecione momentos.</em></h2><Link href="/pecas" className="editorial-button light">Encontre seu look <ArrowUpRight size={18} /></Link></div>
+      </section>
+      <section className="rental-steps" aria-label="Como alugar"><div data-reveal><span>01 / ESCOLHA</span><h3>Seu estilo, sua seleção.</h3><p>Explore o closet e encontre suas peças favoritas.</p></div><div data-reveal><span>02 / RESERVE</span><h3>Uma data com o inverno.</h3><p>Confira a disponibilidade para os dias da sua viagem.</p></div><div data-reveal><span>03 / VIVA</span><h3>O Chile espera por você.</h3><p>Retire suas peças ao chegar e aproveite cada momento.</p></div></section>
+    </EditorialMotion>
   );
 }

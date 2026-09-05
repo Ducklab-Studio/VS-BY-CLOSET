@@ -1,93 +1,44 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Instagram, MessageCircle, Mail } from 'lucide-react';
+import { ArrowUpRight, MapPin, MessageCircle } from 'lucide-react';
 import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
 
 const columns = [
-  {
-    title: 'Alugar',
-    links: [
-      { href: '/como-funciona', label: 'Como funciona' },
-      { href: '/faq', label: 'Perguntas frequentes' },
-    ],
-  },
-  {
-    title: 'Ajuda',
-    links: [
-      { href: '/contato', label: 'Fale conosco' },
-      { href: '/trocas-e-devolucoes', label: 'Devoluções e trocas' },
-    ],
-  },
-  {
-    title: 'Políticas',
-    links: [
-      { href: '/politica-de-privacidade', label: 'Política de privacidade' },
-      { href: '/termos-de-uso', label: 'Termos de locação' },
-    ],
-  },
+  { title: 'Explore o closet', links: [
+    { href: '/pecas', label: 'Todas as peças' },
+    { href: '/como-funciona', label: 'Como funciona' },
+    { href: '/faq', label: 'Perguntas frequentes' },
+  ] },
+  { title: 'Estamos por aqui', links: [
+    { href: '/contato', label: 'Fale conosco' },
+    { href: '/trocas-e-devolucoes', label: 'Devoluções e trocas' },
+    { href: '/carrinho', label: 'Meu carrinho' },
+  ] },
+  { title: 'Com transparência', links: [
+    { href: '/politica-de-privacidade', label: 'Política de privacidade' },
+    { href: '/termos-de-uso', label: 'Termos de locação' },
+  ] },
 ];
 
 export function Footer() {
+  const whatsapp = process.env.NEXT_PUBLIC_WHATSAPP?.replace(/\D/g, '');
   return (
-    <footer className="border-t border-ink/10 bg-sand/40">
-      <div className="mx-auto grid max-w-7xl grid-cols-2 gap-8 px-4 py-12 md:grid-cols-4">
-        <div>
-          <Image
-            src="/brand/logo-horizontal-marsala.png"
-            alt="VS by Closet"
-            width={1200}
-            height={320}
-            className="h-8 w-auto object-contain"
-          />
-          <p className="mt-3 text-sm text-ink/60">
-            Aluguel de roupa de neve premium. Reserve no Brasil, retire ao chegar no Chile.
-          </p>
-          <div className="mt-4 flex gap-3">
-            <a href="#" aria-label="Instagram" className="text-ink/60 hover:text-marsala">
-              <Instagram size={20} />
-            </a>
-            <a href="#" aria-label="WhatsApp" className="text-ink/60 hover:text-marsala">
-              <MessageCircle size={20} />
-            </a>
-            <a href="#" aria-label="E-mail" className="text-ink/60 hover:text-marsala">
-              <Mail size={20} />
-            </a>
-          </div>
+    <footer className="closet-footer">
+      <div className="footer-inner">
+        <div className="footer-opening">
+          <div><p className="footer-eyebrow">Seu closet no Chile</p><h2>A viagem passa.<br /><em>O estilo fica.</em></h2></div>
+          <Link href="/pecas" className="footer-explore"><span>Encontre seu próximo look</span><span className="footer-arrow"><ArrowUpRight size={26} strokeWidth={1.3} /></span></Link>
         </div>
-
-        {columns.map((col) => (
-          <div key={col.title}>
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-ink">{col.title}</h3>
-            <ul className="mt-3 space-y-2">
-              {col.links.map((link) => (
-                <li key={link.href}>
-                  <Link href={link.href} className="text-sm text-ink/60 hover:text-marsala">
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+        <div className="footer-navigation">
+          <div className="footer-brand">
+            <Link href="/" aria-label="VS by Closet — início"><Image src="/brand/logo-horizontal-cream.png" alt="VS by Closet" width={1200} height={320} className="footer-logo" /></Link>
+            <p>Peças para viver o inverno.<br />Reserve no Brasil, retire no Chile.</p>
+            <span className="footer-location"><MapPin size={15} strokeWidth={1.5} /> Brasil → Chile</span>
+            <a href={whatsapp ? `https://wa.me/${whatsapp}` : '/contato'} className="footer-contact"><MessageCircle size={17} strokeWidth={1.5} /><span>Vamos conversar</span><ArrowUpRight size={15} /></a>
           </div>
-        ))}
-
-        {isStoreUrlConfigured && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-ink">Sua conta</h3>
-            <ul className="mt-3 space-y-2">
-              <li>
-                <a href={storeUrl('/account')} className="text-sm text-ink/60 hover:text-marsala">
-                  Minhas reservas
-                </a>
-              </li>
-            </ul>
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-ink/10 py-6">
-        <p className="text-center text-xs text-ink/40">
-          © {new Date().getFullYear()} VS by Closet. Todos os direitos reservados.
-        </p>
+          {columns.map(column => <nav key={column.title} aria-label={column.title} className="footer-column"><h3>{column.title}</h3><ul>{column.links.map(link => <li key={link.href}><Link href={link.href}>{link.label}</Link></li>)}{column.title === 'Estamos por aqui' && isStoreUrlConfigured && <li><a href={storeUrl('/account')}>Minhas reservas <ArrowUpRight size={13} /></a></li>}</ul></nav>)}
+        </div>
+        <div className="footer-bottom"><p>© {new Date().getFullYear()} VS by Closet. Todos os direitos reservados.</p><span>Menos bagagem. Mais histórias.</span></div>
       </div>
     </footer>
   );

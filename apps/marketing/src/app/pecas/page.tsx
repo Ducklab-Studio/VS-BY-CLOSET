@@ -10,6 +10,7 @@ import {
   productUrl,
 } from '@/lib/shopify';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
+import { CategorySelect } from '@/components/CategorySelect';
 
 export const metadata: Metadata = {
   title: 'Peças',
@@ -70,8 +71,8 @@ export default async function PecasPage({
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-12 sm:py-16">
-      <header className="mb-8">
+    <div className="catalog-editorial mx-auto max-w-6xl px-6 py-12 sm:py-16">
+      <header className="catalog-heading mb-8">
         <p className="text-[0.7rem] uppercase tracking-[0.22em] text-ink/45">Aluguel</p>
         <h1 className="mt-2 font-heading text-3xl sm:text-4xl">Peças disponíveis</h1>
         {!isShopifyConfigured && isDemoCatalogEnabled && (
@@ -84,9 +85,10 @@ export default async function PecasPage({
       {/* Filtro por nicho. Rota própria (não estado de cliente) de propósito:
           um link compartilhável direto pra "botas premium" é útil, e o
           catálogo pré-carrega sem esperar JS no navegador do cliente. */}
+      <CategorySelect activeCategory={activeCategory} categories={RENTAL_CATEGORIES} />
       <nav
         aria-label="Filtrar por tipo de peça"
-        className="mb-10 flex flex-wrap gap-2 overflow-x-auto"
+        className="catalog-desktop-categories mb-10 flex-wrap gap-2"
       >
         <CategoryPill href="/pecas" active={!activeCategory}>
           Todas
@@ -111,7 +113,7 @@ export default async function PecasPage({
       ) : (
         <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3">
           {products.map((product) => (
-            <Link key={product.id} href={productUrl(product.handle)} className="group block">
+            <Link key={product.id} href={productUrl(product.handle)} className="catalog-product group block">
               <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-ink/[0.04]">
                 {product.featuredImage ? (
                   <Image
@@ -161,8 +163,9 @@ function CategoryPill({
   return (
     <Link
       href={href}
+      aria-current={active ? 'page' : undefined}
       className={[
-        'shrink-0 rounded-full border px-4 py-2 text-[0.72rem] font-medium uppercase tracking-wider transition-colors',
+        'shrink-0 rounded-full border px-4 py-3 text-sm font-medium transition-colors',
         active
           ? 'border-marsala bg-marsala text-cream'
           : 'border-ink/15 text-ink/60 hover:border-marsala/40 hover:text-marsala',
@@ -172,3 +175,4 @@ function CategoryPill({
     </Link>
   );
 }
+

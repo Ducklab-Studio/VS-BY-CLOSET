@@ -86,7 +86,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-12 sm:py-16">
+    <div className="product-detail mx-auto max-w-6xl px-6 py-12 sm:py-16">
       <nav className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/45">
         <Link href="/" className="transition-colors hover:text-marsala">
           Início
@@ -124,7 +124,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
         </div>
 
         {/* informação + calendário */}
-        <div className="lg:sticky lg:top-8 lg:self-start">
+        <div className="product-detail-info lg:sticky lg:top-32 lg:self-start">
           {!isShopifyConfigured && isDemoCatalogEnabled && (
             <p className="mb-3 inline-block rounded-full bg-marsala/10 px-3 py-1 text-[0.7rem] font-medium text-marsala">
               Modo demonstração — peça fictícia, sem loja conectada
@@ -168,3 +168,4 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     </div>
   );
 }
+

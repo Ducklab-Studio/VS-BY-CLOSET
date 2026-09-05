@@ -8,6 +8,7 @@ import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 import { canTransition, type ReservationStatusValue } from './reservation-state-machine';
 import {
+  extractCustomerEmail,
   extractNoteAttribute,
   extractOrderLineVariants,
   extractReservationId,
@@ -217,7 +218,18 @@ export class WebhooksService {
     }
 
     if (!reservation.shopifyOrderId) {
-      await tx.reservation.update({ where: { id: reservation.id }, data: { shopifyOrderId: orderId, shopifyOrderGid: orderGid } });
+      // Fase 10 — único lugar onde a Reservation aprende o e-mail do
+      // cliente pra reserva ONLINE (o HOLD público nunca coleta e-mail;
+      // achado da auditoria: sem isto, `customerEmail` ficava sempre
+      // null e nenhum e-mail operacional seria possível). Só na
+      // vinculação inicial — não sobrescreve depois, nem é uma segunda
+      // fonte de verdade pra e-mail comercial (isso continua sendo o
+      // pedido na própria Shopify).
+      const customerEmail = extractCustomerEmail(order);
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { shopifyOrderId: orderId, shopifyOrderGid: orderGid, ...(customerEmail ? { customerEmail } : {}) },
+      });
       events.push({ type: 'ORDER_LINKED', reservationId: reservation.id, detail: { orderId } });
     }
 

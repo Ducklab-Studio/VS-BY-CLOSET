@@ -1,223 +1,217 @@
 # Deploy
 
-O site e o Booqable são **duas coisas separadas**, hospedadas em lugares
-diferentes, que se conversam por um script no navegador.
+> Reescrito na Fase 10 para refletir a arquitetura real em produção. A versão
+> anterior deste arquivo descrevia deploy do site em Vercel com o Booqable —
+> plano abandonado antes da Fase 1. Ver [`README.md`](../README.md#histórico-e-legado).
+
+Três peças, três lugares diferentes:
 
 ```
-   SEU SITE                                    BOOQABLE
-   Next.js → Vercel                            já no ar em booqable.com
-   (este repositório)                          (você só configura a conta)
-        │                                             │
-        └─────────────── script JS ───────────────────┘
-                    carregado no navegador
-                       do visitante
+Neon (Postgres)  ◄──────────  Railway (apps/reservations-api, NestJS)
+                                        ▲
+                                        │ server-to-server (ADMIN_API_TOKEN)
+                                        │ + webhooks (Shopify → Railway)
+                                        │
+                              Vercel (apps/marketing, Next.js)
+                                        │
+                                        ▼
+                              Shopify (produto, checkout, pagamento)
 ```
 
-Você **não sobe nada para dentro do Booqable**. Ele já existe como serviço; o
-que se faz lá é cadastrar produtos e autorizar o domínio.
+- **Neon** — Postgres gerenciado. A constraint `EXCLUDE USING gist` que
+  impede double-booking só existe de verdade num Postgres real.
+- **Railway** — hospeda `apps/reservations-api`. É quem fala com o Postgres e
+  recebe os webhooks da Shopify.
+- **Vercel** — hospeda `apps/marketing` (vitrine pública **e** `/closetadmin`).
+  Fala com `apps/reservations-api` só server-to-server, nunca expõe esse
+  endereço ao navegador do cliente final.
+- **Shopify** — a loja real. Continua sendo a única autoridade para produto,
+  preço, pedido, pagamento, refund e conta de cliente.
 
 ---
 
-## Parte 1 — Configurar o Booqable
+## 1. Banco (Neon)
 
-1. Crie a conta em [booqable.com](https://booqable.com). O plano **Start**
-   ($29/mês) atende — API só é necessária em cenário headless, que não é o caso.
-2. Cadastre os produtos como **itens de aluguel** (_rental products_), não como
-   _sales items_. A operação é exclusivamente de locação.
-3. Em **Settings → Online Bookings → Website integration → Custom websites**,
-   copie o identificador da conta (a parte antes de `.booqable.com`).
-4. Ainda em **Online Bookings**, adicione o domínio do site à lista de domínios
-   permitidos.
+1. Crie um projeto em [neon.tech](https://neon.tech) (free tier atende).
+2. Copie a connection string — vai em `DATABASE_URL` do `apps/reservations-api`.
+3. Nenhuma extensão precisa ser habilitada manualmente: `btree_gist` (usada
+   pela constraint `EXCLUDE`) é ativada pela própria migration inicial.
 
-> O passo 4 é o que mais pega gente desprevenida: sem ele o site funciona
-> localmente e os componentes somem em produção.
+## 2. Backend (Railway) — `apps/reservations-api`
 
----
+O deploy é do **monorepo inteiro** (não só a pasta do app) — Root Directory
+fica na raiz do repositório. Definir Root Directory como `apps/reservations-api`
+faz o build receber só os arquivos daquela pasta e excluir `pnpm-workspace.yaml`
+e o lockfile da raiz, quebrando a instalação.
 
-## Parte 2 — Publicar o site na Vercel
+`apps/reservations-api/railway.json` já define tudo:
 
-A Vercel é a empresa que criou o Next.js — o encaixe é nativo, e um site
-deste tamanho cabe no plano gratuito.
-
-### 1. Subir o código para o GitHub
-
-```bash
-gh repo create valles-closet --private --source=. --push
+```json
+{
+  "build": {
+    "buildCommand": "pnpm --filter @valle/reservations-api run db:generate && pnpm --filter @valle/reservations-api run build"
+  },
+  "deploy": {
+    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate"],
+    "startCommand": "pnpm --filter @valle/reservations-api exec node dist/main.js",
+    "healthcheckPath": "/health"
+  }
+}
 ```
 
-Ou crie o repositório pela interface do GitHub e faça o push manual.
+- `preDeployCommand` roda `prisma migrate deploy` **uma vez**, antes de
+  qualquer réplica subir — nunca embutido no `startCommand` (que rodaria uma
+  vez por réplica, correndo risco de duas migrations simultâneas).
+- `/health` confirma conectividade real com o Postgres (`SELECT 1`), não só
+  que o processo respondeu.
 
-### 2. Importar na Vercel
+### Variáveis de ambiente (Railway) — nomes, nunca valores
 
-Em [vercel.com/new](https://vercel.com/new), conecte o GitHub e selecione o
-repositório. O `vercel.json` na raiz já define build, install e região
-(São Paulo) — não é preciso configurar nada na interface.
-
-### 3. Definir as variáveis de ambiente
-
-Em **Settings → Environment Variables**, adicione:
-
-| Variável | Valor |
-| --- | --- |
-| `NEXT_PUBLIC_BOOQABLE_COMPANY` | o identificador copiado no passo 3 acima |
-| `NEXT_PUBLIC_SITE_URL` | `https://seudominio.com.br` |
-
-> Variáveis `NEXT_PUBLIC_*` são **embutidas no bundle durante o build**. Alterar
-> qualquer uma exige um novo deploy — mudar o valor e salvar não basta.
-
-### 4. Ligar o domínio
-
-Em **Settings → Domains**, adicione o domínio. A Vercel mostra os registros DNS
-a criar no seu provedor:
-
-| Tipo | Nome | Valor |
+| Variável | Para quê | Fail-closed? |
 | --- | --- | --- |
-| A | `@` | `76.76.21.21` |
-| CNAME | `www` | `cname.vercel-dns.com` |
+| `DATABASE_URL` | Conexão com o Neon | Sim, sempre |
+| `PORT` | Porta HTTP (Railway define sozinho normalmente) | — |
+| `CORS_ALLOWED_ORIGINS` | Domínios que podem chamar a API do navegador (o domínio do Vercel) | Sim, em produção |
+| `SHOPIFY_STORE_DOMAIN` | Domínio `.myshopify.com` da loja real | Sim, em produção |
+| `SHOPIFY_STORE_CURRENCY` | Moeda operacional (ex.: `CLP`) | Sim, em produção |
+| `SHOPIFY_STOREFRONT_TOKEN` | Token da Storefront API (cartCreate) | Sim, sempre |
+| `TERMS_VERSION` | Versão vigente dos termos aceitos no HOLD | Sim, em produção |
+| `PAYMENT_WINDOW_MINUTES` | Minutos de janela de pagamento pós-checkout | Não — tem default seguro (30) |
+| `SHOPIFY_CLIENT_SECRET` | Assina/valida os webhooks da Shopify — **mesmo valor** do Client Secret do app real | Sim, sempre, sem fallback nem em dev |
+| `RESERVATION_BINDING_SECRET` | Segredo próprio (gerado, nunca reaproveitado) do binding assinado Order↔Reservation | Sim, sempre, sem fallback |
+| `ADMIN_API_TOKEN` | Bearer que autentica chamadas server-to-server do ClosetAdmin (Vercel → Railway) | Sim, sempre, sem fallback |
 
-O HTTPS é emitido e renovado automaticamente.
+Nenhuma dessas variáveis tem um valor "de exemplo" seguro para produção —
+gere segredos próprios com `openssl rand -hex 32` quando o comentário no
+`.env.example` do app pedir isso, e nunca reaproveite um segredo para dois
+propósitos diferentes.
 
-### 5. Voltar ao Booqable
+## 3. Frontend (Vercel) — `apps/marketing`
 
-Autorize o domínio final em **Settings → Online Bookings** (o passo 4 da
-Parte 1). Sem isso, os componentes não carregam no site publicado.
+`vercel.json` já define framework e output. Variáveis de ambiente:
 
-### Deploys seguintes
-
-```bash
-git push
-```
-
-A Vercel constrói e publica sozinha. Cada pull request ganha uma URL de preview
-própria.
-
-**Mudanças de catálogo, preço ou disponibilidade não exigem deploy** — são
-feitas no painel do Booqable e aparecem no site imediatamente.
-
----
-
-## Alternativa — Hostinger
-
-Funciona, mas o plano importa. Node.js não está disponível em todos eles.
-
-| Plano | Node.js | Como publicar |
+| Variável | Visibilidade | Para quê |
 | --- | --- | --- |
-| Premium (compartilhada) | ❌ Não | Só pelo **build estático** (abaixo) |
-| Business / Cloud | ✅ Sim | Node.js gerenciado, deploy pelo GitHub |
-| VPS | ✅ Sim | Docker (seção seguinte) ou Node direto |
+| `NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN` | Pública | Domínio da loja (Storefront API) |
+| `NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN` | Pública* | Token de leitura de catálogo + carrinho |
+| `NEXT_PUBLIC_SHOPIFY_STORE_URL` | Pública | URL da loja |
+| `NEXT_PUBLIC_AVAILABILITY_URL` | Pública | `https://<railway>/availability` |
+| `NEXT_PUBLIC_RENTAL_PLAN_URL` | Pública | `https://<railway>/rental-plan/duration` |
+| `NEXT_PUBLIC_HOLDS_URL` | Pública | `https://<railway>/holds` |
+| `NEXT_PUBLIC_CHECKOUT_URL` | Pública | `https://<railway>/checkout` |
+| `NEXT_PUBLIC_RESERVATIONS_URL` | Pública | `https://<railway>/reservations` |
+| `NEXT_PUBLIC_WHATSAPP` | Pública | Número de atendimento (fallback fora da janela online) |
+| `NEXT_PUBLIC_SITE_URL` | Pública | URL do próprio site |
+| `RESERVATIONS_API_ADMIN_URL` | **Server-only** | `https://<railway>` — usado só pelo ClosetAdmin |
+| `ADMIN_API_TOKEN` | **Server-only** | Mesmo valor configurado no Railway — nunca chega ao navegador |
 
-### Build estático — funciona em qualquer plano
+\* Público por design da Shopify: só lê catálogo e mexe no carrinho de quem o
+possui — não é equivalente a um Admin API token.
 
-Este site não busca nada no servidor: todo o comércio acontece no navegador,
-via Booqable. Isso permite gerar **HTML puro**, que roda até na hospedagem
-compartilhada mais barata — sem Node, sem processo para cair.
+As duas últimas são lidas exclusivamente por código marcado `server-only`
+(`src/lib/admin-api.ts`) — o pacote `server-only` quebra o build se algum
+Client Component tentar importar esse módulo, então "vazar pro navegador" é
+um erro de build, não um risco silencioso.
 
-```bash
-pnpm --filter @loja/web build:static
+## 4. Shopify — o app real
+
+Configuração em `apps/shopify-app/`, gerenciado pelo Shopify CLI (workspace
+próprio, fora do pnpm-workspace da raiz de propósito). Dois perfis:
+
+- `shopify.app.toml` — app de **desenvolvimento**. É o default do CLI; um
+  `shopify app deploy` sem `--config production` nunca aponta para produção.
+- `shopify.app.production.toml` — app real ("VS BY CLOSET Integration").
+
+Configuração vigente no perfil de produção:
+
+```toml
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "https://<railway-domain>/webhooks/shopify"
+  topics = [ "orders/paid", "orders/cancelled", "refunds/create" ]
+
+[access_scopes]
+scopes = "read_inventory,read_orders,read_products,unauthenticated_write_checkouts,unauthenticated_read_checkouts,unauthenticated_read_product_inventory,unauthenticated_read_product_listings"
 ```
 
-Gera `apps/web/out/` (~1,5 MB). Suba o **conteúdo** dessa pasta para
-`public_html` via Gerenciador de Arquivos ou FTP.
+Note o que **não** está na lista de scopes: nenhum `write_orders`, nenhum
+acesso a pagamento ou a dados de cliente além do necessário para o carrinho
+público. O app nunca cria pedido, nunca processa pagamento, nunca edita
+produto — só lê e escuta.
 
-O `.htaccess` vai junto e já configura HTTPS obrigatório, redirecionamento de
-`www`, cabeçalhos de segurança e cache. Confirme que arquivos ocultos estão
-visíveis no gerenciador, senão ele não é enviado.
+Publicar uma nova versão do app (`shopify app deploy --config production`) e
+liberá-la (`shopify app release`) são ações que alteram o app real na
+Shopify — sempre confirmar com a pessoa responsável antes de rodar, e nunca
+automatizar sem revisão humana do que mudou desde a versão ativa.
 
-> Defina `NEXT_PUBLIC_SITE_URL` e `NEXT_PUBLIC_BOOQABLE_COMPANY` **antes** de
-> gerar o build — as duas são gravadas no HTML nesse momento:
->
-> ```bash
-> NEXT_PUBLIC_SITE_URL=https://seudominio.com.br NEXT_PUBLIC_BOOQABLE_COMPANY=suaconta pnpm --filter @loja/web build:static
-> ```
+## 5. Migrations
 
-**O que se perde:** cada alteração do site exige gerar e subir tudo de novo, na
-mão. Não há deploy automático por `git push` nem preview de branch. Mudanças de
-catálogo e preço continuam instantâneas, porque vêm do Booqable.
+Mecanismo único, em todo ambiente que não seja a máquina de quem está
+desenvolvendo: `prisma migrate deploy` (rodado pelo `preDeployCommand` do
+Railway). Nunca `prisma db push`, nunca editar uma migration já aplicada.
 
-### Business ou Cloud — Node.js gerenciado
+Todas as migrations aplicadas até a Fase 10 são aditivas (nenhuma removeu
+coluna, tabela ou dado). A Fase 10 em si **não introduziu nenhuma migration**
+— PDF não precisa de schema novo, e uma fundação para e-mail chegou a ser
+desenhada mas foi removida do repositório antes de ser commitada, de
+propósito, para não correr o risco de o `preDeployCommand` do Railway aplicar
+automaticamente uma funcionalidade ainda não decidida (ver a seção de e-mail
+no `README.md`). `prisma migrate status` deve sempre mostrar "up to date" —
+qualquer migration pendente na árvore de trabalho antes de aprovada é motivo
+para parar e revisar, não para commitar.
 
-Em **hPanel → Websites → Node.js**, aponte para o repositório do GitHub e
-configure:
+## 6. Checklist de produção
 
-- Comando de build: `pnpm --filter @loja/web build`
-- Diretório da aplicação: `apps/web`
-- Comando de start: `pnpm --filter @loja/web start`
+**Backend (Railway)**
+- [ ] `railway.json` presente e sem alteração não planejada
+- [ ] Todas as variáveis da tabela acima configuradas
+- [ ] `prisma migrate status` sem migration pendente
+- [ ] `GET /health` respondendo `200 { status: "ok" }`
 
-Defina `NEXT_PUBLIC_BOOQABLE_COMPANY` e `NEXT_PUBLIC_SITE_URL` nas variáveis de
-ambiente do painel.
+**Frontend (Vercel)**
+- [ ] Build sem erro (`next build`)
+- [ ] `/closetadmin/*` exige sessão válida (testar acesso direto sem login)
+- [ ] Site público funcionando normalmente em mobile e desktop
+- [ ] Tema claro/escuro sem quebra visual
 
----
+**Shopify**
+- [ ] App de produção correto (client_id conferido)
+- [ ] Webhook subscriptions ativas e apontando para o domínio certo do Railway
+- [ ] Scopes sem nenhum acesso de escrita a pedido/pagamento/produto
+- [ ] Nenhuma alteração de produto/preço feita fora do fluxo normal da loja
 
-## Alternativa — VPS com Docker
+**Banco**
+- [ ] Migrations registradas em `_prisma_migrations` batendo com o diretório local
+- [ ] `reservation_items_no_overlap_per_unit` (EXCLUDE) presente — é ela quem
+      impede double-booking, não uma checagem de aplicação
+- [ ] Índices principais presentes (`reservation_items(rental_unit_id, status)`,
+      `reservations(status)`, etc.)
 
-O repositório também traz uma stack Docker completa, caso você prefira servidor
-próprio.
+**PDF (Fase 10)**
+- [ ] `GET /admin/reservations/:id/pdf`, `/admin/reports/period.pdf` e
+      `/admin/reports/operational.pdf` respondendo `200` com sessão válida
+- [ ] Nenhuma das três rotas altera `Reservation` nem chama a Shopify —
+      confirmado por teste automatizado, revalidar se o código dessas rotas
+      mudar
+- [ ] Sem persistência de PDF em disco ou banco — gerado sob demanda,
+      nada a monitorar além do próprio backend estar de pé
 
-```
-Internet ──► Caddy :443 ──► web :3000
-             (SSL automático)
-```
+**E-mail — não existe em produção**
+- [ ] Nenhum schema, migration ou código de e-mail no repositório (opcional/
+      pendente, decisão futura — ver `README.md`)
 
-```bash
-cp .env.production.example .env
-```
+## Procedimentos de emergência
 
-Preencha `DOMAIN`, `ACME_EMAIL` e `BOOQABLE_COMPANY`, aponte o DNS para o IP do
-servidor e execute:
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-Atualizações depois disso:
-
-```bash
-git pull && ./scripts/deploy.sh
-```
-
-Requisitos: 1 vCPU e 1 GB de RAM bastam. Portas 80 e 443 abertas — a 80
-precisa ficar aberta mesmo em site só-HTTPS, pois é por ela que o Let's Encrypt
-valida o domínio.
-
-**Quando escolher esta opção:** exigência de manter tudo em infraestrutura
-própria. Para o caso comum, a Vercel sai mais simples e mais barata, já que o
-site não tem backend nem banco.
-
----
-
-## Onde cada componente do Booqable é usado
-
-São divs com classe própria que o script deles hidrata, encapsuladas em
-`<BooqableEmbed>`:
-
-| Componente | Página | Papel |
-| --- | --- | --- |
-| `datepicker` | Home, Catálogo, Como funciona | Define o período e ativa a disponibilidade real |
-| `product-list` | Home, Catálogo | Grade de produtos |
-| `collections` | Home, Catálogo | Navegação por categoria |
-| `product-search` | Catálogo | Busca |
-| `sort` | Catálogo | Ordenação |
-| `sidebar` | Header | Carrinho |
-
-Para usar em outra página:
-
-```tsx
-import { BooqableEmbed } from '@/components/booqable/BooqableEmbed';
-
-<BooqableEmbed component="product-list" limit={8} perPage={8} />
-```
-
-Sem `NEXT_PUBLIC_BOOQABLE_COMPANY` definida, cada um renderiza um placeholder
-identificado em vez de espaço vazio.
-
----
-
-## Diagnóstico
-
-| Sintoma | Causa provável |
-| --- | --- |
-| Componentes aparecem como placeholder | `NEXT_PUBLIC_BOOQABLE_COMPANY` não definida, ou definida sem novo deploy. |
-| Funciona local, quebra em produção | Domínio não autorizado no Booqable (Settings → Online Bookings). |
-| Espaço vazio no lugar dos produtos | O script não carregou. Veja o console: bloqueio de CSP aponta para `next.config.mjs`; 404 no script indica identificador errado. |
-| Funciona na home, quebra ao navegar | Reinit do Booqable falhou na navegação client-side. Veja `refreshBooqable()` em `src/lib/booqable.ts` — os nomes de método são tentativas, pois a API não é documentada. |
-| Domínio não valida na Vercel | DNS ainda propagando. Confira com `dig +short seudominio.com.br`. |
+- **Migration quebrou em produção**: nunca editar a migration já aplicada.
+  Escrever uma nova migration corretiva e aplicar por `prisma migrate deploy`.
+- **Double-booking suspeito**: confirmar primeiro se
+  `reservation_items_no_overlap_per_unit` continua existindo no banco
+  (`SELECT conname FROM pg_constraint WHERE contype = 'x'`) antes de suspeitar
+  de bug de aplicação — a proteção é do banco, não do código.
+- **Webhook da Shopify parou de chegar**: confirmar a subscription em
+  `shopify app info --config production`, não só o código do lado do Railway.
+- **`ADMIN_API_TOKEN` suspeito de vazamento**: gerar um novo valor, atualizar
+  em Railway e Vercel, redeploy dos dois — o valor antigo para de funcionar
+  imediatamente (comparação em tempo constante, sem cache).

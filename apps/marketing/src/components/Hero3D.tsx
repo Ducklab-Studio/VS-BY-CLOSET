@@ -64,10 +64,10 @@ function useMarkGeometry() {
       // amontoado no lugar do pico. Em 22/0.7 as hastes ainda têm volume e a
       // montanha continua legível.
       new THREE.ExtrudeGeometry(letters, {
-        depth: 22,
+        depth: 12,
         bevelEnabled: true,
-        bevelThickness: 1,
-        bevelSize: 0.7,
+        bevelThickness: 0.4,
+        bevelSize: 0.25,
         bevelSegments: 3,
         curveSegments: 18,
       }),
@@ -80,7 +80,7 @@ function useMarkGeometry() {
       // como acento, não como segunda camada de letra.
       parts.push(
         new THREE.ExtrudeGeometry(stars, {
-          depth: 14,
+          depth: 6,
           bevelEnabled: false,
           curveSegments: 12,
         }),
@@ -159,13 +159,17 @@ function Monogram({ still, parallax }: { still: boolean; parallax: boolean }) {
       return;
     }
 
-    gsap.fromTo(
+    const entrance = gsap.fromTo(
       g.scale,
       { x: 0, y: 0, z: 0 },
       { x: fit, y: fit, z: fit, duration: 1.3, ease: 'back.out(1.6)', delay: 0.15 },
     );
     const shadowTimer = setTimeout(() => setShowShadow(true), 400);
-    return () => clearTimeout(shadowTimer);
+    return () => {
+      entrance.kill();
+      clearTimeout(shadowTimer);
+      entered.current = false;
+    };
   }, [fit, still]);
 
   useFrame(({ clock, pointer }, delta) => {
@@ -218,7 +222,7 @@ function Monogram({ still, parallax }: { still: boolean; parallax: boolean }) {
               versão anterior virava rosa. */}
           <meshPhysicalMaterial
             color="#53131E"
-            roughness={0.4}
+            roughness={0.48}
             metalness={0}
             clearcoat={0.35}
             clearcoatRoughness={0.3}
@@ -280,16 +284,25 @@ function useMotionPrefs() {
 
 export function Hero3D() {
   const { reduced, fine } = useMotionPrefs();
+  const container = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin: '100px' });
+    if (container.current) observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     // Altura menor no celular: 480px fixos comiam quase toda a tela de um
     // telefone e empurravam o resto da home pra fora da primeira dobra.
     <div
+      ref={container}
       className="h-[360px] w-full sm:h-[440px] lg:h-[480px]"
       role="img"
       aria-label="Monograma VS by Closet em três dimensões"
     >
       <Canvas
+        frameloop={visible ? (reduced ? 'demand' : 'always') : 'never'}
         shadows
         // Teto em 1.75: telas de celular passam de 3x, e renderizar a 3x só
         // gasta bateria — a peça é uma silhueta chapada de cor, não textura

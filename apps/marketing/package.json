@@ -9,7 +9,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "next": "^16.0.0",
@@ -24,7 +24,8 @@
     "tailwind-merge": "^2.5.4",
     "lucide-react": "^0.460.0",
     "sharp": "^0.33.5",
-    "@gsap/react": "^2.1.2"
+    "@gsap/react": "^2.1.2",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

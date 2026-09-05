@@ -74,8 +74,8 @@ export default function ReservaConfirmadaPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-16 sm:py-20">
-      <h1 className="mb-6 font-heading text-3xl">Sua reserva</h1>
+    <div className="reservation-status-page mx-auto max-w-xl px-6 py-16 sm:py-20">
+      <p className="privacy-eyebrow">Acompanhe sua viagem</p><h1 className="mb-6 font-heading text-3xl">Sua reserva</h1>
 
       {view === 'loading' && <p className="text-ink/50">Consultando sua reserva…</p>}
 
@@ -170,3 +170,4 @@ function describeStatus(status: string): { title: string; detail: string; tone: 
       return { title: 'Reserva em análise', detail: `Status: ${status}`, tone: 'bg-ink/[0.05] text-ink/70' };
   }
 }
+
