@@ -101,7 +101,7 @@ export function BlocksSection({ blocks, pieces }: { blocks: BlockItem[]; pieces:
                   <span className="ml-2 text-ink/50 dark:text-dark-muted font-mono text-xs">
                     {block.startDate} – {block.endDate}
                   </span>
-                  <p className="text-ink/45 dark:text-dark-muted mt-0.5">{block.reason}</p>
+                  <p className="text-ink/65 dark:text-dark-muted mt-0.5">{block.reason}</p>
                 </div>
                 <ConfirmDialog
                   trigger={<button type="button" className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/50 dark:bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-100/60 dark:hover:bg-red-900/40 transition">Remover</button>}

@@ -46,7 +46,12 @@ export async function generateMetadata({
 
   try {
     const product = await getProductDetail(handle);
-    if (!product) return {};
+    // Sem isto, o <title> da página renderizada por not-found.tsx ficava
+    // com o padrão do layout raiz em vez do próprio — generateMetadata
+    // do segmento CASADO pela URL (esta página) tem prioridade sobre a
+    // metadata de not-found.tsx quando quem aciona é notFound(), não uma
+    // URL sem rota nenhuma.
+    if (!product) return { title: 'Página não encontrada' };
     return {
       title: product.title,
       description: product.description?.slice(0, 160),
@@ -87,7 +92,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
 
   return (
     <div className="product-detail mx-auto max-w-6xl px-6 py-12 sm:py-16">
-      <nav className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/45">
+      <nav className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/65">
         <Link href="/" className="transition-colors hover:text-marsala">
           Início
         </Link>
@@ -117,7 +122,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
               </div>
             ))
           ) : (
-            <div className="grid aspect-[3/4] place-items-center rounded-2xl bg-ink/[0.04] text-sm text-ink/40">
+            <div className="grid aspect-[3/4] place-items-center rounded-2xl bg-ink/[0.04] text-sm text-ink/65">
               Sem foto cadastrada
             </div>
           )}

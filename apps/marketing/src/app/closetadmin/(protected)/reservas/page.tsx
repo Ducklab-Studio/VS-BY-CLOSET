@@ -55,7 +55,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
           <div className="mt-4 overflow-x-auto rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card shadow-sm transition-colors">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-ink/10 dark:border-white/10 text-left text-xs uppercase tracking-wide text-ink/40 dark:text-dark-subtle bg-neutral-50/50 dark:bg-white/[0.02]">
+                <tr className="border-b border-ink/10 dark:border-white/10 text-left text-xs uppercase tracking-wide text-ink/65 dark:text-dark-subtle bg-neutral-50/50 dark:bg-white/[0.02]">
                   <th className="px-4 py-3 font-medium">Cliente</th>
                   <th className="px-4 py-3 font-medium">Origem</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -70,7 +70,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
                     <td className="px-4 py-3">
                       <Link href={`/closetadmin/reservas/${r.id}`} className="block">
                         <span className="font-medium text-ink dark:text-dark-text">{r.customerName ?? '—'}</span>
-                        <span className="block text-xs text-ink/45 dark:text-dark-subtle mt-0.5">{r.customerPhone ?? ''}</span>
+                        <span className="block text-xs text-ink/65 dark:text-dark-subtle mt-0.5">{r.customerPhone ?? ''}</span>
                       </Link>
                     </td>
                     <td className="px-4 py-3">

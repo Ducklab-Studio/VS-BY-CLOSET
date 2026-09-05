@@ -19,7 +19,7 @@ export function ConfirmDialog({
 }: {
   trigger: React.ReactNode;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   confirmLabel?: string;
   requireReason?: boolean;
   danger?: boolean;
@@ -56,7 +56,10 @@ export function ConfirmDialog({
           <button aria-label="Fechar" className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => !pending && setOpen(false)} />
           <div className="relative w-full max-w-sm rounded-2xl bg-white dark:bg-dark-card border border-ink/10 dark:border-white/10 p-6 shadow-2xl transition-colors">
             <h2 className="font-heading text-lg font-bold text-ink dark:text-dark-text tracking-wide">{title}</h2>
-            {description ? <p className="mt-1.5 text-sm text-ink/60 dark:text-dark-muted">{description}</p> : null}
+            {/* div, não <p>: description agora aceita ReactNode (ex.: RulesForm
+                passa uma <ul> com o resumo das mudanças) — <ul> dentro de <p>
+                é HTML inválido e quebra a hidratação. */}
+            {description ? <div className="mt-1.5 text-sm text-ink/60 dark:text-dark-muted">{description}</div> : null}
 
             {requireReason ? (
               <label className="mt-4 flex flex-col gap-1.5 text-sm">

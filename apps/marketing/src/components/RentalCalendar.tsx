@@ -254,7 +254,7 @@ export function RentalCalendar({
         {weekdays.map((w) => (
           <span
             key={w}
-            className="py-1 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-ink/45"
+            className="py-1 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-ink/65"
           >
             {w}
           </span>
@@ -496,7 +496,7 @@ function DayCell({
             : disabled
               ? // Riscado, não apagado: dia apagado o cliente acha que é de
                 // outro mês; riscado ele entende que existe e está tomado.
-                'cursor-not-allowed border-transparent text-ink/40 line-through'
+                'cursor-not-allowed border-transparent text-ink/65 line-through'
               : 'border-transparent hover:border-marsala/25 hover:bg-marsala/[0.06]',
       ].join(' ')}
     >

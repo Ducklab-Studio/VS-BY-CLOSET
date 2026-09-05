@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Como funciona',
@@ -86,11 +87,8 @@ export default function ComoFuncionaPage() {
       {/* ── CTA ─────────────────────────────────────────────────────────── */}
       <section className="guide-cta">
         <h2 className="font-heading text-xl text-ink">Quando é sua viagem?</h2>
-        <Link
-          href="/pecas"
-          className="mt-8 inline-flex rounded-full border border-marsala px-6 py-3 text-xs uppercase tracking-widest text-marsala transition hover:bg-marsala hover:text-cream"
-        >
-          Ver as peças
+        <Link href="/pecas" className="editorial-button">
+          Ver as peças <ArrowUpRight size={18} />
         </Link>
       </section>
     </div>

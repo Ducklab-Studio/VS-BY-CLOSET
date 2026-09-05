@@ -73,7 +73,7 @@ export default async function PecasPage({
   return (
     <div className="catalog-editorial mx-auto max-w-6xl px-6 py-12 sm:py-16">
       <header className="catalog-heading mb-8">
-        <p className="text-[0.7rem] uppercase tracking-[0.22em] text-ink/45">Aluguel</p>
+        <p className="text-[0.7rem] uppercase tracking-[0.22em] text-ink/65">Aluguel</p>
         <h1 className="mt-2 font-heading text-3xl sm:text-4xl">Peças disponíveis</h1>
         {!isShopifyConfigured && isDemoCatalogEnabled && (
           <p className="mt-3 inline-block rounded-full bg-marsala/10 px-3 py-1 text-[0.7rem] font-medium text-marsala">
@@ -130,7 +130,7 @@ export default async function PecasPage({
                 )}
               </div>
               {product.productType && (
-                <p className="mt-3 text-[0.65rem] uppercase tracking-wider text-ink/40">
+                <p className="mt-3 text-[0.65rem] uppercase tracking-wider text-ink/65">
                   {product.productType}
                 </p>
               )}

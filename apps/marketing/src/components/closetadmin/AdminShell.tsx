@@ -104,7 +104,7 @@ function SidebarContent({
       <div className="flex items-center justify-between px-5 py-5 border-b border-ink/5 dark:border-white/5">
         <div className="flex flex-col">
           <span className="font-heading text-xl font-bold text-marsala dark:text-gold tracking-wide">ClosetAdmin</span>
-          <span className="text-[11px] text-ink/40 dark:text-dark-subtle tracking-wider uppercase">Painel de Operações</span>
+          <span className="text-[11px] text-ink/65 dark:text-dark-subtle tracking-wider uppercase">Painel de Operações</span>
         </div>
         {onNavigate ? (
           <button aria-label="Fechar menu" className="rounded-md p-1 text-ink/50 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5" onClick={onNavigate}>
@@ -132,7 +132,7 @@ function SidebarContent({
           );
         })}
       </nav>
-      <div className="border-t border-ink/10 dark:border-white/10 px-5 py-4 text-xs text-ink/40 dark:text-dark-subtle">
+      <div className="border-t border-ink/10 dark:border-white/10 px-5 py-4 text-xs text-ink/65 dark:text-dark-subtle">
         Sessão: <span className="font-medium text-ink/60 dark:text-dark-muted">{session.name}</span> ({session.role})
       </div>
     </>

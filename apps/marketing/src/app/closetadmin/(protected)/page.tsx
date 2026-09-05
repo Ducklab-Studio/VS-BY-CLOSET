@@ -70,13 +70,13 @@ export default async function ClosetAdminDashboardPage() {
           <Card>
             <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Próximas retiradas</h2>
             {upcomingPickups.length === 0 ? (
-              <p className="mt-3 text-sm text-ink/45 dark:text-dark-muted">Nenhuma retirada nos próximos 7 dias.</p>
+              <p className="mt-3 text-sm text-ink/65 dark:text-dark-muted">Nenhuma retirada nos próximos 7 dias.</p>
             ) : (
               <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
                 {upcomingPickups.map((item) => (
                   <li key={`${item.reservationId}-${item.rentalUnitId}`} className="flex items-center justify-between py-2 text-sm">
                     <span className="text-ink dark:text-dark-text font-medium">
-                      {item.customerName ?? 'Cliente'} <span className="text-ink/40 dark:text-dark-subtle font-normal">· {item.rentalUnitCode}</span>
+                      {item.customerName ?? 'Cliente'} <span className="text-ink/65 dark:text-dark-subtle font-normal">· {item.rentalUnitCode}</span>
                     </span>
                     <span className="text-ink/60 dark:text-dark-muted">{formatDatePt(item.pickupDate!)}</span>
                   </li>
@@ -88,13 +88,13 @@ export default async function ClosetAdminDashboardPage() {
           <Card>
             <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Próximas devoluções</h2>
             {upcomingReturns.length === 0 ? (
-              <p className="mt-3 text-sm text-ink/45 dark:text-dark-muted">Nenhuma devolução nos próximos 7 dias.</p>
+              <p className="mt-3 text-sm text-ink/65 dark:text-dark-muted">Nenhuma devolução nos próximos 7 dias.</p>
             ) : (
               <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
                 {upcomingReturns.map((item) => (
                   <li key={`${item.reservationId}-${item.rentalUnitId}-r`} className="flex items-center justify-between py-2 text-sm">
                     <span className="text-ink dark:text-dark-text font-medium">
-                      {item.customerName ?? 'Cliente'} <span className="text-ink/40 dark:text-dark-subtle font-normal">· {item.rentalUnitCode}</span>
+                      {item.customerName ?? 'Cliente'} <span className="text-ink/65 dark:text-dark-subtle font-normal">· {item.rentalUnitCode}</span>
                     </span>
                     <span className="text-ink/60 dark:text-dark-muted">{formatDatePt(item.effectiveReturnDate!)}</span>
                   </li>
@@ -117,7 +117,7 @@ export default async function ClosetAdminDashboardPage() {
           <Card>
             <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Alertas</h2>
             {problems.length === 0 ? (
-              <p className="mt-3 text-sm text-ink/45 dark:text-dark-muted">Nenhuma reserva requer atenção.</p>
+              <p className="mt-3 text-sm text-ink/65 dark:text-dark-muted">Nenhuma reserva requer atenção.</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {problems.slice(0, 6).map((r) => (

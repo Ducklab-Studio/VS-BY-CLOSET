@@ -2,15 +2,48 @@
 
 import { useState } from 'react';
 import type { RentalRuleConfig } from '@/lib/admin-data';
+import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { updateRulesAction } from './actions';
 
 const inputClass =
   'w-28 rounded-lg border border-ink/15 dark:border-white/15 bg-white dark:bg-dark-surface px-3 py-2 text-sm text-ink dark:text-dark-text outline-none transition focus:border-marsala dark:focus:border-gold focus:ring-2 focus:ring-marsala/20 dark:focus:ring-gold/20 placeholder:text-ink/40 dark:placeholder:text-dark-subtle';
 
+/** Fase 10, item 3 — resumo do que muda de verdade, pra confirmação
+ *  aparecer com contexto em vez de um "tem certeza?" genérico. Só
+ *  campos que realmente divergem do valor carregado do backend entram
+ *  na lista. */
+function describeChanges(initial: RentalRuleConfig, form: RentalRuleConfig): string[] {
+  const changes: string[] = [];
+  if (initial.minAdvanceDays !== form.minAdvanceDays) {
+    changes.push(`Antecedência mínima: ${initial.minAdvanceDays} → ${form.minAdvanceDays} dias`);
+  }
+  if (initial.prepDays !== form.prepDays) {
+    changes.push(`Preparação: ${initial.prepDays} → ${form.prepDays} dias`);
+  }
+  if (initial.cleaningDays !== form.cleaningDays) {
+    changes.push(`Limpeza: ${initial.cleaningDays} → ${form.cleaningDays} dias`);
+  }
+  if (initial.maxPieces !== form.maxPieces) {
+    changes.push(`Máximo de peças: ${initial.maxPieces} → ${form.maxPieces}`);
+  }
+  if (initial.blackoutStart !== form.blackoutStart || initial.blackoutEnd !== form.blackoutEnd) {
+    changes.push(`Temporada bloqueada: ${initial.blackoutStart} – ${initial.blackoutEnd} → ${form.blackoutStart} – ${form.blackoutEnd}`);
+  }
+  form.piecesToDaysTable.forEach((tier, i) => {
+    const before = initial.piecesToDaysTable[i];
+    if (before && before.days !== tier.days) {
+      changes.push(`Até ${tier.upTo} peça(s): ${before.days} → ${tier.days} dia(s)`);
+    }
+  });
+  return changes;
+}
+
 export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
   const [form, setForm] = useState(initial);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+
+  const changes = describeChanges(initial, form);
 
   async function save() {
     setPending(true);
@@ -25,7 +58,13 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
       piecesToDaysTable: form.piecesToDaysTable,
     });
     setPending(false);
-    setMessage(result.error ? { type: 'error', text: result.error } : { type: 'ok', text: 'Regras atualizadas.' });
+    if (result.error) {
+      // Lançar em vez de setMessage: o ConfirmDialog mostra o erro
+      // dentro do próprio modal (que fica aberto) e deixa tentar de novo
+      // sem precisar reabrir a confirmação.
+      throw new Error(result.error);
+    }
+    setMessage({ type: 'ok', text: 'Regras atualizadas.' });
   }
 
   function updateTier(index: number, days: number) {
@@ -82,14 +121,32 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
       ) : null}
 
       <div>
-        <button
-          type="button"
-          onClick={save}
-          disabled={pending}
-          className="rounded-lg bg-marsala dark:bg-marsala-light px-5 py-2.5 text-sm font-medium text-cream dark:text-sand hover:bg-marsala/90 dark:hover:bg-marsala-glow transition disabled:opacity-60 shadow-sm"
-        >
-          {pending ? 'Salvando…' : 'Salvar regras'}
-        </button>
+        <ConfirmDialog
+          trigger={
+            <button
+              type="button"
+              disabled={pending || changes.length === 0}
+              className="rounded-lg bg-marsala dark:bg-marsala-light px-5 py-2.5 text-sm font-medium text-cream dark:text-sand hover:bg-marsala/90 dark:hover:bg-marsala-glow transition disabled:opacity-60 shadow-sm"
+            >
+              {pending ? 'Salvando…' : 'Salvar regras'}
+            </button>
+          }
+          title="Confirmar alteração das regras de aluguel?"
+          description={
+            changes.length > 0 ? (
+              <>
+                <span className="block">Isso vale imediatamente para o site e para novas reservas:</span>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {changes.map((change) => (
+                    <li key={change}>{change}</li>
+                  ))}
+                </ul>
+              </>
+            ) : undefined
+          }
+          confirmLabel="Salvar alterações"
+          onConfirm={save}
+        />
       </div>
     </div>
   );

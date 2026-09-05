@@ -7,7 +7,7 @@ export function EmptyState({ title, description }: { title: string; description?
   return (
     <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-ink/15 dark:border-white/10 bg-white dark:bg-dark-card/60 px-6 py-14 text-center transition-colors">
       <p className="font-medium text-ink/70 dark:text-dark-text">{title}</p>
-      {description ? <p className="text-sm text-ink/45 dark:text-dark-muted">{description}</p> : null}
+      {description ? <p className="text-sm text-ink/65 dark:text-dark-muted">{description}</p> : null}
     </div>
   );
 }

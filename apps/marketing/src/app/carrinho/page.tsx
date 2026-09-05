@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
 import { getCart, removeCartLine, type Cart, type CartLine } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
 import { createCheckout, createHold, storeLastReservation, type SundayReturnOptionInfo } from '@/lib/checkout';
@@ -139,11 +140,8 @@ export default function CarrinhoPage() {
     return (
       <Shell>
         <p className="text-ink/60">Seu carrinho está vazio.</p>
-        <Link
-          href="/pecas"
-          className="mt-6 inline-flex rounded-xl border border-marsala px-6 py-3 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5"
-        >
-          Ver peças
+        <Link href="/pecas" className="editorial-button mt-6">
+          Ver peças <ArrowUpRight size={18} />
         </Link>
       </Shell>
     );
@@ -181,7 +179,7 @@ export default function CarrinhoPage() {
                 </Link>
 
                 {line.merchandise.sku && (
-                  <p className="mt-0.5 text-[0.7rem] uppercase tracking-wider text-ink/40">
+                  <p className="mt-0.5 text-[0.7rem] uppercase tracking-wider text-ink/65">
                     {line.merchandise.sku}
                   </p>
                 )}
@@ -196,7 +194,7 @@ export default function CarrinhoPage() {
                   type="button"
                   onClick={() => handleRemove(line.id)}
                   disabled={removing === line.id}
-                  className="mt-2 text-[0.75rem] text-ink/45 underline underline-offset-2 transition-colors hover:text-marsala disabled:opacity-50"
+                  className="mt-2 text-[0.75rem] text-ink/65 underline underline-offset-2 transition-colors hover:text-marsala disabled:opacity-50"
                 >
                   {removing === line.id ? 'Removendo…' : 'Remover'}
                 </button>
@@ -314,7 +312,7 @@ export default function CarrinhoPage() {
         {checkingOut ? 'Preparando…' : 'Finalizar reserva'}
       </button>
 
-      <p className="mt-3 text-center text-[0.7rem] text-ink/45">
+      <p className="mt-3 text-center text-[0.7rem] text-ink/65">
         Pagamento processado com segurança pela Shopify.
       </p>
     </Shell>

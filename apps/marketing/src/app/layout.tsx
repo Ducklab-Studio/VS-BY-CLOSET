@@ -20,6 +20,11 @@ export const metadata: Metadata = {
 const THEME_SCRIPT = `
 (function() {
   try {
+    // Dark mode é exclusivo do /closetadmin — o site público nunca deve
+    // herdar a preferência de tema salva pela equipe neste navegador.
+    // Fora dessa rota, nem lê o localStorage: o <html> fica sem a classe
+    // 'dark' e a vitrine renderiza sempre na identidade cream/bordô.
+    if (!location.pathname.startsWith('/closetadmin')) return;
     var stored = localStorage.getItem('closetadmin_theme');
     var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     if (dark) document.documentElement.classList.add('dark');

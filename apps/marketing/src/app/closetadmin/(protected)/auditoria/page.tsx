@@ -59,10 +59,10 @@ export default async function ClosetAdminAuditPage() {
                     <span className="font-semibold text-ink dark:text-dark-text">{ACTION_LABELS[entry.action] ?? entry.action}</span>
                     {entry.adminUserName ? <span className="text-ink/50 dark:text-dark-muted">por <strong className="font-medium text-ink/70 dark:text-dark-text">{entry.adminUserName}</strong></span> : null}
                   </div>
-                  <span className="text-xs text-ink/40 dark:text-dark-subtle font-mono">{formatDateTimePt(entry.createdAt)}</span>
+                  <span className="text-xs text-ink/65 dark:text-dark-subtle font-mono">{formatDateTimePt(entry.createdAt)}</span>
                 </div>
                 {entry.entityType ? (
-                  <p className="mt-0.5 text-xs text-ink/40 dark:text-dark-subtle font-mono">
+                  <p className="mt-0.5 text-xs text-ink/65 dark:text-dark-subtle font-mono">
                     {entry.entityType} {entry.entityId ? `· ${entry.entityId}` : ''}
                   </p>
                 ) : null}
