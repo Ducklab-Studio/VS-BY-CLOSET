@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   CalendarDays,
@@ -221,7 +222,7 @@ export default async function ClosetAdminCalendarPage({ searchParams }: { search
   );
 }
 
-function SummaryCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+function SummaryCard({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
   return (
     <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
       <div className="flex items-center justify-between gap-3">
