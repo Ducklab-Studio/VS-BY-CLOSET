@@ -12,6 +12,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGOUT: 'Logout',
   MANUAL_RESERVATION_CREATED: 'Reserva manual criada',
   MANUAL_RESERVATION_CANCELLED: 'Reserva manual cancelada',
+  SHOPIFY_UNITS_IMPORTED: 'Peças importadas da Shopify',
   UNIT_ACTIVATED: 'Peça ativada',
   UNIT_DEACTIVATED: 'Peça desativada',
   UNIT_UPDATED: 'Peça atualizada',
