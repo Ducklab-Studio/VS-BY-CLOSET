@@ -38,6 +38,35 @@ jobs:
         run: pnpm lint
         continue-on-error: true
 
+  reservations-api:
+    name: API — typecheck, testes e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @valle/reservations-api run db:generate
+
+      - name: Typecheck API
+        run: pnpm --filter @valle/reservations-api run typecheck
+
+      - name: Testes API
+        run: pnpm --filter @valle/reservations-api run test
+
+      - name: Build API
+        run: pnpm --filter @valle/reservations-api run build
+
   build:
     name: Build da vitrine (Next.js)
     runs-on: ubuntu-latest
