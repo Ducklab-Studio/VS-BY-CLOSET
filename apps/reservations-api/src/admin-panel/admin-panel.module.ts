@@ -11,11 +11,30 @@ import { AdminBlocksController } from './blocks.controller';
 import { AdminBlocksService } from './blocks.service';
 import { AdminAuditController } from './audit.controller';
 import { AdminAuditService } from './audit.service';
+import { ShopifyAdminClient } from './shopify-admin.client';
+import { ShopifyCatalogController } from './shopify-catalog.controller';
+import { ShopifyCatalogService } from './shopify-catalog.service';
 
 @Module({
   imports: [PrismaModule],
-  controllers: [AdminCalendarController, AdminPiecesController, AdminRulesController, AdminBlocksController, AdminAuditController],
-  providers: [AdminRoleGuard, AdminCalendarService, AdminPiecesService, AdminRulesService, AdminBlocksService, AdminAuditService],
+  controllers: [
+    AdminCalendarController,
+    AdminPiecesController,
+    AdminRulesController,
+    AdminBlocksController,
+    AdminAuditController,
+    ShopifyCatalogController,
+  ],
+  providers: [
+    AdminRoleGuard,
+    AdminCalendarService,
+    AdminPiecesService,
+    AdminRulesService,
+    AdminBlocksService,
+    AdminAuditService,
+    ShopifyAdminClient,
+    ShopifyCatalogService,
+  ],
   exports: [AdminCalendarService],
 })
 export class AdminPanelModule {}

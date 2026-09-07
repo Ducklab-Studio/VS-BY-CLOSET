@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
 import { updatePiece } from '@/lib/admin-data';
+import { importShopifyUnits } from '@/lib/shopify-admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /** Item 11 — só campos operacionais, e só ADMIN ("gestão operacional de
@@ -21,5 +22,36 @@ export async function updatePieceAction(
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a peça.' };
   }
   revalidatePath('/closetadmin/pecas');
+  return { error: null };
+}
+
+/**
+ * Cria apenas as unidades físicas escolhidas pela operação. O estoque da
+ * Shopify é exibido como referência, mas nunca é convertido automaticamente
+ * em RentalUnits: aluguel precisa de identidade física individual por peça.
+ */
+export async function importShopifyUnitsAction(
+  shopifyVariantId: string,
+  rawCodes: string,
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'ADMIN');
+
+  const codes = rawCodes
+    .split(/[\n,;]+/)
+    .map((code) => code.trim())
+    .filter(Boolean);
+
+  if (codes.length === 0) return { error: 'Informe pelo menos um código de peça.' };
+  if (codes.length > 50) return { error: 'Cadastre no máximo 50 peças por vez.' };
+
+  try {
+    await importShopifyUnits({ shopifyVariantId, codes }, session.id);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível cadastrar as peças.' };
+  }
+
+  revalidatePath('/closetadmin/pecas');
+  revalidatePath('/closetadmin');
   return { error: null };
 }
