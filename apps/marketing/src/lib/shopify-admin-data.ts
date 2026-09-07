@@ -45,5 +45,6 @@ export function importShopifyUnits(
   },
   adminUserId: string,
 ): Promise<readonly ShopifyMappedUnit[]> {
-  return adminPost('/admin/shopify/units', { ...input, adminUserId });
+  const path = `/admin/shopify/units?adminUserId=${encodeURIComponent(adminUserId)}`;
+  return adminPost(path, input);
 }
