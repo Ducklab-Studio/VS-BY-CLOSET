@@ -1,39 +1,26 @@
 'use client';
 
 import { useState } from 'react';
+import { CalendarClock, RotateCcw, Sparkles } from 'lucide-react';
 import type { RentalRuleConfig } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { updateRulesAction } from './actions';
 
 const inputClass =
-  'w-28 rounded-lg border border-ink/15 dark:border-white/15 bg-white dark:bg-dark-surface px-3 py-2 text-sm text-ink dark:text-dark-text outline-none transition focus:border-marsala dark:focus:border-gold focus:ring-2 focus:ring-marsala/20 dark:focus:ring-gold/20 placeholder:text-ink/40 dark:placeholder:text-dark-subtle';
+  'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-surface dark:text-dark-text dark:focus:border-gold dark:focus:ring-gold/20';
 
-/** Fase 10, item 3 — resumo do que muda de verdade, pra confirmação
- *  aparecer com contexto em vez de um "tem certeza?" genérico. Só
- *  campos que realmente divergem do valor carregado do backend entram
- *  na lista. */
 function describeChanges(initial: RentalRuleConfig, form: RentalRuleConfig): string[] {
   const changes: string[] = [];
-  if (initial.minAdvanceDays !== form.minAdvanceDays) {
-    changes.push(`Antecedência mínima: ${initial.minAdvanceDays} → ${form.minAdvanceDays} dias`);
-  }
-  if (initial.prepDays !== form.prepDays) {
-    changes.push(`Preparação: ${initial.prepDays} → ${form.prepDays} dias`);
-  }
-  if (initial.cleaningDays !== form.cleaningDays) {
-    changes.push(`Limpeza: ${initial.cleaningDays} → ${form.cleaningDays} dias`);
-  }
-  if (initial.maxPieces !== form.maxPieces) {
-    changes.push(`Máximo de peças: ${initial.maxPieces} → ${form.maxPieces}`);
-  }
+  if (initial.minAdvanceDays !== form.minAdvanceDays) changes.push(`Antecedência mínima: ${initial.minAdvanceDays} → ${form.minAdvanceDays} dias`);
+  if (initial.prepDays !== form.prepDays) changes.push(`Preparação: ${initial.prepDays} → ${form.prepDays} dias`);
+  if (initial.cleaningDays !== form.cleaningDays) changes.push(`Limpeza: ${initial.cleaningDays} → ${form.cleaningDays} dias`);
+  if (initial.maxPieces !== form.maxPieces) changes.push(`Máximo de peças: ${initial.maxPieces} → ${form.maxPieces}`);
   if (initial.blackoutStart !== form.blackoutStart || initial.blackoutEnd !== form.blackoutEnd) {
     changes.push(`Temporada bloqueada: ${initial.blackoutStart} – ${initial.blackoutEnd} → ${form.blackoutStart} – ${form.blackoutEnd}`);
   }
-  form.piecesToDaysTable.forEach((tier, i) => {
-    const before = initial.piecesToDaysTable[i];
-    if (before && before.days !== tier.days) {
-      changes.push(`Até ${tier.upTo} peça(s): ${before.days} → ${tier.days} dia(s)`);
-    }
+  form.piecesToDaysTable.forEach((tier, index) => {
+    const before = initial.piecesToDaysTable[index];
+    if (before && before.days !== tier.days) changes.push(`Até ${tier.upTo} peça(s): ${before.days} → ${tier.days} dia(s)`);
   });
   return changes;
 }
@@ -44,6 +31,7 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
   const changes = describeChanges(initial, form);
+  const dirty = changes.length > 0;
 
   async function save() {
     setPending(true);
@@ -58,13 +46,8 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
       piecesToDaysTable: form.piecesToDaysTable,
     });
     setPending(false);
-    if (result.error) {
-      // Lançar em vez de setMessage: o ConfirmDialog mostra o erro
-      // dentro do próprio modal (que fica aberto) e deixa tentar de novo
-      // sem precisar reabrir a confirmação.
-      throw new Error(result.error);
-    }
-    setMessage({ type: 'ok', text: 'Regras atualizadas.' });
+    if (result.error) throw new Error(result.error);
+    setMessage({ type: 'ok', text: 'Regras atualizadas e aplicadas ao motor de disponibilidade.' });
   }
 
   function updateTier(index: number, days: number) {
@@ -74,72 +57,108 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
     }));
   }
 
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <Field label="Antecedência mínima (dias)">
-          <input type="number" min={0} value={form.minAdvanceDays} onChange={(e) => setForm((p) => ({ ...p, minAdvanceDays: Number(e.target.value) }))} className={inputClass} />
-        </Field>
-        <Field label="Preparação (dias)">
-          <input type="number" min={0} value={form.prepDays} onChange={(e) => setForm((p) => ({ ...p, prepDays: Number(e.target.value) }))} className={inputClass} />
-        </Field>
-        <Field label="Limpeza (dias)">
-          <input type="number" min={0} value={form.cleaningDays} onChange={(e) => setForm((p) => ({ ...p, cleaningDays: Number(e.target.value) }))} className={inputClass} />
-        </Field>
-        <Field label="Máximo de peças">
-          <input type="number" min={1} value={form.maxPieces} onChange={(e) => setForm((p) => ({ ...p, maxPieces: Number(e.target.value) }))} className={inputClass} />
-        </Field>
-        <Field label="Início temporada bloqueada (MM-DD)">
-          <input value={form.blackoutStart} onChange={(e) => setForm((p) => ({ ...p, blackoutStart: e.target.value }))} className={inputClass} />
-        </Field>
-        <Field label="Fim temporada bloqueada (MM-DD)">
-          <input value={form.blackoutEnd} onChange={(e) => setForm((p) => ({ ...p, blackoutEnd: e.target.value }))} className={inputClass} />
-        </Field>
-      </div>
+  function reset() {
+    setForm(initial);
+    setMessage(null);
+  }
 
-      <div>
-        <p className="text-sm font-medium text-ink/70 dark:text-dark-muted">Duração por quantidade de peças</p>
-        <div className="mt-2 flex flex-wrap gap-3">
-          {form.piecesToDaysTable.map((tier, i) => (
-            <label key={tier.upTo} className="flex items-center gap-2 rounded-lg border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-surface px-3 py-2 text-sm shadow-sm">
-              <span className="text-ink/50 dark:text-dark-muted">até {tier.upTo} peça(s) →</span>
-              <input
-                type="number"
-                min={1}
-                value={tier.days}
-                onChange={(e) => updateTier(i, Number(e.target.value))}
-                className="w-14 rounded-md border border-ink/15 dark:border-white/15 bg-white dark:bg-dark-card text-ink dark:text-dark-text px-2 py-1 text-center outline-none focus:border-marsala dark:focus:border-gold"
-              />
-              <span className="text-ink/50 dark:text-dark-muted">dia(s)</span>
+  return (
+    <div className="space-y-5">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Field label="Antecedência mínima" hint="Dias entre a reserva e a retirada">
+          <NumberInput value={form.minAdvanceDays} min={0} suffix="dias" onChange={(value) => setForm((prev) => ({ ...prev, minAdvanceDays: value }))} />
+        </Field>
+        <Field label="Preparação" hint="Bloqueio antes da retirada">
+          <NumberInput value={form.prepDays} min={0} suffix="dias" onChange={(value) => setForm((prev) => ({ ...prev, prepDays: value }))} />
+        </Field>
+        <Field label="Limpeza" hint="Bloqueio após a devolução">
+          <NumberInput value={form.cleaningDays} min={0} suffix="dias" onChange={(value) => setForm((prev) => ({ ...prev, cleaningDays: value }))} />
+        </Field>
+        <Field label="Máximo por reserva" hint="Limite total de peças">
+          <NumberInput value={form.maxPieces} min={1} suffix="peças" onChange={(value) => setForm((prev) => ({ ...prev, maxPieces: value }))} />
+        </Field>
+      </section>
+
+      <section className="rounded-xl border border-ink/10 bg-ink/[0.015] p-4 dark:border-white/10 dark:bg-white/[0.02]">
+        <div className="flex items-center gap-2">
+          <CalendarClock size={17} className="text-marsala dark:text-gold" />
+          <div>
+            <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Temporada bloqueada</h3>
+            <p className="text-xs text-ink/45 dark:text-dark-subtle">Intervalo anual em que reservas online não ficam disponíveis.</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Field label="Início (MM-DD)" hint="Ex.: 06-01">
+            <input value={form.blackoutStart} maxLength={5} onChange={(event) => setForm((prev) => ({ ...prev, blackoutStart: event.target.value }))} className={inputClass} />
+          </Field>
+          <Field label="Fim (MM-DD)" hint="Ex.: 09-30">
+            <input value={form.blackoutEnd} maxLength={5} onChange={(event) => setForm((prev) => ({ ...prev, blackoutEnd: event.target.value }))} className={inputClass} />
+          </Field>
+        </div>
+      </section>
+
+      <section>
+        <div className="flex items-center gap-2">
+          <Sparkles size={17} className="text-marsala dark:text-gold" />
+          <div>
+            <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Duração por quantidade de peças</h3>
+            <p className="text-xs text-ink/45 dark:text-dark-subtle">A quantidade reservada define automaticamente quantos dias o aluguel terá.</p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          {form.piecesToDaysTable.map((tier, index) => (
+            <label key={tier.upTo} className="rounded-xl border border-ink/10 bg-white p-4 dark:border-white/10 dark:bg-dark-surface">
+              <span className="text-xs text-ink/45 dark:text-dark-subtle">Até {tier.upTo} peça(s)</span>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={tier.days}
+                  onChange={(event) => updateTier(index, Number(event.target.value))}
+                  className="w-20 rounded-lg border border-ink/15 bg-white px-3 py-2 text-center text-lg font-semibold text-ink outline-none focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-card dark:text-dark-text dark:focus:border-gold dark:focus:ring-gold/20"
+                />
+                <span className="text-sm text-ink/50 dark:text-dark-muted">dia(s)</span>
+              </div>
             </label>
           ))}
         </div>
-      </div>
+      </section>
 
-      {message ? (
-        <p className={`rounded-lg px-3.5 py-2.5 text-sm ${message.type === 'ok' ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-300' : 'bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-300'}`}>{message.text}</p>
+      {dirty ? (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-400">Alterações não salvas</p>
+          <ul className="mt-2 space-y-1 text-xs text-ink/60 dark:text-dark-muted">
+            {changes.slice(0, 5).map((change) => <li key={change}>• {change}</li>)}
+            {changes.length > 5 ? <li>• +{changes.length - 5} alteração(ões)</li> : null}
+          </ul>
+        </div>
       ) : null}
 
-      <div>
+      {message ? (
+        <p className={`rounded-lg border px-3.5 py-2.5 text-sm ${message.type === 'ok' ? 'border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-500' : 'border-red-500/20 bg-red-500/[0.07] text-red-400'}`}>
+          {message.text}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
         <ConfirmDialog
           trigger={
             <button
               type="button"
-              disabled={pending || changes.length === 0}
-              className="rounded-lg bg-marsala dark:bg-marsala-light px-5 py-2.5 text-sm font-medium text-cream dark:text-sand hover:bg-marsala/90 dark:hover:bg-marsala-glow transition disabled:opacity-60 shadow-sm"
+              disabled={pending || !dirty}
+              className="rounded-lg bg-marsala px-5 py-2.5 text-sm font-medium text-cream shadow-sm transition hover:bg-marsala/90 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-marsala-light dark:text-sand dark:hover:bg-marsala-glow"
             >
-              {pending ? 'Salvando…' : 'Salvar regras'}
+              {pending ? 'Salvando…' : dirty ? `Salvar ${changes.length} alteração(ões)` : 'Tudo salvo'}
             </button>
           }
           title="Confirmar alteração das regras de aluguel?"
           description={
-            changes.length > 0 ? (
+            dirty ? (
               <>
                 <span className="block">Isso vale imediatamente para o site e para novas reservas:</span>
                 <ul className="mt-2 list-disc space-y-1 pl-4">
-                  {changes.map((change) => (
-                    <li key={change}>{change}</li>
-                  ))}
+                  {changes.map((change) => <li key={change}>{change}</li>)}
                 </ul>
               </>
             ) : undefined
@@ -147,16 +166,36 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
           confirmLabel="Salvar alterações"
           onConfirm={save}
         />
+
+        <button
+          type="button"
+          onClick={reset}
+          disabled={!dirty || pending}
+          className="inline-flex items-center gap-2 rounded-lg border border-ink/10 px-4 py-2.5 text-sm font-medium text-ink/60 transition hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:text-dark-muted dark:hover:bg-white/5"
+        >
+          <RotateCcw size={15} />
+          Descartar alterações
+        </button>
       </div>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1.5 text-sm">
-      <span className="font-medium text-ink/70 dark:text-dark-muted">{label}</span>
-      {children}
+    <label className="block">
+      <span className="text-sm font-medium text-ink/70 dark:text-dark-muted">{label}</span>
+      {hint ? <span className="mt-0.5 block text-[11px] text-ink/40 dark:text-dark-subtle">{hint}</span> : null}
+      <div className="mt-2">{children}</div>
     </label>
+  );
+}
+
+function NumberInput({ value, min, suffix, onChange }: { value: number; min: number; suffix: string; onChange: (value: number) => void }) {
+  return (
+    <div className="relative">
+      <input type="number" min={min} value={value} onChange={(event) => onChange(Number(event.target.value))} className={`${inputClass} pr-16`} />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink/35 dark:text-dark-subtle">{suffix}</span>
+    </div>
   );
 }
