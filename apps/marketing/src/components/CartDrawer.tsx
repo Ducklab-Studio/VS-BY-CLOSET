@@ -12,16 +12,42 @@ import {
   type Cart,
   type CartLine,
 } from '@/lib/cart';
+import {
+  fetchRentalStock,
+  stockForVariant,
+  type RentalStockMap,
+} from '@/lib/rental-stock';
 
 export function CartDrawer() {
   const dialog = useRef<HTMLDialogElement>(null);
   const [cart, setCart] = useState<Cart | null>(null);
+  const [rentalStock, setRentalStock] = useState<RentalStockMap>({});
   const [loading, setLoading] = useState(false);
+  const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
   const [open, setOpen] = useState(false);
   const [updatingLine, setUpdatingLine] = useState<string | null>(null);
   const request = useRef({ id: 0 });
+
+  async function loadStock(nextCart: Cart | null, requestId?: number) {
+    if (!nextCart?.lines.length) {
+      setRentalStock({});
+      return;
+    }
+
+    setStockLoading(true);
+    try {
+      const nextStock = await fetchRentalStock(nextCart);
+      if (requestId === undefined || requestId === request.current.id) {
+        setRentalStock(nextStock);
+      }
+    } finally {
+      if (requestId === undefined || requestId === request.current.id) {
+        setStockLoading(false);
+      }
+    }
+  }
 
   async function show(wasAdded = false) {
     setAdded(wasAdded);
@@ -32,7 +58,10 @@ export function CartDrawer() {
     const id = ++request.current.id;
     try {
       const result = await getCart();
-      if (id === request.current.id) setCart(result);
+      if (id === request.current.id) {
+        setCart(result);
+        await loadStock(result, id);
+      }
     } catch {
       if (id === request.current.id) setError('Não foi possível carregar seu carrinho.');
     } finally {
@@ -43,21 +72,28 @@ export function CartDrawer() {
   async function changeQuantity(line: CartLine, nextQuantity: number) {
     if (!cart || updatingLine) return;
 
-    const stock = line.merchandise.quantityAvailable;
+    const stock = stockForVariant(rentalStock, line.merchandise.id);
     const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
     const otherLinesQuantity = totalSameVariant - line.quantity;
-    const maxForThisLine = stock === null ? null : Math.max(0, stock - otherLinesQuantity);
+    const maxForThisLine =
+      stock.effective === null ? null : Math.max(0, stock.effective - otherLinesQuantity);
 
     if (nextQuantity < 1) return;
     if (maxForThisLine !== null && nextQuantity > maxForThisLine) {
-      setError(`A Shopify informa somente ${stock} unidade(s) disponível(is) desta peça.`);
+      setError(
+        stock.physical !== null && stock.shopify !== null
+          ? `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is), considerando Shopify e estoque físico.`
+          : `Há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
+      );
       return;
     }
 
     setUpdatingLine(line.id);
     setError(null);
     try {
-      setCart(await updateCartLineQuantity(line.id, nextQuantity));
+      const nextCart = await updateCartLineQuantity(line.id, nextQuantity);
+      setCart(nextCart);
+      await loadStock(nextCart);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível alterar a quantidade.');
     } finally {
@@ -70,7 +106,9 @@ export function CartDrawer() {
     setUpdatingLine(lineId);
     setError(null);
     try {
-      setCart(await removeCartLine(lineId));
+      const nextCart = await removeCartLine(lineId);
+      setCart(nextCart);
+      await loadStock(nextCart);
     } catch {
       setError('Não foi possível remover a peça.');
     } finally {
@@ -146,10 +184,12 @@ export function CartDrawer() {
             </div>
           ) : (
             cart.lines.map((line) => {
-              const stock = line.merchandise.quantityAvailable;
+              const stock = stockForVariant(rentalStock, line.merchandise.id);
               const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
               const canIncrease =
-                line.merchandise.availableForSale && (stock === null || totalSameVariant < stock);
+                line.merchandise.availableForSale &&
+                !stockLoading &&
+                (stock.effective === null || totalSameVariant < stock.effective);
               const busy = updatingLine === line.id;
 
               return (
@@ -168,13 +208,27 @@ export function CartDrawer() {
                       {line.merchandise.product.title}
                     </Link>
 
-                    <p className="mt-1 text-[0.72rem] text-ink/55">
-                      {stock === null
-                        ? 'Estoque Shopify: sob consulta'
-                        : stock > 0
-                          ? `Estoque Shopify: ${stock} disponível(is)`
-                          : 'Esgotado na Shopify'}
-                    </p>
+                    <div className="mt-1 space-y-0.5 text-[0.72rem] text-ink/55">
+                      <p>
+                        {stock.shopify === null
+                          ? 'Estoque Shopify: sob consulta'
+                          : stock.shopify > 0
+                            ? `Estoque Shopify: ${stock.shopify}`
+                            : 'Esgotado na Shopify'}
+                      </p>
+                      <p>
+                        {stockLoading
+                          ? 'Conferindo peças físicas para a data…'
+                          : stock.physical === null
+                            ? 'Estoque físico na data: será validado ao finalizar'
+                            : `Peças físicas livres na data: ${stock.physical}`}
+                      </p>
+                      {stock.effective !== null && !stockLoading ? (
+                        <p className="font-medium text-marsala">
+                          Disponível para esta reserva: {stock.effective}
+                        </p>
+                      ) : null}
+                    </div>
 
                     <div className="mt-2 flex items-center gap-2">
                       <span className="text-[0.72rem] text-ink/60">Quantidade</span>
