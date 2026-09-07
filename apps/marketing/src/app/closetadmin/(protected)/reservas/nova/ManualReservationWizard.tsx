@@ -7,7 +7,7 @@ import { PhoneInput } from '@/components/closetadmin/PhoneInput';
 import { createManualReservationAction } from './actions';
 
 const VIOLATION_LABELS: Record<string, string> = {
-  pickup_before_minimum_advance: 'Esta retirada possui menos de 15 dias de antecedência.',
+  pickup_before_minimum_advance: 'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
   duration_mismatch_with_engine: 'A duração informada não corresponde ao cálculo automático do motor de regras.',
   pickup_outside_online_season: 'A data de retirada está dentro do período de bloqueio de temporada.',
   pickup_is_sunday: 'A retirada não pode ser num domingo.',
@@ -49,7 +49,15 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
   const blocking = useMemo(() => (violations ?? []).filter((v) => !(v in OVERRIDE_KEY_BY_VIOLATION)), [violations]);
   const activePieces = pieces.filter((p) => p.active);
 
+  function resetServerFeedback() {
+    setViolations(null);
+    setOverrides({});
+    setOverrideReason('');
+    setError(null);
+  }
+
   function toggleUnit(id: string) {
+    resetServerFeedback();
     setSelectedUnitIds((prev) => (prev.includes(id) ? prev.filter((u) => u !== id) : [...prev, id]));
   }
 
@@ -82,6 +90,8 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
     }
     if (result.violations) {
       setViolations(result.violations);
+      setOverrides({});
+      setOverrideReason('');
       setStep(4);
       return;
     }
@@ -110,10 +120,26 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
       {step === 2 ? (
         <div className="mt-6 flex flex-col gap-4">
           <Field label="Data de retirada">
-            <input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              value={pickupDate}
+              onChange={(e) => {
+                setPickupDate(e.target.value);
+                resetServerFeedback();
+              }}
+              className={inputClass}
+            />
           </Field>
           <Field label="Data de devolução (opcional — o motor calcula automaticamente pelas peças)">
-            <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              value={returnDate}
+              onChange={(e) => {
+                setReturnDate(e.target.value);
+                resetServerFeedback();
+              }}
+              className={inputClass}
+            />
           </Field>
           <NavButtons onBack={() => setStep(1)} onNext={() => setStep(3)} nextDisabled={!pickupDate} />
         </div>
@@ -125,29 +151,36 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
             Selecione as peças físicas. A disponibilidade final é confirmada pelo servidor no momento de salvar — duas reservas nunca podem usar a mesma
             peça no mesmo período.
           </p>
-          <ul className="mt-3 max-h-80 divide-y divide-ink/5 dark:divide-white/5 overflow-y-auto rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card">
-            {activePieces.map((piece) => (
-              <li key={piece.id}>
-                <label className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-ink/5 dark:hover:bg-white/5 transition">
-                  <span>
-                    <span className="font-medium text-ink dark:text-dark-text">{piece.code}</span>
-                    <span className="ml-2 text-ink/50 dark:text-dark-muted">{piece.name}</span>
-                    {!piece.reservableOnline ? (
-                      <span className="ml-2 rounded-full bg-sand dark:bg-[#3D3325] px-2 py-0.5 text-xs text-ink/70 dark:text-sand">
-                        Acessório
-                      </span>
-                    ) : null}
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={selectedUnitIds.includes(piece.id)}
-                    onChange={() => toggleUnit(piece.id)}
-                    className="accent-marsala dark:accent-gold h-4 w-4 rounded"
-                  />
-                </label>
-              </li>
-            ))}
-          </ul>
+
+          {activePieces.length === 0 ? (
+            <div className="mt-3 rounded-xl border border-dashed border-ink/15 bg-white px-4 py-8 text-center text-sm text-ink/55 dark:border-white/10 dark:bg-dark-card dark:text-dark-muted">
+              Nenhuma peça ativa está disponível para selecionar. Cadastre ou ative uma peça em “Peças”.
+            </div>
+          ) : (
+            <ul className="mt-3 max-h-80 divide-y divide-ink/5 dark:divide-white/5 overflow-y-auto rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card">
+              {activePieces.map((piece) => (
+                <li key={piece.id}>
+                  <label className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 text-sm hover:bg-ink/5 dark:hover:bg-white/5 transition">
+                    <span>
+                      <span className="font-medium text-ink dark:text-dark-text">{piece.code}</span>
+                      <span className="ml-2 text-ink/50 dark:text-dark-muted">{piece.name}</span>
+                      {!piece.reservableOnline ? (
+                        <span className="ml-2 rounded-full bg-sand dark:bg-[#3D3325] px-2 py-0.5 text-xs text-ink/70 dark:text-sand">
+                          Loja
+                        </span>
+                      ) : null}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={selectedUnitIds.includes(piece.id)}
+                      onChange={() => toggleUnit(piece.id)}
+                      className="accent-marsala dark:accent-gold h-4 w-4 rounded"
+                    />
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
           <NavButtons onBack={() => setStep(2)} onNext={() => setStep(4)} nextDisabled={selectedUnitIds.length === 0} />
         </div>
       ) : null}
@@ -176,6 +209,7 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
                   <li key={v}>{VIOLATION_LABELS[v] ?? v}</li>
                 ))}
               </ul>
+              <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
             </div>
           ) : null}
 
@@ -210,7 +244,14 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
           {error ? <p className="rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300">{error}</p> : null}
 
           <div className="flex justify-between">
-            <button type="button" onClick={() => setStep(3)} className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition">
+            <button
+              type="button"
+              onClick={() => {
+                resetServerFeedback();
+                setStep(3);
+              }}
+              className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition"
+            >
               Voltar
             </button>
             <button
