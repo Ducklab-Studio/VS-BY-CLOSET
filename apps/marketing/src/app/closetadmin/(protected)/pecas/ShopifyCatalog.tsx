@@ -41,16 +41,21 @@ export function ShopifyCatalog({ items, isAdmin }: { items: readonly CatalogItem
 }
 
 function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean }) {
+  const isActive = item.product.status === 'ACTIVE';
   const [codes, setCodes] = useState('');
+  const [reservableOnline, setReservableOnline] = useState(isActive);
+  const [countsTowardRentalDuration, setCountsTowardRentalDuration] = useState(true);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const variantLabel = item.title === 'Default Title' ? null : item.title;
-  const isActive = item.product.status === 'ACTIVE';
 
   function submit() {
     setMessage(null);
     startTransition(async () => {
-      const result = await importShopifyUnitsAction(item.id, codes);
+      const result = await importShopifyUnitsAction(item.id, codes, {
+        reservableOnline,
+        countsTowardRentalDuration,
+      });
       if (result.error) {
         setMessage({ type: 'error', text: result.error });
         return;
@@ -124,7 +129,33 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
               Cadastrar
             </button>
           </div>
-          <p className="mt-1.5 text-[11px] text-ink/45 dark:text-dark-subtle">Separe vários códigos por vírgula. O estoque Shopify é apenas referência e não cria peças automaticamente.</p>
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <OptionToggle
+              label="Reservável online"
+              description="Entra na disponibilidade do site."
+              checked={reservableOnline}
+              disabled={pending || !isActive}
+              onChange={setReservableOnline}
+            />
+            <OptionToggle
+              label="Conta na duração"
+              description="Conta para calcular 2/3/4 dias."
+              checked={countsTowardRentalDuration}
+              disabled={pending}
+              onChange={setCountsTowardRentalDuration}
+            />
+          </div>
+
+          {!isActive ? (
+            <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+              Produto inativo na Shopify: a nova peça será criada fora da reserva online.
+            </p>
+          ) : null}
+
+          <p className="mt-2 text-[11px] text-ink/45 dark:text-dark-subtle">
+            Separe vários códigos por vírgula. O estoque Shopify é apenas referência e não cria peças automaticamente.
+          </p>
           {message ? (
             <p className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
               {message.type === 'success' ? <CheckCircle2 size={13} /> : <RefreshCw size={13} />}
@@ -134,6 +165,36 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
         </div>
       ) : null}
     </article>
+  );
+}
+
+function OptionToggle({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className={`flex items-start gap-2 rounded-lg border border-ink/10 px-3 py-2.5 text-xs dark:border-white/10 ${disabled ? 'opacity-55' : 'cursor-pointer'}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-marsala dark:accent-gold"
+      />
+      <span>
+        <span className="block font-medium text-ink dark:text-dark-text">{label}</span>
+        <span className="mt-0.5 block text-ink/45 dark:text-dark-subtle">{description}</span>
+      </span>
+    </label>
   );
 }
 
