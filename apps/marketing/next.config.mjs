@@ -12,6 +12,15 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  // O calendário pode falar com a API por URL absoluta quando ela for
+  // configurada explicitamente. Se não for, usa o proxy same-origin do
+  // próprio Next (/api/availability), que resolve o backend no servidor e
+  // evita depender de CORS ou de NEXT_PUBLIC_AVAILABILITY_URL no localhost.
+  env: {
+    NEXT_PUBLIC_AVAILABILITY_URL:
+      process.env.NEXT_PUBLIC_AVAILABILITY_URL || '/api/availability',
+  },
+
   images: {
     remotePatterns: [
       // CDN de imagem de produto do Shopify.
