@@ -21,7 +21,8 @@ export async function updatePieceAction(
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a peça.' };
   }
-  revalidatePath('/closetadmin/pecas');
+
+  revalidatePieceDependentViews();
   return { error: null };
 }
 
@@ -33,6 +34,7 @@ export async function updatePieceAction(
 export async function importShopifyUnitsAction(
   shopifyVariantId: string,
   rawCodes: string,
+  options?: { reservableOnline?: boolean; countsTowardRentalDuration?: boolean },
 ): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
   requireAdminRole(session, 'ADMIN');
@@ -46,12 +48,26 @@ export async function importShopifyUnitsAction(
   if (codes.length > 50) return { error: 'Cadastre no máximo 50 peças por vez.' };
 
   try {
-    await importShopifyUnits({ shopifyVariantId, codes }, session.id);
+    await importShopifyUnits(
+      {
+        shopifyVariantId,
+        codes,
+        reservableOnline: options?.reservableOnline,
+        countsTowardRentalDuration: options?.countsTowardRentalDuration,
+      },
+      session.id,
+    );
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível cadastrar as peças.' };
   }
 
+  revalidatePieceDependentViews();
+  return { error: null };
+}
+
+function revalidatePieceDependentViews() {
   revalidatePath('/closetadmin/pecas');
   revalidatePath('/closetadmin');
-  return { error: null };
+  revalidatePath('/closetadmin/calendario');
+  revalidatePath('/closetadmin/reservas/nova');
 }
