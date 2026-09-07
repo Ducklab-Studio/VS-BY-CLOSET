@@ -26,45 +26,64 @@ export type RentalStockMap = Record<string, RentalStockEntry>;
  * - Shopify = quantidade comercial vendável da variante.
  * - reservations-api = quantas RentalUnits físicas estão livres NA DATA.
  *
- * O HOLD continua sendo a trava final transacional no backend. Isto evita
- * que o cliente só descubra no último clique que pediu mais unidades do que
- * existem fisicamente para o período selecionado.
+ * `countedPieces` pode representar a quantidade PROSPECTIVA do carrinho.
+ * Isso é importante quando um clique no + cruza uma faixa de duração
+ * (por exemplo 2 → 3 peças): consultamos a agenda já com a nova duração
+ * antes de alterar o carrinho na Shopify.
+ *
+ * O HOLD continua sendo a trava final transacional no backend.
  */
-export async function fetchRentalStock(cart: Cart): Promise<RentalStockMap> {
-  const countedPieces = cart.totalQuantity;
+export async function fetchRentalStock(
+  cart: Cart,
+  options: { countedPieces?: number } = {},
+): Promise<RentalStockMap> {
+  const countedPieces = options.countedPieces ?? cart.totalQuantity;
   const variants = new Map<
     string,
-    { shopify: number | null; availableForSale: boolean; pickup: string | null }
+    {
+      shopify: number | null;
+      availableForSale: boolean;
+      pickups: Set<string>;
+      missingPickup: boolean;
+    }
   >();
 
   for (const line of cart.lines) {
     const pickup =
       line.attributes.find((attribute) => attribute.key === '_vsc_pickup')?.value ?? null;
-    const current = variants.get(line.merchandise.id);
-    const shopify = line.merchandise.quantityAvailable;
+    const current = variants.get(line.merchandise.id) ?? {
+      shopify: null,
+      availableForSale: true,
+      pickups: new Set<string>(),
+      missingPickup: false,
+    };
 
-    variants.set(line.merchandise.id, {
-      shopify:
-        current?.shopify === null || shopify === null
-          ? current?.shopify ?? shopify
-          : Math.min(current?.shopify ?? shopify, shopify),
-      availableForSale:
-        (current?.availableForSale ?? true) && line.merchandise.availableForSale,
-      pickup: current?.pickup && current.pickup !== pickup ? null : (current?.pickup ?? pickup),
-    });
+    const reported = line.merchandise.quantityAvailable;
+    if (reported !== null) {
+      current.shopify = current.shopify === null ? reported : Math.min(current.shopify, reported);
+    }
+    current.availableForSale = current.availableForSale && line.merchandise.availableForSale;
+    if (pickup) current.pickups.add(pickup);
+    else current.missingPickup = true;
+
+    variants.set(line.merchandise.id, current);
   }
 
   const entries = await Promise.all(
     Array.from(variants.entries()).map(async ([variantId, variant]) => {
       const shopify = variant.availableForSale ? variant.shopify : 0;
+      const pickup =
+        !variant.missingPickup && variant.pickups.size === 1
+          ? Array.from(variant.pickups)[0]
+          : null;
       let physical: number | null = null;
 
-      if (variant.pickup) {
+      if (pickup) {
         const params = new URLSearchParams({
           shopifyVariantId: variantId,
           countedPieces: String(countedPieces),
-          from: variant.pickup,
-          to: variant.pickup,
+          from: pickup,
+          to: pickup,
         });
 
         try {
@@ -74,7 +93,7 @@ export async function fetchRentalStock(cart: Cart): Promise<RentalStockMap> {
           });
           if (response.ok) {
             const data = (await response.json()) as AvailabilityResponse;
-            const day = data.days.find((item) => item.date === variant.pickup);
+            const day = data.days.find((item) => item.date === pickup);
             physical = day?.quantityAvailable ?? 0;
           }
         } catch {
