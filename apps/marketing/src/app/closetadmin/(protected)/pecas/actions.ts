@@ -70,4 +70,5 @@ function revalidatePieceDependentViews() {
   revalidatePath('/closetadmin');
   revalidatePath('/closetadmin/calendario');
   revalidatePath('/closetadmin/reservas/nova');
+  revalidatePath('/closetadmin/auditoria');
 }
