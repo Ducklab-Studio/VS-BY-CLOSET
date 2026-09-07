@@ -41,6 +41,23 @@ jobs:
   reservations-api:
     name: API — typecheck, testes e build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: closet
+          POSTGRES_PASSWORD: closet
+          POSTGRES_DB: closet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U closet -d closet_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Banco efêmero do próprio GitHub Actions. Nunca usa o Neon de produção.
+      DATABASE_URL: postgresql://closet:closet@localhost:5432/closet_test
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +74,9 @@ jobs:
 
       - name: Prisma generate
         run: pnpm --filter @valle/reservations-api run db:generate
+
+      - name: Aplicar migrations no Postgres efêmero
+        run: pnpm --filter @valle/reservations-api run db:migrate
 
       - name: Typecheck API
         run: pnpm --filter @valle/reservations-api run typecheck
