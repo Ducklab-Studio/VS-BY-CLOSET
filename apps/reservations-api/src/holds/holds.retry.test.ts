@@ -168,7 +168,10 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
 function pickupSafeFarFuture() {
   const cfg = DEFAULT_RENTAL_RULE_CONFIG;
   let d = addDays(engineToday(cfg), 60);
-  for (let i = 0; i < 400 && (!isOnlineReservationAllowed(d, cfg) || isSunday(d) || isSunday(calculateReturnDate(d, 3))); i++) {
+  // Este cenário pede 2 peças, portanto a duração real é 2 dias. O teste
+  // precisa evitar domingo usando a mesma duração que o motor vai calcular;
+  // usar 3 aqui deixava o resultado dependente do dia em que a suíte rodava.
+  for (let i = 0; i < 400 && (!isOnlineReservationAllowed(d, cfg) || isSunday(d) || isSunday(calculateReturnDate(d, 2))); i++) {
     d = addDays(d, 1);
   }
   return d;
