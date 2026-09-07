@@ -13,6 +13,13 @@
  * peças, e numa troca de peça danificada a data tem que andar junto do
  * item certo.
  *
+ * Estoque e quantidade vêm da Shopify. `quantityAvailable` é consultado na
+ * própria variante e o carrinho usa `cartLinesUpdate` para alterar a
+ * quantidade real da linha; preço e total voltam recalculados pela Shopify.
+ * A disponibilidade por DATA continua sendo revalidada pelo reservations-api
+ * antes de criar o HOLD — estoque comercial e agenda de aluguel são duas
+ * travas complementares, nunca substitutas.
+ *
  * ⚠️ O que chega aqui é conveniência de tela, não garantia. O cliente pode
  * editar qualquer coisa no navegador dele. Quem decide se a reserva vale é
  * o servidor, revalidando contra o banco central antes de confirmar — e a
@@ -37,6 +44,9 @@ export interface CartLine {
     id: string;
     sku: string | null;
     title: string;
+    availableForSale: boolean;
+    /** Quantidade vendável reportada diretamente pela Shopify. */
+    quantityAvailable: number | null;
     price: { amount: string; currencyCode: string };
     product: {
       title: string;
@@ -75,6 +85,8 @@ const CART_FIELDS = `
           id
           sku
           title
+          availableForSale
+          quantityAvailable
           price { amount currencyCode }
           product {
             title
@@ -243,6 +255,34 @@ export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
   return flatten(data.cartCreate.cart);
 }
 
+/**
+ * Atualiza a quantidade de UMA linha do carrinho diretamente na Shopify.
+ * O total/preço retornado já vem recalculado pela plataforma.
+ * Quantidade zero é tratada como remoção explícita.
+ */
+export async function updateCartLineQuantity(lineId: string, quantity: number): Promise<Cart | null> {
+  if (!Number.isInteger(quantity)) throw new Error('Quantidade inválida.');
+  if (quantity <= 0) return removeCartLine(lineId);
+
+  const cartId = readStoredCartId();
+  if (!cartId) return null;
+
+  const data = await cartFetch<{
+    cartLinesUpdate: { cart: Cart | null; userErrors: { message: string }[] };
+  }>(
+    `mutation UpdateLine($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
+      cartLinesUpdate(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FIELDS} }
+        userErrors { message }
+      }
+    }`,
+    { cartId, lines: [{ id: lineId, quantity }] },
+  );
+
+  throwOnUserErrors(data.cartLinesUpdate.userErrors);
+  return data.cartLinesUpdate.cart ? flatten(data.cartLinesUpdate.cart) : null;
+}
+
 export async function removeCartLine(lineId: string): Promise<Cart | null> {
   const cartId = readStoredCartId();
   if (!cartId) return null;
@@ -261,6 +301,14 @@ export async function removeCartLine(lineId: string): Promise<Cart | null> {
 
   throwOnUserErrors(data.cartLinesRemove.userErrors);
   return data.cartLinesRemove.cart ? flatten(data.cartLinesRemove.cart) : null;
+}
+
+/** Quantidade total desta variante no carrinho, mesmo se a Shopify
+ * mantiver duas linhas separadas por atributos diferentes. */
+export function quantityForVariant(cart: Cart, variantId: string): number {
+  return cart.lines
+    .filter((line) => line.merchandise.id === variantId)
+    .reduce((sum, line) => sum + line.quantity, 0);
 }
 
 /**
