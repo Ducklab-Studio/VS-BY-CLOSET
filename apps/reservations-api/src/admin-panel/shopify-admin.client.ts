@@ -38,15 +38,31 @@ interface GraphqlEnvelope<T> {
   readonly errors?: readonly { message?: string }[];
 }
 
+interface RawShopifyVariant {
+  readonly id: string;
+  readonly title: string;
+  readonly sku: string | null;
+  readonly inventoryQuantity: number | null;
+  readonly image: { readonly url: string; readonly altText: string | null } | null;
+  readonly selectedOptions: readonly { name: string; value: string }[];
+  readonly product: {
+    readonly id: string;
+    readonly title: string;
+    readonly handle: string;
+    readonly productType: string;
+    readonly status: string;
+  };
+}
+
 interface VariantsQueryData {
   readonly productVariants: {
-    readonly nodes: readonly ShopifyCatalogVariant[];
+    readonly nodes: readonly RawShopifyVariant[];
     readonly pageInfo: { readonly hasNextPage: boolean; readonly endCursor: string | null };
   };
 }
 
 interface VariantQueryData {
-  readonly productVariant: ShopifyCatalogVariant | null;
+  readonly productVariant: RawShopifyVariant | null;
 }
 
 const VARIANTS_QUERY = `
@@ -101,12 +117,9 @@ export class ShopifyAdminClient {
     const variants: ShopifyCatalogVariant[] = [];
     let after: string | null = null;
 
-    // A loja é pequena, mas pagina de verdade para não criar um limite
-    // silencioso caso o catálogo cresça. `productVariants` evita a paginação
-    // aninhada de variants dentro de products.
     do {
       const data: VariantsQueryData = await this.graphql<VariantsQueryData>(VARIANTS_QUERY, { first: 100, after });
-      variants.push(...data.productVariants.nodes);
+      variants.push(...data.productVariants.nodes.map(normalizeVariant));
       after = data.productVariants.pageInfo.hasNextPage ? data.productVariants.pageInfo.endCursor : null;
     } while (after);
 
@@ -115,7 +128,7 @@ export class ShopifyAdminClient {
 
   async getVariant(id: string): Promise<ShopifyCatalogVariant | null> {
     const data = await this.graphql<VariantQueryData>(VARIANT_QUERY, { id });
-    return data.productVariant;
+    return data.productVariant ? normalizeVariant(data.productVariant) : null;
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -143,8 +156,6 @@ export class ShopifyAdminClient {
     }
 
     if (!response.ok) {
-      // Token pode ter sido revogado entre duas chamadas. Derruba o cache
-      // para a próxima tentativa buscar um novo token, sem expor resposta.
       if (response.status === 401) this.cachedToken = null;
       this.logger.error(`Shopify Admin API respondeu HTTP ${response.status}`);
       throw new ServiceUnavailableException('Não foi possível consultar o catálogo da Shopify no momento.');
@@ -212,6 +223,19 @@ export class ShopifyAdminClient {
     };
     return json.access_token;
   }
+}
+
+function normalizeVariant(raw: RawShopifyVariant): ShopifyCatalogVariant {
+  return {
+    id: raw.id,
+    title: raw.title,
+    sku: raw.sku?.trim() || null,
+    inventoryQuantity: raw.inventoryQuantity,
+    imageUrl: raw.image?.url ?? null,
+    imageAlt: raw.image?.altText ?? null,
+    selectedOptions: raw.selectedOptions,
+    product: raw.product,
+  };
 }
 
 function resolveShopifyAdminCredentials(): ShopifyAdminCredentials {
