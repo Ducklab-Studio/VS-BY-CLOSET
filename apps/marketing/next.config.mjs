@@ -12,13 +12,14 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
-  // O calendário pode falar com a API por URL absoluta quando ela for
-  // configurada explicitamente. Se não for, usa o proxy same-origin do
-  // próprio Next (/api/availability), que resolve o backend no servidor e
-  // evita depender de CORS ou de NEXT_PUBLIC_AVAILABILITY_URL no localhost.
+  // RentalCalendar usa `new URL(...)`, então o valor precisa ser absoluto.
+  // Em desenvolvimento, apontamos para o proxy same-origin do próprio Next.
+  // Em produção, prefira definir NEXT_PUBLIC_AVAILABILITY_URL explicitamente
+  // para a URL pública correta do site ou do reservations-api.
   env: {
     NEXT_PUBLIC_AVAILABILITY_URL:
-      process.env.NEXT_PUBLIC_AVAILABILITY_URL || '/api/availability',
+      process.env.NEXT_PUBLIC_AVAILABILITY_URL ||
+      `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/availability`,
   },
 
   images: {
