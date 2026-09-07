@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "nest build",
-    "start": "node dist/main.js",
+    "start": "node dist/src/main.js",
     "test": "vitest run",
     "test:concurrency": "tsx test/concurrency.manual.ts",
     "test:real-shopify": "tsx test/real-shopify-cart.manual.ts",
