@@ -26,8 +26,11 @@ export async function createManualReservationAction(
   const session = await requireAdminSession();
   try {
     const result = await createManualReservation({ ...input, adminUserId: session.id, adminUserName: session.name });
+    revalidatePath('/closetadmin');
     revalidatePath('/closetadmin/reservas');
     revalidatePath('/closetadmin/calendario');
+    revalidatePath('/closetadmin/pecas');
+    revalidatePath('/closetadmin/auditoria');
     return { ok: true, reservationId: (result as { reservationId: string }).reservationId };
   } catch (err) {
     if (err instanceof AdminApiError) {
