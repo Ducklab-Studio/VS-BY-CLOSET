@@ -70,6 +70,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Theme Check
-        uses: shopify/theme-check-action@v3
+        uses: shopify/theme-check-action@v2
         with:
           theme_root: theme
