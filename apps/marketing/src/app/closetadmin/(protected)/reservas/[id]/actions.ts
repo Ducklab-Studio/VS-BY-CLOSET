@@ -19,7 +19,12 @@ export async function cancelReservationAction(reservationId: string, reason: str
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível cancelar a reserva.' };
   }
+
   revalidatePath(`/closetadmin/reservas/${reservationId}`);
+  revalidatePath('/closetadmin');
   revalidatePath('/closetadmin/reservas');
+  revalidatePath('/closetadmin/calendario');
+  revalidatePath('/closetadmin/pecas');
+  revalidatePath('/closetadmin/auditoria');
   return { error: null };
 }
