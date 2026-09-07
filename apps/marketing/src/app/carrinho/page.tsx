@@ -14,35 +14,26 @@ import {
 } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
 import { createCheckout, createHold, storeLastReservation, type SundayReturnOptionInfo } from '@/lib/checkout';
+import {
+  fetchRentalStock,
+  stockForVariant,
+  type RentalStockMap,
+} from '@/lib/rental-stock';
 
 /**
  * Carrinho.
  *
- * Client component porque o carrinho vive no navegador do cliente (o id
- * fica no localStorage) — não há como renderizar isso no servidor sem
- * saber de quem é o carrinho.
- *
- * A duração exibida ("período de X dias") vem de GET /rental-plan/duration
- * no reservations-api — a MESMA função (`durationForPieces`) que decide
- * a disponibilidade real, não uma cópia local (Fase 4.1).
- *
- * Quantidade/estoque: a quantidade vendável de cada variante vem da
- * própria Shopify (`quantityAvailable`) e o +/- usa `cartLinesUpdate`.
- * O total volta recalculado pela Shopify. A disponibilidade por data ainda
- * é revalidada no reservations-api ao criar o HOLD, então estoque comercial
- * nunca substitui a trava real de agenda das peças físicas.
- *
- * Fase 6 — "Finalizar reserva" não linka mais direto pro checkout de um
- * cart Shopify criado no navegador. O clique agora: cria um HOLD real
- * (POST /holds, bloqueia 30min no Postgres) → pede ao backend pra abrir
- * o carrinho Shopify vinculado a esse HOLD (POST /checkout) → só então
- * redireciona pra URL que a Shopify devolveu. O backend controla o
- * vínculo Reservation ↔ Cart; o navegador nunca mais cria o cart de
- * checkout sozinho. Sem aceite dos termos, o botão nem tenta.
+ * Shopify continua sendo a autoridade do estoque comercial e do preço.
+ * O reservations-api continua sendo a autoridade da agenda das peças
+ * físicas. Para a quantidade exibida ao cliente usamos o MENOR limite
+ * conhecido entre os dois, e o HOLD transacional do backend revalida tudo
+ * novamente antes de seguir para o checkout.
  */
 export default function CarrinhoPage() {
   const [cart, setCart] = useState<Cart | null>(null);
+  const [rentalStock, setRentalStock] = useState<RentalStockMap>({});
   const [loading, setLoading] = useState(true);
+  const [stockLoading, setStockLoading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [updatingQuantity, setUpdatingQuantity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,15 +46,49 @@ export default function CarrinhoPage() {
   const [sundayOptions, setSundayOptions] = useState<SundayReturnOptionInfo[] | null>(null);
   const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
 
-  // Uma chave por versão lógica da reserva. Se o cliente altera quantidade
-  // ou remove uma linha, geramos outra chave porque o payload mudou.
   const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
 
+  async function loadStock(nextCart: Cart | null) {
+    if (!nextCart?.lines.length) {
+      setRentalStock({});
+      return;
+    }
+
+    setStockLoading(true);
+    try {
+      setRentalStock(await fetchRentalStock(nextCart));
+    } finally {
+      setStockLoading(false);
+    }
+  }
+
   useEffect(() => {
+    let cancelled = false;
+
     getCart()
-      .then(setCart)
-      .catch(() => setError('Não foi possível carregar o carrinho.'))
-      .finally(() => setLoading(false));
+      .then(async (result) => {
+        if (cancelled) return;
+        setCart(result);
+        if (result?.lines.length) {
+          setStockLoading(true);
+          try {
+            const stock = await fetchRentalStock(result);
+            if (!cancelled) setRentalStock(stock);
+          } finally {
+            if (!cancelled) setStockLoading(false);
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('Não foi possível carregar o carrinho.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -100,7 +125,9 @@ export default function CarrinhoPage() {
     setRemoving(lineId);
     setError(null);
     try {
-      setCart(await removeCartLine(lineId));
+      const nextCart = await removeCartLine(lineId);
+      setCart(nextCart);
+      await loadStock(nextCart);
       resetCheckoutStateAfterCartChange();
     } catch {
       setError('Não foi possível remover a peça. Tente novamente.');
@@ -112,20 +139,27 @@ export default function CarrinhoPage() {
   async function handleQuantity(line: CartLine, nextQuantity: number) {
     if (!cart || updatingQuantity || nextQuantity < 1) return;
 
-    const stock = line.merchandise.quantityAvailable;
+    const stock = stockForVariant(rentalStock, line.merchandise.id);
     const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
     const otherLinesQuantity = totalSameVariant - line.quantity;
-    const maxForThisLine = stock === null ? null : Math.max(0, stock - otherLinesQuantity);
+    const maxForThisLine =
+      stock.effective === null ? null : Math.max(0, stock.effective - otherLinesQuantity);
 
     if (maxForThisLine !== null && nextQuantity > maxForThisLine) {
-      setError(`A Shopify informa somente ${stock} unidade(s) disponível(is) desta peça.`);
+      setError(
+        stock.physical !== null && stock.shopify !== null
+          ? `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is), considerando Shopify e estoque físico.`
+          : `Há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
+      );
       return;
     }
 
     setUpdatingQuantity(line.id);
     setError(null);
     try {
-      setCart(await updateCartLineQuantity(line.id, nextQuantity));
+      const nextCart = await updateCartLineQuantity(line.id, nextQuantity);
+      setCart(nextCart);
+      await loadStock(nextCart);
       resetCheckoutStateAfterCartChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível alterar a quantidade.');
@@ -143,6 +177,29 @@ export default function CarrinhoPage() {
 
     setCheckingOut(true);
     setCheckoutError(null);
+
+    // Reconsulta imediatamente antes do HOLD: evita usar um snapshot antigo
+    // se outra reserva ocupou uma unidade enquanto o cliente revisava o carrinho.
+    let latestStock: RentalStockMap;
+    try {
+      latestStock = await fetchRentalStock(cart);
+      setRentalStock(latestStock);
+    } catch {
+      setCheckoutError('Não foi possível confirmar o estoque agora. Tente novamente.');
+      setCheckingOut(false);
+      return;
+    }
+
+    for (const item of groupItemsByVariant(cart.lines)) {
+      const stock = stockForVariant(latestStock, item.shopifyVariantId);
+      if (stock.effective !== null && item.quantity > stock.effective) {
+        setCheckoutError(
+          `A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`,
+        );
+        setCheckingOut(false);
+        return;
+      }
+    }
 
     const items = groupItemsByVariant(cart.lines);
     const holdResult = await createHold({
@@ -164,9 +221,6 @@ export default function CarrinhoPage() {
       return;
     }
 
-    // Fase 7 — guardado ANTES do checkout: se a chamada a POST /checkout
-    // falhar depois de ter criado o HOLD, a página pós-checkout ainda
-    // precisa achar essa reserva se o cliente voltar mais tarde.
     storeLastReservation(holdResult.reservationId, holdResult.holdToken);
 
     const checkoutResult = await createCheckout(holdResult.reservationId, holdResult.holdToken);
@@ -202,10 +256,12 @@ export default function CarrinhoPage() {
         {cart.lines.map((line) => {
           const pickup = line.attributes.find((a) => a.key === 'Retirada')?.value;
           const ret = line.attributes.find((a) => a.key === 'Devolução')?.value;
-          const stock = line.merchandise.quantityAvailable;
+          const stock = stockForVariant(rentalStock, line.merchandise.id);
           const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
           const canIncrease =
-            line.merchandise.availableForSale && (stock === null || totalSameVariant < stock);
+            line.merchandise.availableForSale &&
+            !stockLoading &&
+            (stock.effective === null || totalSameVariant < stock.effective);
           const busy = updatingQuantity === line.id || removing === line.id;
 
           return (
@@ -236,13 +292,27 @@ export default function CarrinhoPage() {
                   </p>
                 )}
 
-                <p className={`mt-1 text-[0.72rem] ${stock === 0 ? 'text-red-700' : 'text-ink/55'}`}>
-                  {stock === null
-                    ? 'Estoque Shopify: sob consulta'
-                    : stock > 0
-                      ? `Estoque Shopify: ${stock} disponível(is)`
-                      : 'Esgotado na Shopify'}
-                </p>
+                <div className="mt-1 space-y-0.5 text-[0.72rem] text-ink/55">
+                  <p>
+                    {stock.shopify === null
+                      ? 'Estoque Shopify: sob consulta'
+                      : stock.shopify > 0
+                        ? `Estoque Shopify: ${stock.shopify}`
+                        : 'Esgotado na Shopify'}
+                  </p>
+                  <p>
+                    {stockLoading
+                      ? 'Conferindo peças físicas para a data…'
+                      : stock.physical === null
+                        ? 'Estoque físico na data: será validado ao finalizar'
+                        : `Peças físicas livres na data: ${stock.physical}`}
+                  </p>
+                  {stock.effective !== null && !stockLoading ? (
+                    <p className="font-medium text-marsala">
+                      Disponível para esta reserva: {stock.effective}
+                    </p>
+                  ) : null}
+                </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="text-[0.75rem] text-ink/60">Quantidade</span>
@@ -303,14 +373,11 @@ export default function CarrinhoPage() {
         {durationFailed ? (
           <> · não foi possível calcular o período agora.</>
         ) : duration !== null ? (
-          <>
-            {' '}
-            · período de {duration} {duration === 1 ? 'dia' : 'dias'}
-          </>
+          <> · período de {duration} {duration === 1 ? 'dia' : 'dias'}</>
         ) : (
           <> · calculando período…</>
         )}
-        . Alterar a quantidade atualiza o carrinho na Shopify e o período é recalculado pelas regras do aluguel.
+        . A quantidade respeita o estoque da Shopify e as peças físicas livres para a data escolhida.
       </p>
 
       <div className="mt-6 flex items-baseline justify-between border-t border-ink/10 pt-5">
@@ -387,18 +454,13 @@ export default function CarrinhoPage() {
         </p>
       )}
 
-      {/* Único momento em que o cliente sai daqui — e é proposital: a tela
-          de pagamento é da Shopify porque é ela que processa cartão e PIX,
-          é certificada, e é onde ver "Shopify" passa segurança. Desde a
-          Fase 6, o cart de checkout é criado pelo backend (POST
-          /checkout), vinculado a um HOLD real — não mais direto daqui. */}
       <button
         type="button"
         onClick={handleCheckout}
-        disabled={!termsAccepted || checkingOut || !!sundayOptions}
+        disabled={!termsAccepted || checkingOut || !!sundayOptions || stockLoading}
         className="mt-6 flex w-full items-center justify-center rounded-xl bg-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {checkingOut ? 'Preparando…' : 'Finalizar reserva'}
+        {checkingOut ? 'Preparando…' : stockLoading ? 'Conferindo estoque…' : 'Finalizar reserva'}
       </button>
 
       <p className="mt-3 text-center text-[0.7rem] text-ink/65">
@@ -408,16 +470,11 @@ export default function CarrinhoPage() {
   );
 }
 
-/**
- * Sem fallback: URL não configurada, resposta não-ok, ou erro de rede —
- * tudo vira `null`, e a tela mostra "não foi possível calcular" em vez
- * de inventar um número de dias.
- */
 async function fetchDuration(countedPieces: number): Promise<number | null> {
   const base = process.env.NEXT_PUBLIC_RENTAL_PLAN_URL;
   if (!base) return null;
 
-  const url = new URL(base, window.location.origin);
+  const url = new URL(base);
   url.searchParams.set('countedPieces', String(countedPieces));
 
   try {
@@ -430,9 +487,6 @@ async function fetchDuration(countedPieces: number): Promise<number | null> {
   }
 }
 
-/** O servidor recalcula tudo a partir de shopifyVariantId + quantity —
- *  nunca confia em preço, duração ou datas que o navegador mande (Fase
- *  6, item 2). `merchandise.id` já é o GID real da Shopify. */
 function groupItemsByVariant(lines: CartLine[]): { shopifyVariantId: string; quantity: number }[] {
   const byVariant = new Map<string, number>();
   for (const line of lines) {
@@ -441,13 +495,6 @@ function groupItemsByVariant(lines: CartLine[]): { shopifyVariantId: string; qua
   return Array.from(byVariant.entries()).map(([shopifyVariantId, quantity]) => ({ shopifyVariantId, quantity }));
 }
 
-/**
- * A data de retirada (ISO) vem do atributo oculto `_vsc_pickup`, gravado
- * por RentalCalendar em cada linha. Todo o carrinho compartilha UMA
- * retirada só (é assim que o motor de regras funciona — reserva inteira,
- * não peça por peça); se alguma linha divergir, é tratado como erro em
- * vez de escolher uma data arbitrariamente.
- */
 function derivePickupDate(lines: CartLine[]): string | null {
   const values = new Set(lines.map((l) => l.attributes.find((a) => a.key === '_vsc_pickup')?.value).filter((v): v is string => !!v));
   if (values.size !== 1) return null;
@@ -457,8 +504,7 @@ function derivePickupDate(lines: CartLine[]): string | null {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <p className="privacy-eyebrow">Seu closet de viagem</p>
-      <h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
+      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
       {children}
     </div>
   );
