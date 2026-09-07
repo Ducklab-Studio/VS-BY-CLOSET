@@ -18,6 +18,7 @@ export async function updateRulesAction(input: Partial<Omit<RentalRuleConfig, 'i
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar as regras.' };
   }
   revalidatePath('/closetadmin/regras');
+  revalidatePath('/closetadmin/auditoria');
   return { error: null };
 }
 
@@ -38,9 +39,7 @@ export async function createBlockAction(input: {
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível criar o bloqueio.' };
   }
-  revalidatePath('/closetadmin/regras');
-  revalidatePath('/closetadmin/calendario');
-  revalidatePath('/closetadmin');
+  revalidateOperationalViews();
   return { error: null };
 }
 
@@ -53,8 +52,13 @@ export async function removeBlockAction(id: string): Promise<{ error: string | n
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível remover o bloqueio.' };
   }
+  revalidateOperationalViews();
+  return { error: null };
+}
+
+function revalidateOperationalViews() {
   revalidatePath('/closetadmin/regras');
   revalidatePath('/closetadmin/calendario');
   revalidatePath('/closetadmin');
-  return { error: null };
+  revalidatePath('/closetadmin/auditoria');
 }
