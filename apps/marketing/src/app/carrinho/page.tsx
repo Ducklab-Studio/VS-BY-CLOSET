@@ -3,8 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowUpRight } from 'lucide-react';
-import { getCart, removeCartLine, type Cart, type CartLine } from '@/lib/cart';
+import { ArrowUpRight, Minus, Plus } from 'lucide-react';
+import {
+  getCart,
+  quantityForVariant,
+  removeCartLine,
+  updateCartLineQuantity,
+  type Cart,
+  type CartLine,
+} from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
 import { createCheckout, createHold, storeLastReservation, type SundayReturnOptionInfo } from '@/lib/checkout';
 
@@ -19,6 +26,12 @@ import { createCheckout, createHold, storeLastReservation, type SundayReturnOpti
  * no reservations-api — a MESMA função (`durationForPieces`) que decide
  * a disponibilidade real, não uma cópia local (Fase 4.1).
  *
+ * Quantidade/estoque: a quantidade vendável de cada variante vem da
+ * própria Shopify (`quantityAvailable`) e o +/- usa `cartLinesUpdate`.
+ * O total volta recalculado pela Shopify. A disponibilidade por data ainda
+ * é revalidada no reservations-api ao criar o HOLD, então estoque comercial
+ * nunca substitui a trava real de agenda das peças físicas.
+ *
  * Fase 6 — "Finalizar reserva" não linka mais direto pro checkout de um
  * cart Shopify criado no navegador. O clique agora: cria um HOLD real
  * (POST /holds, bloqueia 30min no Postgres) → pede ao backend pra abrir
@@ -31,6 +44,7 @@ export default function CarrinhoPage() {
   const [cart, setCart] = useState<Cart | null>(null);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [updatingQuantity, setUpdatingQuantity] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [durationFailed, setDurationFailed] = useState(false);
@@ -41,10 +55,8 @@ export default function CarrinhoPage() {
   const [sundayOptions, setSundayOptions] = useState<SundayReturnOptionInfo[] | null>(null);
   const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
 
-  // Uma chave por VISITA a esta página — reaproveitada entre tentativas
-  // (double-click, retry após erro de rede) da MESMA reserva lógica.
-  // Recarregar a página, ou voltar depois, gera uma chave nova — nunca
-  // salva em localStorage pra não virar "a mesma chave pra sempre".
+  // Uma chave por versão lógica da reserva. Se o cliente altera quantidade
+  // ou remove uma linha, geramos outra chave porque o payload mudou.
   const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
 
   useEffect(() => {
@@ -59,6 +71,7 @@ export default function CarrinhoPage() {
     if (pieces === 0) return;
 
     let cancelled = false;
+    setDuration(null);
     fetchDuration(pieces).then((result) => {
       if (cancelled) return;
       if (result === null) {
@@ -75,15 +88,49 @@ export default function CarrinhoPage() {
 
   const pickupDate = useMemo(() => (cart ? derivePickupDate(cart.lines) : null), [cart]);
 
+  function resetCheckoutStateAfterCartChange() {
+    idempotencyKeyRef.current = crypto.randomUUID();
+    setSundayOptions(null);
+    setSundayChoice(null);
+    setCheckoutError(null);
+    setTermsAccepted(false);
+  }
+
   async function handleRemove(lineId: string) {
     setRemoving(lineId);
     setError(null);
     try {
       setCart(await removeCartLine(lineId));
+      resetCheckoutStateAfterCartChange();
     } catch {
       setError('Não foi possível remover a peça. Tente novamente.');
     } finally {
       setRemoving(null);
+    }
+  }
+
+  async function handleQuantity(line: CartLine, nextQuantity: number) {
+    if (!cart || updatingQuantity || nextQuantity < 1) return;
+
+    const stock = line.merchandise.quantityAvailable;
+    const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
+    const otherLinesQuantity = totalSameVariant - line.quantity;
+    const maxForThisLine = stock === null ? null : Math.max(0, stock - otherLinesQuantity);
+
+    if (maxForThisLine !== null && nextQuantity > maxForThisLine) {
+      setError(`A Shopify informa somente ${stock} unidade(s) disponível(is) desta peça.`);
+      return;
+    }
+
+    setUpdatingQuantity(line.id);
+    setError(null);
+    try {
+      setCart(await updateCartLineQuantity(line.id, nextQuantity));
+      resetCheckoutStateAfterCartChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível alterar a quantidade.');
+    } finally {
+      setUpdatingQuantity(null);
     }
   }
 
@@ -155,6 +202,11 @@ export default function CarrinhoPage() {
         {cart.lines.map((line) => {
           const pickup = line.attributes.find((a) => a.key === 'Retirada')?.value;
           const ret = line.attributes.find((a) => a.key === 'Devolução')?.value;
+          const stock = line.merchandise.quantityAvailable;
+          const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
+          const canIncrease =
+            line.merchandise.availableForSale && (stock === null || totalSameVariant < stock);
+          const busy = updatingQuantity === line.id || removing === line.id;
 
           return (
             <li key={line.id} className="flex gap-4 py-5">
@@ -184,6 +236,41 @@ export default function CarrinhoPage() {
                   </p>
                 )}
 
+                <p className={`mt-1 text-[0.72rem] ${stock === 0 ? 'text-red-700' : 'text-ink/55'}`}>
+                  {stock === null
+                    ? 'Estoque Shopify: sob consulta'
+                    : stock > 0
+                      ? `Estoque Shopify: ${stock} disponível(is)`
+                      : 'Esgotado na Shopify'}
+                </p>
+
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[0.75rem] text-ink/60">Quantidade</span>
+                  <div className="inline-flex items-center overflow-hidden rounded-lg border border-ink/15">
+                    <button
+                      type="button"
+                      aria-label="Diminuir quantidade"
+                      disabled={busy || line.quantity <= 1}
+                      onClick={() => void handleQuantity(line, line.quantity - 1)}
+                      className="grid h-8 w-8 place-items-center transition hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Minus size={13} />
+                    </button>
+                    <span className="min-w-9 text-center text-sm font-semibold tabular-nums">
+                      {updatingQuantity === line.id ? '…' : line.quantity}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Aumentar quantidade"
+                      disabled={busy || !canIncrease}
+                      onClick={() => void handleQuantity(line, line.quantity + 1)}
+                      className="grid h-8 w-8 place-items-center transition hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                </div>
+
                 {pickup && ret && (
                   <p className="mt-2 text-[0.8rem] text-ink/60">
                     Retirada {pickup} · Devolução {ret}
@@ -192,16 +279,19 @@ export default function CarrinhoPage() {
 
                 <button
                   type="button"
-                  onClick={() => handleRemove(line.id)}
-                  disabled={removing === line.id}
+                  onClick={() => void handleRemove(line.id)}
+                  disabled={busy}
                   className="mt-2 text-[0.75rem] text-ink/65 underline underline-offset-2 transition-colors hover:text-marsala disabled:opacity-50"
                 >
                   {removing === line.id ? 'Removendo…' : 'Remover'}
                 </button>
               </div>
 
-              <div className="shrink-0 text-right font-semibold tabular-nums">
-                {formatPrice(line.merchandise.price.amount, line.merchandise.price.currencyCode)}
+              <div className="shrink-0 text-right">
+                <p className="font-semibold tabular-nums">
+                  {formatPrice(line.merchandise.price.amount, line.merchandise.price.currencyCode)}
+                </p>
+                {line.quantity > 1 && <p className="mt-1 text-[0.68rem] text-ink/45">cada</p>}
               </div>
             </li>
           );
@@ -220,8 +310,7 @@ export default function CarrinhoPage() {
         ) : (
           <> · calculando período…</>
         )}
-        . O período é definido pela quantidade de peças — ao adicionar ou remover, as
-        datas de devolução são recalculadas.
+        . Alterar a quantidade atualiza o carrinho na Shopify e o período é recalculado pelas regras do aluguel.
       </p>
 
       <div className="mt-6 flex items-baseline justify-between border-t border-ink/10 pt-5">
@@ -328,7 +417,7 @@ async function fetchDuration(countedPieces: number): Promise<number | null> {
   const base = process.env.NEXT_PUBLIC_RENTAL_PLAN_URL;
   if (!base) return null;
 
-  const url = new URL(base);
+  const url = new URL(base, window.location.origin);
   url.searchParams.set('countedPieces', String(countedPieces));
 
   try {
@@ -368,9 +457,9 @@ function derivePickupDate(lines: CartLine[]): string | null {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
+      <p className="privacy-eyebrow">Seu closet de viagem</p>
+      <h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
       {children}
     </div>
   );
 }
-
