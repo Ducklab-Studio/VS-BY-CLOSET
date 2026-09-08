@@ -1,10 +1,10 @@
 /**
- * Vitrine em Next.js — front puro, sem carrinho nem checkout.
+ * Aplicação Next.js ativa: vitrine pública + carrinho + ClosetAdmin.
  *
- * Lê produtos da Storefront API do Shopify (leitura pública, sem PRP) só para
- * exibir catálogo com o visual da marca. O botão "Reservar" leva ao tema
- * Liquid (../../theme), onde o PRP e o checkout de fato funcionam — o widget
- * de aluguel usa App Blocks, mecanismo que só existe dentro do tema Shopify.
+ * Catálogo/carrinho usam Shopify; disponibilidade e regras de aluguel usam
+ * o reservations-api. O proxy `/api/availability` mantém a consulta pública
+ * same-origin e evita depender de CORS ou de uma URL absoluta gravada no
+ * bundle durante o build.
  */
 
 /** @type {import('next').NextConfig} */
@@ -12,19 +12,8 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
-  // RentalCalendar usa `new URL(...)`, então o valor precisa ser absoluto.
-  // Em desenvolvimento, apontamos para o proxy same-origin do próprio Next.
-  // Em produção, prefira definir NEXT_PUBLIC_AVAILABILITY_URL explicitamente
-  // para a URL pública correta do site ou do reservations-api.
-  env: {
-    NEXT_PUBLIC_AVAILABILITY_URL:
-      process.env.NEXT_PUBLIC_AVAILABILITY_URL ||
-      `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/availability`,
-  },
-
   images: {
     remotePatterns: [
-      // CDN de imagem de produto do Shopify.
       { protocol: 'https', hostname: 'cdn.shopify.com' },
       { protocol: 'https', hostname: 'res.cloudinary.com' },
     ],
