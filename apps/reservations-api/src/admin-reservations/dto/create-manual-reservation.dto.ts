@@ -28,20 +28,20 @@ class ManualReservationItemDto {
 }
 
 /**
- * Overrides explícitos — item 5 da Fase 8. Cada chave é uma exceção de
- * negócio NOMEADA, nunca um "ignora tudo" genérico.
+ * Overrides explícitos — cada chave é uma exceção de negócio NOMEADA,
+ * nunca um "ignora tudo" genérico.
  *
- *   minLeadTime    — ignora a antecedência mínima (o exemplo real dado).
- *   customDuration — `returnDate`/`durationDays` explícitos que NÃO
- *                    batem com o que o RentalPlanEngine calcularia
- *                    sozinho a partir das peças escolhidas. Sem este
- *                    override, um valor divergente é rejeitado — o
- *                    motor continua sendo a autoridade por padrão (ver
- *                    AdminReservationsService).
+ *   minLeadTime         — ignora a antecedência mínima.
+ *   customDuration      — permite `returnDate`/`durationDays` explícitos
+ *                         divergentes do cálculo normal do motor.
+ *   outsideOnlineSeason — permite reserva MANUAL durante a janela em que
+ *                         o canal ONLINE fica bloqueado. Esta exceção é
+ *                         exclusiva de usuário ADMIN e exige motivo; a
+ *                         validação de role é feita no backend, consultando
+ *                         `admin_users`, nunca confiando no frontend.
  *
- * As outras regras do motor (temporada, domingo, máximo de peças)
- * continuam bloqueando sempre, sem override, até existir uma
- * necessidade de negócio real e nomeada pra cada uma.
+ * Domingo de retirada, máximo de peças, bloqueios operacionais e conflito
+ * de agenda continuam sem override.
  */
 class ManualReservationOverridesDto {
   @IsOptional()
@@ -51,6 +51,10 @@ class ManualReservationOverridesDto {
   @IsOptional()
   @IsBoolean()
   customDuration?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  outsideOnlineSeason?: boolean;
 }
 
 /**
@@ -67,12 +71,9 @@ class ManualReservationOverridesDto {
  * ver `overrides.customDuration`.
  */
 export class CreateManualReservationDto {
-  /** Preenchido pelo ClosetAdmin (Fase 9) — o servidor do apps/marketing
-   *  já validou a sessão/role antes de chamar este endpoint; aqui serve
-   *  só pra auditoria (ReservationEvent.detail), nunca pra decisão de
-   *  autorização (essa continua sendo o bearer ADMIN_API_TOKEN do
-   *  AdminAuthGuard). Opcional pra não quebrar quem já chamava este
-   *  endpoint direto na Fase 8 sem essa informação. */
+  /** Preenchido pelo ClosetAdmin (Fase 9). Também é usado pelo backend
+   *  para autorizar `outsideOnlineSeason`: nesse caso o usuário é buscado
+   *  novamente em `admin_users` e precisa estar ativo com role ADMIN. */
   @IsOptional()
   @IsUUID()
   adminUserId?: string;
