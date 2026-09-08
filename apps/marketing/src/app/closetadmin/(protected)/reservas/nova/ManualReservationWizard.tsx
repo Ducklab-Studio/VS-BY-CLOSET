@@ -122,9 +122,13 @@ export function ManualReservationWizard({
       return;
     }
     if (result.violations) {
-      setViolations(result.violations);
-      setOverrides({});
-      setOverrideReason('');
+      // O backend pode descobrir overrides em etapas (ex.: temporada +
+      // antecedência primeiro e duração customizada depois). Enquanto o
+      // usuário não alterar datas/peças, as confirmações já dadas precisam
+      // continuar ativas; apagá-las aqui fazia o wizard alternar entre os
+      // mesmos grupos de violações indefinidamente.
+      const nextViolations = result.violations;
+      setViolations((previous) => Array.from(new Set([...(previous ?? []), ...nextViolations])));
       setStep(4);
       return;
     }
