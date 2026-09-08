@@ -80,7 +80,7 @@ export interface CreateManualReservationInput {
   returnDate?: string;
   durationDays?: number;
   sundayReturnOption?: 'saturday' | 'mondayMorning';
-  overrides?: { minLeadTime?: boolean; customDuration?: boolean };
+  overrides?: { minLeadTime?: boolean; customDuration?: boolean; outsideOnlineSeason?: boolean };
   overrideReason?: string;
   internalNote?: string;
   adminUserId: string;
