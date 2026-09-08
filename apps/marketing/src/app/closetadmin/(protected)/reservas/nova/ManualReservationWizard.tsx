@@ -9,18 +9,21 @@ import { createManualReservationAction } from './actions';
 const VIOLATION_LABELS: Record<string, string> = {
   pickup_before_minimum_advance: 'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
   duration_mismatch_with_engine: 'A duração informada não corresponde ao cálculo automático do motor de regras.',
-  pickup_outside_online_season: 'A data de retirada está dentro do período de bloqueio de temporada.',
+  pickup_outside_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
+  pickup_outside_online_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
   pickup_is_sunday: 'A retirada não pode ser num domingo.',
   max_pieces_exceeded: 'Quantidade de peças acima do máximo permitido.',
   no_reservable_items: 'Nenhuma peça válida selecionada.',
   pickup_not_before_return: 'A data de devolução precisa ser depois da retirada.',
 };
 
-// Só estas duas têm override nomeado (item 5 da Fase 8) — as demais
-// bloqueiam sempre, sem exceção possível pelo painel.
-const OVERRIDE_KEY_BY_VIOLATION: Record<string, 'minLeadTime' | 'customDuration'> = {
+type OverrideKey = 'minLeadTime' | 'customDuration' | 'outsideOnlineSeason';
+
+const OVERRIDE_KEY_BY_VIOLATION: Record<string, OverrideKey> = {
   pickup_before_minimum_advance: 'minLeadTime',
   duration_mismatch_with_engine: 'customDuration',
+  pickup_outside_season: 'outsideOnlineSeason',
+  pickup_outside_online_season: 'outsideOnlineSeason',
 };
 
 const inputClass =
@@ -28,7 +31,13 @@ const inputClass =
 
 type Step = 1 | 2 | 3 | 4;
 
-export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] }) {
+export function ManualReservationWizard({
+  pieces,
+  canOverrideSeason,
+}: {
+  pieces: PieceListItem[];
+  canOverrideSeason: boolean;
+}) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(1);
   const [customerName, setCustomerName] = useState('');
@@ -40,13 +49,37 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
   const [internalNote, setInternalNote] = useState('');
 
   const [violations, setViolations] = useState<string[] | null>(null);
-  const [overrides, setOverrides] = useState<{ minLeadTime?: boolean; customDuration?: boolean }>({});
+  const [overrides, setOverrides] = useState<{
+    minLeadTime?: boolean;
+    customDuration?: boolean;
+    outsideOnlineSeason?: boolean;
+  }>({});
   const [overrideReason, setOverrideReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const overridable = useMemo(() => (violations ?? []).filter((v) => v in OVERRIDE_KEY_BY_VIOLATION), [violations]);
-  const blocking = useMemo(() => (violations ?? []).filter((v) => !(v in OVERRIDE_KEY_BY_VIOLATION)), [violations]);
+  const overridable = useMemo(
+    () =>
+      (violations ?? []).filter((violation) => {
+        const key = OVERRIDE_KEY_BY_VIOLATION[violation];
+        if (!key) return false;
+        if (key === 'outsideOnlineSeason' && !canOverrideSeason) return false;
+        return true;
+      }),
+    [violations, canOverrideSeason],
+  );
+
+  const blocking = useMemo(
+    () =>
+      (violations ?? []).filter((violation) => {
+        const key = OVERRIDE_KEY_BY_VIOLATION[violation];
+        if (!key) return true;
+        if (key === 'outsideOnlineSeason' && !canOverrideSeason) return true;
+        return false;
+      }),
+    [violations, canOverrideSeason],
+  );
+
   const activePieces = pieces.filter((p) => p.active);
 
   function resetServerFeedback() {
@@ -209,7 +242,11 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
                   <li key={v}>{VIOLATION_LABELS[v] ?? v}</li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
+              {!canOverrideSeason && blocking.some((v) => OVERRIDE_KEY_BY_VIOLATION[v] === 'outsideOnlineSeason') ? (
+                <p className="mt-2 text-xs opacity-80">Exceção de temporada é exclusiva de usuário ADMIN.</p>
+              ) : (
+                <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
+              )}
             </div>
           ) : null}
 
@@ -227,7 +264,10 @@ export function ManualReservationWizard({ pieces }: { pieces: PieceListItem[] })
                         onChange={(e) => setOverrides((prev) => ({ ...prev, [key]: e.target.checked }))}
                         className="mt-0.5 accent-marsala dark:accent-gold"
                       />
-                      <span>{VIOLATION_LABELS[v] ?? v} — permitir mesmo assim.</span>
+                      <span>
+                        {VIOLATION_LABELS[v] ?? v} — permitir mesmo assim.
+                        {key === 'outsideOnlineSeason' ? ' O site público continua bloqueado; esta exceção vale somente para esta reserva manual.' : ''}
+                      </span>
                     </label>
                   );
                 })}
