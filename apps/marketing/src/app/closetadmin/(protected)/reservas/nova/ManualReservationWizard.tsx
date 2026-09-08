@@ -127,7 +127,8 @@ export function ManualReservationWizard({
       // usuário não alterar datas/peças, as confirmações já dadas precisam
       // continuar ativas; apagá-las aqui fazia o wizard alternar entre os
       // mesmos grupos de violações indefinidamente.
-      setViolations((previous) => Array.from(new Set([...(previous ?? []), ...result.violations])));
+      const nextViolations = result.violations;
+      setViolations((previous) => Array.from(new Set([...(previous ?? []), ...nextViolations])));
       setStep(4);
       return;
     }
