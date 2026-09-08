@@ -13,17 +13,21 @@ export interface CreateManualResult {
 }
 
 /**
- * Item 6 (fluxo "Nova reserva"). A validação de verdade — engine de
- * duração, temporada, domingo, máximo de peças, double booking, bloqueio
- * operacional — é TODA feita no reservations-api
- * (`AdminReservationsService.createManual`, Fases 8/9); este action só
- * encaminha e traduz o formato de erro (`violations`) pro wizard decidir
- * se mostra um override ou um bloqueio definitivo.
+ * Fluxo "Nova reserva". A validação de negócio definitiva continua no
+ * reservations-api. Este action só faz uma barreira de UX adicional para
+ * a exceção de temporada: STAFF nem envia esse override. O backend ainda
+ * revalida a role contra `admin_users`, então esta checagem não é a camada
+ * de segurança final.
  */
 export async function createManualReservationAction(
   input: Omit<CreateManualReservationInput, 'adminUserId' | 'adminUserName'>,
 ): Promise<CreateManualResult> {
   const session = await requireAdminSession();
+
+  if (input.overrides?.outsideOnlineSeason === true && session.role !== 'ADMIN') {
+    return { ok: false, error: 'Exceção de temporada é exclusiva de usuário ADMIN.' };
+  }
+
   try {
     const result = await createManualReservation({ ...input, adminUserId: session.id, adminUserName: session.name });
     revalidatePath('/closetadmin');
