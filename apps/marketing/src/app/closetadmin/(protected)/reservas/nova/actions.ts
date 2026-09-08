@@ -10,6 +10,18 @@ export interface CreateManualResult {
   readonly error?: string;
   readonly violations?: string[];
   readonly reservationId?: string;
+  readonly confirmation?: {
+    readonly pickupDate: string;
+    readonly returnDate: string;
+    readonly itemCodes: string[];
+  };
+}
+
+interface CreatedManualReservation {
+  readonly reservationId: string;
+  readonly pickupDate: string;
+  readonly returnDate: string;
+  readonly items: readonly { code: string }[];
 }
 
 /**
@@ -29,13 +41,27 @@ export async function createManualReservationAction(
   }
 
   try {
-    const result = await createManualReservation({ ...input, adminUserId: session.id, adminUserName: session.name });
+    const result = (await createManualReservation({
+      ...input,
+      adminUserId: session.id,
+      adminUserName: session.name,
+    })) as CreatedManualReservation;
+
     revalidatePath('/closetadmin');
     revalidatePath('/closetadmin/reservas');
     revalidatePath('/closetadmin/calendario');
     revalidatePath('/closetadmin/pecas');
     revalidatePath('/closetadmin/auditoria');
-    return { ok: true, reservationId: (result as { reservationId: string }).reservationId };
+
+    return {
+      ok: true,
+      reservationId: result.reservationId,
+      confirmation: {
+        pickupDate: result.pickupDate,
+        returnDate: result.returnDate,
+        itemCodes: result.items.map((item) => item.code),
+      },
+    };
   } catch (err) {
     if (err instanceof AdminApiError) {
       const body = err.body as { violations?: unknown } | undefined;
