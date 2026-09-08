@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
 import { addRentalToCart, countPiecesInCart, isCartConfigured } from '@/lib/cart';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
@@ -14,13 +14,9 @@ import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
  * testado em apps/reservations-api/src/rental-rules. Este componente
  * NÃO reimplementa nada disso: só lê o que o servidor já calculou.
  *
- * Os únicos utilitários de data usados daqui de @/lib/rental-rules são
- * genéricos de calendário (addDays, toISO, sameDay...) — não têm regra
- * de negócio nenhuma, só aritmética de data pra desenhar a grade.
- *
- * FAIL CLOSED: se a API não estiver configurada ou falhar, o calendário
- * mostra erro e não deixa reservar — nunca inventa data ocupada nem
- * mostra "tudo disponível" por padrão.
+ * FAIL CLOSED: se a API falhar, o calendário mostra erro e não deixa
+ * reservar. O fallback padrão é o proxy same-origin `/api/availability`;
+ * nenhuma URL localhost é gravada no bundle de produção.
  */
 
 const WEEKDAY_BASE = new Date(2024, 0, 7); // um domingo
@@ -82,9 +78,19 @@ export function RentalCalendar({
     let cancelled = false;
 
     async function load() {
+      setLoading(true);
+      setLoadFailed(false);
+      setData(null);
+      setError(null);
+
       const cartPieces = isCartConfigured ? await countPiecesInCart().catch(() => 0) : 0;
       if (cancelled) return;
-      const countedPieces = Math.min(cartPieces + 1, 6); // +1 = a peça sendo vista
+
+      // Não limita artificialmente em 6 aqui. Se o cliente já estiver no
+      // máximo, o backend precisa receber a quantidade prospectiva real e
+      // responder `max_pieces_exceeded`; capar em 6 permitia uma 7ª peça
+      // parecer disponível no calendário e só falhar muito depois.
+      const countedPieces = cartPieces + 1;
 
       setPieces(countedPieces);
       setSelected(null);
@@ -102,12 +108,11 @@ export function RentalCalendar({
       setLoading(false);
     }
 
-    load();
+    void load();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variant.id]);
+  }, [variant.id, today, rangeEnd]);
 
   const dayMap = useMemo(() => {
     const map = new Map<string, AvailabilityDay>();
@@ -126,7 +131,7 @@ export function RentalCalendar({
     [locale],
   );
 
-  const { days, freeCount, padCount, isBlackoutSeason } = useMemo(() => {
+  const { days, freeCount, padCount, isBlackoutSeason, isMaxPiecesExceeded } = useMemo(() => {
     const y = view.getFullYear();
     const m = view.getMonth();
     const pad = new Date(y, m, 1).getDay();
@@ -135,6 +140,7 @@ export function RentalCalendar({
     let free = 0;
     let known = 0;
     let blackout = 0;
+    let maxPiecesExceeded = 0;
 
     for (let i = 1; i <= total; i++) {
       const date = new Date(y, m, i);
@@ -143,20 +149,18 @@ export function RentalCalendar({
       if (info) {
         known++;
         if (info.reason === 'pickup_outside_online_season') blackout++;
+        if (info.reason === 'max_pieces_exceeded') maxPiecesExceeded++;
       }
       out.push({ date, info });
     }
-    // Fase 10, item 14 — nenhum dia reservável no mês E a temporada é
-    // (ao menos parte de) o motivo, não "sem estoque"/"erro técnico":
-    // mensagem de negócio dedicada em vez da genérica "não há datas
-    // disponíveis". Não exige que TODO dia seja exatamente por
-    // temporada — achado real testando: perto da virada de mês, alguns
-    // dias caem por antecedência insuficiente e outros por temporada ao
-    // mesmo tempo (as duas janelas se sobrepõem), mas a causa raiz do
-    // mês inteiro estar fechado continua sendo a temporada. `reason` já
-    // vem calculado pelo motor real (GET /availability) — só
-    // reapresentado aqui, nunca uma segunda regra.
-    return { days: out, freeCount: free, padCount: pad, isBlackoutSeason: known > 0 && free === 0 && blackout > 0 };
+
+    return {
+      days: out,
+      freeCount: free,
+      padCount: pad,
+      isBlackoutSeason: known > 0 && free === 0 && blackout > 0,
+      isMaxPiecesExceeded: known > 0 && free === 0 && maxPiecesExceeded > 0,
+    };
   }, [view, dayMap]);
 
   const atFirstMonth = view.getFullYear() === today.getFullYear() && view.getMonth() === today.getMonth();
@@ -196,9 +200,9 @@ export function RentalCalendar({
         returnLabel: returnDate.toLocaleDateString(locale),
       });
       window.dispatchEvent(new Event('closet:cart-added'));
-      setSubmitting(false);
     } catch {
       setError('Não foi possível adicionar ao carrinho. Tente novamente.');
+    } finally {
       setSubmitting(false);
     }
   }
@@ -376,13 +380,15 @@ export function RentalCalendar({
       >
         {loadFailed
           ? 'Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.'
-          : isBlackoutSeason
-            ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
-            : freeCount === 0 && !loading
-              ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
-              : selected && selectedInfo?.bookable
-                ? 'Disponível para retirada nesta data.'
-                : null}
+          : isMaxPiecesExceeded
+            ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
+            : isBlackoutSeason
+              ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
+              : freeCount === 0 && !loading
+                ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
+                : selected && selectedInfo?.bookable
+                  ? 'Disponível para retirada nesta data.'
+                  : null}
       </Status>
 
       {error && <Status tone="error">{error}</Status>}
@@ -397,14 +403,7 @@ export function RentalCalendar({
         Alugar agora
       </button>
 
-      {/* Saída pro atendimento: dentro dos 15 dias, na alta temporada, ou
-          bloqueio de negócio (feriado/manutenção), reservar não é
-          possível — mas não é beco sem saída. A funcionária cria a
-          reserva à mão, e ela passa pela mesma trava do banco. Texto do
-          botão muda pra "Consultar em loja" especificamente no caso de
-          temporada bloqueada (item 14 da Fase 10) — não é a mesma coisa
-          que "falar com atendimento" por falta de estoque pontual. */}
-      {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && (
+      {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
         <a
           href={whatsappHref}
           target="_blank"
@@ -425,9 +424,10 @@ const LONG_DATE: Intl.DateTimeFormatOptions = {
 };
 
 /**
- * Consulta a disponibilidade real. Sem fallback nenhum: URL não
- * configurada, resposta não-ok, ou erro de rede — tudo vira `null`, e
- * quem chama mostra "não foi possível consultar", nunca inventa datas.
+ * Consulta a disponibilidade real. Sem fallback inventado: por padrão usa
+ * o proxy same-origin do Next; uma URL pública explícita continua aceita.
+ * `new URL(base, window.location.origin)` suporta os dois formatos e evita
+ * o crash que ocorria com `new URL('/api/availability')`.
  */
 async function fetchAvailability(
   shopifyVariantId: string,
@@ -435,27 +435,24 @@ async function fetchAvailability(
   from: Date,
   to: Date,
 ): Promise<AvailabilityResponse | null> {
-  const base = process.env.NEXT_PUBLIC_AVAILABILITY_URL;
-  if (!base) return null;
-
-  const url = new URL(base);
+  const base = process.env.NEXT_PUBLIC_AVAILABILITY_URL?.trim() || '/api/availability';
+  const url = new URL(base, window.location.origin);
   url.searchParams.set('shopifyVariantId', shopifyVariantId);
   url.searchParams.set('countedPieces', String(countedPieces));
   url.searchParams.set('from', toISO(from));
   url.searchParams.set('to', toISO(to));
 
   try {
-    const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+    const res = await fetch(url.toString(), {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
     if (!res.ok) return null;
     return (await res.json()) as AvailabilityResponse;
   } catch {
     return null;
   }
 }
-
-// ---------------------------------------------------------------------------
-// peças de UI
-// ---------------------------------------------------------------------------
 
 function DayCell({
   date,
@@ -494,9 +491,7 @@ function DayCell({
           : !known
             ? 'cursor-not-allowed border-transparent text-ink/25'
             : disabled
-              ? // Riscado, não apagado: dia apagado o cliente acha que é de
-                // outro mês; riscado ele entende que existe e está tomado.
-                'cursor-not-allowed border-transparent text-ink/65 line-through'
+              ? 'cursor-not-allowed border-transparent text-ink/65 line-through'
               : 'border-transparent hover:border-marsala/25 hover:bg-marsala/[0.06]',
       ].join(' ')}
     >
