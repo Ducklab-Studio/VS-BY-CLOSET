@@ -275,7 +275,10 @@ describe('AvailabilityService — integração real (Neon)', () => {
     });
 
     test('bem antes do bloqueio (fora da janela de preparação) → disponível', async () => {
-      const probe = addDays(existingBlocked.blockedFrom, -10);
+      // Este teste é sobre distância do bloqueio, não sobre domingo/temporada.
+      // Mantém a sonda num dia de retirada normalmente válido para não
+      // transformar a passagem do calendário em falso-negativo.
+      const probe = pickupSafe(addDays(existingBlocked.blockedFrom, -10));
       const res = await service.getAvailability({
         shopifyVariantId: VARIANT_OVERLAP,
         countedPieces: 1,
