@@ -5,6 +5,8 @@ export class DurationQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(6)
+  // Teto técnico anti-abuso. O máximo comercial real vem de
+  // rental_rule_config e é validado por durationForPieces.
+  @Max(50)
   countedPieces!: number;
 }
