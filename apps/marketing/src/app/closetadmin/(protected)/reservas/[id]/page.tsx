@@ -111,16 +111,9 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
           ) : (
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
               {reservation.events.map((event, i) => (
-                <li key={i} className="py-2.5 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-ink dark:text-dark-text">{event.type}</span>
-                    <span className="text-xs text-ink/65 dark:text-dark-subtle">{formatDateTimePt(event.createdAt)}</span>
-                  </div>
-                  {event.detail ? (
-                    <pre className="mt-1 overflow-x-auto rounded-lg bg-ink/5 dark:bg-black/40 border border-ink/5 dark:border-white/5 p-2 text-xs text-ink/60 dark:text-sand/80 font-mono">
-                      {JSON.stringify(event.detail, null, 2)}
-                    </pre>
-                  ) : null}
+                <li key={i} className="flex items-center justify-between gap-4 py-2.5 text-sm">
+                  <span className="font-medium text-ink dark:text-dark-text">{event.type}</span>
+                  <span className="text-xs text-ink/65 dark:text-dark-subtle">{formatDateTimePt(event.createdAt)}</span>
                 </li>
               ))}
             </ul>
