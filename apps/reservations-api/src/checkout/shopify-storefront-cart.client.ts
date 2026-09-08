@@ -3,14 +3,13 @@ import { resolveShopifyStorefrontCredentials, type ShopifyStorefrontCredentials 
 
 /**
  * Cliente mínimo da Storefront API pra `cartCreate` — só o que a Fase 6
- * precisa (item 18: Admin API continua fora, isto é Storefront pura).
- * Padrão de chamada idêntico ao já usado em
- * apps/marketing/src/lib/shopify.ts (mesmo formato de erro, mesma
- * versão de API) — não é uma segunda implementação de cliente Shopify,
- * é a mesma ideia, só que rodando neste servidor (que não compartilha
- * `.env` com o Next.js).
+ * precisa. É Storefront pura; a Admin API continua separada.
+ *
+ * A versão precisa ficar alinhada com os clientes Storefront do Next.js.
+ * Usar uma versão retirada faz a Shopify "fall forward" silenciosamente,
+ * o que deixa o comportamento real diferente do que o código declara.
  */
-const API_VERSION = '2025-01';
+const API_VERSION = '2026-07';
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface CartLineInput {
@@ -79,8 +78,6 @@ export async function shopifyCartCreate(
       signal: controller.signal,
     });
   } catch (err) {
-    // Rede caiu ou o timeout do AbortController disparou — mesma
-    // categoria (infra), o chamador não precisa diferenciar.
     throw new Error(`Falha de rede ao chamar a Storefront API: ${err instanceof Error ? err.name : 'unknown'}`);
   } finally {
     clearTimeout(timeout);
@@ -108,11 +105,8 @@ export async function shopifyCartCreate(
 
 /**
  * Wrapper injetável — mesmo padrão de RentalRuleConfigService: existe pra
- * CheckoutService poder ser testado construindo com um cliente FAKE
- * (`new CheckoutService(prisma, config, fakeCartClient)`), sem precisar
- * de mock de módulo. A resolução de credenciais mora aqui dentro (não em
- * CheckoutService) — quem usa o cliente real não precisa saber de onde
- * vêm o domínio/token.
+ * CheckoutService poder ser testado construindo com um cliente FAKE,
+ * sem precisar de mock de módulo. A resolução de credenciais mora aqui.
  */
 @Injectable()
 export class ShopifyCartClient {
