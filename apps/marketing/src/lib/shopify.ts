@@ -19,11 +19,13 @@
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
-const API_VERSION = '2025-01';
+// Versão estável suportada na data desta auditoria. Manter alinhada com
+// cart.ts e reservations-api/src/checkout/shopify-storefront-cart.client.ts.
+const API_VERSION = '2026-07';
 
 /**
- * URL pública da loja (o tema Liquid), usada para montar o link de "Reservar".
- * Ex.: https://loja.vsbycloset.com.br — ver README para a decisão de domínio.
+ * URL pública da Shopify, usada apenas nos poucos fluxos que ainda precisam
+ * sair deste site (conta/políticas/rastreio). Produto e carrinho são internos.
  */
 const STORE_URL = (process.env.NEXT_PUBLIC_SHOPIFY_STORE_URL ?? '').replace(/\/$/, '');
 
