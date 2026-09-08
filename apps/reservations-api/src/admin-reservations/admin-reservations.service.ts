@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -124,12 +124,17 @@ interface AttemptContext {
  * `validateMinimumAdvance`, `validateMaxPieces`, `isSunday` — nenhuma regra
  * reimplementada aqui). `returnDate`/`durationDays` explícitos só passam
  * batendo com o que o motor calcularia OU com `overrides.customDuration`
- * + `overrideReason`. A única regra que o canal manual dispensa de
- * verdade é `reservableOnline` (item 8: "manual ≠ online" — esse flag é
- * do canal público, irrelevante aqui); por isso os itens passam pro
- * motor sempre com `reservableOnline: true` sintético — `countsTowardRentalDuration`
- * de cada peça continua sendo o REAL, lido do banco, nunca o que o corpo
- * da requisição mandaria (o DTO nem declara esse campo).
+ * + `overrideReason`. A janela de temporada continua bloqueando por padrão;
+ * `overrides.outsideOnlineSeason` abre uma exceção somente para esta reserva
+ * manual, exige motivo e é autorizada exclusivamente para usuário ADMIN,
+ * revalidado no banco no momento da ação. O canal público não é alterado.
+ *
+ * A única regra que o canal manual dispensa de verdade é `reservableOnline`
+ * (item 8: "manual ≠ online" — esse flag é do canal público, irrelevante
+ * aqui); por isso os itens passam pro motor sempre com `reservableOnline:
+ * true` sintético — `countsTowardRentalDuration` de cada peça continua sendo
+ * o REAL, lido do banco, nunca o que o corpo da requisição mandaria (o DTO
+ * nem declara esse campo).
  *
  * Diferença deliberada do HOLD público: aqui a equipe escolhe as peças
  * físicas EXATAS (`rentalUnitId`), nunca "uma variante, o sistema escolhe
@@ -151,9 +156,16 @@ export class AdminReservationsService {
     if (idempotencyKey !== undefined) validateIdempotencyKeyFormat(idempotencyKey);
 
     const overrides = dto.overrides ?? {};
-    const hasAnyOverride = overrides.minLeadTime === true || overrides.customDuration === true;
+    const hasAnyOverride =
+      overrides.minLeadTime === true ||
+      overrides.customDuration === true ||
+      overrides.outsideOnlineSeason === true;
     if (hasAnyOverride && !dto.overrideReason) {
       throw new BadRequestException('overrideReason é obrigatório quando algum override é usado.');
+    }
+
+    if (overrides.outsideOnlineSeason === true) {
+      await this.assertAdminCanOverrideSeason(dto.adminUserId);
     }
 
     const unitIds = normalizeUnitIds(dto.items.map((i) => i.rentalUnitId));
@@ -221,6 +233,31 @@ export class AdminReservationsService {
     }
 
     throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
+  }
+
+  /** A exceção de temporada é mais sensível que os outros overrides: o
+   *  frontend não decide a role. Reconsulta `admin_users` aqui e só permite
+   *  ADMIN ativo. Falha de banco vira 503 (fail closed), nunca autorização
+   *  presumida. */
+  private async assertAdminCanOverrideSeason(adminUserId: string | undefined): Promise<void> {
+    if (!adminUserId) {
+      throw new ForbiddenException('Exceção de temporada exige usuário ADMIN autenticado.');
+    }
+
+    let adminUser: { active: boolean; role: 'ADMIN' | 'STAFF' } | null;
+    try {
+      adminUser = await this.prisma.adminUser.findUnique({
+        where: { id: adminUserId },
+        select: { active: true, role: true },
+      });
+    } catch (err) {
+      this.logger.error(`Falha ao validar role para override de temporada: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível validar a autorização do override no momento.');
+    }
+
+    if (!adminUser || !adminUser.active || adminUser.role !== 'ADMIN') {
+      throw new ForbiddenException('Exceção de temporada é exclusiva de usuário ADMIN.');
+    }
   }
 
   private async attemptCreateManual(tx: Prisma.TransactionClient, ctx: AttemptContext, unitIds: readonly string[]): Promise<ManualReservationResponse> {
@@ -629,7 +666,7 @@ export class AdminReservationsService {
  */
 function resolveManualDuration(input: {
   dto: CreateManualReservationDto;
-  overrides: { minLeadTime?: boolean; customDuration?: boolean };
+  overrides: { minLeadTime?: boolean; customDuration?: boolean; outsideOnlineSeason?: boolean };
   pickupDate: CivilDate;
   today: CivilDate;
   config: RentalRuleConfig;
@@ -649,17 +686,19 @@ function resolveManualDuration(input: {
 
   // Todas as violações são coletadas JUNTAS antes de decidir rejeitar —
   // mesmo padrão de calculateRentalPlan (avalia tudo, depois decide),
-  // nunca lança na primeira que encontrar. Achado real escrevendo o
-  // teste 2 desta fase: lançar cedo em `pickup_outside_season` sem
-  // chegar a avaliar `pickup_before_minimum_advance` deixava a lista de
-  // violations incompleta — quem chama corrigiria uma, reenviaria, e só
-  // aí descobriria a outra, uma a uma.
+  // nunca lança na primeira que encontrar.
   const unresolved: string[] = [];
+  const overridesApplied: string[] = [];
   if (isPickupSunday) unresolved.push('pickup_is_sunday');
-  if (!isSeasonOk) unresolved.push('pickup_outside_season');
+  if (!isSeasonOk) {
+    if (overrides.outsideOnlineSeason === true) {
+      overridesApplied.push('outsideOnlineSeason');
+    } else {
+      unresolved.push('pickup_outside_season');
+    }
+  }
   if (!isMaxPiecesOk) unresolved.push('max_pieces_exceeded');
 
-  const overridesApplied: string[] = [];
   const requestedExplicitDate = dto.returnDate ? civilDateFromISO(dto.returnDate) : dto.durationDays ? addDays(pickupDate, dto.durationDays) : null;
 
   if (!isMinAdvanceOk) {

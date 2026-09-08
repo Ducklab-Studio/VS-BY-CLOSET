@@ -25,7 +25,7 @@ export default async function ClosetAdminNewReservationPage() {
   return (
     <div>
       <PageHeader title="Nova reserva manual" description="Cliente → Datas → Peças → Validação → Resumo → Confirmar" />
-      <ManualReservationWizard pieces={pieces} />
+      <ManualReservationWizard pieces={pieces} canOverrideSeason={session.role === 'ADMIN'} />
     </div>
   );
 }
