@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { extractCustomerPhone, type ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
 
 const REMINDER_ACTION = 'PICKUP_REMINDER_48H_SENT';
 const REMINDER_TIMEZONE = 'America/Santiago';
@@ -12,10 +13,13 @@ const ACTIVE_BEFORE_PICKUP: ReservationStatus[] = [
   ReservationStatus.ready_for_pickup,
 ];
 
+type ReminderChannel = 'whatsapp' | 'email';
+
 interface ReminderReservation {
   readonly id: string;
   readonly customerName: string | null;
-  readonly customerEmail: string;
+  readonly customerEmail: string | null;
+  readonly customerPhone: string | null;
   readonly pickupDate: Date;
   readonly returnDate: Date | null;
   readonly items: readonly {
@@ -26,6 +30,10 @@ interface ReminderReservation {
 interface EmailPayload {
   readonly subject: string;
   readonly html: string;
+}
+
+interface WhatsAppTemplatePayload {
+  readonly bodyParameters: readonly string[];
 }
 
 @Injectable()
@@ -42,11 +50,13 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (!this.providerConfigured()) {
-      this.logger.error('Lembrete 48h habilitado, mas RESEND_API_KEY ou REMINDER_FROM_EMAIL não foi configurado.');
+    const channel = this.channel();
+    if (!this.providerConfigured(channel)) {
+      this.logger.error(`Lembrete 48h habilitado, mas o provedor de ${channel} não está configurado.`);
       return;
     }
 
+    this.logger.log(`Lembrete 48h habilitado via ${channel}.`);
     void this.runSafely();
     const intervalMs = this.pollMinutes() * 60_000;
     this.timer = setInterval(() => void this.runSafely(), intervalMs);
@@ -63,9 +73,14 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
    * (sem horário); portanto "48h" significa dois dias civis antes. O envio
    * começa no horário configurado em Santiago e, se o processo estiver fora
    * do ar naquele instante, ainda pode acontecer mais tarde no mesmo dia.
+   *
+   * WhatsApp usa TEMPLATE aprovado pela Meta, não mensagem livre. Isso é
+   * importante porque o lembrete é iniciado pela empresa e normalmente está
+   * fora da janela de atendimento de 24h.
    */
   async runOnce(now = new Date()): Promise<number> {
-    if (!this.enabled() || !this.providerConfigured()) return 0;
+    const channel = this.channel();
+    if (!this.enabled() || !this.providerConfigured(channel)) return 0;
 
     const target = reminderTargetForNow(now, this.sendHour(), REMINDER_TIMEZONE);
     if (!target) return 0;
@@ -74,13 +89,14 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.reservation.findMany({
       where: {
         pickupDate,
-        customerEmail: { not: null },
         status: { in: ACTIVE_BEFORE_PICKUP },
+        ...(channel === 'email' ? { customerEmail: { not: null } } : {}),
       },
       select: {
         id: true,
         customerName: true,
         customerEmail: true,
+        customerPhone: true,
         pickupDate: true,
         returnDate: true,
         items: {
@@ -93,18 +109,19 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
 
     let sent = 0;
     for (const raw of rows) {
-      if (!raw.customerEmail || !raw.pickupDate) continue;
+      if (!raw.pickupDate) continue;
       const reservation: ReminderReservation = {
         ...raw,
-        customerEmail: raw.customerEmail,
         pickupDate: raw.pickupDate,
       };
-      if (await this.sendOne(reservation)) sent += 1;
+      if (await this.sendOne(reservation, channel)) sent += 1;
     }
     return sent;
   }
 
-  private async sendOne(reservation: ReminderReservation): Promise<boolean> {
+  private async sendOne(reservation: ReminderReservation, channel: ReminderChannel): Promise<boolean> {
+    // A chave não inclui canal de propósito: uma reserva recebe UM lembrete
+    // de retirada. Trocar e-mail por WhatsApp depois não gera duplicidade.
     const idempotencyKey = `vsbycloset-pickup-48h-${reservation.id}`;
 
     return this.prisma.$transaction(
@@ -125,16 +142,32 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
         // desde a consulta inicial, não dispara mensagem atrasada.
         const current = await tx.reservation.findUnique({
           where: { id: reservation.id },
-          select: { status: true, customerEmail: true },
+          select: { status: true, customerEmail: true, customerPhone: true },
         });
-        if (!current || !ACTIVE_BEFORE_PICKUP.includes(current.status) || !current.customerEmail) return false;
+        if (!current || !ACTIVE_BEFORE_PICKUP.includes(current.status)) return false;
 
-        const message = buildPickupReminderEmail(reservation);
-        const providerMessageId = await this.sendWithResend({
-          to: current.customerEmail,
-          ...message,
-          idempotencyKey,
-        });
+        let providerMessageId: string;
+        let provider: string;
+
+        if (channel === 'whatsapp') {
+          const recipient = await this.resolveWhatsAppRecipient(tx, reservation.id, current.customerPhone);
+          if (!recipient) return false;
+
+          providerMessageId = await this.sendWithWhatsApp({
+            to: recipient,
+            ...buildPickupReminderWhatsAppTemplate(reservation),
+          });
+          provider = 'meta_whatsapp_cloud_api';
+        } else {
+          if (!current.customerEmail) return false;
+          const message = buildPickupReminderEmail(reservation);
+          providerMessageId = await this.sendWithResend({
+            to: current.customerEmail,
+            ...message,
+            idempotencyKey,
+          });
+          provider = 'resend';
+        }
 
         await tx.adminAuditEvent.create({
           data: {
@@ -144,19 +177,103 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
             entityType: 'Reservation',
             entityId: reservation.id,
             detail: {
-              channel: 'email',
-              provider: 'resend',
+              channel,
+              provider,
               providerMessageId,
               pickupDate: toCivilISO(reservation.pickupDate),
             } as Prisma.InputJsonValue,
           },
         });
 
-        this.logger.log(`Lembrete 48h enviado para reserva ${reservation.id}.`);
+        this.logger.log(`Lembrete 48h enviado via ${channel} para reserva ${reservation.id}.`);
         return true;
       },
       { timeout: 15_000, maxWait: 5_000 },
     );
+  }
+
+  /**
+   * Reserva manual já guarda telefone. Para reserva ONLINE, versões antigas
+   * do fluxo guardavam apenas e-mail; nesse caso recuperamos o telefone do
+   * webhook Shopify já persistido, validamos e então o gravamos na Reservation
+   * para as próximas leituras. Não inventa DDI quando a Shopify não forneceu.
+   */
+  private async resolveWhatsAppRecipient(
+    tx: Prisma.TransactionClient,
+    reservationId: string,
+    persistedPhone: string | null,
+  ): Promise<string | null> {
+    const direct = normalizeWhatsAppRecipient(persistedPhone);
+    if (direct) return direct;
+
+    const webhook = await tx.webhookEvent.findFirst({
+      where: {
+        reservationId,
+        status: 'processed',
+        topic: { in: ['orders/paid', 'orders/create'] },
+      },
+      orderBy: { processedAt: 'desc' },
+      select: { payload: true },
+    });
+    if (!webhook) return null;
+
+    const rawPhone = extractCustomerPhone(webhook.payload as unknown as ShopifyOrderPayload);
+    const recipient = normalizeWhatsAppRecipient(rawPhone);
+    if (!recipient || !rawPhone) return null;
+
+    await tx.reservation.update({
+      where: { id: reservationId },
+      data: { customerPhone: rawPhone },
+    });
+    return recipient;
+  }
+
+  private async sendWithWhatsApp(input: {
+    to: string;
+    bodyParameters: readonly string[];
+  }): Promise<string> {
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN!.trim();
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!.trim();
+    const templateName = process.env.WHATSAPP_PICKUP_REMINDER_TEMPLATE!.trim();
+    const languageCode = (process.env.WHATSAPP_TEMPLATE_LANGUAGE ?? 'pt_BR').trim() || 'pt_BR';
+    const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION!.trim();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+
+    try {
+      const response = await fetch(`https://graph.facebook.com/${graphVersion}/${encodeURIComponent(phoneNumberId)}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: input.to,
+          type: 'template',
+          template: {
+            name: templateName,
+            language: { code: languageCode },
+            components: [
+              {
+                type: 'body',
+                parameters: input.bodyParameters.map((text) => ({ type: 'text', text })),
+              },
+            ],
+          },
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) throw new Error(`WhatsAppHTTP${response.status}`);
+      const data = (await response.json()) as { messages?: readonly { id?: unknown }[] };
+      const id = data.messages?.[0]?.id;
+      if (typeof id !== 'string' || !id) throw new Error('WhatsAppInvalidResponse');
+      return id;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async sendWithResend(input: {
@@ -201,7 +318,19 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
     return process.env.PICKUP_REMINDER_ENABLED?.trim().toLowerCase() === 'true';
   }
 
-  private providerConfigured(): boolean {
+  private channel(): ReminderChannel {
+    return process.env.PICKUP_REMINDER_CHANNEL?.trim().toLowerCase() === 'email' ? 'email' : 'whatsapp';
+  }
+
+  private providerConfigured(channel: ReminderChannel): boolean {
+    if (channel === 'whatsapp') {
+      return Boolean(
+        process.env.WHATSAPP_ACCESS_TOKEN?.trim() &&
+          process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() &&
+          process.env.WHATSAPP_PICKUP_REMINDER_TEMPLATE?.trim() &&
+          process.env.WHATSAPP_GRAPH_API_VERSION?.trim(),
+      );
+    }
     return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.REMINDER_FROM_EMAIL?.trim());
   }
 
@@ -233,6 +362,31 @@ export function reminderTargetForNow(now: Date, sendHour: number, timezone = REM
   const base = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   base.setUTCDate(base.getUTCDate() + 2);
   return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth() + 1)}-${pad2(base.getUTCDate())}`;
+}
+
+export function buildPickupReminderWhatsAppTemplate(reservation: ReminderReservation): WhatsAppTemplatePayload {
+  const name = cleanTemplateText(reservation.customerName?.trim() || 'cliente', 120);
+  const pickup = formatCivilPt(reservation.pickupDate);
+  const returnDate = reservation.returnDate ? formatCivilPt(reservation.returnDate) : 'a confirmar';
+  const pieces = reservation.items.length
+    ? reservation.items
+        .map(({ rentalUnit }) => `${rentalUnit.name} (${rentalUnit.code})`)
+        .join(', ')
+    : 'itens da sua reserva';
+
+  return {
+    // Template esperado na Meta:
+    // Olá {{1}}! Sua retirada na VS BY CLOSET está marcada para {{2}}.
+    // Devolução prevista: {{3}}. Peças: {{4}}.
+    bodyParameters: [name, pickup, returnDate, cleanTemplateText(pieces, 900)],
+  };
+}
+
+export function normalizeWhatsAppRecipient(phone: string | null | undefined): string | null {
+  const digits = phone?.replace(/\D/g, '') ?? '';
+  // E.164 tem no máximo 15 dígitos. Não tenta inventar DDI ausente.
+  if (digits.length < 10 || digits.length > 15) return null;
+  return digits;
 }
 
 export function buildPickupReminderEmail(reservation: ReminderReservation): EmailPayload {
@@ -288,6 +442,10 @@ function toCivilISO(date: Date): string {
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
+}
+
+function cleanTemplateText(value: string, maxLength: number): string {
+  return value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength) || '-';
 }
 
 function escapeHtml(value: string): string {

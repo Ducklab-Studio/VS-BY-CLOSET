@@ -20,6 +20,10 @@ export interface ShopifyOrderLineItem {
   readonly quantity?: number;
 }
 
+interface ShopifyPhoneContainer {
+  readonly phone?: string | null;
+}
+
 export interface ShopifyOrderPayload {
   readonly id: number | string;
   readonly admin_graphql_api_id: string;
@@ -30,10 +34,17 @@ export interface ShopifyOrderPayload {
   readonly line_items?: readonly ShopifyOrderLineItem[];
   /// `email` costuma vir preenchido; `contact_email` é o fallback oficial
   /// da Shopify pra pedidos sem conta de cliente (checkout como
-  /// visitante). Só usado pra e-mail OPERACIONAL (Fase 10) — nunca pra
-  /// nada de checkout/pagamento, que continua sendo só a Shopify.
+  /// visitante). Só usado pra comunicação OPERACIONAL — nunca pra
+  /// checkout/pagamento, que continua sendo só a Shopify.
   readonly email?: string | null;
   readonly contact_email?: string | null;
+  /// O telefone pode aparecer em mais de um ponto do Order dependendo de
+  /// como o checkout foi preenchido. A ordem de preferência fica no parser
+  /// abaixo; não copiamos endereço nem outros dados pessoais para a reserva.
+  readonly phone?: string | null;
+  readonly customer?: ShopifyPhoneContainer | null;
+  readonly shipping_address?: ShopifyPhoneContainer | null;
+  readonly billing_address?: ShopifyPhoneContainer | null;
 }
 
 export interface ShopifyRefundTransaction {
@@ -72,18 +83,33 @@ export function extractNoteAttribute(order: ShopifyOrderPayload, name: string): 
 }
 
 /**
- * Fase 10 — achado da auditoria: `Reservation.customerEmail` nunca era
- * preenchido pra reserva ONLINE (só a manual grava, e é opcional lá) —
- * o HOLD público nunca coleta e-mail, então o único lugar onde ele
- * existe de verdade é no próprio Order da Shopify. `email` é o padrão;
- * `contact_email` é o fallback oficial da Shopify pra checkout como
- * visitante. `null` (nunca string vazia) quando nenhum dos dois vem —
- * e-mails operacionais simplesmente não são enviados pra essa reserva,
- * não é tratado como erro.
+ * `Reservation.customerEmail` da reserva ONLINE nasce do Order da Shopify,
+ * porque o HOLD público não coleta contato. `email` é o padrão;
+ * `contact_email` é fallback para checkout como visitante.
  */
 export function extractCustomerEmail(order: ShopifyOrderPayload): string | null {
   const value = (order.email ?? order.contact_email)?.trim();
   return value ? value : null;
+}
+
+/**
+ * Mesmo princípio do e-mail: o telefone operacional da reserva ONLINE vem
+ * do Order real. Preferimos o campo de contato do próprio pedido, depois o
+ * customer e por fim endereços. Não inventa DDI nem altera o valor aqui;
+ * a normalização E.164-ish só acontece no adaptador do WhatsApp.
+ */
+export function extractCustomerPhone(order: ShopifyOrderPayload): string | null {
+  const candidates = [
+    order.phone,
+    order.customer?.phone,
+    order.shipping_address?.phone,
+    order.billing_address?.phone,
+  ];
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+    if (value) return value;
+  }
+  return null;
 }
 
 /** {variantId, quantity} normalizados a partir das linhas REAIS do
