@@ -9,13 +9,6 @@ import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
 import type { CreateManualReservationDto } from '../admin-reservations/dto/create-manual-reservation.dto';
 import { AdminAuditService } from './audit.service';
 
-/**
- * Fase 9, item 14 — /closetadmin/auditoria. Confirma a UNIÃO das duas
- * fontes reais (admin_audit_events + reservation_events de origem
- * manual) e que nenhum segredo (PIN/hash/token) aparece em nenhuma das
- * duas — nunca sanitizado aqui porque nunca é gravado nessas tabelas
- * (ver admin-audit.ts).
- */
 const prisma = new PrismaService();
 const rentalRuleConfig = new RentalRuleConfigService(prisma);
 const reservationsSvc = new AdminReservationsService(prisma, rentalRuleConfig);
@@ -144,5 +137,32 @@ describe('AdminAuditService — /closetadmin/auditoria (integração real, Neon)
     expect(entries.length).toBeLessThanOrEqual(2);
     const capped = await audit.list({ limit: 999999 });
     expect(capped.length).toBeLessThanOrEqual(500);
+  });
+
+  test('6) limpar auditoria oculta eventos antigos sem apagar o histórico e novos eventos voltam a aparecer', async () => {
+    await writeAdminAuditEvent(prisma, {
+      adminUserId,
+      adminUserName: `Auditor ${PREFIX}`,
+      action: 'RULE_MODIFIED',
+      entityType: 'RentalRuleConfig',
+      entityId: 'before-clear',
+    });
+
+    await audit.clear(adminUserId, `Auditor ${PREFIX}`);
+
+    const afterClear = await audit.list({ limit: 500 });
+    expect(afterClear.find((e) => e.entityId === 'before-clear')).toBeUndefined();
+    expect(afterClear.find((e) => e.action === 'AUDIT_CLEARED')).toBeUndefined();
+
+    await writeAdminAuditEvent(prisma, {
+      adminUserId,
+      adminUserName: `Auditor ${PREFIX}`,
+      action: 'RULE_MODIFIED',
+      entityType: 'RentalRuleConfig',
+      entityId: 'after-clear',
+    });
+
+    const withNewEvent = await audit.list({ limit: 500 });
+    expect(withNewEvent.find((e) => e.entityId === 'after-clear')).toBeDefined();
   });
 });
