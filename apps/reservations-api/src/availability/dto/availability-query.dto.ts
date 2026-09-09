@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsISO8601, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { TECHNICAL_MAX_PIECES } from '../../rental-rules/rental-limits';
 
 /**
  * Query params de GET /availability. Validado no servidor — nada aqui é
@@ -13,15 +14,14 @@ export class AvailabilityQueryDto {
   shopifyVariantId!: string;
 
   /**
-   * Aceita uma margem técnica maior que o máximo comercial atual (6) para
-   * que uma tentativa de 7ª peça chegue ao motor e volte como
-   * `max_pieces_exceeded`, em vez de virar um 400 genérico do DTO. O teto
-   * 50 é apenas anti-abuso; a regra real continua sendo `maxPieces`.
+   * Aceita uma margem técnica maior que o máximo comercial para que uma
+   * tentativa acima da regra chegue ao motor e volte como
+   * `max_pieces_exceeded`, em vez de virar um 400 genérico do DTO.
    */
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(TECHNICAL_MAX_PIECES)
   countedPieces!: number;
 
   @IsOptional()

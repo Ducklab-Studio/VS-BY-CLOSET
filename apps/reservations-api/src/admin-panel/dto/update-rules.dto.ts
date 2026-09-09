@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsInt, IsOptional, IsString, IsUUID, Matches, Max, Min, ValidateNested } from 'class-validator';
+import { TECHNICAL_MAX_PIECES } from '../../rental-rules/rental-limits';
 
 class PiecesToDaysRuleDto {
   @IsInt()
@@ -34,7 +35,6 @@ export class UpdateRulesDto {
   @Max(30)
   cleaningDays?: number;
 
-  // MM-DD — mesmo formato já usado por isOnlineReservationAllowed.
   @IsOptional()
   @IsString()
   @Matches(/^\d{2}-\d{2}$/)
@@ -48,7 +48,7 @@ export class UpdateRulesDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(TECHNICAL_MAX_PIECES)
   maxPieces?: number;
 
   @IsOptional()
