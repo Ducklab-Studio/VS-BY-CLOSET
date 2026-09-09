@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsIn, IsISO8601, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { TECHNICAL_MAX_PIECES } from '../../rental-rules/rental-limits';
 
 /**
  * Um item pedido: variante Shopify + quantidade. De propósito, é só isso
@@ -23,7 +24,9 @@ class HoldItemDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(6)
+  // Teto técnico anti-abuso. O máximo comercial real vem do banco e é
+  // validado pelo RentalPlanEngine depois de expandir as quantidades.
+  @Max(TECHNICAL_MAX_PIECES)
   quantity!: number;
 }
 
@@ -36,7 +39,9 @@ export class CreateHoldDto {
   @ValidateNested({ each: true })
   @Type(() => HoldItemDto)
   @ArrayMinSize(1)
-  @ArrayMaxSize(6)
+  // Limite estrutural/anti-abuso apenas. O total efetivo de peças é
+  // validado contra RentalRuleConfig.maxPieces no motor, nunca aqui.
+  @ArrayMaxSize(TECHNICAL_MAX_PIECES)
   items!: HoldItemDto[];
 
   @IsISO8601({ strict: true })
