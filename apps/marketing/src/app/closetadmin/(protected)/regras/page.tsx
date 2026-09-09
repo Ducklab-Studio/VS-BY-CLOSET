@@ -98,8 +98,8 @@ export default async function ClosetAdminRulesPage() {
 
           <div className="mt-5 space-y-3">
             <FlowRow step="1" label="Preparação" value={`${rules.prepDays} dia(s)`} />
-            <FlowRow step="2" label="Retirada + aluguel" value="conforme a quantidade" />
-            <FlowRow step="3" label="Devolução" value="data calculada" />
+            <FlowRow step="2" label="Retirada + aluguel" value={formatDurationTable(rules.piecesToDaysTable)} />
+            <FlowRow step="3" label="Devolução" value="data calculada automaticamente" />
             <FlowRow step="4" label="Limpeza" value={`${rules.cleaningDays} dia(s)`} />
           </div>
 
@@ -165,4 +165,16 @@ function FlowRow({ step, label, value }: { step: string; label: string; value: s
 function formatMonthDay(value: string): string {
   const [month, day] = value.split('-');
   return month && day ? `${day}/${month}` : value;
+}
+
+function formatDurationTable(table: readonly { upTo: number; days: number }[]): string {
+  let previousLimit = 0;
+  return table
+    .map((tier) => {
+      const from = previousLimit + 1;
+      previousLimit = tier.upTo;
+      const range = from === tier.upTo ? `${tier.upTo}` : `${from}–${tier.upTo}`;
+      return `${range} peça(s): ${tier.days} dia(s)`;
+    })
+    .join(' · ');
 }
