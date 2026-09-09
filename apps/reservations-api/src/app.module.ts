@@ -13,6 +13,7 @@ import { AdminReservationsModule } from './admin-reservations/admin-reservations
 import { AdminAuthModule } from './admin-auth/admin-auth.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { PdfModule } from './pdf/pdf.module';
+import { RemindersModule } from './reminders/reminders.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -33,6 +34,7 @@ import { AppController } from './app.controller';
     AdminAuthModule,
     AdminPanelModule,
     PdfModule,
+    RemindersModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
