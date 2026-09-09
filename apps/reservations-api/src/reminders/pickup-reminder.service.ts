@@ -1,12 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { extractCustomerPhone, type ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
 
 const REMINDER_ACTION = 'PICKUP_REMINDER_48H_SENT';
 const REMINDER_TIMEZONE = 'America/Santiago';
 const DEFAULT_SEND_HOUR = 10;
 const DEFAULT_POLL_MINUTES = 15;
-const DEFAULT_GRAPH_API_VERSION = 'v23.0';
 const ACTIVE_BEFORE_PICKUP: ReservationStatus[] = [
   ReservationStatus.confirmed,
   ReservationStatus.preparing,
@@ -90,9 +90,7 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
       where: {
         pickupDate,
         status: { in: ACTIVE_BEFORE_PICKUP },
-        ...(channel === 'whatsapp'
-          ? { customerPhone: { not: null } }
-          : { customerEmail: { not: null } }),
+        ...(channel === 'email' ? { customerEmail: { not: null } } : {}),
       },
       select: {
         id: true,
@@ -152,7 +150,7 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
         let provider: string;
 
         if (channel === 'whatsapp') {
-          const recipient = normalizeWhatsAppRecipient(current.customerPhone);
+          const recipient = await this.resolveWhatsAppRecipient(tx, reservation.id, current.customerPhone);
           if (!recipient) return false;
 
           providerMessageId = await this.sendWithWhatsApp({
@@ -194,6 +192,42 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * Reserva manual já guarda telefone. Para reserva ONLINE, versões antigas
+   * do fluxo guardavam apenas e-mail; nesse caso recuperamos o telefone do
+   * webhook Shopify já persistido, validamos e então o gravamos na Reservation
+   * para as próximas leituras. Não inventa DDI quando a Shopify não forneceu.
+   */
+  private async resolveWhatsAppRecipient(
+    tx: Prisma.TransactionClient,
+    reservationId: string,
+    persistedPhone: string | null,
+  ): Promise<string | null> {
+    const direct = normalizeWhatsAppRecipient(persistedPhone);
+    if (direct) return direct;
+
+    const webhook = await tx.webhookEvent.findFirst({
+      where: {
+        reservationId,
+        status: 'processed',
+        topic: { in: ['orders/paid', 'orders/create'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { payload: true },
+    });
+    if (!webhook) return null;
+
+    const rawPhone = extractCustomerPhone(webhook.payload as unknown as ShopifyOrderPayload);
+    const recipient = normalizeWhatsAppRecipient(rawPhone);
+    if (!recipient || !rawPhone) return null;
+
+    await tx.reservation.update({
+      where: { id: reservationId },
+      data: { customerPhone: rawPhone },
+    });
+    return recipient;
+  }
+
   private async sendWithWhatsApp(input: {
     to: string;
     bodyParameters: readonly string[];
@@ -202,7 +236,7 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!.trim();
     const templateName = process.env.WHATSAPP_PICKUP_REMINDER_TEMPLATE!.trim();
     const languageCode = (process.env.WHATSAPP_TEMPLATE_LANGUAGE ?? 'pt_BR').trim() || 'pt_BR';
-    const graphVersion = (process.env.WHATSAPP_GRAPH_API_VERSION ?? DEFAULT_GRAPH_API_VERSION).trim() || DEFAULT_GRAPH_API_VERSION;
+    const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION!.trim();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8_000);
 
@@ -293,7 +327,8 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
       return Boolean(
         process.env.WHATSAPP_ACCESS_TOKEN?.trim() &&
           process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() &&
-          process.env.WHATSAPP_PICKUP_REMINDER_TEMPLATE?.trim(),
+          process.env.WHATSAPP_PICKUP_REMINDER_TEMPLATE?.trim() &&
+          process.env.WHATSAPP_GRAPH_API_VERSION?.trim(),
       );
     }
     return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.REMINDER_FROM_EMAIL?.trim());
