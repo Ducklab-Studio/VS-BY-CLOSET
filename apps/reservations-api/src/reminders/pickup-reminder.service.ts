@@ -212,7 +212,7 @@ export class PickupReminderService implements OnModuleInit, OnModuleDestroy {
         status: 'processed',
         topic: { in: ['orders/paid', 'orders/create'] },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { processedAt: 'desc' },
       select: { payload: true },
     });
     if (!webhook) return null;
