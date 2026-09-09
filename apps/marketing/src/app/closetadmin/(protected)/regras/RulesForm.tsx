@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { CalendarClock, RotateCcw, Sparkles } from 'lucide-react';
 import type { RentalRuleConfig } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
@@ -26,6 +27,7 @@ function describeChanges(initial: RentalRuleConfig, form: RentalRuleConfig): str
 }
 
 export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
+  const router = useRouter();
   const [form, setForm] = useState(initial);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
@@ -48,6 +50,10 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
     setPending(false);
     if (result.error) throw new Error(result.error);
     setMessage({ type: 'ok', text: 'Regras atualizadas e aplicadas ao motor de disponibilidade.' });
+    // O resumo lateral e os cards superiores são Server Components.
+    // Depois de salvar, recarregamos os dados frescos do backend para que
+    // toda a página reflita imediatamente a mesma configuração do motor.
+    router.refresh();
   }
 
   function updateTier(index: number, days: number) {
