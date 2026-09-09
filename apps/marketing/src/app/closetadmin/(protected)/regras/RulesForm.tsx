@@ -10,6 +10,20 @@ import { updateRulesAction } from './actions';
 const inputClass =
   'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-surface dark:text-dark-text dark:focus:border-gold dark:focus:ring-gold/20';
 
+const AGREED_RULES = {
+  minAdvanceDays: 15,
+  prepDays: 3,
+  cleaningDays: 2,
+  blackoutStart: '06-01',
+  blackoutEnd: '09-30',
+  maxPieces: 6,
+  piecesToDaysTable: [
+    { upTo: 2, days: 2 },
+    { upTo: 4, days: 3 },
+    { upTo: 6, days: 4 },
+  ],
+} as const;
+
 function describeChanges(initial: RentalRuleConfig, form: RentalRuleConfig): string[] {
   const changes: string[] = [];
   if (initial.minAdvanceDays !== form.minAdvanceDays) changes.push(`Antecedência mínima: ${initial.minAdvanceDays} → ${form.minAdvanceDays} dias`);
@@ -36,10 +50,6 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
   const dirty = changes.length > 0;
 
   useEffect(() => {
-    // Mantém o card "Como a disponibilidade é formada" sincronizado com
-    // o que o Anderson está editando, antes mesmo de salvar. O backend só
-    // muda quando ele confirma; isto aqui é apenas preview visual da mesma
-    // configuração que será enviada no save.
     window.dispatchEvent(new CustomEvent<RentalRuleConfig>('closet:rules-preview', { detail: form }));
   }, [form]);
 
@@ -58,9 +68,6 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
     setPending(false);
     if (result.error) throw new Error(result.error);
     setMessage({ type: 'ok', text: 'Regras atualizadas e aplicadas ao motor de disponibilidade.' });
-    // O resumo lateral e os cards superiores também leem os valores salvos
-    // do backend. Atualiza os Server Components para todos mostrarem a
-    // mesma configuração persistida imediatamente.
     router.refresh();
   }
 
@@ -73,6 +80,20 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
 
   function reset() {
     setForm(initial);
+    setMessage(null);
+  }
+
+  function loadAgreedRules() {
+    setForm((prev) => ({
+      ...prev,
+      minAdvanceDays: AGREED_RULES.minAdvanceDays,
+      prepDays: AGREED_RULES.prepDays,
+      cleaningDays: AGREED_RULES.cleaningDays,
+      blackoutStart: AGREED_RULES.blackoutStart,
+      blackoutEnd: AGREED_RULES.blackoutEnd,
+      maxPieces: AGREED_RULES.maxPieces,
+      piecesToDaysTable: AGREED_RULES.piecesToDaysTable.map((tier) => ({ ...tier })),
+    }));
     setMessage(null);
   }
 
@@ -180,6 +201,16 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
           confirmLabel="Salvar alterações"
           onConfirm={save}
         />
+
+        <button
+          type="button"
+          onClick={loadAgreedRules}
+          disabled={pending}
+          className="inline-flex items-center gap-2 rounded-lg border border-marsala/20 px-4 py-2.5 text-sm font-medium text-marsala transition hover:bg-marsala/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gold/20 dark:text-gold dark:hover:bg-gold/5"
+        >
+          <Sparkles size={15} />
+          Carregar regras combinadas
+        </button>
 
         <button
           type="button"
