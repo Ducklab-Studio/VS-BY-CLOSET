@@ -1,5 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { writeAdminAuditEvent } from '../admin/admin-audit';
 
 export interface AuditEntry {
   readonly id: string;
@@ -20,16 +21,11 @@ export interface AuditFilters {
 }
 
 /**
- * Fase 9, item 14 — /closetadmin/auditoria. União de duas fontes já
- * existentes (nenhuma tabela nova): `admin_audit_events` (login/logout/
- * regra/peça/bloqueio — ver ../admin/admin-audit.ts) e o subconjunto de
- * `reservation_events` que é de origem manual/admin (criar/cancelar
- * reserva manual — ver AdminReservationsService). Somente ADMIN
- * ("auditoria completa" no RBAC da Fase 9) — STAFF não vê auditoria.
- *
- * Nunca expõe PIN/pinHash/cookie/ADMIN_API_TOKEN/secrets — nenhuma das
- * duas fontes grava esses valores (ver comentários em admin-audit.ts e
- * no WebhooksService), então não há sanitização adicional a fazer aqui.
+ * A tela de auditoria une os eventos do painel com os eventos de reservas
+ * manuais. O botão "Limpar logs" NÃO apaga histórico operacional do banco:
+ * grava um marcador AUDIT_CLEARED e a listagem passa a mostrar somente os
+ * eventos posteriores a esse marcador. Assim a tela fica limpa sem destruir
+ * evidência de reserva, cancelamento, login ou alteração administrativa.
  */
 @Injectable()
 export class AdminAuditService {
@@ -41,13 +37,27 @@ export class AdminAuditService {
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
 
     try {
+      const cleared = await this.prisma.adminAuditEvent.findFirst({
+        where: { action: 'AUDIT_CLEARED' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      const afterClear = cleared ? { gt: cleared.createdAt } : undefined;
+
       const [panelEvents, reservationEvents] = await Promise.all([
         this.prisma.adminAuditEvent.findMany({
+          where: {
+            action: { not: 'AUDIT_CLEARED' },
+            ...(afterClear ? { createdAt: afterClear } : {}),
+          },
           orderBy: { createdAt: 'desc' },
           take: limit,
         }),
         this.prisma.reservationEvent.findMany({
-          where: { type: { in: ['MANUAL_RESERVATION_CREATED', 'MANUAL_RESERVATION_CANCELLED'] } },
+          where: {
+            type: { in: ['MANUAL_RESERVATION_CREATED', 'MANUAL_RESERVATION_CANCELLED'] },
+            ...(afterClear ? { createdAt: afterClear } : {}),
+          },
           orderBy: { createdAt: 'desc' },
           take: limit,
         }),
@@ -90,6 +100,27 @@ export class AdminAuditService {
     } catch (err) {
       this.logger.error(`Falha ao consultar auditoria: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível consultar a auditoria no momento.');
+    }
+  }
+
+  async clear(adminUserId: string, adminUserName: string): Promise<{ clearedAt: string }> {
+    try {
+      await writeAdminAuditEvent(this.prisma, {
+        adminUserId,
+        adminUserName,
+        action: 'AUDIT_CLEARED',
+        entityType: 'AuditLog',
+        entityId: 'global',
+      });
+      const marker = await this.prisma.adminAuditEvent.findFirstOrThrow({
+        where: { action: 'AUDIT_CLEARED', adminUserId },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      return { clearedAt: marker.createdAt.toISOString() };
+    } catch (err) {
+      this.logger.error(`Falha ao limpar visualização da auditoria: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível limpar os logs no momento.');
     }
   }
 }
