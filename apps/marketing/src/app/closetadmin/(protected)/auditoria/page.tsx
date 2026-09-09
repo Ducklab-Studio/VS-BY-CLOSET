@@ -20,6 +20,7 @@ const ACTION_LABELS: Record<string, string> = {
   RULE_MODIFIED: 'Regra modificada',
   BLOCK_CREATED: 'Bloqueio criado',
   BLOCK_REMOVED: 'Bloqueio removido',
+  PICKUP_REMINDER_48H_SENT: 'Lembrete de retirada enviado',
 };
 
 export default async function ClosetAdminAuditPage() {
