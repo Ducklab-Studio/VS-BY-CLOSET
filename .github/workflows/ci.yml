@@ -36,7 +36,6 @@ jobs:
 
       - name: Lint
         run: pnpm lint
-        continue-on-error: true
 
   reservations-api:
     name: API — typecheck, testes e build
@@ -112,13 +111,7 @@ jobs:
           NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: ci-placeholder.myshopify.com
           NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: ci-placeholder
 
-  theme-check:
-    name: Lint do tema Shopify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Theme Check
-        uses: shopify/theme-check-action@v2
-        with:
-          theme_root: theme
+# `theme/` é legado e não participa da aplicação em produção (README.md).
+# O Theme Check antigo fazia a CI inteira ficar vermelha por um artefato
+# abandonado, enquanto Next/Nest/Prisma passavam. Se o tema voltar a ser
+# ativo no futuro, deve ganhar um workflow próprio antes de ser reativado.

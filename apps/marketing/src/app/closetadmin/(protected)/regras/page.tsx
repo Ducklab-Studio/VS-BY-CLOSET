@@ -6,6 +6,7 @@ import { AdminApiError } from '@/lib/admin-api';
 import { Card, ErrorState, PageHeader } from '@/components/closetadmin/ui';
 import { RulesForm } from './RulesForm';
 import { BlocksSection } from './BlocksSection';
+import { AvailabilityFormationPreview } from './AvailabilityFormationPreview';
 
 export const metadata: Metadata = { title: 'Regras e bloqueios' };
 
@@ -96,12 +97,7 @@ export default async function ClosetAdminRulesPage() {
             O período ocupado não é só o aluguel. O sistema protege automaticamente preparação e limpeza antes de liberar a peça novamente.
           </p>
 
-          <div className="mt-5 space-y-3">
-            <FlowRow step="1" label="Preparação" value={`${rules.prepDays} dia(s)`} />
-            <FlowRow step="2" label="Retirada + aluguel" value="conforme a quantidade" />
-            <FlowRow step="3" label="Devolução" value="data calculada" />
-            <FlowRow step="4" label="Limpeza" value={`${rules.cleaningDays} dia(s)`} />
-          </div>
+          <AvailabilityFormationPreview initial={rules} />
 
           <div className="mt-5 rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-4 py-3">
             <p className="text-xs font-medium text-amber-400">Importante</p>
@@ -145,20 +141,6 @@ function SummaryCard({ icon, label, value, detail }: { icon: React.ReactNode; la
         <p className="mt-0.5 truncate text-[11px] text-ink/40 dark:text-dark-subtle">{detail}</p>
       </div>
     </Card>
-  );
-}
-
-function FlowRow({ step, label, value }: { step: string; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-ink/10 bg-ink/[0.015] px-3.5 py-3 dark:border-white/10 dark:bg-white/[0.02]">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-marsala/10 text-xs font-semibold text-marsala dark:bg-gold/10 dark:text-gold">
-        {step}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink dark:text-dark-text">{label}</p>
-        <p className="text-xs text-ink/45 dark:text-dark-subtle">{value}</p>
-      </div>
-    </div>
   );
 }
 

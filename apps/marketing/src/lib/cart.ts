@@ -29,7 +29,9 @@
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
-const API_VERSION = '2025-01';
+// Versão estável suportada; manter alinhada com shopify.ts e com o cliente
+// Storefront server-side do reservations-api.
+const API_VERSION = '2026-07';
 
 /* O id do carrinho vive no navegador do cliente. Se ele limpar os dados do
    site, perde o carrinho — e tudo bem: carrinho não é reserva. Reserva só
@@ -312,16 +314,13 @@ export function quantityForVariant(cart: Cart, variantId: string): number {
 }
 
 /**
- * Quantas peças o cliente já tem no carrinho.
+ * Quantas peças de aluguel o cliente já tem no carrinho.
  *
- * É isso que define a duração do aluguel — o cliente não escolhe quantos
- * dias fica, a regra do cliente amarra na quantidade (1-2 peças = 2 dias,
- * 3-4 = 3 dias...). Por isso a data de devolução muda sozinha quando ele
- * adiciona outra peça.
- *
- * ⚠️ Pendência: acessório não deveria contar como peça. Saber o que é
- * acessório depende do nosso banco (é dado nosso, não da Shopify), então
- * por enquanto conta tudo.
+ * O fluxo público só adiciona itens reserváveis ao carrinho; acessórios
+ * ficam em "Consultar em loja" e não entram aqui. Ainda assim, esta soma é
+ * apenas UX: o reservations-api recarrega as RentalUnits reais e recalcula
+ * `countsTowardRentalDuration` antes de criar o HOLD, então manipular o
+ * navegador nunca altera a regra de duração no backend.
  */
 export async function countPiecesInCart(): Promise<number> {
   try {

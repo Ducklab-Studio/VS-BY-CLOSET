@@ -3,11 +3,9 @@ import { IsISO8601, IsInt, IsOptional, IsString, Max, Min, MinLength } from 'cla
 
 /**
  * Query params de GET /availability. Validado no servidor — nada aqui é
- * confiado do jeito que chega: `countedPieces` é o exemplo mais direto
- * (o item 10 da Fase 4 pede explicitamente pra não confiar em
- * quantidade calculada pelo navegador). O DTO só garante FORMATO —
- * quem decide se a combinação é uma reserva válida é o motor
- * (`calculateRentalPlan`), não este arquivo.
+ * confiado do jeito que chega. O DTO garante FORMATO/sanidade; quem decide
+ * se a quantidade cabe na regra atual é `calculateRentalPlan`, usando
+ * `maxPieces` fresco do banco.
  */
 export class AvailabilityQueryDto {
   @IsString()
@@ -15,16 +13,15 @@ export class AvailabilityQueryDto {
   shopifyVariantId!: string;
 
   /**
-   * Quantas peças contáveis o cliente já tem (carrinho + a que está
-   * olhando agora) — é isso que decide a duração, não o dia em si.
-   * Limite 1-6 aqui é só sanidade de payload (rejeita "-3" ou "9999"
-   * antes de qualquer cálculo); o motor real ainda valida contra
-   * `maxPieces` da config, que é a regra de negócio de verdade.
+   * Aceita uma margem técnica maior que o máximo comercial atual (6) para
+   * que uma tentativa de 7ª peça chegue ao motor e volte como
+   * `max_pieces_exceeded`, em vez de virar um 400 genérico do DTO. O teto
+   * 50 é apenas anti-abuso; a regra real continua sendo `maxPieces`.
    */
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(6)
+  @Max(50)
   countedPieces!: number;
 
   @IsOptional()
