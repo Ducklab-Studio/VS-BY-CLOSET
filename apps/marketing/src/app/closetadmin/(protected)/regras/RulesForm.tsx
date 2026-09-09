@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarClock, RotateCcw, Sparkles } from 'lucide-react';
 import type { RentalRuleConfig } from '@/lib/admin-data';
@@ -35,6 +35,14 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
   const changes = describeChanges(initial, form);
   const dirty = changes.length > 0;
 
+  useEffect(() => {
+    // Mantém o card "Como a disponibilidade é formada" sincronizado com
+    // o que o Anderson está editando, antes mesmo de salvar. O backend só
+    // muda quando ele confirma; isto aqui é apenas preview visual da mesma
+    // configuração que será enviada no save.
+    window.dispatchEvent(new CustomEvent<RentalRuleConfig>('closet:rules-preview', { detail: form }));
+  }, [form]);
+
   async function save() {
     setPending(true);
     setMessage(null);
@@ -50,9 +58,9 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
     setPending(false);
     if (result.error) throw new Error(result.error);
     setMessage({ type: 'ok', text: 'Regras atualizadas e aplicadas ao motor de disponibilidade.' });
-    // O resumo lateral e os cards superiores são Server Components.
-    // Depois de salvar, recarregamos os dados frescos do backend para que
-    // toda a página reflita imediatamente a mesma configuração do motor.
+    // O resumo lateral e os cards superiores também leem os valores salvos
+    // do backend. Atualiza os Server Components para todos mostrarem a
+    // mesma configuração persistida imediatamente.
     router.refresh();
   }
 
