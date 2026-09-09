@@ -191,3 +191,7 @@ export interface AuditEntry {
 export function listAudit(adminUserId: string, limit = 100): Promise<AuditEntry[]> {
   return adminGet(`/admin/audit?limit=${limit}`, adminUserId);
 }
+
+export function clearAudit(adminUserId: string, adminUserName: string): Promise<{ clearedAt: string }> {
+  return adminPost('/admin/audit/clear', { adminUserId, adminUserName });
+}
