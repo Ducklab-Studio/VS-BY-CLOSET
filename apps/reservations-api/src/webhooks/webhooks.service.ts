@@ -1,12 +1,14 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveStoreConfig } from '../holds/store-config';
+import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { resolveReservationBindingSecret } from '../checkout/checkout.config';
 import { canonicalItemsFingerprint, verifyReservationSignature } from '../reservation-binding';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 import { canTransition, type ReservationStatusValue } from './reservation-state-machine';
+import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
+import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import {
   extractCustomerEmail,
   extractNoteAttribute,
@@ -56,9 +58,13 @@ export class WebhooksService {
 
     return this.prisma.$transaction(
       async (tx) => {
+        await lockOperationalBlocks(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.shopifyWebhookId}))`;
+        const payload = input.payload as { id?: unknown; order_id?: unknown } | null;
+        const orderKey = String(input.topic === 'refunds/create' ? payload?.order_id : payload?.id);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'shopify-order:' + orderKey}))`;
 
-        await tx.store.upsert({ where: { id: store.id }, update: {}, create: { id: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency } });
+        await ensureStoreConfig(tx, store);
 
         const existing = await tx.webhookEvent.findUnique({ where: { shopifyWebhookId: input.shopifyWebhookId } });
         if (existing && existing.status !== 'failed') {
@@ -153,6 +159,8 @@ export class WebhooksService {
       return { status: 'ignored', orderId, events };
     }
 
+    await tx.$queryRaw`SELECT id FROM reservations WHERE id = ${reservationId}::uuid FOR UPDATE`;
+    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE id = ${reservationId}::uuid AND status = 'pending_payment' AND payment_expires_at <= now()`;
     const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: { items: { include: { rentalUnit: true } } } });
     if (!reservation) {
       // NÃO passa `reservationId` pro evento aqui — esse id veio do
@@ -231,6 +239,13 @@ export class WebhooksService {
         data: { shopifyOrderId: orderId, shopifyOrderGid: orderGid, ...(customerEmail ? { customerEmail } : {}) },
       });
       events.push({ type: 'ORDER_LINKED', reservationId: reservation.id, detail: { orderId } });
+    }
+
+    if (topic === 'orders/cancelled') return { status: 'processed', orderId, reservationId: reservation.id, events };
+
+    const earlierRefund = await tx.webhookEvent.findFirst({ where: { orderId, topic: 'refunds/create', status: { in: ['processed', 'ignored'] } }, select: { id: true } });
+    if (earlierRefund) {
+      return this.markCorrelationProblem(tx, reservation, orderId, events, 'REFUND_BEFORE_ORDER', 'refund recebido antes da vinculação do pedido — revisão manual');
     }
 
     if (order.financial_status !== 'paid') {
@@ -328,6 +343,15 @@ export class WebhooksService {
     }
 
     for (const item of items) {
+      const range = { blockedFrom: civilDateFromPgDate(item.blockedFrom), blockedUntilExclusive: civilDateFromPgDate(item.blockedUntil) };
+      const unit = await tx.rentalUnit.findUnique({ where: { id: item.rentalUnitId }, select: { active: true } });
+      const storeBlocks = await loadActiveStoreWideBlocks(tx, range.blockedFrom, range.blockedUntilExclusive);
+      const unitBlocks = await loadActiveUnitBlocks(tx, [item.rentalUnitId]);
+      if (!unit?.active || isRangeBlockedStoreWide(range, storeBlocks) !== null || unitBlocks.some((block) => blockedRangesOverlap(block.range, range))) {
+        await tx.reservation.updateMany({ where: { id: reservationId, status: 'expired' }, data: { status: 'late_payment_conflict' } });
+        events.push({ type: 'LATE_PAYMENT_CONFLICT', reservationId, detail: { orderId, reason: 'unidade inativa ou bloqueio operacional' } });
+        return { status: 'processed', orderId, reservationId, events };
+      }
       const from = civilDateToISO(civilDateFromPgDate(item.blockedFrom));
       const until = civilDateToISO(civilDateFromPgDate(item.blockedUntil));
       const conflict = await tx.$queryRaw<{ id: string }[]>`
@@ -378,7 +402,13 @@ export class WebhooksService {
     const orderId = String(order.id);
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/cancelled', orderId } }];
 
-    const reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+    let reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+    if (!reservation && extractReservationId(order)) {
+      const linked = await this.handleOrderPaidOrCreated(tx, order, 'orders/cancelled');
+      reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+      if (!reservation) return linked;
+      events.push(...linked.events);
+    }
     if (!reservation) {
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
       return { status: 'ignored', orderId, events };
@@ -448,10 +478,9 @@ export class WebhooksService {
   private async bestEffortRecordFailure(input: { topic: string; shopifyWebhookId: string; payload: unknown }, err: unknown): Promise<void> {
     try {
       const store = resolveStoreConfig();
-      await this.prisma.webhookEvent.upsert({
-        where: { shopifyWebhookId: input.shopifyWebhookId },
-        update: { status: 'failed', errorMessage: errorCode(err), attemptCount: { increment: 1 } },
-        create: {
+      const created = await this.prisma.webhookEvent.createMany({
+        skipDuplicates: true,
+        data: {
           shopifyWebhookId: input.shopifyWebhookId,
           storeId: store.id,
           topic: input.topic,
@@ -459,6 +488,11 @@ export class WebhooksService {
           status: 'failed',
           errorMessage: errorCode(err),
         },
+      });
+      // A concurrent successful delivery must never be downgraded to failed.
+      if (created.count === 0) await this.prisma.webhookEvent.updateMany({
+        where: { shopifyWebhookId: input.shopifyWebhookId, status: 'failed' },
+        data: { errorMessage: errorCode(err), attemptCount: { increment: 1 } },
       });
     } catch (writeErr) {
       // Puramente observabilidade — nunca deixa uma falha AQUI mascarar
@@ -482,6 +516,12 @@ interface DispatchResult {
 }
 
 function errorCode(err: unknown): string {
-  if (err && typeof err === 'object' && 'code' in err) return String((err as { code: unknown }).code);
+  if (err && typeof err === 'object' && 'code' in err) {
+    const prismaError = err as { code: unknown; meta?: { target?: unknown } };
+    const target = Array.isArray(prismaError.meta?.target)
+      ? prismaError.meta.target.filter((value): value is string => typeof value === 'string').join(',')
+      : undefined;
+    return `${String(prismaError.code)}${target ? `(${target})` : ''}`;
+  }
   return err instanceof Error ? err.name : 'unknown';
 }

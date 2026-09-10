@@ -32,7 +32,7 @@ const reservations = new AdminReservationsService(prisma, rentalRuleConfig);
 const calendar = new AdminCalendarService(prisma);
 const reservationPdf = new ReservationPdfService();
 const periodReportPdf = new PeriodReportPdfService(reservations);
-const operationalReportPdf = new OperationalReportPdfService(calendar);
+const operationalReportPdf = new OperationalReportPdfService(calendar, rentalRuleConfig);
 
 const CFG = DEFAULT_RENTAL_RULE_CONFIG;
 const PREFIX = `admin-pdf-test-${Date.now()}`;

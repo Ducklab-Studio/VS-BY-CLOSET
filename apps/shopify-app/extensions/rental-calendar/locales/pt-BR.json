@@ -21,6 +21,7 @@
       "duration_note": "O período é definido pela quantidade de peças ({count} no total). Ao adicionar mais peças, a devolução é recalculada."
     },
     "status": {
+      "retired": "Este calendário foi desativado. Utilize o site VS BY CLOSET para iniciar sua reserva.",
       "available": "Disponível para retirada nesta data.",
       "busy": "ocupado",
       "unavailable": "indisponível",

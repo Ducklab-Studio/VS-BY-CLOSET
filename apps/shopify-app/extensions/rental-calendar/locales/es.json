@@ -21,6 +21,7 @@
       "duration_note": "El período se define por la cantidad de prendas ({count} en total). Al agregar más prendas, la devolución se recalcula."
     },
     "status": {
+      "retired": "Este calendario fue desactivado. Inicia tu reserva en el sitio web de VS BY CLOSET.",
       "available": "Disponible para retiro en esta fecha.",
       "busy": "ocupado",
       "unavailable": "no disponible",

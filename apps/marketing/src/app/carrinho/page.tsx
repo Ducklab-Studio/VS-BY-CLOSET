@@ -13,7 +13,8 @@ import {
   type CartLine,
 } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
-import { createCheckout, createHold, storeLastReservation, type SundayReturnOptionInfo } from '@/lib/checkout';
+import { type SundayReturnOptionInfo } from '@/lib/checkout';
+import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
   stockForVariant,
@@ -46,7 +47,8 @@ export default function CarrinhoPage() {
   const [sundayOptions, setSundayOptions] = useState<SundayReturnOptionInfo[] | null>(null);
   const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
 
-  const idempotencyKeyRef = useRef<string>(crypto.randomUUID());
+  const checkoutAttemptRef = useRef<ReturnType<typeof createCheckoutAttempt> | null>(null);
+  if (checkoutAttemptRef.current === null) checkoutAttemptRef.current = createCheckoutAttempt();
 
   async function loadStock(nextCart: Cart | null) {
     if (!nextCart?.lines.length) {
@@ -114,7 +116,7 @@ export default function CarrinhoPage() {
   const pickupDate = useMemo(() => (cart ? derivePickupDate(cart.lines) : null), [cart]);
 
   function resetCheckoutStateAfterCartChange() {
-    idempotencyKeyRef.current = crypto.randomUUID();
+    checkoutAttemptRef.current?.reset();
     setSundayOptions(null);
     setSundayChoice(null);
     setCheckoutError(null);
@@ -122,6 +124,7 @@ export default function CarrinhoPage() {
   }
 
   async function handleRemove(lineId: string) {
+    if (checkingOut || removing || updatingQuantity) return;
     setRemoving(lineId);
     setError(null);
     try {
@@ -137,7 +140,7 @@ export default function CarrinhoPage() {
   }
 
   async function handleQuantity(line: CartLine, nextQuantity: number) {
-    if (!cart || updatingQuantity || nextQuantity < 1) return;
+    if (!cart || checkingOut || removing || updatingQuantity || nextQuantity < 1) return;
 
     const stock = stockForVariant(rentalStock, line.merchandise.id);
     const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
@@ -169,7 +172,7 @@ export default function CarrinhoPage() {
   }
 
   async function handleCheckout() {
-    if (!cart || !termsAccepted) return;
+    if (!cart || !termsAccepted || checkingOut || removing || updatingQuantity) return;
     if (!pickupDate) {
       setCheckoutError('Não foi possível identificar a data de retirada deste carrinho. Refaça a seleção pela peça.');
       return;
@@ -178,54 +181,35 @@ export default function CarrinhoPage() {
     setCheckingOut(true);
     setCheckoutError(null);
 
-    // Reconsulta imediatamente antes do HOLD: evita usar um snapshot antigo
-    // se outra reserva ocupou uma unidade enquanto o cliente revisava o carrinho.
-    let latestStock: RentalStockMap;
-    try {
-      latestStock = await fetchRentalStock(cart);
-      setRentalStock(latestStock);
-    } catch {
-      setCheckoutError('Não foi possível confirmar o estoque agora. Tente novamente.');
-      setCheckingOut(false);
-      return;
-    }
-
-    for (const item of groupItemsByVariant(cart.lines)) {
-      const stock = stockForVariant(latestStock, item.shopifyVariantId);
-      if (stock.effective !== null && item.quantity > stock.effective) {
-        setCheckoutError(
-          `A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`,
-        );
-        setCheckingOut(false);
-        return;
-      }
-    }
-
     const items = groupItemsByVariant(cart.lines);
-    const holdResult = await createHold({
+    const checkoutResult = await checkoutAttemptRef.current!.run({
       items,
       pickupDate,
       termsAccepted,
-      idempotencyKey: idempotencyKeyRef.current,
       ...(sundayChoice ? { sundayReturnOption: sundayChoice } : {}),
+    }, async () => {
+      let latestStock: RentalStockMap;
+      try {
+        latestStock = await fetchRentalStock(cart);
+        setRentalStock(latestStock);
+      } catch {
+        throw new Error('Não foi possível confirmar o estoque agora. Tente novamente.');
+      }
+      for (const item of items) {
+        const stock = stockForVariant(latestStock, item.shopifyVariantId);
+        if (stock.effective !== null && item.quantity > stock.effective) {
+          throw new Error(`A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`);
+        }
+      }
     });
 
-    if (!holdResult.ok) {
-      if (holdResult.reason === 'needs_sunday_choice') {
-        setSundayOptions(holdResult.returnOptions);
+    if (!checkoutResult.ok) {
+      if ('reason' in checkoutResult && checkoutResult.reason === 'needs_sunday_choice') {
+        setSundayOptions(checkoutResult.returnOptions);
         setCheckoutError(null);
       } else {
-        setCheckoutError(holdResult.message);
+        setCheckoutError(checkoutResult.message);
       }
-      setCheckingOut(false);
-      return;
-    }
-
-    storeLastReservation(holdResult.reservationId, holdResult.holdToken);
-
-    const checkoutResult = await createCheckout(holdResult.reservationId, holdResult.holdToken);
-    if (!checkoutResult.ok) {
-      setCheckoutError(checkoutResult.message);
       setCheckingOut(false);
       return;
     }
@@ -262,7 +246,7 @@ export default function CarrinhoPage() {
             line.merchandise.availableForSale &&
             !stockLoading &&
             (stock.effective === null || totalSameVariant < stock.effective);
-          const busy = updatingQuantity === line.id || removing === line.id;
+          const busy = checkingOut || !!updatingQuantity || !!removing;
 
           return (
             <li key={line.id} className="flex gap-4 py-5">
@@ -403,6 +387,7 @@ export default function CarrinhoPage() {
               <button
                 key={option.type}
                 type="button"
+                disabled={checkingOut}
                 onClick={() => {
                   setSundayChoice(option.type);
                   setSundayOptions(null);
@@ -426,7 +411,7 @@ export default function CarrinhoPage() {
       {sundayChoice && (
         <p className="mt-4 text-[0.75rem] text-ink/55">
           Devolução escolhida: {sundayChoice === 'saturday' ? 'sábado à noite' : 'segunda-feira de manhã'}.{' '}
-          <button type="button" onClick={() => setSundayChoice(null)} className="underline underline-offset-2 hover:text-marsala">
+          <button type="button" disabled={checkingOut} onClick={() => { checkoutAttemptRef.current?.reset(); setSundayChoice(null); }} className="underline underline-offset-2 hover:text-marsala">
             alterar
           </button>
         </p>
@@ -457,7 +442,7 @@ export default function CarrinhoPage() {
       <button
         type="button"
         onClick={handleCheckout}
-        disabled={!termsAccepted || checkingOut || !!sundayOptions || stockLoading}
+        disabled={!termsAccepted || checkingOut || !!sundayOptions || stockLoading || !!removing || !!updatingQuantity}
         className="mt-6 flex w-full items-center justify-center rounded-xl bg-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {checkingOut ? 'Preparando…' : stockLoading ? 'Conferindo estoque…' : 'Finalizar reserva'}

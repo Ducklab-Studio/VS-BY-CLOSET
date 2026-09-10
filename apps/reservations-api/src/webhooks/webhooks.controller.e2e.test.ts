@@ -29,7 +29,10 @@ import { WebhooksController } from './webhooks.controller';
  * container de DI.
  */
 const SECRET = 'e2e-test-webhook-secret';
-process.env.SHOPIFY_CLIENT_SECRET = SECRET;
+const STORE_DOMAIN = 'e2e-webhooks.myshopify.com';
+const originalSecret = process.env.SHOPIFY_CLIENT_SECRET;
+const originalDomain = process.env.SHOPIFY_STORE_DOMAIN;
+const originalCurrency = process.env.SHOPIFY_STORE_CURRENCY;
 
 const prisma = new PrismaService();
 const controller = new WebhooksController(new WebhooksService(prisma));
@@ -42,6 +45,9 @@ function sign(body: string): string {
 }
 
 beforeAll(async () => {
+  process.env.SHOPIFY_CLIENT_SECRET = SECRET;
+  process.env.SHOPIFY_STORE_DOMAIN = STORE_DOMAIN;
+  process.env.SHOPIFY_STORE_CURRENCY = 'CLP';
   server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (c) => chunks.push(c));
@@ -53,6 +59,7 @@ beforeAll(async () => {
           asHeader(req.headers['x-shopify-hmac-sha256']),
           asHeader(req.headers['x-shopify-topic']),
           asHeader(req.headers['x-shopify-webhook-id']),
+          asHeader(req.headers['x-shopify-shop-domain']),
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
@@ -71,11 +78,31 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
+  await prisma.store.deleteMany({ where: { id: STORE_DOMAIN } });
   await prisma.$disconnect();
+  restoreEnv('SHOPIFY_CLIENT_SECRET', originalSecret);
+  restoreEnv('SHOPIFY_STORE_DOMAIN', originalDomain);
+  restoreEnv('SHOPIFY_STORE_CURRENCY', originalCurrency);
 });
 
 function asHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
+function signedHeaders(body: string, webhookId: string, extra: Record<string, string> = {}) {
+  return {
+    'Content-Type': 'application/json',
+    'X-Shopify-Hmac-Sha256': sign(body),
+    'X-Shopify-Topic': 'orders/paid',
+    'X-Shopify-Webhook-Id': webhookId,
+    'X-Shopify-Shop-Domain': STORE_DOMAIN,
+    ...extra,
+  };
 }
 
 async function cleanupEvent(webhookId: string) {
@@ -96,10 +123,11 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': sign(body),
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': webhookId,
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body,
     });
-    expect(res.status).toBe(200);
+    expect(res.status, await res.text()).toBe(200);
     await cleanupEvent(webhookId);
   }, 15_000); // primeira query real do arquivo — conexão fria com o Neon fica perto do timeout padrão de 5s
 
@@ -113,6 +141,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': 'aW52YWxpZC1zaWduYXR1cmU=',
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': webhookId,
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body,
     });
@@ -132,6 +161,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': sign(original), // assina UMA coisa
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': webhookId,
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body: tampered, // envia OUTRA
     });
@@ -149,6 +179,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': wrongSignature,
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': webhookId,
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body,
     });
@@ -167,6 +198,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': 'AAAA', // decodifica pra só 3 bytes — nunca pode bater com um HMAC-SHA256 real (32 bytes)
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': webhookId,
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body,
     });
@@ -177,7 +209,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
     const webhookId = `e2e-${Date.now()}-no-header`;
     const res = await fetch(baseUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Topic': 'orders/paid', 'X-Shopify-Webhook-Id': webhookId },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Topic': 'orders/paid', 'X-Shopify-Webhook-Id': webhookId, 'X-Shopify-Shop-Domain': STORE_DOMAIN },
       body: JSON.stringify({ id: 999004 }),
     });
     expect(res.status).toBe(401);
@@ -187,7 +219,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
     const body = JSON.stringify({ id: 999005 });
     const res = await fetch(baseUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Hmac-Sha256': sign(body), 'X-Shopify-Webhook-Id': 'e2e-no-topic' },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Hmac-Sha256': sign(body), 'X-Shopify-Webhook-Id': 'e2e-no-topic', 'X-Shopify-Shop-Domain': STORE_DOMAIN },
       body,
     });
     expect(res.status).toBe(400);
@@ -202,6 +234,7 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
         'X-Shopify-Hmac-Sha256': sign(body),
         'X-Shopify-Topic': 'orders/paid',
         'X-Shopify-Webhook-Id': 'e2e-malformed',
+        'X-Shopify-Shop-Domain': STORE_DOMAIN,
       },
       body,
     });
@@ -216,14 +249,37 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
       'X-Shopify-Hmac-Sha256': sign(body),
       'X-Shopify-Topic': 'orders/paid',
       'X-Shopify-Webhook-Id': webhookId,
+      'X-Shopify-Shop-Domain': STORE_DOMAIN,
     };
     const first = await fetch(baseUrl, { method: 'POST', headers, body });
     const second = await fetch(baseUrl, { method: 'POST', headers, body });
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(200);
+    expect(first.status, await first.text()).toBe(200);
+    expect(second.status, await second.text()).toBe(200);
 
     const count = await prisma.$queryRaw<{ count: bigint }[]>`SELECT count(*)::bigint AS count FROM webhook_events WHERE shopify_webhook_id = ${webhookId}`;
     expect(Number(count[0].count)).toBe(1);
     await cleanupEvent(webhookId);
+  });
+
+  test('webhook assinado de outra loja é rejeitado antes de processar', async () => {
+    const webhookId = `e2e-${Date.now()}-wrong-shop`;
+    const body = JSON.stringify({ id: 999009, financial_status: 'paid' });
+    const res = await fetch(baseUrl, {
+      method: 'POST',
+      headers: signedHeaders(body, webhookId, { 'X-Shopify-Shop-Domain': 'outra-loja.myshopify.com' }),
+      body,
+    });
+    expect(res.status).toBe(401);
+    const count = await prisma.$queryRaw<{ count: bigint }[]>`SELECT count(*)::bigint AS count FROM webhook_events WHERE shopify_webhook_id = ${webhookId}`;
+    expect(Number(count[0].count)).toBe(0);
+  });
+
+  test('domínio da loja ausente é rejeitado mesmo com HMAC válido', async () => {
+    const webhookId = `e2e-${Date.now()}-no-shop`;
+    const body = JSON.stringify({ id: 999010 });
+    const headers = signedHeaders(body, webhookId);
+    delete (headers as Partial<typeof headers>)['X-Shopify-Shop-Domain'];
+    const res = await fetch(baseUrl, { method: 'POST', headers, body });
+    expect(res.status).toBe(400);
   });
 });

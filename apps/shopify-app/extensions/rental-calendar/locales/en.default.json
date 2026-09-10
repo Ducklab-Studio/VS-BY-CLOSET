@@ -21,6 +21,7 @@
       "duration_note": "The rental period is set by the number of items ({count} total). Adding more items recalculates the return date."
     },
     "status": {
+      "retired": "This calendar has been retired. Start your reservation on the VS BY CLOSET website.",
       "available": "Available for pickup on this date.",
       "busy": "booked",
       "unavailable": "unavailable",

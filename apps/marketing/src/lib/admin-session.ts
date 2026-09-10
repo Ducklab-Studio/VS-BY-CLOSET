@@ -4,7 +4,8 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { adminPost } from './admin-api';
 
-export const ADMIN_SESSION_COOKIE = 'closetadmin_session';
+import { ADMIN_SESSION_COOKIE } from './admin-cookie';
+export { ADMIN_SESSION_COOKIE } from './admin-cookie';
 
 export interface AdminSessionUser {
   readonly id: string;

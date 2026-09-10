@@ -119,13 +119,19 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
     let executeRawCalls = 0;
     const secondInsertError = new Error('erro simulado no 2º INSERT de reservation_items');
     const fakeTx = {
-      store: { upsert: vi.fn().mockResolvedValue({}) },
-      $executeRaw: vi.fn(async () => {
+      store: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: 'dev-store',
+          shopifyDomain: 'dev-store.myshopify.com',
+          currency: 'CLP',
+        }),
+      },
+      $executeRaw: vi.fn(async (sql: TemplateStringsArray) => {
+        if (!sql.join('').includes('INSERT INTO reservation_items')) return 1;
         executeRawCalls += 1;
-        // Chamada 1 = expira HOLDs antigos (sucesso). Chamadas 2 e 3 =
-        // um INSERT de reservation_items por unidade alocada (2
-        // unidades pedidas) — a 3ª (a do SEGUNDO item) falha.
-        if (executeRawCalls === 3) throw secondInsertError;
+        // Count item inserts only; lock/expiry statements are independent.
+        if (executeRawCalls === 2) throw secondInsertError;
         return 1;
       }),
       $queryRaw: vi
@@ -135,6 +141,8 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
           { id: 'unit-1', shopifyVariantId: variant },
           { id: 'unit-2', shopifyVariantId: variant },
         ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: 'resv-1', expiresAt: new Date() }]),
     } as unknown as Prisma.TransactionClient;
@@ -161,7 +169,7 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
     // com a garantia real do Prisma ($transaction dá ROLLBACK completo
     // quando o callback lança), que impede o 1º item de "sobrar" sozinho
     // no banco de verdade.
-    expect(executeRawCalls).toBe(3);
+    expect(executeRawCalls).toBe(2);
   });
 });
 

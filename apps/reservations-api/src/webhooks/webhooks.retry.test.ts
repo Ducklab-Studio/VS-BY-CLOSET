@@ -14,7 +14,7 @@ import { WebhooksService } from './webhooks.service';
 function fakePrismaThatThrows(err: Error) {
   return {
     $transaction: vi.fn().mockRejectedValue(err),
-    webhookEvent: { upsert: vi.fn().mockResolvedValue({ id: 'fake-id' }) },
+    webhookEvent: { createMany: vi.fn().mockResolvedValue({ count: 0 }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
   } as unknown as PrismaService;
 }
 
@@ -34,16 +34,14 @@ describe('WebhooksService — erro de banco durante o processamento', () => {
 
     await expect(service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: 'wh-fault-2', payload: { id: 2 } })).rejects.toThrow();
 
-    expect(prisma.webhookEvent.upsert).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(prisma.webhookEvent.upsert).mock.calls[0][0];
-    expect(call.update).toMatchObject({ status: 'failed' });
-    expect(call.create).toMatchObject({ status: 'failed' });
+    expect(prisma.webhookEvent.createMany).toHaveBeenCalledWith(expect.objectContaining({ skipDuplicates: true, data: expect.objectContaining({ status: 'failed' }) }));
+    expect(prisma.webhookEvent.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { shopifyWebhookId: 'wh-fault-2', status: 'failed' } }));
   });
 
   test('falha no registro de auditoria (best-effort) não mascara o erro original — ainda 503', async () => {
     const prisma = {
       $transaction: vi.fn().mockRejectedValue(new Error('original failure')),
-      webhookEvent: { upsert: vi.fn().mockRejectedValue(new Error('audit write also failed')) },
+      webhookEvent: { createMany: vi.fn().mockRejectedValue(new Error('audit write also failed')) },
     } as unknown as PrismaService;
     const service = new WebhooksService(prisma);
 

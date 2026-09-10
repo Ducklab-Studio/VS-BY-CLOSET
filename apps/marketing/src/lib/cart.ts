@@ -60,7 +60,6 @@ export interface CartLine {
 
 export interface Cart {
   id: string;
-  checkoutUrl: string;
   totalQuantity: number;
   cost: {
     subtotalAmount: { amount: string; currencyCode: string };
@@ -71,7 +70,6 @@ export interface Cart {
 
 const CART_FIELDS = `
   id
-  checkoutUrl
   totalQuantity
   cost {
     subtotalAmount { amount currencyCode }

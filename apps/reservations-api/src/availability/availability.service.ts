@@ -12,6 +12,7 @@ import {
 import { addDays, civilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO, compareCivilDates, diffDays } from '../rental-rules/civil-date';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import type { AvailabilityQueryDto } from './dto/availability-query.dto';
+import { loadActiveStoreWideBlocks, loadActiveUnitBlocks } from '../admin/operational-blocks';
 
 const MAX_RANGE_DAYS = 180;
 const DEFAULT_RANGE_DAYS = 120;
@@ -103,7 +104,8 @@ export class AvailabilityService {
     // reserva com blockedFrom ANTES de `from` (por causa do prepDays)
     // ainda pode se sobrepor com um pickup dentro de [from,to].
     const searchFrom = addDays(fromDate, -config.prepDays);
-    const searchTo = addDays(toDate, config.cleaningDays + 8); // folga: maior duração possível + exceção de domingo
+    const maxDuration = Math.max(...config.piecesToDaysTable.map((row) => row.days));
+    const searchTo = addDays(toDate, maxDuration + config.cleaningDays + 2);
     const occupied = await this.loadOccupiedRanges(
       reservableUnits.map((u) => u.id),
       searchFrom,
@@ -220,10 +222,18 @@ export class AvailabilityService {
       throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
     }
 
-    return rows.map((row) => ({
+    const occupied = rows.map((row) => ({
       unitId: row.rentalUnitId,
       range: { blockedFrom: civilDateFromPgDate(row.lo), blockedUntilExclusive: civilDateFromPgDate(row.hi) },
     }));
+    try {
+      const unitBlocks = await loadActiveUnitBlocks(this.prisma, unitIds);
+      const storeBlocks = await loadActiveStoreWideBlocks(this.prisma, searchFrom, searchTo);
+      return [...occupied, ...unitBlocks, ...storeBlocks.flatMap((range) => unitIds.map((unitId) => ({ unitId, range })))];
+    } catch (err) {
+      this.logger.error(`Falha ao consultar bloqueios operacionais: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
+    }
   }
 }
 

@@ -17,9 +17,9 @@ import {
   validateMinimumAdvance,
 } from '../rental-rules/rental-engine';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
-import { resolveStoreConfig } from '../holds/store-config';
+import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { canTransition, type ReservationStatusValue } from '../webhooks/reservation-state-machine';
-import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks } from '../admin/operational-blocks';
+import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { ManualReservationBlockedError, ManualReservationInvalidUnitError, ManualReservationUnitConflictError } from './manual-reservation.errors';
 import type { CreateManualReservationDto } from './dto/create-manual-reservation.dto';
 import type { CancelManualReservationDto } from './dto/cancel-manual-reservation.dto';
@@ -261,6 +261,7 @@ export class AdminReservationsService {
   }
 
   private async attemptCreateManual(tx: Prisma.TransactionClient, ctx: AttemptContext, unitIds: readonly string[]): Promise<ManualReservationResponse> {
+    await lockOperationalBlocks(tx);
     const { dto, storeId, shopifyDomain, currency, pickupDate, today, config, idempotencyKey, requestHash } = ctx;
     const overrides = dto.overrides ?? {};
 
@@ -277,7 +278,7 @@ export class AdminReservationsService {
       }
     }
 
-    await tx.store.upsert({ where: { id: storeId }, update: {}, create: { id: storeId, shopifyDomain, currency } });
+    await ensureStoreConfig(tx, { id: storeId, shopifyDomain, currency });
 
     // Mesmo mecanismo lazy de expiração do HOLD público — reserva manual
     // não cria HOLD, mas pode competir por unidades com HOLDs vencidos de

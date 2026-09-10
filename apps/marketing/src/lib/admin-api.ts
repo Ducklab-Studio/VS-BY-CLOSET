@@ -1,4 +1,6 @@
 import 'server-only';
+import { cookies } from 'next/headers';
+import { ADMIN_SESSION_COOKIE } from './admin-cookie';
 
 /**
  * Fase 9 — ponte server-to-server com o reservations-api para o
@@ -36,15 +38,19 @@ function token(): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const sessionToken = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
   let res: Response;
   try {
     res = await fetch(`${baseUrl()}${path}`, {
       ...init,
       cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token()}`,
         ...init.headers,
+        Authorization: `Bearer ${token()}`,
+        ...(sessionToken ? { 'X-Admin-Session': sessionToken } : {}),
       },
     });
   } catch {
@@ -82,12 +88,15 @@ export function adminPatch<T>(path: string, body: unknown): Promise<T> {
  * de guards, nunca um "quase igual" genérico demais.
  */
 export async function adminGetPdf(path: string, adminUserId: string): Promise<Buffer> {
+  const sessionToken = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
   let res: Response;
   try {
     res = await fetch(`${baseUrl()}${withAdminUserId(path, adminUserId)}`, {
       method: 'GET',
       cache: 'no-store',
-      headers: { Authorization: `Bearer ${token()}` },
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+      headers: { Authorization: `Bearer ${token()}`, ...(sessionToken ? { 'X-Admin-Session': sessionToken } : {}) },
     });
   } catch {
     throw new AdminApiError(503, 'Não foi possível conectar ao servidor do ClosetAdmin.');

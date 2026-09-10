@@ -2,10 +2,8 @@
  * Configuração das regras de aluguel, centralizada — nenhum número mágico
  * (15, 3, 2, "06-01"...) deve aparecer solto em outro arquivo do motor.
  *
- * Este objeto é o valor PADRÃO. A Fase 2 desenhou `RentalRuleConfig` como
- * tabela singleton no Postgres — quando essa tabela existir de verdade
- * (fase futura), este arquivo vira só o fallback de quando o banco não
- * responde, não a fonte principal.
+ * Bootstrap/test defaults only. Runtime services load and validate the
+ * singleton in PostgreSQL; database failures never fall back to these values.
  */
 
 export interface PiecesToDaysRule {

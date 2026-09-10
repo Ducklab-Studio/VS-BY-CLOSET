@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { type BlockedRange, blockedRangesOverlap } from '../rental-rules/rental-engine';
-import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
+import { addDays, civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 import type { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -23,6 +23,12 @@ export interface StoreWideBlockRange {
 
 type DbClient = Pick<PrismaService | Prisma.TransactionClient, '$queryRaw'>;
 
+/** Readers may allocate concurrently; block changes wait for in-flight allocations. */
+export async function lockOperationalBlocks(tx: Prisma.TransactionClient, write = false): Promise<void> {
+  if (write) await tx.$executeRaw`SELECT pg_advisory_xact_lock(194731, 1)`;
+  else await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(194731, 1)`;
+}
+
 /** Bloqueios de loja inteira ativos que tocam a janela [from, to). */
 export async function loadActiveStoreWideBlocks(
   client: DbClient,
@@ -36,7 +42,7 @@ export async function loadActiveStoreWideBlocks(
       AND removed_at IS NULL
       AND daterange(start_date, end_date, '[]') && daterange(${civilDateToISO(from)}::date, ${civilDateToISO(to)}::date, '[)')
   `;
-  return rows.map((r) => ({ blockedFrom: civilDateFromPgDate(r.lo), blockedUntilExclusive: civilDateFromPgDate(r.hi), reason: r.reason }));
+  return rows.map((r) => ({ blockedFrom: civilDateFromPgDate(r.lo), blockedUntilExclusive: addDays(civilDateFromPgDate(r.hi), 1), reason: r.reason }));
 }
 
 /** Bloqueios de peça específica ativos, no mesmo formato de "ocupação"
@@ -56,7 +62,7 @@ export async function loadActiveUnitBlocks(
   `;
   return rows.map((r) => ({
     unitId: r.rentalUnitId,
-    range: { blockedFrom: civilDateFromPgDate(r.lo), blockedUntilExclusive: civilDateFromPgDate(r.hi) },
+    range: { blockedFrom: civilDateFromPgDate(r.lo), blockedUntilExclusive: addDays(civilDateFromPgDate(r.hi), 1) },
     reason: r.reason,
   }));
 }

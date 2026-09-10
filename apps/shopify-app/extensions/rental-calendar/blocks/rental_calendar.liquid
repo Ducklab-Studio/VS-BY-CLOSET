@@ -1,5 +1,5 @@
 {%- comment -%}
-  VS BY CLOSET — bloco de aluguel.
+  VS BY CLOSET — bloco legado desativado. Nao reativar sem HOLD server-side.
 
   O que este bloco NÃO faz de propósito:
 
@@ -28,6 +28,7 @@
 <div
   class="vsc-rental"
   data-vsc-rental
+  data-retired-message="{{ 'rental.status.retired' | t | escape }}"
   data-sku="{{ sku | escape }}"
   data-variant-id="{{ variant.id }}"
   data-product-id="{{ p.id }}"

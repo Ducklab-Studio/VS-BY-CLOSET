@@ -2,9 +2,9 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service';
 import {
   DEFAULT_RENTAL_RULE_CONFIG,
-  type PiecesToDaysRule,
   type RentalRuleConfig,
 } from '../rental-rules/rental-rule-config';
+import { validateRentalConfig } from '../rental-rules/validate-rental-config';
 
 /**
  * Ponte entre a tabela `rental_rule_config` (singleton, ver migration
@@ -44,6 +44,12 @@ export class RentalRuleConfigService {
       throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
     }
 
+    try {
+      validateRentalConfig(row);
+    } catch {
+      this.logger.error('rental_rule_config inválida.');
+      throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
+    }
     return {
       minAdvanceDays: row.minAdvanceDays,
       prepDays: row.prepDays,
@@ -51,7 +57,7 @@ export class RentalRuleConfigService {
       blackoutStart: row.blackoutStart,
       blackoutEnd: row.blackoutEnd,
       maxPieces: row.maxPieces,
-      piecesToDaysTable: parsePiecesToDaysTable(row.piecesToDaysTable),
+      piecesToDaysTable: row.piecesToDaysTable,
       timezone: row.timezone,
     };
   }
@@ -60,30 +66,6 @@ export class RentalRuleConfigService {
 function errorCode(err: unknown): string {
   if (err && typeof err === 'object' && 'code' in err) return String((err as { code: unknown }).code);
   return err instanceof Error ? err.name : 'unknown';
-}
-
-/**
- * `piecesToDaysTable` é JSONB — chega como `unknown` do ponto de vista
- * do TypeScript. Valida o formato explicitamente em vez de fazer um
- * cast direto: uma linha de config corrompida ou editada à mão errado
- * no banco tem que virar um erro claro aqui, não um `undefined.days`
- * explodindo em algum lugar aleatório do motor mais adiante.
- */
-function parsePiecesToDaysTable(value: unknown): PiecesToDaysRule[] {
-  if (!Array.isArray(value)) {
-    throw new Error('rental_rule_config.pieces_to_days_table não é um array.');
-  }
-  return value.map((entry, index) => {
-    if (
-      typeof entry !== 'object' ||
-      entry === null ||
-      typeof (entry as Record<string, unknown>).upTo !== 'number' ||
-      typeof (entry as Record<string, unknown>).days !== 'number'
-    ) {
-      throw new Error(`rental_rule_config.pieces_to_days_table[${index}] tem formato inválido.`);
-    }
-    return entry as PiecesToDaysRule;
-  });
 }
 
 // Reexportado só pra quem quiser o fallback explicitamente (ex.: testes

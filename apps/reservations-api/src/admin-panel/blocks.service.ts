@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { civilDateFromISO, civilDateToISO, isBefore } from '../rental-rules/civil-date';
 import type { CreateBlockDto } from './dto/create-block.dto';
+import { lockOperationalBlocks } from '../admin/operational-blocks';
 
 export interface BlockItem {
   readonly id: string;
@@ -69,7 +70,9 @@ export class AdminBlocksService {
 
     let created;
     try {
-      created = await this.prisma.operationalBlock.create({
+      created = await this.prisma.$transaction(async (tx) => {
+        await lockOperationalBlocks(tx, true);
+        const block = await tx.operationalBlock.create({
         data: {
           scope: dto.scope,
           rentalUnitId: dto.rentalUnitId ?? null,
@@ -81,20 +84,17 @@ export class AdminBlocksService {
           reason: dto.reason,
           createdByAdminUserId: adminUserId,
         },
+        });
+        await writeAdminAuditEvent(tx, {
+          adminUserId, adminUserName, action: 'BLOCK_CREATED', entityType: 'OperationalBlock', entityId: block.id,
+          after: { scope: block.scope, rentalUnitId: block.rentalUnitId, startDate: dto.startDate, endDate: dto.endDate, reason: dto.reason },
+        });
+        return block;
       });
     } catch (err) {
       this.logger.error(`Falha ao criar bloqueio: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível criar o bloqueio no momento.');
     }
-
-    await writeAdminAuditEvent(this.prisma, {
-      adminUserId,
-      adminUserName,
-      action: 'BLOCK_CREATED',
-      entityType: 'OperationalBlock',
-      entityId: created.id,
-      after: { scope: created.scope, rentalUnitId: created.rentalUnitId, startDate: dto.startDate, endDate: dto.endDate, reason: dto.reason },
-    });
 
     return this.toItem(created.id);
   }
@@ -107,21 +107,21 @@ export class AdminBlocksService {
     }
 
     try {
-      await this.prisma.operationalBlock.update({ where: { id }, data: { removedAt: new Date() } });
+      await this.prisma.$transaction(async (tx) => {
+        await lockOperationalBlocks(tx, true);
+        const removedAt = new Date();
+        const updated = await tx.operationalBlock.updateMany({ where: { id, removedAt: null }, data: { removedAt } });
+        if (!updated.count) throw new ConflictException('Este bloqueio já foi levantado.');
+        await writeAdminAuditEvent(tx, {
+          adminUserId, adminUserName, action: 'BLOCK_REMOVED', entityType: 'OperationalBlock', entityId: id,
+          before: { removedAt: null }, after: { removedAt: removedAt.toISOString() },
+        });
+      });
     } catch (err) {
       this.logger.error(`Falha ao remover bloqueio ${id}: ${errorCode(err)}`);
+      if (err instanceof ConflictException) throw err;
       throw new ServiceUnavailableException('Não foi possível remover o bloqueio no momento.');
     }
-
-    await writeAdminAuditEvent(this.prisma, {
-      adminUserId,
-      adminUserName,
-      action: 'BLOCK_REMOVED',
-      entityType: 'OperationalBlock',
-      entityId: id,
-      before: { removedAt: null },
-      after: { removedAt: new Date().toISOString() },
-    });
 
     return this.toItem(id);
   }

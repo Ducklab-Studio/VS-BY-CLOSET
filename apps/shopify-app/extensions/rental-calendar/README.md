@@ -1,3 +1,18 @@
+# Retirement notice (2026-09-09)
+
+This legacy block is disabled locally. It previously fabricated demo availability,
+applied obsolete browser-side rules and submitted directly to Shopify's native
+cart without a backend HOLD. The replacement JavaScript makes no network calls
+and never enables reservation submission, including after theme-editor reloads.
+
+Use the current Next.js cart -> POST /holds -> POST /checkout flow. Do not
+reactivate this extension without a separate reviewed backend integration.
+This source change does not update any released Shopify extension. The live
+Horizon theme inspected on 2026-09-09 did not reference this block. Native
+Shopify checkout is a separate deployment concern; see the checkout/staging audit.
+
+The content below documents the historical prototype, not current business rules.
+
 # VS BY CLOSET — bloco de aluguel
 
 Calendário de retirada na página do produto, nas duas lojas (BR e CL).
