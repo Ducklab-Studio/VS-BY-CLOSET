@@ -5,7 +5,7 @@
   },
   "deploy": {
     "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate"],
-    "startCommand": "pnpm --filter @valle/reservations-api exec node dist/main.js",
+    "startCommand": "pnpm --filter @valle/reservations-api run start",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",

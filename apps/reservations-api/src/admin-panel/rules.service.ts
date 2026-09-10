@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import type { UpdateRulesDto } from './dto/update-rules.dto';
+import { validateRentalConfig } from '../rental-rules/validate-rental-config';
 
 @Injectable()
 export class AdminRulesService {
@@ -23,9 +24,16 @@ export class AdminRulesService {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          // Serialize PATCH reads so two individually valid edits cannot combine into invalid rules.
+          await tx.$queryRaw`SELECT id FROM rental_rule_config WHERE id = 'default' FOR UPDATE`;
           const before = await tx.rentalRuleConfig.findUniqueOrThrow({ where: { id: 'default' } });
 
-          validateProspectiveRules(before, dto);
+          const patch = Object.fromEntries(Object.entries(dto).filter(([, value]) => value !== undefined));
+          try {
+            validateRentalConfig({ ...before, ...patch });
+          } catch (err) {
+            throw new UnprocessableEntityException(err instanceof Error ? err.message : 'Configuração inválida.');
+          }
 
           const data: Prisma.RentalRuleConfigUpdateInput = {
             minAdvanceDays: dto.minAdvanceDays,
@@ -64,52 +72,6 @@ export class AdminRulesService {
       this.logger.error(`Falha ao atualizar rental_rule_config: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível atualizar as regras no momento.');
     }
-  }
-}
-
-/**
- * Validação cruzada da configuração FINAL (estado atual + PATCH).
- * O DTO valida cada campo isoladamente; aqui garantimos a coerência entre
- * maxPieces e a tabela de duração. Os dias NÃO precisam ser crescentes:
- * isso é decisão comercial. Apenas `upTo` deve estar em ordem estritamente
- * crescente para o motor ter uma interpretação determinística, e a tabela
- * deve cobrir todo o maxPieces configurado.
- */
-function validateProspectiveRules(
-  before: { maxPieces: number; piecesToDaysTable: unknown },
-  dto: Pick<UpdateRulesDto, 'maxPieces' | 'piecesToDaysTable'>,
-): void {
-  const maxPieces = dto.maxPieces ?? before.maxPieces;
-  const table = dto.piecesToDaysTable ?? before.piecesToDaysTable;
-
-  if (!Array.isArray(table) || table.length === 0) {
-    throw new UnprocessableEntityException('A tabela de duração precisa ter ao menos uma faixa.');
-  }
-
-  let previousUpTo = 0;
-  for (let index = 0; index < table.length; index++) {
-    const entry = table[index];
-    if (typeof entry !== 'object' || entry === null) {
-      throw new UnprocessableEntityException(`Faixa de duração ${index + 1} inválida.`);
-    }
-
-    const row = entry as Record<string, unknown>;
-    const upTo = row.upTo;
-    const days = row.days;
-    if (!Number.isInteger(upTo) || Number(upTo) <= 0 || !Number.isInteger(days) || Number(days) <= 0) {
-      throw new UnprocessableEntityException(`Faixa de duração ${index + 1} precisa ter upTo e days inteiros positivos.`);
-    }
-
-    if (Number(upTo) <= previousUpTo) {
-      throw new UnprocessableEntityException('As faixas de duração precisam estar em ordem crescente, sem repetir upTo.');
-    }
-    previousUpTo = Number(upTo);
-  }
-
-  if (previousUpTo < maxPieces) {
-    throw new UnprocessableEntityException(
-      `A tabela de duração cobre até ${previousUpTo} peça(s), mas o máximo configurado é ${maxPieces}.`,
-    );
   }
 }
 

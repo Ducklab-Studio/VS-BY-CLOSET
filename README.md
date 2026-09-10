@@ -72,6 +72,13 @@ isso sozinho.
 nunca recria produto/preço/pedido/pagamento/refund do Shopify, e nunca vira um
 sistema financeiro paralelo.
 
+O Mercado Pago é configurado exclusivamente como meio de pagamento dentro da
+Shopify. Este projeto não usa API, credenciais, checkout nem webhook próprios do
+Mercado Pago. A confirmação operacional chega somente pelo webhook Shopify
+`orders/paid`; cancelamentos e reembolsos chegam por `orders/cancelled` e
+`refunds/create`. Confirmar uma reserva nunca altera o estoque global Shopify:
+a disponibilidade por período vem de `RentalUnit`s e `ReservationItem`s.
+
 ---
 
 ## 📁 Estrutura
@@ -107,11 +114,10 @@ mais trabalho e não estão em produção — ver [Histórico e legado](#histór
 | 9 | **ClosetAdmin**: autenticação própria (nome+telefone+PIN), sessão HttpOnly, RBAC (ADMIN/STAFF), calendário, reservas, peças, regras, bloqueios operacionais, auditoria |
 | 10 | Exportação em **PDF** sob demanda (reserva individual, relatório por período, relatório operacional), correção de UX de temporada bloqueada, auditoria de segurança/performance final |
 
-Regras de negócio vigentes (aplicadas por `RentalPlanEngine`, nunca duplicadas
-no frontend): 1–2 peças = 2 dias, 3–4 = 3 dias, 5–6 = 4 dias · máximo 6 peças
-· antecedência mínima 15 dias · preparação 3 dias · limpeza 2 dias · bloqueio
-online de 1º de junho a 30 de setembro (loja física continua funcionando) ·
-domingo fechado · fuso `America/Santiago`.
+As regras comerciais vigentes são carregadas de `RentalRuleConfig` no banco e
+aplicadas pelo motor server-side, sem duplicação de limites comerciais no
+frontend. Valores exibidos ou usados durante testes não substituem a configuração
+aprovada. O timezone operacional permanece `America/Santiago`.
 
 ### E-mail operacional — opcional/pendente
 

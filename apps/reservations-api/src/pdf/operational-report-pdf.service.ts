@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AdminCalendarService, type CalendarItem } from '../admin-panel/calendar.service';
 import { civilDateFromISO, civilDateToISO, addDays } from '../rental-rules/civil-date';
 import { today as engineToday } from '../rental-rules/rental-engine';
-import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
+import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
 import { BRAND, collectPdfBuffer, createPdfDocument, drawFooters, drawHeader, drawSectionTitle } from './pdf-brand';
 
 const LOOKAHEAD_DAYS = 7;
@@ -15,13 +15,10 @@ const LOOKAHEAD_DAYS = 7;
  */
 @Injectable()
 export class OperationalReportPdfService {
-  constructor(private readonly calendar: AdminCalendarService) {}
+  constructor(private readonly calendar: AdminCalendarService, private readonly rules: RentalRuleConfigService) {}
 
   async generate(referenceDateIso?: string): Promise<Buffer> {
-    // Timezone é sempre 'America/Santiago' (DEFAULT_RENTAL_RULE_CONFIG) —
-    // só o valor vem do banco quando editável em outros pontos do
-    // sistema; "hoje" nunca deveria variar por causa disso.
-    const today = referenceDateIso ? civilDateFromISO(referenceDateIso) : engineToday(DEFAULT_RENTAL_RULE_CONFIG);
+    const today = referenceDateIso ? civilDateFromISO(referenceDateIso) : engineToday(await this.rules.load());
     const todayIso = civilDateToISO(today);
     const untilIso = civilDateToISO(addDays(today, LOOKAHEAD_DAYS));
 

@@ -143,7 +143,7 @@ export async function getReservationStatus(reservationId: string, holdToken: str
   return { ok: false, message: typeof body.message === 'string' ? body.message : 'Não foi possível consultar sua reserva.' };
 }
 
-export type CreateCheckoutResult = { ok: true; checkoutUrl: string } | { ok: false; message: string };
+export type CreateCheckoutResult = { ok: true; checkoutUrl: string } | { ok: false; message: string; expired?: boolean };
 
 export async function createCheckout(reservationId: string, holdToken: string): Promise<CreateCheckoutResult> {
   const base = process.env.NEXT_PUBLIC_CHECKOUT_URL;
@@ -166,5 +166,5 @@ export async function createCheckout(reservationId: string, holdToken: string): 
   if (res.ok && typeof body.checkoutUrl === 'string') {
     return { ok: true, checkoutUrl: body.checkoutUrl };
   }
-  return { ok: false, message: typeof body.message === 'string' ? body.message : 'Não foi possível continuar para o pagamento.' };
+  return { ok: false, expired: res.status === 410, message: typeof body.message === 'string' ? body.message : 'Não foi possível continuar para o pagamento.' };
 }

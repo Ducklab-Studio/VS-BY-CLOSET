@@ -37,6 +37,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Checkout flow and legacy guards
+        run: node --test scripts/checkout-flow.test.mjs
+
   reservations-api:
     name: API — typecheck, testes e build
     runs-on: ubuntu-latest

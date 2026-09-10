@@ -264,6 +264,8 @@ model Reservation {
 
   pickupDate DateTime? @map("pickup_date") @db.Date
   returnDate DateTime? @map("return_date") @db.Date
+  calculatedReturnDate DateTime? @map("calculated_return_date") @db.Date
+  rentalDurationDays Int? @map("rental_duration_days")
 
   /// Só tem valor enquanto status = hold. Não é o que garante a trava —
   /// isso é a EXCLUDE constraint. É usado pra leitura/UI.

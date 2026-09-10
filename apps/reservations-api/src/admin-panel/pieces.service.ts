@@ -47,13 +47,13 @@ export class AdminPiecesService {
             SELECT 1 FROM reservation_items ri
             WHERE ri.rental_unit_id = ru.id
               AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-              AND ri.blocked_range @> CURRENT_DATE
+              AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
           ) AS "currentlyOccupied",
           (
             SELECT count(*)::int FROM reservation_items ri
             WHERE ri.rental_unit_id = ru.id
               AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-              AND lower(ri.blocked_range) > CURRENT_DATE
+              AND lower(ri.blocked_range) > (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
           ) AS "upcomingReservations"
         FROM rental_units ru
         ORDER BY ru.code
@@ -69,28 +69,25 @@ export class AdminPiecesService {
       throw new BadRequestException('Nenhum campo pra atualizar.');
     }
 
-    const before = await this.prisma.rentalUnit.findUnique({ where: { id } });
-    if (!before) {
-      throw new NotFoundException('Peça não encontrada.');
-    }
-
-    let after;
     try {
-      after = await this.prisma.rentalUnit.update({ where: { id }, data: input });
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM rental_units WHERE id = ${id}::uuid FOR UPDATE`;
+        const before = await tx.rentalUnit.findUnique({ where: { id } });
+        if (!before) throw new NotFoundException('Peça não encontrada.');
+        const after = await tx.rentalUnit.update({ where: { id }, data: input });
+        await writeAdminAuditEvent(tx, {
+          adminUserId, adminUserName,
+          action: after.active !== before.active ? (after.active ? 'UNIT_ACTIVATED' : 'UNIT_DEACTIVATED') : 'UNIT_UPDATED',
+          entityType: 'RentalUnit', entityId: id,
+          before: { active: before.active, reservableOnline: before.reservableOnline, countsTowardRentalDuration: before.countsTowardRentalDuration },
+          after: { active: after.active, reservableOnline: after.reservableOnline, countsTowardRentalDuration: after.countsTowardRentalDuration },
+        });
+      });
     } catch (err) {
+      if (err instanceof NotFoundException) throw err;
       this.logger.error(`Falha ao atualizar peça ${id}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível atualizar a peça no momento.');
     }
-
-    await writeAdminAuditEvent(this.prisma, {
-      adminUserId,
-      adminUserName,
-      action: after.active !== before.active ? (after.active ? 'UNIT_ACTIVATED' : 'UNIT_DEACTIVATED') : 'UNIT_UPDATED',
-      entityType: 'RentalUnit',
-      entityId: id,
-      before: { active: before.active, reservableOnline: before.reservableOnline, countsTowardRentalDuration: before.countsTowardRentalDuration },
-      after: { active: after.active, reservableOnline: after.reservableOnline, countsTowardRentalDuration: after.countsTowardRentalDuration },
-    });
 
     const [item] = await this.prisma.$queryRaw<PieceListItem[]>`
       SELECT
@@ -101,13 +98,13 @@ export class AdminPiecesService {
           SELECT 1 FROM reservation_items ri
           WHERE ri.rental_unit_id = ru.id
             AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND ri.blocked_range @> CURRENT_DATE
+            AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
         ) AS "currentlyOccupied",
         (
           SELECT count(*)::int FROM reservation_items ri
           WHERE ri.rental_unit_id = ru.id
             AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND lower(ri.blocked_range) > CURRENT_DATE
+            AND lower(ri.blocked_range) > (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
         ) AS "upcomingReservations"
       FROM rental_units ru WHERE ru.id = ${id}::uuid
     `;

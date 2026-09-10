@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from './admin-pin';
 import { AdminRoleGuard } from './admin-role.guard';
 import { REQUIRE_ROLE_KEY } from './require-role.decorator';
+import { generateSessionToken, hashSessionToken } from './admin-session-token';
 
 /**
  * Integração real (Neon) para os dados (AdminUser criado de verdade),
@@ -27,18 +28,24 @@ const guard = new AdminRoleGuard(prisma, reflector);
 
 const PHONE_TAG = `9${Date.now()}`;
 let userCounter = 0;
+const tokens = new Map<string, string>();
 
 async function createUser(role: 'ADMIN' | 'STAFF', active = true) {
   const pinHash = await hashPin('1234');
-  return prisma.adminUser.create({
+  const user = await prisma.adminUser.create({
     data: { name: 'Guard Teste', phone: `${PHONE_TAG}${userCounter++}`, pinHash, role, active },
   });
+  const token = generateSessionToken();
+  await prisma.adminSession.create({ data: { adminUserId: user.id, tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 60_000) } });
+  tokens.set(user.id, token);
+  return user;
 }
 
 function contextWith(input: { query?: Record<string, unknown>; body?: Record<string, unknown>; requiredRole?: 'ADMIN' | 'STAFF' }): ExecutionContext {
   const handler = () => undefined;
   if (input.requiredRole) Reflect.defineMetadata(REQUIRE_ROLE_KEY, input.requiredRole, handler);
-  const request: { query: Record<string, unknown>; body: Record<string, unknown> | undefined; adminUser?: unknown } = {
+  const request = {
+    headers: { 'x-admin-session': tokens.get(String(input.query?.adminUserId ?? input.body?.adminUserId)) },
     query: input.query ?? {},
     body: input.body,
   };
@@ -61,13 +68,23 @@ afterAll(async () => {
 });
 
 describe('AdminRoleGuard — RBAC (integração real, Neon)', () => {
+  test('revoked or expired sessions and another user ID are rejected', async () => {
+    const user = await createUser('ADMIN');
+    const other = await createUser('ADMIN');
+    tokens.set(other.id, tokens.get(user.id)!);
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: other.id } }))).rejects.toThrow(UnauthorizedException);
+    await prisma.adminSession.updateMany({ where: { adminUserId: user.id }, data: { revokedAt: new Date() } });
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: user.id } }))).rejects.toThrow(UnauthorizedException);
+    await prisma.adminSession.updateMany({ where: { adminUserId: user.id }, data: { revokedAt: null, expiresAt: new Date(0) } });
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: user.id } }))).rejects.toThrow(UnauthorizedException);
+  });
   test('1) adminUserId ausente (nem query nem body) → UnauthorizedException', async () => {
     await expect(guard.canActivate(contextWith({}))).rejects.toThrow(UnauthorizedException);
   }, 15_000);
 
   test('2) adminUserId inexistente no banco → UnauthorizedException', async () => {
     await expect(guard.canActivate(contextWith({ query: { adminUserId: '00000000-0000-0000-0000-000000000000' } }))).rejects.toThrow(
-      'Usuário administrativo inválido ou inativo.',
+      'Sessão administrativa inválida.',
     );
   });
 

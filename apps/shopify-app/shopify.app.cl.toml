@@ -41,7 +41,7 @@ api_version = "2026-10"
   # Por enquanto é só placeholder — NÃO É válido pra deploy.
   [[webhooks.subscriptions]]
   uri = "PLACEHOLDER — URL pública real de reservations-api, ex.: https://<host-real>/webhooks/shopify"
-  topics = [ "orders/paid", "orders/cancelled", "refunds/create" ]
+  topics = [ "orders/create", "orders/paid", "orders/cancelled", "refunds/create" ]
 
 [auth]
 redirect_urls = [ "PLACEHOLDER — puxar do Partner Dashboard via `shopify app config link`, não inventar" ]

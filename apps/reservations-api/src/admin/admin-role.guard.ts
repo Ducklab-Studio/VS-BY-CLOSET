@@ -3,22 +3,18 @@ import { Reflector } from '@nestjs/core';
 import type { AdminRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQUIRE_ROLE_KEY } from './require-role.decorator';
+import { hashSessionToken } from './admin-session-token';
 
 interface RequestWithAdminUser {
+  headers?: Record<string, string | string[] | undefined>;
   query: Record<string, unknown>;
   body: Record<string, unknown> | undefined;
   adminUser?: { id: string; name: string; role: AdminRole; active: boolean };
 }
 
 /**
- * Item 15 da Fase 9: "Backend precisa validar role em TODA ação
- * protegida" — nunca confiar que o apps/marketing já escondeu o botão.
- * Este guard roda DEPOIS do `AdminAuthGuard` (bearer — confirma que quem
- * chama é o servidor do apps/marketing, nunca o navegador direto) e
- * re-verifica o `adminUserId` recebido contra o banco NA HORA — nunca
- * confia num "role" que o chamador afirme, só no que está gravado agora
- * em `admin_users` (fail closed se o usuário foi desativado entre a
- * criação da sessão e esta chamada).
+ * After server authentication, bind the claimed identity to a live session.
+ * Active status and role are read from PostgreSQL on every request.
  */
 @Injectable()
 export class AdminRoleGuard implements CanActivate {
@@ -35,7 +31,13 @@ export class AdminRoleGuard implements CanActivate {
       throw new UnauthorizedException('adminUserId ausente.');
     }
 
-    const adminUser = await this.prisma.adminUser.findUnique({ where: { id: adminUserId } });
+    const token = request.headers?.['x-admin-session'];
+    if (typeof token !== 'string' || !token || token.length > 256) throw new UnauthorizedException('Sessão administrativa inválida.');
+    const session = await this.prisma.adminSession.findUnique({ where: { tokenHash: hashSessionToken(token) }, include: { adminUser: true } });
+    if (!session || session.adminUserId !== adminUserId || session.revokedAt || session.expiresAt <= new Date()) {
+      throw new UnauthorizedException('Sessão administrativa inválida.');
+    }
+    const adminUser = session.adminUser;
     if (!adminUser || !adminUser.active) {
       throw new UnauthorizedException('Usuário administrativo inválido ou inativo.');
     }

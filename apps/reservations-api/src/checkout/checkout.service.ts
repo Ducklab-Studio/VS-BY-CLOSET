@@ -1,8 +1,7 @@
 import { ConflictException, ForbiddenException, GoneException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
-import { durationForPieces } from '../rental-rules/rental-engine';
-import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
+import { civilDateFromPgDate, civilDateToISO, diffDays } from '../rental-rules/civil-date';
 import { verifyHoldToken } from '../holds/hold-token';
 import { paymentWindowMinutes, resolveReservationBindingSecret } from './checkout.config';
 import { type CartLineInput, ShopifyCartClient } from './shopify-storefront-cart.client';
@@ -47,6 +46,10 @@ export class CheckoutService {
       throw new ForbiddenException('holdToken inválido.');
     }
 
+    if (reservation.status === 'expired') {
+      throw new GoneException('Esta reserva expirou. Inicie uma nova reserva.');
+    }
+
     // Expira com o MESMO mecanismo oficial do HoldsService (UPDATE
     // guardado por status+expires_at) — nunca cria carrinho pra um HOLD
     // vencido, mesmo que o status ainda esteja "hold" no banco (a
@@ -60,6 +63,9 @@ export class CheckoutService {
     }
 
     if (reservation.status !== 'hold') {
+      if (reservation.status === 'pending_payment' && await this.expirePaymentIfDue(reservation.id)) {
+        throw new GoneException('A janela de pagamento expirou.');
+      }
       // Replay seguro: checkout já pronto pra esta reserva (item 7 —
       // "retornar o checkout existente quando seguro").
       if (reservation.status === 'pending_payment' && reservation.checkoutState === 'ready' && reservation.checkoutUrl && reservation.paymentExpiresAt) {
@@ -89,7 +95,8 @@ export class CheckoutService {
     // só uma chamada por vez consegue mover none/failed → creating; quem
     // perde a corrida lê o estado atual e reage (replay se já ready,
     // 409 se genuinamente em voo).
-    const claim = await this.claimCreatingState(reservation.id);
+    const attemptId = generateReservationBindingId();
+    const claim = await this.claimCreatingState(reservation.id, attemptId);
     if (!claim.claimed) {
       if (claim.state === 'ready' && claim.checkoutUrl && claim.paymentExpiresAt) {
         return { reservationId: reservation.id, status: 'pending_payment', checkoutUrl: claim.checkoutUrl, expiresAt: claim.paymentExpiresAt.toISOString() };
@@ -97,17 +104,8 @@ export class CheckoutService {
       throw new ConflictException('O checkout desta reserva já está sendo criado — tente novamente em instantes.');
     }
 
-    let config;
-    try {
-      config = await this.rentalRuleConfig.load();
-    } catch (err) {
-      await this.markFailed(reservation.id);
-      this.logger.error(`Falha ao carregar rental_rule_config pro checkout: ${errorCode(err)}`);
-      throw new ServiceUnavailableException('Não foi possível criar o checkout no momento.');
-    }
-
-    const countedPieces = reservation.items.filter((item) => item.rentalUnit.countsTowardRentalDuration).length;
-    const durationDays = countedPieces > 0 ? durationForPieces(countedPieces, config) : 0;
+    const durationDays = reservation.rentalDurationDays ?? (reservation.pickupDate && reservation.returnDate
+      ? diffDays(civilDateFromPgDate(reservation.returnDate), civilDateFromPgDate(reservation.pickupDate)) : 0);
     const pickupDateIso = reservation.pickupDate ? civilDateToISO(civilDateFromPgDate(reservation.pickupDate)) : '';
     const effectiveReturnDateIso = reservation.returnDate ? civilDateToISO(civilDateFromPgDate(reservation.returnDate)) : '';
 
@@ -123,7 +121,7 @@ export class CheckoutService {
     let reservationSignature: string;
     try {
       const bindingSecret = resolveReservationBindingSecret();
-      reservationBindingId = generateReservationBindingId();
+      reservationBindingId = attemptId;
       const itemsFingerprint = canonicalItemsFingerprint(
         reservation.items.map((item) => ({ variantId: item.rentalUnit.shopifyVariantId ?? '', quantity: 1 })),
       );
@@ -135,7 +133,7 @@ export class CheckoutService {
         effectiveReturnDate: effectiveReturnDateIso,
       });
     } catch (err) {
-      await this.markFailed(reservation.id);
+      await this.markFailed(reservation.id, attemptId);
       this.logger.error(`Falha ao gerar o binding assinado do checkout: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível criar o checkout no momento.');
     }
@@ -154,32 +152,36 @@ export class CheckoutService {
     try {
       result = await this.cartClient.cartCreate(lines, attributes);
     } catch (err) {
-      await this.markFailed(reservation.id);
+      await this.markFailed(reservation.id, attemptId);
       this.logger.error(`Falha ao chamar Storefront API (cartCreate): ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível criar o checkout no momento.');
     }
 
     if (!result.ok) {
-      await this.markFailed(reservation.id);
+      await this.markFailed(reservation.id, attemptId);
       this.logger.error(`Storefront API recusou o cart: ${result.userErrors.map((e) => e.message).join('; ')}`);
       throw new UnprocessableEntityException('Não foi possível criar o checkout — um item não está disponível na Shopify.');
     }
 
-    const paymentExpiresAt = new Date(Date.now() + paymentWindowMinutes() * 60_000);
-    const persisted = await this.prisma.reservation.updateMany({
-      where: { id: reservation.id, checkoutState: 'creating' },
-      data: {
-        checkoutState: 'ready',
-        shopifyCartId: result.cartId,
-        reservationBindingId,
-        checkoutUrl: result.checkoutUrl,
-        checkoutCreatedAt: new Date(),
-        paymentExpiresAt,
-        status: 'pending_payment',
-      },
-    });
+    const minutes = paymentWindowMinutes();
+    let persisted: { paymentExpiresAt: Date }[];
+    try {
+      persisted = await this.prisma.$queryRaw<{ paymentExpiresAt: Date }[]>`
+        UPDATE reservations
+        SET checkout_state = 'ready', shopify_cart_id = ${result.cartId}, checkout_url = ${result.checkoutUrl},
+            checkout_created_at = now(), payment_expires_at = now() + ${minutes} * interval '1 minute',
+            status = 'pending_payment', updated_at = now()
+        WHERE id = ${reservation.id}::uuid AND status = 'hold' AND expires_at > now()
+          AND checkout_state = 'creating' AND reservation_binding_id = ${reservationBindingId}
+        RETURNING payment_expires_at AS "paymentExpiresAt"
+      `;
+    } catch (err) {
+      await this.markFailed(reservation.id, attemptId);
+      this.logger.error(`Falha ao persistir checkout: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível concluir o checkout no momento.');
+    }
 
-    if (persisted.count !== 1) {
+    if (persisted.length !== 1) {
       // O cart foi criado na Shopify, mas não conseguimos gravar o
       // vínculo (perdemos a guarda 'creating' de algum jeito inesperado,
       // ou o banco falhou bem neste instante). Item 8 da Fase 6: um cart
@@ -187,7 +189,7 @@ export class CheckoutService {
       // — por isso NÃO tentamos "corrigir" escrevendo por cima, só
       // falhamos fechado e deixamos o estado como está pra investigação/
       // nova tentativa.
-      this.logger.error(`cartCreate teve sucesso (cart ${result.cartId}) mas não foi possível persistir o vínculo com a reserva ${reservation.id}.`);
+      this.logger.error(`cartCreate teve sucesso mas não foi possível persistir o vínculo com a reserva ${reservation.id}.`);
       throw new ServiceUnavailableException('Não foi possível concluir o checkout no momento.');
     }
 
@@ -195,7 +197,7 @@ export class CheckoutService {
       reservationId: reservation.id,
       status: 'pending_payment',
       checkoutUrl: result.checkoutUrl,
-      expiresAt: paymentExpiresAt.toISOString(),
+      expiresAt: persisted[0].paymentExpiresAt.toISOString(),
     };
   }
 
@@ -233,9 +235,17 @@ export class CheckoutService {
     }
   }
 
-  private async markFailed(reservationId: string): Promise<void> {
+  private async expirePaymentIfDue(reservationId: string): Promise<boolean> {
+    const updated = await this.prisma.$executeRaw`
+      UPDATE reservations SET status = 'expired'
+      WHERE id = ${reservationId}::uuid AND status = 'pending_payment' AND payment_expires_at <= now()
+    `;
+    return updated > 0;
+  }
+
+  private async markFailed(reservationId: string, attemptId: string): Promise<void> {
     try {
-      await this.prisma.reservation.updateMany({ where: { id: reservationId, checkoutState: 'creating' }, data: { checkoutState: 'failed' } });
+      await this.prisma.reservation.updateMany({ where: { id: reservationId, checkoutState: 'creating', reservationBindingId: attemptId }, data: { checkoutState: 'failed' } });
     } catch (err) {
       // Não relança — já estamos no meio do tratamento de outra falha;
       // deixar em 'creating' (retentável depois de STALE_CREATING_MS) é
@@ -246,26 +256,28 @@ export class CheckoutService {
 
   private async claimCreatingState(
     reservationId: string,
+    attemptId: string,
   ): Promise<{ claimed: true } | { claimed: false; state?: string; checkoutUrl?: string | null; paymentExpiresAt?: Date | null }> {
     try {
       const fromIdle = await this.prisma.reservation.updateMany({
-        where: { id: reservationId, checkoutState: { in: ['none', 'failed'] } },
-        data: { checkoutState: 'creating' },
+        where: { id: reservationId, status: 'hold', checkoutState: { in: ['none', 'failed'] } },
+        data: { checkoutState: 'creating', reservationBindingId: attemptId },
       });
       if (fromIdle.count === 1) return { claimed: true };
 
       const staleBefore = new Date(Date.now() - STALE_CREATING_MS);
       const fromStale = await this.prisma.reservation.updateMany({
-        where: { id: reservationId, checkoutState: 'creating', updatedAt: { lt: staleBefore } },
-        data: { checkoutState: 'creating' }, // bump updatedAt (@updatedAt) — reclama a tentativa
+        where: { id: reservationId, status: 'hold', checkoutState: 'creating', updatedAt: { lt: staleBefore } },
+        data: { checkoutState: 'creating', reservationBindingId: attemptId },
       });
       if (fromStale.count === 1) return { claimed: true };
 
       const current = await this.prisma.reservation.findUnique({
         where: { id: reservationId },
-        select: { checkoutState: true, checkoutUrl: true, paymentExpiresAt: true },
+        select: { status: true, checkoutState: true, checkoutUrl: true, paymentExpiresAt: true },
       });
-      return { claimed: false, state: current?.checkoutState, checkoutUrl: current?.checkoutUrl, paymentExpiresAt: current?.paymentExpiresAt };
+      if (current?.status !== 'pending_payment' || await this.expirePaymentIfDue(reservationId)) return { claimed: false };
+      return { claimed: false, state: current.checkoutState, checkoutUrl: current.checkoutUrl, paymentExpiresAt: current.paymentExpiresAt };
     } catch (err) {
       this.logger.error(`Falha ao tentar reivindicar criação de checkout para ${reservationId}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível criar o checkout no momento.');

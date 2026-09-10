@@ -8,19 +8,20 @@ import {
   type RentalCartItem,
   calculateBlockedRange,
   calculateRentalPlan,
-  calculateReturnDate,
-  durationForPieces,
   resolveEffectiveReturnDate,
   today as engineToday,
 } from '../rental-rules/rental-engine';
-import { type CivilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
+import { type CivilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO, diffDays } from '../rental-rules/civil-date';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
-import { type StoreConfig, resolveStoreConfig } from './store-config';
+import { ensureStoreConfig, type StoreConfig, resolveStoreConfig } from './store-config';
 import { currentTermsVersion } from './terms';
 import { generateHoldToken, hashHoldToken } from './hold-token';
 import { IdempotencyRaceLostError, InsufficientCapacityError } from './holds.errors';
 import { allocateFreeUnits } from './allocate-free-units';
 import type { CreateHoldDto } from './dto/create-hold.dto';
+import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
+import { blockedRangesOverlap } from '../rental-rules/rental-engine';
+import { TECHNICAL_MAX_PIECES } from '../rental-rules/rental-limits';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
 
@@ -115,6 +116,9 @@ export class HoldsService {
     if (idempotencyKey !== undefined) validateIdempotencyKeyFormat(idempotencyKey);
 
     const normalizedItems = normalizeItems(dto.items);
+    if (normalizedItems.reduce((total, item) => total + item.quantity, 0) > TECHNICAL_MAX_PIECES) {
+      throw new BadRequestException('Quantidade acima do teto técnico permitido.');
+    }
     const sundayReturnOption = dto.sundayReturnOption ?? null;
     const requestHash = idempotencyKey
       ? hashRequestPayload({ items: normalizedItems, pickupDate: dto.pickupDate, sundayReturnOption, termsAccepted: dto.termsAccepted })
@@ -173,7 +177,7 @@ export class HoldsService {
             if (existing.requestHash !== requestHash) {
               throw new ConflictException('Idempotency-Key já foi usada com um payload diferente.');
             }
-            return this.buildResponseFromReservationId(existing.reservationId, config, this.prisma);
+            return this.buildResponseFromReservationId(existing.reservationId, this.prisma);
           }
           this.logger.error('Corrida de idempotência perdida, mas nenhuma linha vencedora encontrada.');
           throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
@@ -200,6 +204,7 @@ export class HoldsService {
   }
 
   private async attemptCreateHold(tx: Prisma.TransactionClient, ctx: AttemptContext): Promise<HoldResponse> {
+    await lockOperationalBlocks(tx);
     const { normalizedItems, pickupDate, sundayReturnOption, config, today, store, termsVersion, idempotencyKey, requestHash, holdToken, holdTokenHash } = ctx;
     const variantIds = normalizedItems.map((i) => i.shopifyVariantId);
 
@@ -220,18 +225,14 @@ export class HoldsService {
         if (existing.requestHash !== requestHash) {
           throw new ConflictException('Idempotency-Key já foi usada com um payload diferente.');
         }
-        return this.buildResponseFromReservationId(existing.reservationId, config, tx);
+        return this.buildResponseFromReservationId(existing.reservationId, tx);
       }
     }
 
     // A loja não tem linha real hoje (confirmado contra o Neon antes de
     // escrever este serviço) — upsert idempotente, nunca um INSERT cru
     // que falharia na segunda chamada.
-    await tx.store.upsert({
-      where: { id: store.id },
-      update: {},
-      create: { id: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency },
-    });
+    await ensureStoreConfig(tx, store);
 
     // Item 8/9 da Fase 5: expira ANTES de checar ocupação, na mesma
     // transação — sem isso, um HOLD vencido continuaria "ocupando" a
@@ -298,37 +299,14 @@ export class HoldsService {
 
     const blockedRange = calculateBlockedRange(pickupDate, effectiveReturnDate, config);
 
-    // A partir daqui: FOR UPDATE trava as linhas candidatas — qualquer
-    // outra transação pedindo a MESMA variante espera aqui até esta
-    // committar ou dar rollback. É isto, não o retry, que evita a
-    // corrida na prática (ver item 6 da Fase 5: "Postgres como árbitro
-    // final", "não usar lock em memória").
-    //
-    // Preflight da Fase 6 — ordem determinística de lock entre variantes:
-    // uma query ÚNICA `WHERE shopify_variant_id = ANY(...) ORDER BY id FOR
-    // UPDATE` NÃO garante que o Postgres trave as linhas na ordem do
-    // ORDER BY — o LockRows roda sobre a saída do scan, e o Sort pode
-    // acontecer depois (é uma pegadinha documentada do Postgres, não uma
-    // suposição). Por isso o lock aqui é feito em UM LOOP, uma variante
-    // por vez, na ordem de `variantIds` — que já vem alfabeticamente
-    // ordenada por `normalizeItems()` (não pela ordem que o cliente
-    // mandou no payload). Toda transação que precisar de mais de uma
-    // variante trava SEMPRE na mesma ordem global (alfabética) — é a
-    // técnica clássica de prevenção de deadlock (lock ordering fixo), e
-    // não depende de nenhum comportamento interno do planner. Provado sob
-    // concorrência real (variantes pedidas em ordem invertida entre duas
-    // requisições simultâneas) em holds.deadlock.integration.test.ts.
-    const candidates: { id: string; shopifyVariantId: string }[] = [];
-    for (const variantId of variantIds) {
-      const rows = await tx.$queryRaw<{ id: string; shopifyVariantId: string }[]>`
+    // IDs are immutable; all allocation paths acquire unit locks in ascending ID order.
+    const candidates = await tx.$queryRaw<{ id: string; shopifyVariantId: string }[]>`
         SELECT id, shopify_variant_id AS "shopifyVariantId"
         FROM rental_units
-        WHERE shopify_variant_id = ${variantId} AND active = true AND reservable_online = true
+        WHERE shopify_variant_id = ANY(${variantIds}::text[]) AND active = true AND reservable_online = true
         ORDER BY id
         FOR UPDATE
       `;
-      candidates.push(...rows);
-    }
 
     const candidateIds = candidates.map((c) => c.id);
     const occupiedRows = candidateIds.length
@@ -341,6 +319,14 @@ export class HoldsService {
         `
       : [];
     const occupiedIds = new Set(occupiedRows.map((r) => r.rentalUnitId));
+    const storeBlocks = await loadActiveStoreWideBlocks(tx, blockedRange.blockedFrom, blockedRange.blockedUntilExclusive);
+    if (isRangeBlockedStoreWide(blockedRange, storeBlocks) !== null) {
+      throw new ConflictException('Não há disponibilidade para o período solicitado.');
+    }
+    const unitBlocks = await loadActiveUnitBlocks(tx, candidateIds);
+    for (const block of unitBlocks) {
+      if (blockedRangesOverlap(block.range, blockedRange)) occupiedIds.add(block.unitId);
+    }
 
     const needed = new Map(normalizedItems.map((i) => [i.shopifyVariantId, i.quantity]));
     const allocationResult = allocateFreeUnits(candidates, occupiedIds, needed);
@@ -351,10 +337,11 @@ export class HoldsService {
     }
 
     const [{ id: reservationId, expiresAt }] = await tx.$queryRaw<{ id: string; expiresAt: Date }[]>`
-      INSERT INTO reservations (id, status, origin_store_id, pickup_date, return_date, expires_at, terms_accepted_at, terms_version, hold_token_hash)
+      INSERT INTO reservations (id, status, origin_store_id, pickup_date, return_date, calculated_return_date, rental_duration_days, expires_at, terms_accepted_at, terms_version, hold_token_hash)
       VALUES (
         gen_random_uuid(), 'hold', ${store.id},
         ${civilDateToISO(pickupDate)}::date, ${civilDateToISO(effectiveReturnDate)}::date,
+        ${civilDateToISO(plan.calculatedReturnDate)}::date, ${plan.durationDays},
         now() + interval '30 minutes', now(), ${termsVersion}, ${holdTokenHash}
       )
       RETURNING id, expires_at AS "expiresAt"
@@ -407,15 +394,10 @@ export class HoldsService {
   }
 
   /**
-   * Resposta de replay (Idempotency-Key repetida) ou, no futuro,
-   * consulta de HOLD por id. `durationDays`/`calculatedReturnDate` são
-   * RECALCULADOS a partir da config ATUAL — se o Anderson mudar a tabela
-   * peças→dias entre a criação e o replay, estes dois campos podem
-   * divergir do que valeu no momento da criação. `pickupDate`,
-   * `effectiveReturnDate`, `reservationId`, `expiresAt` e `items` são
-   * fato gravado, nunca recalculados.
+   * Replay uses the accepted snapshot, never today's rental rules.
+   * Legacy rows without a snapshot retain their recorded effective dates.
    */
-  private async buildResponseFromReservationId(reservationId: string, config: RentalRuleConfig, client: DbReader): Promise<HoldResponse> {
+  private async buildResponseFromReservationId(reservationId: string, client: DbReader): Promise<HoldResponse> {
     let reservation;
     let rows;
     try {
@@ -437,17 +419,15 @@ export class HoldsService {
     }
 
     const grouped = new Map<string, number>();
-    let countedPieces = 0;
     for (const row of rows) {
       if (!row.shopifyVariantId) continue;
       grouped.set(row.shopifyVariantId, (grouped.get(row.shopifyVariantId) ?? 0) + 1);
-      if (row.countsTowardRentalDuration) countedPieces += 1;
     }
 
     const pickupDate = civilDateFromPgDate(reservation.pickupDate);
     const effectiveReturnDate = civilDateFromPgDate(reservation.returnDate);
-    const durationDays = countedPieces > 0 ? durationForPieces(countedPieces, config) : 0;
-    const calculatedReturnDate = countedPieces > 0 ? calculateReturnDate(pickupDate, durationDays) : effectiveReturnDate;
+    const calculatedReturnDate = reservation.calculatedReturnDate ? civilDateFromPgDate(reservation.calculatedReturnDate) : effectiveReturnDate;
+    const durationDays = reservation.rentalDurationDays ?? diffDays(calculatedReturnDate, pickupDate);
 
     return {
       reservationId,

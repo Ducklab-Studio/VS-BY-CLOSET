@@ -1,4 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 
 /**
  * A loja Shopify que toda reserva pertence. Hoje não existe nenhuma linha
@@ -36,4 +37,16 @@ export function resolveStoreConfig(): StoreConfig {
   // O próprio domínio como id: é único por natureza, e evita inventar um
   // identificador arbitrário separado pra algo que já É um identificador.
   return { id: shopifyDomain, shopifyDomain, currency };
+}
+
+/** Handles concurrent first use across HOLD, manual and webhook transactions. */
+export async function ensureStoreConfig(tx: Prisma.TransactionClient, store: StoreConfig): Promise<void> {
+  await tx.store.createMany({
+    skipDuplicates: true,
+    data: [{ id: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency }],
+  });
+  const persisted = await tx.store.findUnique({ where: { id: store.id } });
+  if (!persisted) throw new ServiceUnavailableException('Configuração da loja ausente no banco.');
+  if (persisted.shopifyDomain !== store.shopifyDomain) throw new ServiceUnavailableException('Domínio da loja diverge do banco.');
+  if (persisted.currency !== store.currency) throw new ServiceUnavailableException('Moeda da loja diverge do banco.');
 }
