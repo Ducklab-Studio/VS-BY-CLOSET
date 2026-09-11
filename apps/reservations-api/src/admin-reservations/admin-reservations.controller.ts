@@ -41,7 +41,19 @@ export class AdminReservationsController {
 
   @Get()
   @UseGuards(AdminRoleGuard)
-  list(@Query() filters: ReservationListFilters): Promise<ReservationListItem[]> {
+  list(@Query() query: Record<string, string | undefined>): Promise<ReservationListItem[]> {
+    const filters: ReservationListFilters = {
+      status: query.status || undefined,
+      source: query.source || undefined,
+      from: query.from || undefined,
+      to: query.to || undefined,
+      customer: query.customer || undefined,
+      phone: query.phone || undefined,
+      unitCode: query.unitCode || undefined,
+      code: query.code || undefined,
+      includeArchived: query.includeArchived === 'true',
+      archivedOnly: query.archivedOnly === 'true',
+    };
     return this.adminReservations.listReservations(filters);
   }
 
