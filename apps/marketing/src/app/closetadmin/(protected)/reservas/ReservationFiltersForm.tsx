@@ -26,11 +26,14 @@ export function ReservationFiltersForm({ initial }: { initial: Record<string, st
     customer: initial.customer ?? '',
     phone: initial.phone ?? '',
     unitCode: initial.unitCode ?? '',
+    code: initial.code ?? '',
     from: initial.from ?? '',
     to: initial.to ?? '',
   });
+  const [includeArchived, setIncludeArchived] = useState(initial.includeArchived === 'true');
+  const [archivedOnly, setArchivedOnly] = useState(initial.archivedOnly === 'true');
 
-  const activeCount = Object.values(values).filter(Boolean).length;
+  const activeCount = Object.values(values).filter(Boolean).length + (includeArchived ? 1 : 0) + (archivedOnly ? 1 : 0);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,11 +41,15 @@ export function ReservationFiltersForm({ initial }: { initial: Record<string, st
     for (const [key, value] of Object.entries(values)) {
       if (value) params.set(key, value);
     }
+    if (archivedOnly) params.set('archivedOnly', 'true');
+    else if (includeArchived) params.set('includeArchived', 'true');
     router.push(`/closetadmin/reservas${params.toString() ? `?${params.toString()}` : ''}`);
   }
 
   function clearFilters() {
-    setValues({ status: '', source: '', customer: '', phone: '', unitCode: '', from: '', to: '' });
+    setValues({ status: '', source: '', customer: '', phone: '', unitCode: '', code: '', from: '', to: '' });
+    setIncludeArchived(false);
+    setArchivedOnly(false);
     router.push('/closetadmin/reservas');
   }
 
@@ -144,6 +151,40 @@ export function ReservationFiltersForm({ initial }: { initial: Record<string, st
             className={inputClass}
           />
         </Field>
+
+        <Field label="Código da reserva">
+          <input
+            placeholder="Ex.: A1B2C3D4"
+            value={values.code}
+            onChange={(e) => setValues((v) => ({ ...v, code: e.target.value }))}
+            className={inputClass}
+          />
+        </Field>
+
+        <div className="flex flex-col justify-end gap-2 pb-1 text-sm">
+          <label className="flex items-center gap-2 text-ink dark:text-dark-text">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => {
+                setIncludeArchived(e.target.checked);
+                if (e.target.checked) setArchivedOnly(false);
+              }}
+            />
+            Incluir arquivadas
+          </label>
+          <label className="flex items-center gap-2 text-ink dark:text-dark-text">
+            <input
+              type="checkbox"
+              checked={archivedOnly}
+              onChange={(e) => {
+                setArchivedOnly(e.target.checked);
+                if (e.target.checked) setIncludeArchived(false);
+              }}
+            />
+            Somente histórico arquivado
+          </label>
+        </div>
 
         <div className="flex items-end">
           <button

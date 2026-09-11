@@ -1,8 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireAdminSession } from '@/lib/admin-session';
-import { cancelManualReservation } from '@/lib/admin-data';
+import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
+import { cancelManualReservation, restoreReservation } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /**
@@ -25,6 +25,27 @@ export async function cancelReservationAction(reservationId: string, reason: str
   revalidatePath('/closetadmin/reservas');
   revalidatePath('/closetadmin/calendario');
   revalidatePath('/closetadmin/pecas');
+  revalidatePath('/closetadmin/auditoria');
+  return { error: null };
+}
+
+/**
+ * "Limpar históricos" — restaurar é exclusivo de ADMIN (mesma regra do
+ * arquivamento). Só limpa `archivedAt`/`archivedBy`/`archiveReason` —
+ * nunca reativa HOLD, reabre pagamento ou muda status comercial (ver
+ * ReservationArchiveService.restore).
+ */
+export async function restoreReservationAction(reservationId: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'ADMIN');
+  try {
+    await restoreReservation(reservationId, session.id, session.name);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível restaurar a reserva.' };
+  }
+
+  revalidatePath(`/closetadmin/reservas/${reservationId}`);
+  revalidatePath('/closetadmin/reservas');
   revalidatePath('/closetadmin/auditoria');
   return { error: null };
 }

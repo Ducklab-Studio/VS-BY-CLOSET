@@ -341,6 +341,17 @@ model Reservation {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  /// "Limpar históricos" — soft delete puro, nunca DELETE físico. Só
+  /// tira a reserva da listagem operacional padrão; nada aqui apaga ou
+  /// altera status, itens, pagamentos, webhooks ou eventos. Reversível
+  /// (ver ReservationArchiveService.restore). `archivedBy` é o
+  /// AdminUser.id de quem arquivou — sem relação FK de propósito (mesmo
+  /// padrão frouxo de AdminAuditEvent.adminUserId): a reserva arquivada
+  /// não pode virar inconsistente se o AdminUser for removido no futuro.
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(6)
+  archivedBy     String?   @map("archived_by") @db.Uuid
+  archiveReason  String?   @map("archive_reason")
+
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
   idempotencyKeys       HoldIdempotencyKey[]
@@ -350,6 +361,7 @@ model Reservation {
 
   @@unique([originStoreId, shopifyOrderId])
   @@index([status])
+  @@index([archivedAt])
   @@map("reservations")
 }
 
