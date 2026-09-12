@@ -204,7 +204,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow();
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
 
-    const result = await service.handleWebhook('mp-payment-1', 'payment', {});
+    const result = await service.handleWebhook(`${PREFIX}-mp-payment-1`, 'payment', {});
     expect(result.outcome).toBe('processed');
 
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
@@ -222,7 +222,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(31);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'pending' }));
 
-    await service.handleWebhook('mp-payment-2', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-2`, 'payment', {});
 
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
     expect(reservation.status).toBe('pending_payment');
@@ -232,7 +232,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(32);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'rejected' }));
 
-    await service.handleWebhook('mp-payment-3', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-3`, 'payment', {});
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe('rejected');
@@ -244,7 +244,7 @@ describe('MercadoPagoService — webhook', () => {
     const { service, mp, paymentId } = await setupApprovedFlow(33);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'cancelled' }));
 
-    await service.handleWebhook('mp-payment-4', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-4`, 'payment', {});
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe('cancelled');
@@ -253,10 +253,10 @@ describe('MercadoPagoService — webhook', () => {
   test('estorno) pagamento aprovado e depois reembolsado → refundedAt preenchido', async () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(34);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
-    await service.handleWebhook('mp-payment-5a', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-5a`, 'payment', {});
 
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'refunded' }));
-    await service.handleWebhook('mp-payment-5b', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-5b`, 'payment', {});
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe('refunded');
@@ -273,7 +273,7 @@ describe('MercadoPagoService — webhook', () => {
     await prisma.$executeRaw`UPDATE reservations SET status = 'expired' WHERE id = ${hold.reservationId}::uuid`;
 
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
-    const result = await service.handleWebhook('mp-payment-late', 'payment', {});
+    const result = await service.handleWebhook(`${PREFIX}-mp-payment-late`, 'payment', {});
 
     expect(result.outcome).toBe('processed');
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
@@ -308,7 +308,7 @@ describe('MercadoPagoService — webhook', () => {
     `;
 
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
-    await service.handleWebhook('mp-payment-conflict', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-conflict`, 'payment', {});
 
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
     expect(reservation.status).toBe('late_payment_conflict');
@@ -322,7 +322,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(37);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved', transactionAmount: UNIT_PRICE + 999 }));
 
-    const result = await service.handleWebhook('mp-payment-6', 'payment', {});
+    const result = await service.handleWebhook(`${PREFIX}-mp-payment-6`, 'payment', {});
     expect(result.outcome).toBe('rejected');
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
@@ -335,7 +335,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(38);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved', currencyId: 'ARS' }));
 
-    const result = await service.handleWebhook('mp-payment-7', 'payment', {});
+    const result = await service.handleWebhook(`${PREFIX}-mp-payment-7`, 'payment', {});
     expect(result.outcome).toBe('rejected');
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
     expect(reservation.status).toBe('pending_payment');
@@ -345,8 +345,8 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(39);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
 
-    const first = await service.handleWebhook('mp-payment-8', 'payment', {});
-    const second = await service.handleWebhook('mp-payment-8', 'payment', {});
+    const first = await service.handleWebhook(`${PREFIX}-mp-payment-8`, 'payment', {});
+    const second = await service.handleWebhook(`${PREFIX}-mp-payment-8`, 'payment', {});
 
     expect(first.outcome).toBe('processed');
     expect(second.outcome).toBe('duplicate');
@@ -357,10 +357,10 @@ describe('MercadoPagoService — webhook', () => {
   test('12) webhook fora de ordem (pending chegando depois de approved) → ignorado, nunca reverte', async () => {
     const { hold, service, mp, paymentId } = await setupApprovedFlow(40);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
-    await service.handleWebhook('mp-payment-9a', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-9a`, 'payment', {});
 
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'pending' }));
-    const result = await service.handleWebhook('mp-payment-9b', 'payment', {});
+    const result = await service.handleWebhook(`${PREFIX}-mp-payment-9b`, 'payment', {});
 
     expect(result.outcome).toBe('ignored');
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
@@ -375,7 +375,7 @@ describe('MercadoPagoService — webhook', () => {
       const { paymentId, service, mp } = await setupApprovedFlow(41);
       vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
 
-      const result = await service.handleWebhook('mp-payment-10', 'payment', { signature: 'ts=1,v1=deadbeef', requestId: 'req-1' });
+      const result = await service.handleWebhook(`${PREFIX}-mp-payment-10`, 'payment', { signature: 'ts=1,v1=deadbeef', requestId: 'req-1' });
       expect(result.outcome).toBe('rejected');
       expect(mp.getPayment).not.toHaveBeenCalled();
     } finally {
@@ -412,7 +412,7 @@ describe('MercadoPagoService — webhook', () => {
     const { hold, service, mp } = await setupApprovedFlow(43);
     vi.mocked(mp.getPayment).mockRejectedValue(new Error('timeout simulado'));
 
-    await expect(service.handleWebhook('mp-payment-fail', 'payment', {})).rejects.toMatchObject({ status: 503 });
+    await expect(service.handleWebhook(`${PREFIX}-mp-payment-fail`, 'payment', {})).rejects.toMatchObject({ status: 503 });
     const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
     expect(reservation.status).toBe('pending_payment');
   }, TIMEOUT);
@@ -420,7 +420,7 @@ describe('MercadoPagoService — webhook', () => {
   test('preservação da auditoria) todo webhook processado grava MercadoPagoWebhookEvent', async () => {
     const { paymentId, service, mp } = await setupApprovedFlow(44);
     vi.mocked(mp.getPayment).mockResolvedValue(makePaymentPayload({ externalReference: paymentId, status: 'approved' }));
-    await service.handleWebhook('mp-payment-audit', 'payment', {});
+    await service.handleWebhook(`${PREFIX}-mp-payment-audit`, 'payment', {});
 
     const logs = await prisma.mercadoPagoWebhookEvent.findMany({ where: { paymentId } });
     expect(logs.length).toBeGreaterThanOrEqual(1);
