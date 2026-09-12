@@ -33,12 +33,12 @@ const MP_STATUS_TO_PAYMENT_STATUS: Record<string, string | undefined> = {
  *  aplicada, WHERE não bate) e proteção contra fora-de-ordem (ex.: um
  *  "pending" chegando depois de "approved" nunca reverte o pagamento). */
 const ALLOWED_PAYMENT_TRANSITIONS: Record<string, readonly string[]> = {
-  pending: ['pending', 'in_process', 'approved', 'rejected', 'cancelled'],
-  in_process: ['in_process', 'approved', 'rejected', 'cancelled'],
-  approved: ['approved', 'refunded'],
+  pending: ['in_process', 'approved', 'rejected', 'cancelled'],
+  in_process: ['approved', 'rejected', 'cancelled'],
+  approved: ['refunded'],
   rejected: [],
   cancelled: [],
-  refunded: ['refunded'],
+  refunded: [],
 };
 
 export interface MercadoPagoPreferenceResponse {
