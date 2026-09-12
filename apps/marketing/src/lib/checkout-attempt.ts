@@ -2,15 +2,26 @@ import { createCheckout, createHold, storeLastReservation, type CreateCheckoutRe
 
 type Input = Omit<Parameters<typeof createHold>[0], 'idempotencyKey'>;
 type Result = CreateCheckoutResult | Exclude<CreateHoldResult, { ok: true }>;
+type CreateCheckoutFn = (reservationId: string, holdToken: string) => Promise<CreateCheckoutResult>;
 
-/** Keep the credential from a successful HOLD: idempotent replays omit it. */
+/**
+ * Keep the credential from a successful HOLD: idempotent replays omit it.
+ *
+ * `createCheckoutFn` é escolhido POR CHAMADA (não fixado na criação do
+ * attempt) — Mercado Pago é o método principal, Shopify a alternativa
+ * (ver carrinho/page.tsx); se o cliente trocar de método depois de já
+ * ter um HOLD (ex.: uma tentativa anterior falhou só na criação do
+ * checkout), a MESMA reserva/HOLD é reaproveitada, nunca cria um
+ * segundo — só o provedor final muda. Default `createCheckout`
+ * (Shopify) preserva o comportamento anterior pra quem não passar nada.
+ */
 export function createCheckoutAttempt() {
   let attempt: { intent: string; key: string; hold?: StoredReservation } | undefined;
   let busy = false;
 
   return {
     reset() { attempt = undefined; },
-    async run(input: Input, beforeHold: () => Promise<void>): Promise<Result> {
+    async run(input: Input, beforeHold: () => Promise<void>, createCheckoutFn: CreateCheckoutFn = createCheckout): Promise<Result> {
       if (busy) return { ok: false, message: 'O checkout já está sendo preparado.' };
       if (!input.termsAccepted) return { ok: false, message: 'Aceite os termos para continuar.' };
       const intent = JSON.stringify({
@@ -33,7 +44,7 @@ export function createCheckoutAttempt() {
           current.hold = { reservationId: held.reservationId, holdToken: held.holdToken };
           storeLastReservation(held.reservationId, held.holdToken);
         }
-        const result = await createCheckout(current.hold.reservationId, current.hold.holdToken);
+        const result = await createCheckoutFn(current.hold.reservationId, current.hold.holdToken);
         if (attempt !== current) return changed();
         // Only an authoritative expiration permits a fresh HOLD on retry.
         if (!result.ok && result.expired) attempt = undefined;

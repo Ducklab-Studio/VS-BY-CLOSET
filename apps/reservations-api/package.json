@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:migrate:dev": "prisma migrate dev"
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:dev-safe": "node scripts/migrate-dev-safe.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",

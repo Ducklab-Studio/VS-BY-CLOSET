@@ -103,6 +103,77 @@ export async function shopifyCartCreate(
   return { ok: true, cartId: cart.id, checkoutUrl: cart.checkoutUrl };
 }
 
+export interface VariantPrice {
+  readonly variantId: string;
+  readonly amount: number;
+  readonly currencyCode: string;
+}
+
+interface VariantPricesResponse {
+  nodes: ({ id: string; price: { amount: string; currencyCode: string } } | null)[];
+}
+
+const VARIANT_PRICES_QUERY = `
+  query VariantPrices($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        price { amount currencyCode }
+      }
+    }
+  }
+`;
+
+/**
+ * Preço real de cada variante — usado pelo Mercado Pago (Fase de
+ * integração MP) pra calcular o valor da preferência no SERVIDOR. O
+ * preço nunca é reimplementado/estimado aqui: é sempre o que a Shopify
+ * (fonte única de preço deste projeto) tem cadastrado, buscado ao vivo.
+ * Lança em qualquer falha de infraestrutura (mesmo padrão de
+ * `shopifyCartCreate`); uma variante que não existe mais some do
+ * resultado (nunca lança "not found" — quem chama decide o que fazer
+ * com uma lista mais curta que o pedido).
+ */
+export async function shopifyFetchVariantPrices(
+  credentials: ShopifyStorefrontCredentials,
+  variantIds: readonly string[],
+): Promise<VariantPrice[]> {
+  if (variantIds.length === 0) return [];
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`https://${credentials.shopifyDomain}/api/${API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Storefront-Access-Token': credentials.storefrontToken,
+      },
+      body: JSON.stringify({ query: VARIANT_PRICES_QUERY, variables: { ids: variantIds } }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`Falha de rede ao chamar a Storefront API: ${err instanceof Error ? err.name : 'unknown'}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Storefront API respondeu ${res.status}`);
+  }
+
+  const json = (await res.json()) as { data?: VariantPricesResponse; errors?: { message: string }[] };
+  if (json.errors?.length) {
+    throw new Error(`Storefront API retornou erro de GraphQL: ${json.errors.map((e) => e.message).join('; ')}`);
+  }
+
+  return (json.data?.nodes ?? [])
+    .filter((node): node is NonNullable<typeof node> => node !== null)
+    .map((node) => ({ variantId: node.id, amount: Number(node.price.amount), currencyCode: node.price.currencyCode }));
+}
+
 /**
  * Wrapper injetável — mesmo padrão de RentalRuleConfigService: existe pra
  * CheckoutService poder ser testado construindo com um cliente FAKE,
@@ -113,5 +184,10 @@ export class ShopifyCartClient {
   cartCreate(lines: readonly CartLineInput[], attributes: readonly CartAttributeInput[]): Promise<CartCreateResult> {
     const credentials = resolveShopifyStorefrontCredentials();
     return shopifyCartCreate(credentials, lines, attributes);
+  }
+
+  fetchVariantPrices(variantIds: readonly string[]): Promise<VariantPrice[]> {
+    const credentials = resolveShopifyStorefrontCredentials();
+    return shopifyFetchVariantPrices(credentials, variantIds);
   }
 }

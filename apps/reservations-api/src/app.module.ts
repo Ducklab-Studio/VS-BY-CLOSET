@@ -7,6 +7,7 @@ import { AvailabilityModule } from './availability/availability.module';
 import { RentalPlanModule } from './rental-plan/rental-plan.module';
 import { HoldsModule } from './holds/holds.module';
 import { CheckoutModule } from './checkout/checkout.module';
+import { MercadoPagoModule } from './mercadopago/mercadopago.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { AdminReservationsModule } from './admin-reservations/admin-reservations.module';
@@ -29,6 +30,7 @@ import { AppController } from './app.controller';
     RentalPlanModule,
     HoldsModule,
     CheckoutModule,
+    MercadoPagoModule,
     WebhooksModule,
     ReservationsModule,
     AdminReservationsModule,

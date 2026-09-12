@@ -13,7 +13,7 @@ import {
   type CartLine,
 } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
-import { type SundayReturnOptionInfo } from '@/lib/checkout';
+import { createCheckout, createMercadoPagoPreference, type SundayReturnOptionInfo } from '@/lib/checkout';
 import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
@@ -42,6 +42,11 @@ export default function CarrinhoPage() {
   const [durationFailed, setDurationFailed] = useState(false);
 
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // Mercado Pago é o método PRINCIPAL/recomendado; Shopify continua
+  // disponível como alternativa (nunca removido). Trocar de método
+  // depois de já ter um HOLD reaproveita a MESMA reserva — ver
+  // createCheckoutAttempt().
+  const [paymentMethod, setPaymentMethod] = useState<'mercadopago' | 'shopify'>('mercadopago');
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [sundayOptions, setSundayOptions] = useState<SundayReturnOptionInfo[] | null>(null);
@@ -201,7 +206,7 @@ export default function CarrinhoPage() {
           throw new Error(`A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`);
         }
       }
-    });
+    }, paymentMethod === 'mercadopago' ? createMercadoPagoPreference : createCheckout);
 
     if (!checkoutResult.ok) {
       if ('reason' in checkoutResult && checkoutResult.reason === 'needs_sunday_choice') {
@@ -417,6 +422,44 @@ export default function CarrinhoPage() {
         </p>
       )}
 
+      <div className="mt-6" role="radiogroup" aria-label="Forma de pagamento">
+        <span className="mb-2 block text-[0.8rem] uppercase tracking-[0.12em] text-ink/55">Forma de pagamento</span>
+        <div className="flex flex-col gap-2.5 sm:flex-row">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={paymentMethod === 'mercadopago'}
+            disabled={checkingOut}
+            onClick={() => setPaymentMethod('mercadopago')}
+            className={`flex-1 rounded-xl border px-4 py-3 text-left transition-colors ${
+              paymentMethod === 'mercadopago' ? 'border-marsala bg-marsala/[0.06]' : 'border-ink/15 hover:border-ink/30'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span className="font-medium text-ink">Mercado Pago</span>
+              <span className="rounded-full bg-marsala px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wide text-cream">
+                Recomendado
+              </span>
+            </span>
+            <span className="mt-0.5 block text-[0.72rem] text-ink/55">Cartão, pix e outros meios — ambiente de teste.</span>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={paymentMethod === 'shopify'}
+            disabled={checkingOut}
+            onClick={() => setPaymentMethod('shopify')}
+            className={`flex-1 rounded-xl border px-4 py-3 text-left transition-colors ${
+              paymentMethod === 'shopify' ? 'border-marsala bg-marsala/[0.06]' : 'border-ink/15 hover:border-ink/30'
+            }`}
+          >
+            <span className="font-medium text-ink">Shopify</span>
+            <span className="mt-0.5 block text-[0.72rem] text-ink/55">Alternativa — checkout padrão da loja.</span>
+          </button>
+        </div>
+      </div>
+
       <label className="mt-5 flex items-start gap-2.5 text-[0.78rem] leading-relaxed text-ink/70">
         <input
           type="checkbox"
@@ -449,7 +492,7 @@ export default function CarrinhoPage() {
       </button>
 
       <p className="mt-3 text-center text-[0.7rem] text-ink/65">
-        Pagamento processado com segurança pela Shopify.
+        {paymentMethod === 'mercadopago' ? 'Pagamento processado com segurança pelo Mercado Pago.' : 'Pagamento processado com segurança pela Shopify.'}
       </p>
     </Shell>
   );

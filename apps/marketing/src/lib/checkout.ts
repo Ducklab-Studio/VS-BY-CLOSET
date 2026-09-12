@@ -168,3 +168,36 @@ export async function createCheckout(reservationId: string, holdToken: string): 
   }
   return { ok: false, expired: res.status === 410, message: typeof body.message === 'string' ? body.message : 'Não foi possível continuar para o pagamento.' };
 }
+
+/**
+ * Mercado Pago (Checkout Pro, ambiente de TESTE/sandbox) — método
+ * PRINCIPAL de pagamento; `createCheckout` (Shopify) acima continua
+ * como alternativa. Mesmo contrato de `createCheckout`: HOLD já criado,
+ * navegador só recebe a URL final pra redirecionar — nunca vê token,
+ * valor calculado no servidor. `idempotencyKey` própria (nunca reaproveita
+ * a do HOLD): cada TENTATIVA de pagamento é uma chave nova, mesmo padrão
+ * de POST /holds.
+ */
+export async function createMercadoPagoPreference(reservationId: string, holdToken: string): Promise<CreateCheckoutResult> {
+  const base = process.env.NEXT_PUBLIC_MERCADOPAGO_CHECKOUT_URL;
+  if (!base) return { ok: false, message: 'Pagamento com Mercado Pago não configurado no momento.' };
+
+  let res: Response;
+  let json: unknown;
+  try {
+    res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservationId, holdToken, idempotencyKey: crypto.randomUUID() }),
+    });
+    json = await res.json().catch(() => null);
+  } catch {
+    return { ok: false, message: 'Não foi possível continuar para o pagamento. Verifique sua conexão.' };
+  }
+
+  const body = (json ?? {}) as { checkoutUrl?: unknown; message?: unknown };
+  if (res.ok && typeof body.checkoutUrl === 'string') {
+    return { ok: true, checkoutUrl: body.checkoutUrl };
+  }
+  return { ok: false, expired: res.status === 410, message: typeof body.message === 'string' ? body.message : 'Não foi possível continuar para o pagamento com o Mercado Pago.' };
+}

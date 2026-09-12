@@ -31,7 +31,10 @@ export function resolveStoreConfig(): StoreConfig {
     if (process.env.NODE_ENV === 'production') {
       throw new ServiceUnavailableException('Loja não configurada — não é possível criar reserva no momento.');
     }
-    return { id: 'dev-store', shopifyDomain: 'dev-store.myshopify.com', currency: 'CLP' };
+    // BRL — moeda definitiva do checkout (cliente brasileiro, paga em
+    // BRL; a retirada em loja no Chile é só logística, não define a
+    // moeda). Ver mercadopago.service.ts.
+    return { id: 'dev-store', shopifyDomain: 'dev-store.myshopify.com', currency: 'BRL' };
   }
 
   // O próprio domínio como id: é único por natureza, e evita inventar um

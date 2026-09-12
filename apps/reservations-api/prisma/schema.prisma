@@ -358,11 +358,98 @@ model Reservation {
   manualIdempotencyKeys ManualReservationIdempotencyKey[]
   webhookEvents         WebhookEvent[]
   events                ReservationEvent[]
+  payments              Payment[]
 
   @@unique([originStoreId, shopifyOrderId])
   @@index([status])
   @@index([archivedAt])
   @@map("reservations")
+}
+
+/// Mercado Pago (Checkout Pro, sandbox) — método de pagamento
+/// PRINCIPAL, Shopify continua como alternativa (ver checkout.module.ts
+/// e mercadopago.module.ts). Não existe uma tabela "Hold" separada
+/// neste projeto — HOLD é só `Reservation.status = 'hold'` — então
+/// "holdId" do pedido é sempre `reservationId`; não duplicado aqui.
+enum PaymentProvider {
+  mercadopago
+
+  @@map("payment_provider")
+}
+
+/// Espelha o vocabulário de status do Mercado Pago (`payment.status`),
+/// nunca reinventado — ver mercadopago-client.ts. `in_process` cobre
+/// pagamentos ainda em análise (ex.: boleto/pix pendente de compensação
+/// na conta de teste).
+enum PaymentStatus {
+  pending
+  in_process
+  approved
+  rejected
+  cancelled
+  refunded
+
+  @@map("payment_status")
+}
+
+/// Um registro por PREFERÊNCIA criada — `externalPaymentId` só é
+/// preenchido quando o Mercado Pago de fato processa um pagamento pra
+/// essa preferência (pode nunca acontecer, se o cliente abandonar o
+/// checkout). `idempotencyKey` é escolhida pelo cliente (mesmo padrão
+/// de HoldIdempotencyKey) — chave primária de fato da criação, nunca
+/// duas preferências pra uma mesma tentativa.
+model Payment {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider          PaymentProvider @default(mercadopago)
+  reservationId     String          @map("reservation_id") @db.Uuid
+  preferenceId      String?         @unique @map("preference_id")
+  /// `sandbox_init_point` (ambiente de teste) devolvido na criação —
+  /// guardado pra replay idempotente sem precisar reconsultar o
+  /// Mercado Pago. Nunca contém dado de cartão, só a URL do checkout.
+  checkoutUrl       String?         @map("checkout_url")
+  externalPaymentId String?         @map("external_payment_id")
+  status            PaymentStatus   @default(pending)
+  /// Sempre calculado no servidor a partir do preço real (Shopify),
+  /// nunca aceito do cliente — ver MercadoPagoService.createPreference.
+  amount            Decimal         @db.Decimal(10, 2)
+  currency          String
+  idempotencyKey    String          @unique @map("idempotency_key")
+  paidAt            DateTime?       @map("paid_at") @db.Timestamptz(6)
+  refundedAt        DateTime?       @map("refunded_at") @db.Timestamptz(6)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  reservation   Reservation               @relation(fields: [reservationId], references: [id])
+  webhookEvents MercadoPagoWebhookEvent[]
+
+  @@index([reservationId])
+  @@index([externalPaymentId])
+  @@map("payments")
+}
+
+/// Log de toda notificação recebida — tabela PRÓPRIA, nunca reaproveita
+/// `WebhookEvent` (essa é inteiramente modelada em cima de conceitos do
+/// Shopify: `storeId`, `shopifyWebhookId`, `orderId`). A segurança real
+/// contra duplicidade/fora-de-ordem é a máquina de estados de
+/// `PaymentStatus` (transição condicional no UPDATE, ver
+/// MercadoPagoService.applyPaymentUpdate) — esta tabela é auditoria/
+/// observabilidade, não o mecanismo de proteção em si.
+model MercadoPagoWebhookEvent {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  externalPaymentId String        @map("external_payment_id")
+  notificationId    String?       @map("notification_id")
+  topic             String
+  payload           Json
+  status            WebhookStatus
+  errorMessage      String?       @map("error_message")
+  paymentId         String?       @map("payment_id") @db.Uuid
+  processedAt       DateTime      @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([externalPaymentId])
+  @@index([paymentId])
+  @@map("mercadopago_webhook_events")
 }
 
 /// Garante que POST /holds seja seguro contra double-click / retry de rede
