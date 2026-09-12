@@ -295,7 +295,11 @@ describe('MercadoPagoService — webhook', () => {
     const [item] = items;
     const otherRows = await prisma.$queryRaw<{ id: string }[]>`
       INSERT INTO reservations (id, status, origin_store_id, pickup_date, return_date, source)
-      VALUES (gen_random_uuid(), 'confirmed', 'dev-store', ${item.blockedFrom}::date, ${item.blockedUntil}::date, 'manual_admin')
+      VALUES (
+        gen_random_uuid(), 'confirmed',
+        (SELECT origin_store_id FROM reservations WHERE id = ${hold.reservationId}::uuid),
+        ${item.blockedFrom}::date, ${item.blockedUntil}::date, 'manual_admin'
+      )
       RETURNING id
     `;
     await prisma.$executeRaw`
