@@ -306,6 +306,59 @@ describe('WebhooksService — correlação e confirmação normal', () => {
     expect(reservation.status).toBe('confirmed');
   });
 
+  test('33) confirmação com customer.first_name/last_name e telefone → Reservation ganha customerName e customerPhone (Fase 11 — achado: nome/telefone da Shopify nunca eram capturados pra reserva online)', async () => {
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'pending_payment', 133);
+    await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, {
+        id: nextOrderId(),
+        customer: { first_name: 'Ana', last_name: 'Pereira', phone: '+55 82 98888-1234' },
+      }),
+    });
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerName).toBe('Ana Pereira');
+    expect(reservation.customerPhone).toBe('+55 82 98888-1234');
+  }, 15_000);
+
+  test('34) sem "customer", mas com billing_address.first_name/last_name → usa o endereço como fallback pra nome', async () => {
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'pending_payment', 134);
+    await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, {
+        id: nextOrderId(),
+        billing_address: { first_name: 'Carlos', last_name: 'Nunes' },
+      }),
+    });
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerName).toBe('Carlos Nunes');
+  }, 15_000);
+
+  test('35) reserva já vinculada ao pedido mas sem nome (linkada antes da Fase 11) → nova entrega do mesmo pedido completa o nome sem sobrescrever o telefone já gravado', async () => {
+    const unit = await createUnit();
+    const orderId = nextOrderId();
+    const fixture = await createReservation([unit], 'confirmed', 135, { shopifyOrderId: String(orderId) });
+    await prisma.reservation.update({ where: { id: fixture.reservationId }, data: { customerPhone: '+55 82 90000-0000' } });
+
+    await service.handleIncoming({
+      topic: 'orders/paid',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, {
+        id: orderId,
+        customer: { first_name: 'Maria', last_name: 'Souza', phone: '+55 82 91111-1111' },
+      }),
+    });
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.customerName).toBe('Maria Souza');
+    expect(reservation.customerPhone).toBe('+55 82 90000-0000');
+  }, 15_000);
+
   test('22) ReservationItem segue o trigger — nunca é escrito diretamente, mas reflete o status novo', async () => {
     const unit = await createUnit();
     const fixture = await createReservation([unit], 'pending_payment', 102);

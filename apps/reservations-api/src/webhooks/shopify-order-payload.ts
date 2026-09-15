@@ -20,8 +20,17 @@ export interface ShopifyOrderLineItem {
   readonly quantity?: number;
 }
 
-interface ShopifyPhoneContainer {
+/// `customer` traz `first_name`/`last_name` (confirmado contra
+/// shopify.dev/docs/api/admin-rest — Order resource); `billing_address`/
+/// `shipping_address` trazem os mesmos dois campos MAIS `name` (a
+/// concatenação que a própria Shopify já calcula). Um único tipo cobre os
+/// três containers porque `extractCustomerName`/`extractCustomerPhone`
+/// olham os mesmos três, na mesma ordem de preferência.
+interface ShopifyContactContainer {
   readonly phone?: string | null;
+  readonly first_name?: string | null;
+  readonly last_name?: string | null;
+  readonly name?: string | null;
 }
 
 export interface ShopifyOrderPayload {
@@ -42,9 +51,9 @@ export interface ShopifyOrderPayload {
   /// como o checkout foi preenchido. A ordem de preferência fica no parser
   /// abaixo; não copiamos endereço nem outros dados pessoais para a reserva.
   readonly phone?: string | null;
-  readonly customer?: ShopifyPhoneContainer | null;
-  readonly shipping_address?: ShopifyPhoneContainer | null;
-  readonly billing_address?: ShopifyPhoneContainer | null;
+  readonly customer?: ShopifyContactContainer | null;
+  readonly shipping_address?: ShopifyContactContainer | null;
+  readonly billing_address?: ShopifyContactContainer | null;
 }
 
 export interface ShopifyRefundTransaction {
@@ -110,6 +119,36 @@ export function extractCustomerPhone(order: ShopifyOrderPayload): string | null 
     if (value) return value;
   }
   return null;
+}
+
+/**
+ * `Reservation.customerName` da reserva ONLINE nasce do Order, no mesmo
+ * espírito de extractCustomerEmail/extractCustomerPhone acima — o HOLD
+ * público não coleta nome. Preferência: `customer` (ligado à
+ * identidade/conta de quem comprou), depois `shipping_address`, depois
+ * `billing_address` (endereço pode ter o nome de um terceiro — por isso
+ * vêm depois do customer). Em cada container: `first_name` + `last_name`
+ * montam o nome completo; se algum faltar, cai para o `name` já
+ * concatenado que a Shopify calcula nos endereços. Nunca deriva nome a
+ * partir do e-mail.
+ */
+export function extractCustomerName(order: ShopifyOrderPayload): string | null {
+  const candidates = [order.customer, order.shipping_address, order.billing_address];
+  for (const candidate of candidates) {
+    const name = fullName(candidate);
+    if (name) return name;
+  }
+  return null;
+}
+
+function fullName(container: ShopifyContactContainer | null | undefined): string | null {
+  if (!container) return null;
+  const first = container.first_name?.trim();
+  const last = container.last_name?.trim();
+  const combined = [first, last].filter((part): part is string => Boolean(part)).join(' ');
+  if (combined) return combined;
+  const name = container.name?.trim();
+  return name ? name : null;
 }
 
 /** {variantId, quantity} normalizados a partir das linhas REAIS do
