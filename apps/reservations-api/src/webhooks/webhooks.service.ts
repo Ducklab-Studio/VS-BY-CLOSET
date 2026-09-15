@@ -456,6 +456,28 @@ export class WebhooksService {
       return { status: 'processed', orderId, reservationId: reservation.id, events };
     }
 
+    // Achado em staging (erro repetido): uma reserva que já saiu do
+    // fluxo ativo por conta própria (hoje só `expired` — a unidade já
+    // foi liberada, ver OCCUPYING_RESERVATION_STATUSES) não pode ser
+    // "cancelada" de novo. `canTransition('expired','problem')` é
+    // válido pra outros casos (endurecimento de correlação), mas usá-lo
+    // AQUI reabriria a unidade: `problem` volta a ocupar
+    // (OCCUPYING_RESERVATION_STATUSES), e se outra reserva já tomou
+    // legitimamente o mesmo horário (o que é o ponto de liberar a
+    // unidade ao expirar), o UPDATE esbarra na EXCLUDE constraint de
+    // reservation_items dentro do trigger de sincronia — Postgres
+    // rejeita, e como a violação nasce dentro do trigger (não da
+    // statement que o Prisma emitiu), ele não reconhece o código e
+    // relança como PrismaClientUnknownRequestError. Como o handler
+    // responde 503 pra qualquer erro não tratado, a Shopify reentrega o
+    // MESMO webhook, e a mesma colisão se repete indefinidamente pro
+    // mesmo pedido. Idempotente aqui: reserva que já não ocupa mais
+    // nada não precisa de transição nenhuma — o cancelamento só está
+    // confirmando o que já aconteceu.
+    if (!OCCUPYING_RESERVATION_STATUSES.includes(from as (typeof OCCUPYING_RESERVATION_STATUSES)[number])) {
+      return { status: 'processed', orderId, reservationId: reservation.id, events };
+    }
+
     // Item 11: só vira `cancelled` de verdade se ainda não foi retirada.
     // picked_up/returned/cleaning → `problem` (revisão manual), nunca
     // cancelled automático.

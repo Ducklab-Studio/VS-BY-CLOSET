@@ -509,6 +509,73 @@ describe('WebhooksService — cancelamento', () => {
     });
     expect(res.outcome).toBe('ignored');
   });
+
+  test('cancelamento com reservation_id de UUID válido mas inexistente (pedido "inexistente") → ignored, nunca lança', async () => {
+    const res = await service.handleIncoming({
+      topic: 'orders/cancelled',
+      shopifyWebhookId: nextWebhookId(),
+      payload: orderPayload('00000000-0000-0000-0000-000000000000', { id: nextOrderId() }),
+    });
+    expect(res.outcome).toBe('ignored');
+  });
+
+  test('cancelamento duplicado (mesmo shopifyWebhookId reentregue) → segunda entrega é duplicate, não reprocessa', async () => {
+    const unit = await createUnit();
+    const orderId = nextOrderId();
+    const fixture = await createReservation([unit], 'confirmed', 122, { shopifyOrderId: String(orderId) });
+    const webhookId = nextWebhookId();
+    const payload = orderPayload(null, { id: orderId, cancel_reason: 'customer' });
+
+    const first = await service.handleIncoming({ topic: 'orders/cancelled', shopifyWebhookId: webhookId, payload });
+    expect(first.outcome).toBe('processed');
+
+    const second = await service.handleIncoming({ topic: 'orders/cancelled', shopifyWebhookId: webhookId, payload });
+    expect(second.outcome).toBe('duplicate');
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.status).toBe('cancelled');
+  });
+
+  test('webhook de cancelamento reenviado (novo id de entrega, reserva já cancelled) → idempotente, permanece cancelled', async () => {
+    const unit = await createUnit();
+    const orderId = nextOrderId();
+    const fixture = await createReservation([unit], 'cancelled', 123, { shopifyOrderId: String(orderId) });
+
+    const res = await service.handleIncoming({
+      topic: 'orders/cancelled',
+      shopifyWebhookId: nextWebhookId(),
+      payload: orderPayload(null, { id: orderId, cancel_reason: 'customer' }),
+    });
+    expect(res.outcome).toBe('processed');
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.status).toBe('cancelled');
+  });
+
+  test('reserva já expirada cujo horário foi retomado por outra reserva → cancelamento tardio é no-op, sem colidir com a EXCLUDE constraint', async () => {
+    const unit = await createUnit();
+    const orderId = nextOrderId();
+    // A unidade só pôde ser retomada porque 'expired' já não ocupa mais
+    // nada (ver OCCUPYING_RESERVATION_STATUSES) — reproduz exatamente o
+    // cenário encontrado em staging: pedido cancelado chegando DEPOIS
+    // que a reserva original expirou e outra reserva já tomou o mesmo
+    // horário.
+    const expiredFixture = await createReservation([unit], 'expired', 124, { shopifyOrderId: String(orderId) });
+    const otherFixture = await createReservation([unit], 'confirmed', 124);
+
+    const res = await service.handleIncoming({
+      topic: 'orders/cancelled',
+      shopifyWebhookId: nextWebhookId(),
+      payload: orderPayload(null, { id: orderId, cancel_reason: 'customer' }),
+    });
+    expect(res.outcome).toBe('processed');
+
+    const expired = await prisma.reservation.findUniqueOrThrow({ where: { id: expiredFixture.reservationId } });
+    expect(expired.status).toBe('expired'); // nunca reaberta pra 'problem'
+
+    const other = await prisma.reservation.findUniqueOrThrow({ where: { id: otherFixture.reservationId } });
+    expect(other.status).toBe('confirmed'); // a reserva que tomou o horário continua intacta
+  });
 });
 
 describe('WebhooksService — refund', () => {
