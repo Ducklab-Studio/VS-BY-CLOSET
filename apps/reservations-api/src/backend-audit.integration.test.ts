@@ -72,24 +72,33 @@ afterEach(async () => {
   await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: base });
 });
 afterAll(async () => {
-  // Restore the singleton even if cleanup of a related fixture fails.
-  await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { ...original, piecesToDaysTable: original.piecesToDaysTable as object[] } });
-  const reserved = await prisma.reservation.findMany({ where: { items: { some: { rentalUnit: { code: { startsWith: prefix } } } } }, select: { id: true } });
-  const ids = reserved.map(({ id }) => id);
-  const webhooks = await prisma.webhookEvent.findMany({ where: { reservationId: { in: ids } }, select: { id: true } });
-  await prisma.reservationEvent.deleteMany({ where: { OR: [{ reservationId: { in: ids } }, { webhookEventId: { in: webhooks.map(({ id }) => id) } }] } });
-  await prisma.webhookEvent.deleteMany({ where: { reservationId: { in: ids } } });
-  await prisma.holdIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
-  await prisma.manualReservationIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
-  await prisma.reservationItem.deleteMany({ where: { reservationId: { in: ids } } });
-  await prisma.reservation.deleteMany({ where: { id: { in: ids } } });
-  await prisma.rentalUnit.deleteMany({ where: { code: { startsWith: prefix } } });
-  await prisma.adminAuditEvent.deleteMany({ where: { adminUserId } });
-  await prisma.adminUser.delete({ where: { id: adminUserId } });
-  await prisma.store.deleteMany({ where: { id: { startsWith: prefix } } });
-  if (bindingSecret === undefined) delete process.env.RESERVATION_BINDING_SECRET;
-  else process.env.RESERVATION_BINDING_SECRET = bindingSecret;
-  await prisma.$disconnect();
+  try {
+    // Restore the singleton even if cleanup of a related fixture fails.
+    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { ...original, piecesToDaysTable: original.piecesToDaysTable as object[] } });
+    const reserved = await prisma.reservation.findMany({ where: { items: { some: { rentalUnit: { code: { startsWith: prefix } } } } }, select: { id: true } });
+    const ids = reserved.map(({ id }) => id);
+    const webhooks = await prisma.webhookEvent.findMany({ where: { reservationId: { in: ids } }, select: { id: true } });
+    await prisma.reservationEvent.deleteMany({ where: { OR: [{ reservationId: { in: ids } }, { webhookEventId: { in: webhooks.map(({ id }) => id) } }] } });
+    await prisma.webhookEvent.deleteMany({ where: { reservationId: { in: ids } } });
+    await prisma.holdIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
+    await prisma.manualReservationIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
+    await prisma.reservationItem.deleteMany({ where: { reservationId: { in: ids } } });
+    await prisma.reservation.deleteMany({ where: { id: { in: ids } } });
+    await prisma.rentalUnit.deleteMany({ where: { code: { startsWith: prefix } } });
+    await prisma.adminAuditEvent.deleteMany({ where: { adminUserId } });
+    await prisma.adminUser.delete({ where: { id: adminUserId } });
+    await prisma.store.deleteMany({ where: { id: { startsWith: prefix } } });
+  } finally {
+    // Restaurar a env var e desconectar o Prisma mesmo se alguma etapa de
+    // limpeza acima falhar — sem isto, uma falha em qualquer delete deixa o
+    // binding secret vazando pros próximos arquivos de teste e a conexão do
+    // Prisma aberta (achado: afterAll não tinha try/finally, então uma
+    // exceção no meio da limpeza pulava tanto a restauração da env var
+    // quanto o $disconnect()).
+    if (bindingSecret === undefined) delete process.env.RESERVATION_BINDING_SECRET;
+    else process.env.RESERVATION_BINDING_SECRET = bindingSecret;
+    await prisma.$disconnect();
+  }
 });
 
 describe('Final backend audit: real PostgreSQL', () => {

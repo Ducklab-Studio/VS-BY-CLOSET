@@ -43,6 +43,27 @@ async function createUnit(): Promise<string> {
   return unit.id;
 }
 
+/** Reserva source=online criada direto via SQL — o canal público (HOLD +
+ *  checkout Shopify) não é o que está sob teste aqui, só o filtro de
+ *  listagem por origem/data. Item 2 do pedido do usuário: os testes de
+ *  filtro precisam de reservas online DE VERDADE, não só manuais. */
+async function createOnlineReservation(opts: { pickup: CivilDate; customerName?: string | null }): Promise<{ reservationId: string; unitId: string }> {
+  const unitId = await createUnit();
+  const returnDate = addDays(opts.pickup, 2);
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    INSERT INTO reservations (id, status, source, origin_store_id, pickup_date, return_date, customer_name)
+    VALUES (gen_random_uuid(), 'confirmed', 'online', 'dev-store', ${civilDateToISO(opts.pickup)}::date, ${civilDateToISO(returnDate)}::date, ${opts.customerName ?? null})
+    RETURNING id
+  `;
+  const reservationId = rows[0].id;
+  await prisma.$executeRaw`
+    INSERT INTO reservation_items (id, reservation_id, rental_unit_id, status, blocked_range)
+    VALUES (gen_random_uuid(), ${reservationId}::uuid, ${unitId}::uuid, 'confirmed',
+      daterange(${civilDateToISO(opts.pickup)}::date, ${civilDateToISO(returnDate)}::date, '[)'))
+  `;
+  return { reservationId, unitId };
+}
+
 async function cleanup() {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT DISTINCT ri.reservation_id AS id FROM reservation_items ri
@@ -124,5 +145,78 @@ describe('AdminReservationsService.listReservations/getReservationDetail (integr
 
   test('5) getReservationDetail de id malformado → BadRequestException', async () => {
     await expect(service.getReservationDetail('nao-e-um-uuid')).rejects.toThrow(BadRequestException);
+  });
+
+  test('6) filtro de origem: "online" só traz reserva online; "manual_admin" só traz manual; sem filtro (todas as origens) traz as duas', async () => {
+    const pickup = pickupWithoutSundayReturn(2, 680);
+    const manualUnitId = await createUnit();
+    const manualUnit = await prisma.rentalUnit.findUniqueOrThrow({ where: { id: manualUnitId } });
+    const manual = await service.createManual({
+      customerName: 'Cliente Origem Manual',
+      customerPhone: '+56 9 4444 5555',
+      items: [{ rentalUnitId: manualUnitId }],
+      pickupDate: civilDateToISO(pickup),
+    } as CreateManualReservationDto);
+
+    const online = await createOnlineReservation({ pickup: addDays(pickup, 1), customerName: 'Cliente Origem Online' });
+    const onlineUnit = await prisma.rentalUnit.findUniqueOrThrow({ where: { id: online.unitId } });
+
+    const bothOrigins = await service.listReservations({ from: civilDateToISO(pickup), to: civilDateToISO(addDays(pickup, 1)) });
+    const bothIds = bothOrigins.map((r) => r.id);
+    expect(bothIds).toEqual(expect.arrayContaining([manual.reservationId, online.reservationId]));
+
+    const onlineOnly = await service.listReservations({ source: 'online', unitCode: onlineUnit.code });
+    expect(onlineOnly.map((r) => r.id)).toEqual([online.reservationId]);
+
+    const manualOnly = await service.listReservations({ source: 'manual_admin', unitCode: manualUnit.code });
+    expect(manualOnly.map((r) => r.id)).toEqual([manual.reservationId]);
+
+    // origem errada pra uma peça que só existe na outra origem → nada encontrado
+    const wrongOrigin = await service.listReservations({ source: 'online', unitCode: manualUnit.code });
+    expect(wrongOrigin).toEqual([]);
+  }, 20_000);
+
+  test('7) filtro de data de retirada: intervalo inclusivo nos dois extremos; só "from" mostra a partir dela; só "to" mostra até ela', async () => {
+    const base = addDays(engineToday(CFG), 700);
+    const before = await createOnlineReservation({ pickup: addDays(base, -1) });
+    const onStart = await createOnlineReservation({ pickup: base });
+    const onEnd = await createOnlineReservation({ pickup: addDays(base, 3) });
+    const after = await createOnlineReservation({ pickup: addDays(base, 4) });
+
+    const inRange = await service.listReservations({ from: civilDateToISO(base), to: civilDateToISO(addDays(base, 3)) });
+    const inRangeIds = inRange.map((r) => r.id);
+    expect(inRangeIds).toEqual(expect.arrayContaining([onStart.reservationId, onEnd.reservationId]));
+    expect(inRangeIds).not.toContain(before.reservationId);
+    expect(inRangeIds).not.toContain(after.reservationId);
+
+    const fromOnly = await service.listReservations({ from: civilDateToISO(addDays(base, 4)) });
+    expect(fromOnly.map((r) => r.id)).toContain(after.reservationId);
+    expect(fromOnly.map((r) => r.id)).not.toContain(before.reservationId);
+    expect(fromOnly.map((r) => r.id)).not.toContain(onStart.reservationId);
+
+    const toOnly = await service.listReservations({ to: civilDateToISO(addDays(base, -1)) });
+    expect(toOnly.map((r) => r.id)).toContain(before.reservationId);
+    expect(toOnly.map((r) => r.id)).not.toContain(after.reservationId);
+    expect(toOnly.map((r) => r.id)).not.toContain(onStart.reservationId);
+  }, 20_000);
+
+  test('8) combinação de origem + intervalo de datas + busca por cliente: só bate quando TODOS os filtros são satisfeitos ao mesmo tempo', async () => {
+    const pickup = addDays(engineToday(CFG), 710);
+    const target = await createOnlineReservation({ pickup, customerName: 'Fernanda Combinação Teste' });
+    const sameWindowDifferentName = await createOnlineReservation({ pickup: addDays(pickup, 1), customerName: 'Outra Pessoa' });
+
+    const combined = await service.listReservations({
+      source: 'online',
+      from: civilDateToISO(pickup),
+      to: civilDateToISO(addDays(pickup, 1)),
+      customer: 'Fernanda Combinação',
+    });
+    expect(combined.map((r) => r.id)).toEqual([target.reservationId]);
+    expect(combined.map((r) => r.id)).not.toContain(sameWindowDifferentName.reservationId);
+  }, 20_000);
+
+  test('9) filtro sem nenhuma reserva correspondente → lista vazia', async () => {
+    const empty = await service.listReservations({ customer: `cliente-inexistente-${PREFIX}` });
+    expect(empty).toEqual([]);
   });
 });

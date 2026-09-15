@@ -11,6 +11,8 @@ import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlock
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import {
   extractCustomerEmail,
+  extractCustomerName,
+  extractCustomerPhone,
   extractNoteAttribute,
   extractOrderLineVariants,
   extractReservationId,
@@ -226,19 +228,52 @@ export class WebhooksService {
     }
 
     if (!reservation.shopifyOrderId) {
-      // Fase 10 — único lugar onde a Reservation aprende o e-mail do
-      // cliente pra reserva ONLINE (o HOLD público nunca coleta e-mail;
-      // achado da auditoria: sem isto, `customerEmail` ficava sempre
-      // null e nenhum e-mail operacional seria possível). Só na
+      // Fase 10/11 — único lugar onde a Reservation aprende e-mail, nome
+      // e telefone do cliente pra reserva ONLINE (o HOLD público não
+      // coleta contato; achado da auditoria: sem isto, esses campos
+      // ficavam sempre null e o ClosetAdmin exibia "Cliente não
+      // informado"/"Sem contato" mesmo com o pedido pago). Só na
       // vinculação inicial — não sobrescreve depois, nem é uma segunda
-      // fonte de verdade pra e-mail comercial (isso continua sendo o
+      // fonte de verdade pra dado comercial (isso continua sendo o
       // pedido na própria Shopify).
       const customerEmail = extractCustomerEmail(order);
+      const customerName = extractCustomerName(order);
+      const customerPhone = extractCustomerPhone(order);
       await tx.reservation.update({
         where: { id: reservation.id },
-        data: { shopifyOrderId: orderId, shopifyOrderGid: orderGid, ...(customerEmail ? { customerEmail } : {}) },
+        data: {
+          shopifyOrderId: orderId,
+          shopifyOrderGid: orderGid,
+          ...(customerEmail ? { customerEmail } : {}),
+          ...(customerName ? { customerName } : {}),
+          ...(customerPhone ? { customerPhone } : {}),
+        },
       });
       events.push({ type: 'ORDER_LINKED', reservationId: reservation.id, detail: { orderId } });
+    } else {
+      // Já vinculada a ESTE MESMO pedido (a verificação DUPLICATE_ORDER
+      // acima já barrou o caso de um orderId diferente) — reentrega do
+      // mesmo webhook, ou reserva que foi linkada por uma versão anterior
+      // deste código, antes de nome/telefone/e-mail serem capturados
+      // aqui. Preenche só o que ainda falta; nunca sobrescreve um valor
+      // já gravado (item 8: "não substituir dados existentes por
+      // valores vazios").
+      const patch: Prisma.ReservationUpdateInput = {};
+      if (!reservation.customerEmail) {
+        const customerEmail = extractCustomerEmail(order);
+        if (customerEmail) patch.customerEmail = customerEmail;
+      }
+      if (!reservation.customerName) {
+        const customerName = extractCustomerName(order);
+        if (customerName) patch.customerName = customerName;
+      }
+      if (!reservation.customerPhone) {
+        const customerPhone = extractCustomerPhone(order);
+        if (customerPhone) patch.customerPhone = customerPhone;
+      }
+      if (Object.keys(patch).length > 0) {
+        await tx.reservation.update({ where: { id: reservation.id }, data: patch });
+      }
     }
 
     if (topic === 'orders/cancelled') return { status: 'processed', orderId, reservationId: reservation.id, events };
