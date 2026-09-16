@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Eraser, RotateCcw } from 'lucide-react';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { clearOldReservationsAction, restoreManyAction } from './archive-actions';
@@ -19,8 +20,18 @@ import { clearOldReservationsAction, restoreManyAction } from './archive-actions
  * Server refresh (não router.push) depois de limpar/restaurar — os
  * filtros atuais de origem, status, busca e datas continuam na URL,
  * intocados.
+ *
+ * Achado real: `revalidatePath` dentro da Server Action invalida o
+ * cache no servidor, mas NÃO faz a página já montada buscar os dados
+ * de novo sozinha quando a action é chamada como função direta (fora
+ * de um <form>) — sem um `router.refresh()` explícito aqui, o
+ * arquivamento acontecia de verdade no banco (confirmado: a reserva
+ * some da listagem depois de um F5 manual) mas a tabela na tela
+ * continuava mostrando o estado antigo, parecendo que o botão "não
+ * fazia nada".
  */
 export function ClearListButton({ estimatedCount }: { estimatedCount: number }) {
+  const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [lastArchivedIds, setLastArchivedIds] = useState<readonly string[] | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -38,6 +49,7 @@ export function ClearListButton({ estimatedCount }: { estimatedCount: number }) 
         : 'Nenhuma reserva expirada ou cancelada estava elegível para ocultar agora.',
     );
     setLastArchivedIds(result.archivedIds.length > 0 ? result.archivedIds : null);
+    router.refresh();
   }
 
   async function handleRestore() {
@@ -52,6 +64,7 @@ export function ClearListButton({ estimatedCount }: { estimatedCount: number }) 
       }
       setMessage(`${restoredCount} reserva${restoredCount === 1 ? '' : 's'} ${restoredCount === 1 ? 'foi restaurada' : 'foram restauradas'} para a lista.`);
       setLastArchivedIds(null);
+      router.refresh();
     } finally {
       setRestoring(false);
     }
