@@ -114,8 +114,17 @@ describe('ReservationArchiveService — elegibilidade e proteção', () => {
     expect(result.archivedIds).toContain(id);
   });
 
-  test('3) NUNCA arquiva reserva futura (pickupDate ainda não chegou)', async () => {
-    const id = await createReservation({ status: 'cancelled', daysAgoClosed: 40, pickupDaysFromToday: 60 });
+  test('3) NUNCA arquiva reserva "returned"/"completed" futura (pickupDate ainda não chegou — dado incomum, mas a guarda continua valendo pra esses dois status)', async () => {
+    // Revisado junto com o achado do teste 7b: a guarda "não arquiva
+    // com retirada futura" só ainda faz sentido pra returned/completed
+    // (o aluguel só termina de verdade depois da retirada real
+    // acontecer — pickup no futuro aqui é dado incomum/incoerente, mas
+    // a guarda continua protegendo mesmo assim). Pra cancelled/expired
+    // ela foi removida de propósito — ver notFutureCondition() e teste
+    // 7b: a retirada PLANEJADA de uma reserva já cancelada/expirada não
+    // significa mais nada, então não pode mais protegê-la de ser
+    // arquivada.
+    const id = await createReservation({ status: 'returned', daysAgoClosed: 40, pickupDaysFromToday: 60 });
     const preview = await archiveService.preview({ minSafetyDays: 30 });
     const sampleIds = preview.sample.map((s) => s.id);
     expect(sampleIds).not.toContain(id);
@@ -158,6 +167,41 @@ describe('ReservationArchiveService — elegibilidade e proteção', () => {
     await archiveService.execute({ minSafetyDays: 30 }, 'LIMPAR HISTÓRICOS', `${PREFIX} teste 7`, ADMIN_USER_ID, 'Teste');
     const row = await prisma.reservation.findUnique({ where: { id } });
     expect(row?.archivedAt).toBeNull();
+  });
+
+  test('7b) reserva expired/cancelled com data de retirada planejada no FUTURO é arquivada pela data real de encerramento (updated_at), não pela data planejada', async () => {
+    // Achado em produção: reservas "expired" mantêm a retirada/devolução
+    // PLANEJADA (podem estar meses/anos no futuro — o cliente nunca
+    // chegou a pagar) mesmo depois de expiradas. Usar essa data como
+    // "encerramento" faz a reserva nunca envelhecer o suficiente pra
+    // ser arquivada. O helper createReservation() sincroniza
+    // return_date com daysAgoClosed por padrão, então este teste insere
+    // direto pra simular exatamente o caso real: return_date no futuro,
+    // updated_at (a transição de status) há 40 dias.
+    const today = todayCivil();
+    const futureReturn = addDays(today, 120);
+    const futurePickup = addDays(today, 118);
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO reservations (id, status, origin_store_id, pickup_date, return_date, source, internal_note)
+      VALUES (gen_random_uuid(), 'expired'::"reservation_status", 'dev-store', ${civilDateToISO(futurePickup)}::date, ${civilDateToISO(futureReturn)}::date, 'manual_admin', ${PREFIX})
+      RETURNING id
+    `;
+    const id = rows[0].id;
+    await prisma.$executeRaw`UPDATE reservations SET updated_at = now() - interval '40 days' WHERE id = ${id}::uuid`;
+
+    const result = await archiveService.execute({ statuses: ['expired', 'cancelled'], minSafetyDays: 30 }, 'LIMPAR HISTÓRICOS', `${PREFIX} teste 7b`, ADMIN_USER_ID, 'Teste');
+    expect(result.archivedIds).toContain(id);
+
+    const row = await prisma.reservation.findUnique({ where: { id } });
+    expect(row?.archivedAt).not.toBeNull();
+    expect(row?.status).toBe('expired');
+  });
+
+  test('7c) reserva returned/completed continua usando a data de devolução real como encerramento (comportamento original preservado)', async () => {
+    const id = await createReservation({ status: 'returned', daysAgoClosed: 5 });
+    await archiveService.execute({ minSafetyDays: 30 }, 'LIMPAR HISTÓRICOS', `${PREFIX} teste 7c`, ADMIN_USER_ID, 'Teste');
+    const row = await prisma.reservation.findUnique({ where: { id } });
+    expect(row?.archivedAt).toBeNull(); // devolvida há só 5 dias — ainda dentro do período de segurança
   });
 
   test('8) preserva auditoria (ReservationEvent + AdminAuditEvent), itens e demais dados', async () => {

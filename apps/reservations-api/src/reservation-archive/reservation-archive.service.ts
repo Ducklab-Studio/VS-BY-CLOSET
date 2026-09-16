@@ -110,13 +110,49 @@ export class ReservationArchiveService {
     return conditions;
   }
 
+  /**
+   * Achado real ("Limpar lista" nunca arquivava nada, mesmo esperando):
+   * `return_date`/`calculated_return_date` são a janela PLANEJADA do
+   * aluguel — fazem sentido como "data de encerramento" só pra
+   * `returned`/`completed`, onde o encerramento de fato acontece na
+   * volta da peça. Para `cancelled`/`expired` (encerramentos
+   * ANORMAIS, que podem acontecer a qualquer momento ANTES da data
+   * planejada — inclusive meses ou anos antes), usar essa mesma data
+   * significa que uma reserva cancelada/expirada com retirada
+   * planejada pra 2027 nunca teria "encerrado há 30 dias" na conta,
+   * não importa quanto tempo realmente passe desde que ela virou
+   * cancelled/expired. `updated_at` é o momento real da transição de
+   * status (nenhum outro campo marca isso com mais precisão hoje) —
+   * usado só para esses dois status; os demais continuam com o
+   * comportamento original.
+   */
+  private closureExpr(): Prisma.Sql {
+    return Prisma.sql`(CASE WHEN r.status IN ('cancelled', 'expired') THEN r.updated_at::date ELSE COALESCE(r.calculated_return_date, r.return_date, r.updated_at::date) END)`;
+  }
+
+  /**
+   * Mesmo achado do closureExpr(), segundo lugar onde ele aparecia: a
+   * guarda "não arquiva reserva com retirada futura" existe pra nunca
+   * esconder algo que ainda vai acontecer — faz sentido pra
+   * `returned`/`completed` (aluguel já concluído de verdade). Para
+   * `cancelled`/`expired`, a retirada PLANEJADA no futuro não significa
+   * mais nada — o cliente nunca vem, então "é futura" deixa de ser
+   * motivo pra proteger. Sem isto, o mesmo bug do closureExpr()
+   * continuava valendo mesmo depois de corrigida a data de
+   * encerramento.
+   */
+  private notFutureCondition(): Prisma.Sql {
+    return Prisma.sql`(r.status IN ('cancelled', 'expired') OR r.pickup_date IS NULL OR r.pickup_date <= CURRENT_DATE)`;
+  }
+
   async preview(filters: ArchiveFilters): Promise<ArchivePreviewResult> {
     const minSafetyDays = filters.minSafetyDays ?? resolveDefaultMinSafetyDays();
     const cutoff = this.cutoffDate(minSafetyDays);
     const statuses = this.resolveStatuses(filters);
     const base = this.baseConditions(filters);
 
-    const closureExpr = Prisma.sql`COALESCE(r.calculated_return_date, r.return_date, r.updated_at::date)`;
+    const closureExpr = this.closureExpr();
+    const notFuture = this.notFutureCondition();
     const closedBeforeCondition = filters.closedBefore ? Prisma.sql`AND ${closureExpr} <= ${filters.closedBefore}::date` : Prisma.sql``;
 
     try {
@@ -125,7 +161,7 @@ export class ReservationArchiveService {
         WHERE ${Prisma.join(base, ' AND ')}
           AND r.archived_at IS NULL
           AND r.status = ANY(${statuses}::"reservation_status"[])
-          AND (r.pickup_date IS NULL OR r.pickup_date <= CURRENT_DATE)
+          AND ${notFuture}
           AND ${closureExpr} <= ${cutoff}::date
           ${closedBeforeCondition}
       `);
@@ -137,11 +173,14 @@ export class ReservationArchiveService {
           AND NOT (r.status = ANY(${[...ARCHIVABLE_TERMINAL_STATUSES]}::"reservation_status"[]))
       `);
 
+      // 'cancelled'/'expired' nunca entram aqui — pra elas, retirada no
+      // futuro não é mais um motivo de proteção (ver notFutureCondition).
       const [futureRow] = await this.prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
         SELECT count(*)::bigint AS count FROM reservations r
         WHERE ${Prisma.join(base, ' AND ')}
           AND r.archived_at IS NULL
           AND r.status = ANY(${statuses}::"reservation_status"[])
+          AND r.status NOT IN ('cancelled', 'expired')
           AND r.pickup_date IS NOT NULL AND r.pickup_date > CURRENT_DATE
       `);
 
@@ -158,7 +197,7 @@ export class ReservationArchiveService {
         WHERE ${Prisma.join(base, ' AND ')}
           AND r.archived_at IS NULL
           AND r.status = ANY(${statuses}::"reservation_status"[])
-          AND (r.pickup_date IS NULL OR r.pickup_date <= CURRENT_DATE)
+          AND ${notFuture}
           AND ${closureExpr} <= ${cutoff}::date
           ${closedBeforeCondition}
         ORDER BY ${closureExpr} ASC
@@ -203,7 +242,8 @@ export class ReservationArchiveService {
     const cutoff = this.cutoffDate(minSafetyDays);
     const statuses = this.resolveStatuses(filters);
     const base = this.baseConditions(filters);
-    const closureExpr = Prisma.sql`COALESCE(r.calculated_return_date, r.return_date, r.updated_at::date)`;
+    const closureExpr = this.closureExpr();
+    const notFuture = this.notFutureCondition();
     const closedBeforeCondition = filters.closedBefore ? Prisma.sql`AND ${closureExpr} <= ${filters.closedBefore}::date` : Prisma.sql``;
 
     let eligibleIds: string[];
@@ -213,7 +253,7 @@ export class ReservationArchiveService {
         WHERE ${Prisma.join(base, ' AND ')}
           AND r.archived_at IS NULL
           AND r.status = ANY(${statuses}::"reservation_status"[])
-          AND (r.pickup_date IS NULL OR r.pickup_date <= CURRENT_DATE)
+          AND ${notFuture}
           AND ${closureExpr} <= ${cutoff}::date
           ${closedBeforeCondition}
         ORDER BY r.id
