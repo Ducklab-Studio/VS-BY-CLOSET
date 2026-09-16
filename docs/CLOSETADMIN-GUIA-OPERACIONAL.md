@@ -57,6 +57,23 @@ filtros por status, origem, cliente, telefone e código da peça.
   (botão "Cancelar reserva" na tela de detalhe) — sempre pedindo um motivo,
   que fica registrado na auditoria.
 
+### Limpar lista — só Administrador
+
+O botão **"Limpar lista"**, ao lado dos filtros, oculta da listagem as
+reservas **Expirada** e **Cancelada** mais antigas — só isso, nunca as
+outras. Reservas ativas, **Aguardando pagamento** ou **Requer atenção**
+nunca são afetadas, mesmo que sejam antigas.
+
+- Nenhuma reserva é apagada do banco nem tem o status alterado — "limpar" é
+  só um filtro de listagem por cima do que já existe.
+- Depois de confirmar, aparece uma mensagem dizendo quantas foram ocultadas,
+  com um botão **"Restaurar lista"** logo ao lado para desfazer aquele lote
+  específico.
+- A qualquer momento, marque o filtro **"Mostrar arquivadas"** para ver as
+  reservas ocultadas junto das demais (elas aparecem com o selo
+  "Arquivada"). Na tela de detalhe de qualquer uma delas há também um botão
+  individual **"Restaurar reserva"**.
+
 ### Como criar uma reserva manual
 
 1. Em Reservas, clique **Nova reserva**.
