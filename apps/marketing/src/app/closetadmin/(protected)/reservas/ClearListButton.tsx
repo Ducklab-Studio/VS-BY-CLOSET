@@ -21,14 +21,19 @@ import { clearOldReservationsAction, restoreManyAction } from './archive-actions
  * filtros atuais de origem, status, busca e datas continuam na URL,
  * intocados.
  *
- * Achado real: `revalidatePath` dentro da Server Action invalida o
- * cache no servidor, mas NÃO faz a página já montada buscar os dados
- * de novo sozinha quando a action é chamada como função direta (fora
- * de um <form>) — sem um `router.refresh()` explícito aqui, o
- * arquivamento acontecia de verdade no banco (confirmado: a reserva
- * some da listagem depois de um F5 manual) mas a tabela na tela
- * continuava mostrando o estado antigo, parecendo que o botão "não
- * fazia nada".
+ * Achado real (2 rodadas): `revalidatePath` dentro da Server Action
+ * invalida o cache no servidor, mas não faz a página já montada buscar
+ * os dados de novo sozinha quando a action é chamada como função
+ * direta (fora de um <form>) — corrigido com `router.refresh()`. Mas
+ * mesmo depois disso, a mensagem de resultado (`useState` local) não
+ * aparecia de jeito nenhum — o próprio `router.refresh()` re-renderiza
+ * a árvore de Server Components na mesma passada, e o estado que
+ * acabou de ser setado nunca chegava a pintar na tela antes disso.
+ * `window.alert()` é síncrono e bloqueante: garante que a pessoa vê o
+ * resultado nem que a atualização da lista logo em seguida mexa em
+ * tudo por baixo. O texto inline abaixo do botão continua existindo
+ * como reforço quando sobrevive ao re-render, mas não é mais a única
+ * fonte de feedback.
  */
 export function ClearListButton({ estimatedCount }: { estimatedCount: number }) {
   const router = useRouter();
@@ -43,12 +48,13 @@ export function ClearListButton({ estimatedCount }: { estimatedCount: number }) 
     if (clearError || !result) {
       throw new Error(clearError ?? 'Não foi possível ocultar as reservas.');
     }
-    setMessage(
+    const text =
       result.archivedCount > 0
         ? `${result.archivedCount} reserva${result.archivedCount === 1 ? '' : 's'} ${result.archivedCount === 1 ? 'foi ocultada' : 'foram ocultadas'} da lista.`
-        : 'Nenhuma reserva expirada ou cancelada estava elegível para ocultar agora.',
-    );
+        : `Nenhuma reserva expirada ou cancelada estava elegível para ocultar agora (precisa estar encerrada há pelo menos ${result.minSafetyDays} dias).`;
+    setMessage(text);
     setLastArchivedIds(result.archivedIds.length > 0 ? result.archivedIds : null);
+    window.alert(text);
     router.refresh();
   }
 
@@ -60,10 +66,13 @@ export function ClearListButton({ estimatedCount }: { estimatedCount: number }) 
       const { restoredCount, error: restoreError } = await restoreManyAction(lastArchivedIds);
       if (restoreError) {
         setError(restoreError);
+        window.alert(restoreError);
         return;
       }
-      setMessage(`${restoredCount} reserva${restoredCount === 1 ? '' : 's'} ${restoredCount === 1 ? 'foi restaurada' : 'foram restauradas'} para a lista.`);
+      const text = `${restoredCount} reserva${restoredCount === 1 ? '' : 's'} ${restoredCount === 1 ? 'foi restaurada' : 'foram restauradas'} para a lista.`;
+      setMessage(text);
       setLastArchivedIds(null);
+      window.alert(text);
       router.refresh();
     } finally {
       setRestoring(false);
