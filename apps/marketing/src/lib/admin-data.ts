@@ -206,6 +206,9 @@ export function clearAudit(adminUserId: string, adminUserName: string): Promise<
  *  estado terminal. Ver apps/reservations-api/src/reservation-archive. */
 export interface ArchiveFilters {
   status?: 'cancelled' | 'expired' | 'returned' | 'completed';
+  /** "Limpar lista" — conjunto explícito de status numa única chamada
+   *  (ex.: ['expired', 'cancelled']). Prioridade sobre os demais campos. */
+  statuses?: ('cancelled' | 'expired' | 'returned' | 'completed')[];
   source?: string;
   closedBefore?: string;
   minSafetyDays?: number;

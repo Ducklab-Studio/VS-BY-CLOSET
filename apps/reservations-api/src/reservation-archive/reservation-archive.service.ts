@@ -24,6 +24,9 @@ function resolveDefaultMinSafetyDays(): number {
 
 export interface ArchiveFilters {
   readonly status?: string;
+  /** Ver ArchiveFilterDto.statuses — conjunto explícito, prioridade
+   *  máxima em resolveStatuses(). */
+  readonly statuses?: readonly string[];
   readonly source?: string;
   readonly closedBefore?: string;
   readonly minSafetyDays?: number;
@@ -82,10 +85,13 @@ export class ReservationArchiveService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Conjunto de status considerado nesta chamada — atalhos
-   *  (`onlyCancelled`/`onlyReturned`) têm prioridade sobre `status`
-   *  explícito; sem nenhum dos dois, todos os 4 terminais entram. */
+  /** Conjunto de status considerado nesta chamada — `statuses` (conjunto
+   *  explícito, ex.: "Limpar lista" pedindo expired+cancelled numa só
+   *  chamada) tem prioridade máxima; depois os atalhos
+   *  (`onlyCancelled`/`onlyReturned`); depois `status` único; sem
+   *  nenhum dos anteriores, todos os 4 terminais entram. */
   private resolveStatuses(filters: ArchiveFilters): readonly string[] {
+    if (filters.statuses && filters.statuses.length > 0) return [...new Set(filters.statuses)];
     if (filters.onlyCancelled) return ['cancelled'];
     if (filters.onlyReturned) return ['returned'];
     if (filters.status) return [filters.status];
@@ -296,8 +302,9 @@ export class ReservationArchiveService {
       throw new BadRequestException('reservationId inválido.');
     }
 
+    let restored: RestoreResult & { archiveReasonBefore: string | null };
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      restored = await this.prisma.$transaction(async (tx) => {
         const reservation = await tx.reservation.findUnique({ where: { id: reservationId } });
         if (!reservation) throw new NotFoundException('Reserva não encontrada.');
         if (!reservation.archivedAt) throw new ConflictException('Esta reserva não está arquivada.');
@@ -318,22 +325,33 @@ export class ReservationArchiveService {
           },
         });
 
-        await writeAdminAuditEvent(tx, {
-          adminUserId,
-          adminUserName,
-          action: 'RESERVATION_RESTORED',
-          entityType: 'Reservation',
-          entityId: reservationId,
-          detail: { previousArchiveReason: reservation.archiveReason },
-        });
-
-        return { reservationId, status: reservation.status };
+        return { reservationId, status: reservation.status, archiveReasonBefore: reservation.archiveReason };
       }, { timeout: 10_000, maxWait: 5_000 });
     } catch (err) {
       if (err instanceof NotFoundException || err instanceof ConflictException || err instanceof BadRequestException) throw err;
       this.logger.error(`Falha ao restaurar reserva ${reservationId}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível restaurar a reserva no momento.');
     }
+
+    // Fora da transação, best-effort — mesmo padrão de execute(): a
+    // restauração em si (archivedAt/archivedBy/archiveReason limpos,
+    // ReservationEvent gravado) já commitou; uma falha só na escrita da
+    // auditoria nunca pode desfazer/mascarar uma restauração que já
+    // aconteceu de verdade.
+    try {
+      await writeAdminAuditEvent(this.prisma, {
+        adminUserId,
+        adminUserName,
+        action: 'RESERVATION_RESTORED',
+        entityType: 'Reservation',
+        entityId: reservationId,
+        detail: { previousArchiveReason: restored.archiveReasonBefore },
+      });
+    } catch (err) {
+      this.logger.error(`Não foi possível registrar auditoria de restauração (restauração já aplicada) ${reservationId}: ${errorCode(err)}`);
+    }
+
+    return { reservationId: restored.reservationId, status: restored.status };
   }
 }
 

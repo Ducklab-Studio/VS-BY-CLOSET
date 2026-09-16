@@ -16,7 +16,6 @@ import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge } from '@/components/closetadmin/ui';
 import { ReservationFiltersForm } from './ReservationFiltersForm';
 import { ExportPeriodPdfButton } from './ExportPeriodPdfButton';
-import { ArchiveHistoryPanel } from './ArchiveHistoryPanel';
 
 export const metadata: Metadata = { title: 'Reservas' };
 
@@ -68,6 +67,11 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
   ).length;
   const attentionCount = allReservations.filter((reservation) => reservation.status === 'problem').length;
   const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && Boolean(value)).length;
+  // Estimativa pro texto de confirmação do "Limpar lista" — `allReservations`
+  // já exclui arquivadas por padrão (ver ReservationListFilters), então isto
+  // é o teto de candidatas ANTES do período mínimo de segurança do
+  // ReservationArchiveService (a contagem exata vem do resultado da execução).
+  const archivableEstimate = allReservations.filter((reservation) => reservation.status === 'expired' || reservation.status === 'cancelled').length;
 
   return (
     <div>
@@ -76,7 +80,6 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
         description="Acompanhe reservas online e manuais, retiradas, devoluções e ocorrências operacionais."
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {session.role === 'ADMIN' ? <ArchiveHistoryPanel /> : null}
             <ExportPeriodPdfButton />
             <Link
               href="/closetadmin/reservas/nova"
@@ -118,7 +121,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
         />
       </section>
 
-      <ReservationFiltersForm initial={rawFilters} />
+      <ReservationFiltersForm initial={rawFilters} showClearList={session.role === 'ADMIN'} estimatedArchivableCount={archivableEstimate} />
 
       <section className="mt-5 overflow-hidden rounded-xl border border-ink/10 bg-white shadow-sm dark:border-white/10 dark:bg-dark-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/10 px-4 py-3.5 dark:border-white/10">

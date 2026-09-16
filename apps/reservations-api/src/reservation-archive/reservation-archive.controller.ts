@@ -25,19 +25,21 @@ export class ReservationArchiveController {
   @Get('preview')
   preview(
     @Query('status') status?: string,
+    @Query('statuses') statuses?: string,
     @Query('source') source?: string,
     @Query('closedBefore') closedBefore?: string,
     @Query('minSafetyDays') minSafetyDays?: string,
     @Query('onlyCancelled') onlyCancelled?: string,
     @Query('onlyReturned') onlyReturned?: string,
   ) {
-    return this.archive.preview(parseFilters({ status, source, closedBefore, minSafetyDays, onlyCancelled, onlyReturned }));
+    return this.archive.preview(parseFilters({ status, statuses, source, closedBefore, minSafetyDays, onlyCancelled, onlyReturned }));
   }
 
   @Post()
   execute(@Body() dto: ExecuteArchiveDto, @Req() req: RequestWithAdminUser) {
     const filters: ArchiveFilters = {
       status: dto.status,
+      statuses: dto.statuses,
       source: dto.source,
       closedBefore: dto.closedBefore,
       minSafetyDays: dto.minSafetyDays,
@@ -55,6 +57,7 @@ export class ReservationArchiveController {
 
 function parseFilters(raw: {
   status?: string;
+  statuses?: string;
   source?: string;
   closedBefore?: string;
   minSafetyDays?: string;
@@ -63,6 +66,12 @@ function parseFilters(raw: {
 }): ArchiveFilters {
   return {
     status: raw.status || undefined,
+    statuses: raw.statuses
+      ? raw.statuses
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined,
     source: raw.source || undefined,
     closedBefore: raw.closedBefore || undefined,
     minSafetyDays: raw.minSafetyDays ? Number(raw.minSafetyDays) : undefined,

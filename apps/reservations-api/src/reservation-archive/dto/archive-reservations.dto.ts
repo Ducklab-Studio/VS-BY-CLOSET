@@ -11,6 +11,15 @@ export class ArchiveFilterDto {
   @IsIn(ARCHIVABLE_TERMINAL_STATUSES)
   status?: (typeof ARCHIVABLE_TERMINAL_STATUSES)[number];
 
+  /** "Limpar lista" (ClosetAdmin) — conjunto explícito de status, pra
+   *  arquivar mais de um terminal numa única chamada (ex.: expired +
+   *  cancelled) sem precisar de duas execuções separadas. Tem
+   *  prioridade sobre `status`/`onlyCancelled`/`onlyReturned` quando
+   *  presente — ver ReservationArchiveService.resolveStatuses. */
+  @IsOptional()
+  @IsIn(ARCHIVABLE_TERMINAL_STATUSES, { each: true })
+  statuses?: (typeof ARCHIVABLE_TERMINAL_STATUSES)[number][];
+
   @IsOptional()
   @IsIn(['online', 'manual_admin'])
   source?: string;

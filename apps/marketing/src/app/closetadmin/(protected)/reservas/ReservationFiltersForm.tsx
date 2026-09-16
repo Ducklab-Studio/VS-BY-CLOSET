@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Filter, RotateCcw, Search } from 'lucide-react';
+import { ClearListButton } from './ClearListButton';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos os status' },
@@ -18,7 +19,17 @@ const STATUS_OPTIONS = [
 const inputClass =
   'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition placeholder:text-ink/40 focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-surface dark:text-dark-text dark:placeholder:text-dark-subtle dark:focus:border-gold dark:focus:ring-gold/20';
 
-export function ReservationFiltersForm({ initial }: { initial: Record<string, string | undefined> }) {
+export function ReservationFiltersForm({
+  initial,
+  showClearList = false,
+  estimatedArchivableCount = 0,
+}: {
+  initial: Record<string, string | undefined>;
+  /** Só ADMIN vê "Limpar lista" — decidido no server (page.tsx), o
+   *  mesmo padrão já usado pelo resto do ClosetAdmin. */
+  showClearList?: boolean;
+  estimatedArchivableCount?: number;
+}) {
   const router = useRouter();
   const [values, setValues] = useState({
     status: initial.status ?? '',
@@ -68,16 +79,19 @@ export function ReservationFiltersForm({ initial }: { initial: Record<string, st
           </div>
         </div>
 
-        {activeCount > 0 ? (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-ink/55 transition hover:bg-ink/5 hover:text-ink dark:text-dark-muted dark:hover:bg-white/5 dark:hover:text-dark-text"
-          >
-            <RotateCcw size={14} />
-            Limpar filtros
-          </button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {activeCount > 0 ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-ink/55 transition hover:bg-ink/5 hover:text-ink dark:text-dark-muted dark:hover:bg-white/5 dark:hover:text-dark-text"
+            >
+              <RotateCcw size={14} />
+              Limpar filtros
+            </button>
+          ) : null}
+          {showClearList ? <ClearListButton estimatedCount={estimatedArchivableCount} /> : null}
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -171,7 +185,7 @@ export function ReservationFiltersForm({ initial }: { initial: Record<string, st
                 if (e.target.checked) setArchivedOnly(false);
               }}
             />
-            Incluir arquivadas
+            Mostrar arquivadas
           </label>
           <label className="flex items-center gap-2 text-ink dark:text-dark-text">
             <input

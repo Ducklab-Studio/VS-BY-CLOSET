@@ -281,6 +281,79 @@ describe('ReservationArchiveService — elegibilidade e proteção', () => {
   });
 });
 
+describe('ReservationArchiveService — filtro "statuses" (ClosetAdmin: botão "Limpar lista")', () => {
+  test('18) statuses: [expired, cancelled] arquiva as duas em uma única chamada, sem tocar "returned"', async () => {
+    const expiredId = await createReservation({ status: 'expired', daysAgoClosed: 40 });
+    const cancelledId = await createReservation({ status: 'cancelled', daysAgoClosed: 40 });
+    const returnedId = await createReservation({ status: 'returned', daysAgoClosed: 40 });
+
+    const result = await archiveService.execute(
+      { statuses: ['expired', 'cancelled'], minSafetyDays: 30 },
+      'LIMPAR HISTÓRICOS',
+      `${PREFIX} teste 18`,
+      ADMIN_USER_ID,
+      'Teste',
+    );
+    expect(result.archivedIds).toContain(expiredId);
+    expect(result.archivedIds).toContain(cancelledId);
+    expect(result.archivedIds).not.toContain(returnedId);
+
+    const expiredRow = await prisma.reservation.findUnique({ where: { id: expiredId } });
+    const cancelledRow = await prisma.reservation.findUnique({ where: { id: cancelledId } });
+    const returnedRow = await prisma.reservation.findUnique({ where: { id: returnedId } });
+    expect(expiredRow?.archivedAt).not.toBeNull();
+    expect(expiredRow?.status).toBe('expired'); // arquivar nunca muda o status
+    expect(cancelledRow?.archivedAt).not.toBeNull();
+    expect(cancelledRow?.status).toBe('cancelled');
+    expect(returnedRow?.archivedAt).toBeNull(); // fora do conjunto pedido — não arquivada
+
+    // Nenhuma linha foi excluída — as três reservas continuam existindo.
+    expect(expiredRow).not.toBeNull();
+    expect(cancelledRow).not.toBeNull();
+    expect(returnedRow).not.toBeNull();
+  });
+
+  test('19) statuses: [expired, cancelled] continua protegendo ativas/pagamento pendente/ocorrência aberta', async () => {
+    const pendingId = await createReservation({ status: 'pending_payment', daysAgoClosed: 100 });
+    const problemId = await createReservation({ status: 'problem', daysAgoClosed: 100 });
+    const confirmedId = await createReservation({ status: 'confirmed', daysAgoClosed: 100 });
+
+    await archiveService.execute({ statuses: ['expired', 'cancelled'] }, 'LIMPAR HISTÓRICOS', `${PREFIX} teste 19`, ADMIN_USER_ID, 'Teste');
+
+    const pendingRow = await prisma.reservation.findUnique({ where: { id: pendingId } });
+    const problemRow = await prisma.reservation.findUnique({ where: { id: problemId } });
+    const confirmedRow = await prisma.reservation.findUnique({ where: { id: confirmedId } });
+    expect(pendingRow?.archivedAt).toBeNull();
+    expect(pendingRow?.status).toBe('pending_payment');
+    expect(problemRow?.archivedAt).toBeNull();
+    expect(problemRow?.status).toBe('problem');
+    expect(confirmedRow?.archivedAt).toBeNull();
+    expect(confirmedRow?.status).toBe('confirmed');
+  });
+
+  test('20) restaurar depois de "Limpar lista" devolve a reserva à listagem sem alterar status/itens', async () => {
+    const unitId = await createUnit();
+    const id = await createReservation({ status: 'expired', daysAgoClosed: 40, unitId });
+    const execResult = await archiveService.execute(
+      { statuses: ['expired', 'cancelled'], minSafetyDays: 30 },
+      'LIMPAR HISTÓRICOS',
+      `${PREFIX} teste 20`,
+      ADMIN_USER_ID,
+      'Teste',
+    );
+    expect(execResult.archivedIds).toContain(id);
+
+    const restored = await archiveService.restore(id, ADMIN_USER_ID, 'Teste');
+    expect(restored.status).toBe('expired');
+
+    const row = await prisma.reservation.findUnique({ where: { id } });
+    expect(row?.archivedAt).toBeNull();
+    expect(row?.status).toBe('expired');
+    const item = await prisma.reservationItem.findFirst({ where: { reservationId: id } });
+    expect(item?.status).toBe('expired');
+  });
+});
+
 function shortCode(id: string): string {
   return id.replace(/-/g, '').slice(0, 8);
 }
