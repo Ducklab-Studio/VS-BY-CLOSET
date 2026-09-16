@@ -5,8 +5,9 @@ import { requireAdminSession } from '@/lib/admin-session';
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
-import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge } from '@/components/closetadmin/ui';
+import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge } from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
+import { RestoreButton } from './RestoreButton';
 
 export const metadata: Metadata = { title: 'Detalhe da reserva' };
 
@@ -54,6 +55,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
                 <FileDown size={16} /> Exportar PDF
               </a>
               {canCancel ? <CancelButton reservationId={reservation.id} /> : null}
+              {reservation.archivedAt && session.role === 'ADMIN' ? <RestoreButton reservationId={reservation.id} /> : null}
             </div>
           }
         />
@@ -63,6 +65,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={reservation.status} />
               <SourceBadge source={reservation.source} />
+              {reservation.archivedAt ? <ArchivedBadge /> : null}
             </div>
 
             <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
@@ -74,6 +77,8 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               <Field label="Devolução" value={reservation.returnDate ? formatDatePt(reservation.returnDate) : '—'} />
               <Field label="Confirmada em" value={reservation.confirmedAt ? formatDateTimePt(reservation.confirmedAt) : '—'} />
               <Field label="Atualizada em" value={formatDateTimePt(reservation.updatedAt)} />
+              {reservation.archivedAt ? <Field label="Arquivada em" value={formatDateTimePt(reservation.archivedAt)} /> : null}
+              {reservation.archiveReason ? <Field label="Motivo do arquivamento" value={reservation.archiveReason} /> : null}
             </dl>
 
             {isOnline ? (

@@ -29,3 +29,24 @@ export const OCCUPYING_RESERVATION_STATUSES = [
   // sabe (corretamente) que já não é mais desta reserva. Ver
   // WebhooksService.attemptLatePaymentRecovery.
 ] as const;
+
+/**
+ * "Limpar históricos" (arquivamento) — status em que uma reserva é
+ * verdadeiramente terminal: nenhuma transição automática (webhook) nem
+ * manual (painel) sai daqui, então arquivar não corre o risco de
+ * esconder algo que ainda pode mudar. Deliberadamente DE FORA:
+ *
+ * - `hold`/`pending_payment`/`confirmed`/`preparing`/`ready_for_pickup`/
+ *   `picked_up`/`cleaning` — ainda em andamento.
+ * - `problem`/`late_payment_conflict` — precisam de revisão humana
+ *   (ocorrência operacional aberta); só saem de `problem` por ação
+ *   manual futura, nunca automaticamente.
+ * - `pending` — legado da Fase 1 nunca escrito por reserva nova, mas
+ *   soa a "aguardando" — mantido fora por precaução.
+ *
+ * `expired` entra aqui apesar de poder (raramente) se recuperar via
+ * late payment (`expired → confirmed`/`late_payment_conflict`,
+ * webhooks.service.ts) — a proteção contra isso é o período mínimo de
+ * segurança (ReservationArchiveService), não a exclusão do status.
+ */
+export const ARCHIVABLE_TERMINAL_STATUSES = ['cancelled', 'expired', 'returned', 'completed'] as const;

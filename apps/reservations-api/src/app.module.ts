@@ -10,6 +10,7 @@ import { CheckoutModule } from './checkout/checkout.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { AdminReservationsModule } from './admin-reservations/admin-reservations.module';
+import { ReservationArchiveModule } from './reservation-archive/reservation-archive.module';
 import { AdminAuthModule } from './admin-auth/admin-auth.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { PdfModule } from './pdf/pdf.module';
@@ -31,6 +32,7 @@ import { AppController } from './app.controller';
     WebhooksModule,
     ReservationsModule,
     AdminReservationsModule,
+    ReservationArchiveModule,
     AdminAuthModule,
     AdminPanelModule,
     PdfModule,
