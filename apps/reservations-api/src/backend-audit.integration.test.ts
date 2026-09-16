@@ -33,6 +33,18 @@ const prefix = `final-audit-${randomUUID()}`;
 let adminUserId: string;
 let original: Awaited<ReturnType<typeof rules.get>>;
 let nextUnit = 0;
+let nextWebhook = 0;
+/** Achado (limpeza órfã depois de uma falha): um `shopifyWebhookId`
+ *  gerado com `randomUUID()` cru não carrega `prefix`, então o
+ *  afterAll só consegue achar o webhookEvent de volta indiretamente
+ *  (via reservationId) — e pelo menos um caso aqui (orders/paid
+ *  chegando DEPOIS de orders/cancelled, linha ~309) cria um segundo
+ *  webhookEvent que nenhum finally local limpa. Prefixar todo
+ *  shopifyWebhookId gerado neste arquivo com `prefix` dá ao afterAll
+ *  uma forma direta e completa de achar (e apagar) todos eles. */
+function nextWebhookId(): string {
+  return `${prefix}-webhook-${nextWebhook++}`;
+}
 const base = { ...DEFAULT_RENTAL_RULE_CONFIG, minAdvanceDays: 0, blackoutStart: '12-31', blackoutEnd: '12-31', maxPieces: 8, piecesToDaysTable: [{ upTo: 8, days: 2 }] };
 let pickup = addDays(today(base), 45);
 while (isSunday(pickup) || isSunday(addDays(pickup, 2)) || civilDateToISO(pickup).endsWith('12-31')) pickup = addDays(pickup, 1);
@@ -72,22 +84,45 @@ afterEach(async () => {
   await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: base });
 });
 afterAll(async () => {
+  // Best-effort por etapa (achado real: um erro numa etapa — ex.:
+  // FK ao apagar webhookEvent — abortava TODA a limpeza depois dela,
+  // deixando rental_units/reservations órfãs visíveis no ClosetAdmin
+  // "Peças" até alguém investigar manualmente). Uma etapa que falha só
+  // é logada; as demais continuam tentando limpar o que der.
+  async function step(label: string, fn: () => Promise<unknown>) {
+    try {
+      await fn();
+    } catch (err) {
+      console.error(`[backend-audit cleanup] falhou "${label}":`, err instanceof Error ? err.message : err);
+    }
+  }
+
   try {
     // Restore the singleton even if cleanup of a related fixture fails.
-    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { ...original, piecesToDaysTable: original.piecesToDaysTable as object[] } });
+    await step('restore rental_rule_config', () =>
+      prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { ...original, piecesToDaysTable: original.piecesToDaysTable as object[] } }),
+    );
     const reserved = await prisma.reservation.findMany({ where: { items: { some: { rentalUnit: { code: { startsWith: prefix } } } } }, select: { id: true } });
     const ids = reserved.map(({ id }) => id);
-    const webhooks = await prisma.webhookEvent.findMany({ where: { reservationId: { in: ids } }, select: { id: true } });
-    await prisma.reservationEvent.deleteMany({ where: { OR: [{ reservationId: { in: ids } }, { webhookEventId: { in: webhooks.map(({ id }) => id) } }] } });
-    await prisma.webhookEvent.deleteMany({ where: { reservationId: { in: ids } } });
-    await prisma.holdIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
-    await prisma.manualReservationIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } });
-    await prisma.reservationItem.deleteMany({ where: { reservationId: { in: ids } } });
-    await prisma.reservation.deleteMany({ where: { id: { in: ids } } });
-    await prisma.rentalUnit.deleteMany({ where: { code: { startsWith: prefix } } });
-    await prisma.adminAuditEvent.deleteMany({ where: { adminUserId } });
-    await prisma.adminUser.delete({ where: { id: adminUserId } });
-    await prisma.store.deleteMany({ where: { id: { startsWith: prefix } } });
+    // Busca por `shopifyWebhookId` prefixado (ver nextWebhookId) em vez
+    // de só por reservationId — mais completa: também acha webhooks
+    // criados por um handleIncoming() cujo próprio finally local do
+    // teste não cobria (ex.: um segundo evento chegando depois do
+    // primeiro, linha ~309).
+    const webhooks = await prisma.webhookEvent.findMany({ where: { shopifyWebhookId: { startsWith: prefix } }, select: { id: true } });
+    const webhookIds = webhooks.map(({ id }) => id);
+    await step('reservationEvent deleteMany', () =>
+      prisma.reservationEvent.deleteMany({ where: { OR: [{ reservationId: { in: ids } }, { webhookEventId: { in: webhookIds } }] } }),
+    );
+    await step('webhookEvent deleteMany', () => prisma.webhookEvent.deleteMany({ where: { id: { in: webhookIds } } }));
+    await step('holdIdempotencyKey deleteMany', () => prisma.holdIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } }));
+    await step('manualReservationIdempotencyKey deleteMany', () => prisma.manualReservationIdempotencyKey.deleteMany({ where: { reservationId: { in: ids } } }));
+    await step('reservationItem deleteMany', () => prisma.reservationItem.deleteMany({ where: { reservationId: { in: ids } } }));
+    await step('reservation deleteMany', () => prisma.reservation.deleteMany({ where: { id: { in: ids } } }));
+    await step('rentalUnit deleteMany', () => prisma.rentalUnit.deleteMany({ where: { code: { startsWith: prefix } } }));
+    await step('adminAuditEvent deleteMany', () => prisma.adminAuditEvent.deleteMany({ where: { adminUserId } }));
+    await step('adminUser delete', () => prisma.adminUser.delete({ where: { id: adminUserId } }));
+    await step('store deleteMany', () => prisma.store.deleteMany({ where: { id: { startsWith: prefix } } }));
   } finally {
     // Restaurar a env var e desconectar o Prisma mesmo se alguma etapa de
     // limpeza acima falhar — sem isto, uma falha em qualquer delete deixa o
@@ -123,7 +158,7 @@ describe('Final backend audit: real PostgreSQL', () => {
   test('legacy paid order with only calendar properties cannot confirm or allocate a reservation', async () => {
     const [unit] = await units();
     const hold = await holds.createHold(holdDto(unit.shopifyVariantId!));
-    const webhookId = randomUUID();
+    const webhookId = nextWebhookId();
     const service = new WebhooksService(prisma);
     const input = { topic: 'orders/paid', shopifyWebhookId: webhookId, payload: {
       id: Date.now(), financial_status: 'paid', note_attributes: [],
@@ -285,7 +320,7 @@ describe('Final backend audit: real PostgreSQL', () => {
     if (reason === 'inactive') await prisma.rentalUnit.update({ where: { id: unit.id }, data: { active: false } });
     else await blocks.create({ scope: 'UNIT', rentalUnitId: unit.id, startDate: pickupDate, endDate: pickupDate, reason: 'Audit block', adminUserId }, adminUserId, 'Audit admin');
     const orderId = Date.now();
-    await new WebhooksService(prisma).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: randomUUID(), payload: {
+    await new WebhooksService(prisma).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: {
       id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, financial_status: 'paid',
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })),
       line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
@@ -303,10 +338,10 @@ describe('Final backend audit: real PostgreSQL', () => {
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })), line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
     };
     const service = new WebhooksService(prisma);
-    const firstId = randomUUID();
+    const firstId = nextWebhookId();
     try {
       await service.handleIncoming({ topic, shopifyWebhookId: firstId, payload: topic === 'refunds/create' ? { id: orderId + 1, order_id: orderId, transactions: [] } : payload });
-      await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: randomUUID(), payload });
+      await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload });
       expect((await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } })).status).toBe(topic === 'orders/cancelled' ? 'cancelled' : 'problem');
     } finally {
       const first = await prisma.webhookEvent.findUnique({ where: { shopifyWebhookId: firstId } });
