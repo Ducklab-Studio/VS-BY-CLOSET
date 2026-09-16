@@ -62,6 +62,17 @@ export function SourceBadge({ source }: { source: string }) {
   );
 }
 
+/** "Limpar históricos" — selo discreto pra reserva arquivada; nunca
+ *  substitui o StatusBadge (arquivamento não é um status, é só um
+ *  filtro de listagem por cima do status real). */
+export function ArchivedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200/70 px-2.5 py-1 text-xs font-medium tracking-wide text-neutral-600 dark:bg-white/5 dark:text-dark-subtle">
+      Arquivada
+    </span>
+  );
+}
+
 export function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <div className={`rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card p-5 dark:shadow-md dark:shadow-black/30 transition-colors ${className}`}>{children}</div>;
 }

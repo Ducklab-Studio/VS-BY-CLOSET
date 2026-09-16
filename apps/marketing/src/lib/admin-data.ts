@@ -35,6 +35,7 @@ export interface ReservationListItem {
   readonly returnDate: string | null;
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
+  readonly archivedAt: string | null;
 }
 
 export interface ReservationFilters {
@@ -45,12 +46,15 @@ export interface ReservationFilters {
   customer?: string;
   phone?: string;
   unitCode?: string;
+  code?: string;
+  includeArchived?: boolean;
+  archivedOnly?: boolean;
 }
 
 export function listReservations(adminUserId: string, filters: ReservationFilters): Promise<ReservationListItem[]> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value) params.set(key, value);
+    if (value) params.set(key, String(value));
   }
   const qs = params.toString();
   return adminGet(`/admin/reservations${qs ? `?${qs}` : ''}`, adminUserId);
@@ -63,6 +67,8 @@ export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'
   readonly confirmedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly archivedBy: string | null;
+  readonly archiveReason: string | null;
   readonly items: readonly { rentalUnitId: string; code: string; status: string; blockedFrom: string; blockedUntilExclusive: string }[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
@@ -194,4 +200,71 @@ export function listAudit(adminUserId: string, limit = 100): Promise<AuditEntry[
 
 export function clearAudit(adminUserId: string, adminUserName: string): Promise<{ clearedAt: string }> {
   return adminPost('/admin/audit/clear', { adminUserId, adminUserName });
+}
+
+/** "Limpar históricos" — arquivamento (soft delete) de reservas em
+ *  estado terminal. Ver apps/reservations-api/src/reservation-archive. */
+export interface ArchiveFilters {
+  status?: 'cancelled' | 'expired' | 'returned' | 'completed';
+  /** "Limpar lista" — conjunto explícito de status numa única chamada
+   *  (ex.: ['expired', 'cancelled']). Prioridade sobre os demais campos. */
+  statuses?: ('cancelled' | 'expired' | 'returned' | 'completed')[];
+  source?: string;
+  closedBefore?: string;
+  minSafetyDays?: number;
+  onlyCancelled?: boolean;
+  onlyReturned?: boolean;
+}
+
+export interface ArchivePreviewRow {
+  readonly id: string;
+  readonly status: string;
+  readonly source: string;
+  readonly customerName: string | null;
+  readonly pickupDate: string | null;
+  readonly returnDate: string | null;
+  readonly closureDate: string;
+}
+
+export interface ArchivePreviewResult {
+  readonly eligibleCount: number;
+  readonly protectedActiveCount: number;
+  readonly futureCount: number;
+  readonly alreadyArchivedCount: number;
+  readonly cutoffDate: string;
+  readonly minSafetyDays: number;
+  readonly statuses: readonly string[];
+  readonly sample: readonly ArchivePreviewRow[];
+}
+
+export interface ArchiveExecutionResult {
+  readonly archivedCount: number;
+  readonly ignoredCount: number;
+  readonly ignoredReasons: Record<string, number>;
+  readonly archivedIds: readonly string[];
+  readonly cutoffDate: string;
+  readonly minSafetyDays: number;
+}
+
+export function previewArchive(adminUserId: string, filters: ArchiveFilters): Promise<ArchivePreviewResult> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return adminGet(`/admin/reservations-archive/preview${qs ? `?${qs}` : ''}`, adminUserId);
+}
+
+export function executeArchive(
+  filters: ArchiveFilters,
+  confirmPhrase: string,
+  reason: string,
+  adminUserId: string,
+  adminUserName: string,
+): Promise<ArchiveExecutionResult> {
+  return adminPost('/admin/reservations-archive', { ...filters, confirmPhrase, reason, adminUserId, adminUserName });
+}
+
+export function restoreReservation(id: string, adminUserId: string, adminUserName: string): Promise<{ reservationId: string; status: string }> {
+  return adminPost(`/admin/reservations-archive/${id}/restore`, { adminUserId, adminUserName });
 }

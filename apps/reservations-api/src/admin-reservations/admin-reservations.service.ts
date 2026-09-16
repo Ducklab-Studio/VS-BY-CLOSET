@@ -50,6 +50,14 @@ export interface ReservationListFilters {
   readonly customer?: string;
   readonly phone?: string;
   readonly unitCode?: string;
+  /** "Limpar históricos" — busca por código curto (8 primeiros
+   *  caracteres do id sem hífen), mesmo formato mostrado na tela. */
+  readonly code?: string;
+  /** Por padrão a listagem SEMPRE exclui arquivadas (item "ocultar por
+   *  padrão"). `includeArchived` mistura ativas + arquivadas;
+   *  `archivedOnly` mostra só a aba "Histórico arquivado". */
+  readonly includeArchived?: boolean;
+  readonly archivedOnly?: boolean;
 }
 
 export interface ReservationListItem {
@@ -63,6 +71,7 @@ export interface ReservationListItem {
   readonly returnDate: string | null;
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
+  readonly archivedAt: string | null;
 }
 
 /** Fase 10 — versão enxuta usada só pelos relatórios PDF (item 2): sem
@@ -86,6 +95,8 @@ export interface ReservationDetailResponse extends Omit<ReservationListItem, 'it
   readonly confirmedAt: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly archivedBy: string | null;
+  readonly archiveReason: string | null;
   readonly items: readonly { rentalUnitId: string; code: string; status: string; blockedFrom: string; blockedUntilExclusive: string }[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
@@ -480,7 +491,8 @@ export class AdminReservationsService {
           r.customer_name AS "customerName", r.customer_phone AS "customerPhone", r.customer_email AS "customerEmail",
           r.pickup_date::text AS "pickupDate", r.return_date::text AS "returnDate",
           r.shopify_order_id AS "shopifyOrderId",
-          (SELECT count(*)::int FROM reservation_items ri WHERE ri.reservation_id = r.id) AS "itemCount"
+          (SELECT count(*)::int FROM reservation_items ri WHERE ri.reservation_id = r.id) AS "itemCount",
+          r.archived_at::text AS "archivedAt"
         FROM reservations r
         WHERE ${Prisma.join(conditions, ' AND ')}
         ORDER BY r.pickup_date DESC NULLS LAST, r.created_at DESC
@@ -504,6 +516,16 @@ export class AdminReservationsService {
       conditions.push(
         Prisma.sql`EXISTS (SELECT 1 FROM reservation_items ri2 JOIN rental_units ru2 ON ru2.id = ri2.rental_unit_id WHERE ri2.reservation_id = r.id AND ru2.code ILIKE ${'%' + filters.unitCode + '%'})`,
       );
+    }
+    if (filters.code) conditions.push(Prisma.sql`replace(r.id::text, '-', '') ILIKE ${filters.code + '%'}`);
+
+    // "Limpar históricos" — ocultar arquivadas por padrão (item da tela
+    // principal); `archivedOnly` tem prioridade sobre `includeArchived`
+    // (aba "Histórico arquivado" nunca precisa dos dois juntos).
+    if (filters.archivedOnly) {
+      conditions.push(Prisma.sql`r.archived_at IS NOT NULL`);
+    } else if (!filters.includeArchived) {
+      conditions.push(Prisma.sql`r.archived_at IS NULL`);
     }
     return conditions;
   }
@@ -602,6 +624,9 @@ export class AdminReservationsService {
       confirmedAt: reservation.confirmedAt?.toISOString() ?? null,
       createdAt: reservation.createdAt.toISOString(),
       updatedAt: reservation.updatedAt.toISOString(),
+      archivedAt: reservation.archivedAt?.toISOString() ?? null,
+      archivedBy: reservation.archivedBy,
+      archiveReason: reservation.archiveReason,
       items: items.map((i) => ({
         rentalUnitId: i.rentalUnitId,
         code: i.code,

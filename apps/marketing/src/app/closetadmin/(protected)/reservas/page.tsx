@@ -13,7 +13,7 @@ import {
 import { requireAdminSession } from '@/lib/admin-session';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { ErrorState, PageHeader, SourceBadge, StatusBadge } from '@/components/closetadmin/ui';
+import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge } from '@/components/closetadmin/ui';
 import { ReservationFiltersForm } from './ReservationFiltersForm';
 import { ExportPeriodPdfButton } from './ExportPeriodPdfButton';
 
@@ -27,6 +27,9 @@ type SearchParams = {
   customer?: string;
   phone?: string;
   unitCode?: string;
+  code?: string;
+  includeArchived?: string;
+  archivedOnly?: string;
 };
 
 /**
@@ -36,7 +39,10 @@ type SearchParams = {
  */
 export default async function ClosetAdminReservationsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const session = await requireAdminSession();
-  const filters = await searchParams;
+  const rawFilters = await searchParams;
+  const includeArchived = rawFilters.includeArchived === 'true';
+  const archivedOnly = rawFilters.archivedOnly === 'true';
+  const filters = { ...rawFilters, includeArchived, archivedOnly };
 
   let reservations: ReservationListItem[] | null = null;
   let allReservations: ReservationListItem[] | null = null;
@@ -60,7 +66,12 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
     ['hold', 'pending_payment'].includes(reservation.status),
   ).length;
   const attentionCount = allReservations.filter((reservation) => reservation.status === 'problem').length;
-  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && Boolean(value)).length;
+  // Estimativa pro texto de confirmação do "Limpar lista" — `allReservations`
+  // já exclui arquivadas por padrão (ver ReservationListFilters), então isto
+  // é o teto de candidatas ANTES do período mínimo de segurança do
+  // ReservationArchiveService (a contagem exata vem do resultado da execução).
+  const archivableEstimate = allReservations.filter((reservation) => reservation.status === 'expired' || reservation.status === 'cancelled').length;
 
   return (
     <div>
@@ -110,7 +121,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
         />
       </section>
 
-      <ReservationFiltersForm initial={filters} />
+      <ReservationFiltersForm initial={rawFilters} showClearList={session.role === 'ADMIN'} estimatedArchivableCount={archivableEstimate} />
 
       <section className="mt-5 overflow-hidden rounded-xl border border-ink/10 bg-white shadow-sm dark:border-white/10 dark:bg-dark-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/10 px-4 py-3.5 dark:border-white/10">
@@ -195,8 +206,9 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
                       </Link>
                     </td>
                     <td className="px-4 py-3.5">
-                      <Link href={`/closetadmin/reservas/${reservation.id}`} className="block">
+                      <Link href={`/closetadmin/reservas/${reservation.id}`} className="flex flex-wrap items-center gap-1.5">
                         <StatusBadge status={reservation.status} />
+                        {reservation.archivedAt ? <ArchivedBadge /> : null}
                       </Link>
                     </td>
                     <td className="px-4 py-3.5">
