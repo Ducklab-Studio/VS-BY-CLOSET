@@ -318,6 +318,13 @@ export function restoreEmployee(id: string, adminUserId: string): Promise<Employ
   return adminPost(`/admin/employees/${id}/restore`, { adminUserId });
 }
 
+/** "Excluir permanentemente" — DELETE físico real, só quem já foi
+ *  removido antes. Backend recusa se ativo, SUPER_ADMIN, ou o próprio
+ *  ator. */
+export function purgeEmployee(id: string, adminUserId: string): Promise<{ id: string }> {
+  return adminPost(`/admin/employees/${id}/purge`, { adminUserId });
+}
+
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
   return adminPut(`/admin/employees/${id}/permissions`, { moduleAccess, adminUserId });
 }

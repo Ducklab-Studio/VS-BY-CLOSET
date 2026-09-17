@@ -52,6 +52,14 @@ export class AdminEmployeesController {
     return this.employees.restore(id, req.adminUser!.id, req.adminUser!.name);
   }
 
+  /** "Excluir permanentemente" — DELETE físico real, único endpoint
+   *  deste controller que faz isso. POST (não DELETE HTTP) pra manter o
+   *  mesmo padrão de ação explícita já usado em todo o resto da API. */
+  @Post(':id/purge')
+  purge(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<{ id: string }> {
+    return this.employees.purge(id, req.adminUser!.id, req.adminUser!.name);
+  }
+
   @Put(':id/permissions')
   updatePermissions(@Param('id') id: string, @Body() dto: UpdateEmployeePermissionsDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.updatePermissions(id, dto.moduleAccess, req.adminUser!.id, req.adminUser!.name);

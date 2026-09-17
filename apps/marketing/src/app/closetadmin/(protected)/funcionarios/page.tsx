@@ -35,7 +35,7 @@ export default async function ClosetAdminEmployeesPage() {
         title="Funcionários"
         description="Cada funcionário tem login próprio (telefone + PIN), nunca credenciais compartilhadas. Acesso por módulo: reservas, calendário, peças, regras, relatórios e auditoria."
       />
-      <EmployeesSection employees={employees} />
+      <EmployeesSection employees={employees} currentUserId={session.id} />
     </div>
   );
 }
