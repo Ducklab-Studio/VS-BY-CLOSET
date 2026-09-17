@@ -6,6 +6,7 @@ import {
   blockEmployee,
   createEmployee,
   listEmployees,
+  purgeEmployee,
   reactivateEmployee,
   removeEmployee,
   restoreEmployee,
@@ -103,6 +104,22 @@ export async function restoreEmployeeAction(id: string): Promise<{ error: string
     await restoreEmployee(id, session.id);
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível restaurar o funcionário.' };
+  }
+  revalidateEmployeesPath();
+  return { error: null };
+}
+
+/** "Excluir permanentemente" — DELETE físico real. Backend recusa se
+ *  ativo, SUPER_ADMIN, ou o próprio ator; frontend também esconde o
+ *  botão nesses casos (defesa em profundidade, nunca a única camada). */
+export async function purgeEmployeeAction(id: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+
+  try {
+    await purgeEmployee(id, session.id);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível excluir o funcionário.' };
   }
   revalidateEmployeesPath();
   return { error: null };

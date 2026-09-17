@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Eye, Plus, RotateCcw, ShieldCheck, Trash2, UserPlus, Wrench } from 'lucide-react';
+import { Ban, Eye, Flame, Plus, RotateCcw, ShieldCheck, Trash2, UserPlus, Wrench } from 'lucide-react';
 import type { AdminModuleName } from '@/lib/admin-permissions';
 import type { EmployeeListItem } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
@@ -11,6 +11,7 @@ import {
   blockEmployeeAction,
   createEmployeeAction,
   listEmployeesAction,
+  purgeEmployeeAction,
   reactivateEmployeeAction,
   removeEmployeeAction,
   restoreEmployeeAction,
@@ -43,7 +44,7 @@ const ROLE_LABELS: Record<string, string> = { SUPER_ADMIN: 'Proprietário', ADMI
  * assim a lista atualiza sozinha (sem recarregar a página) e sempre
  * respeita o estado atual do filtro "Mostrar removidos".
  */
-export function EmployeesSection({ employees: initialEmployees }: { employees: EmployeeListItem[] }) {
+export function EmployeesSection({ employees: initialEmployees, currentUserId }: { employees: EmployeeListItem[]; currentUserId: string }) {
   const [employees, setEmployees] = useState(initialEmployees);
   const [showRemoved, setShowRemoved] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -85,7 +86,7 @@ export function EmployeesSection({ employees: initialEmployees }: { employees: E
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {visibleEmployees.map((employee) => (
-            <EmployeeCard key={employee.id} employee={employee} onChanged={() => refresh(showRemoved)} />
+            <EmployeeCard key={employee.id} employee={employee} currentUserId={currentUserId} onChanged={() => refresh(showRemoved)} />
           ))}
         </div>
       )}
@@ -212,13 +213,14 @@ function CreateEmployeeForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
-function EmployeeCard({ employee, onChanged }: { employee: EmployeeListItem; onChanged: () => void }) {
+function EmployeeCard({ employee, currentUserId, onChanged }: { employee: EmployeeListItem; currentUserId: string; onChanged: () => void }) {
   const [moduleAccess, setModuleAccess] = useState<AdminModuleName[]>([...employee.moduleAccess]);
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = JSON.stringify([...moduleAccess].sort()) !== JSON.stringify([...employee.moduleAccess].sort());
 
   const removed = Boolean(employee.removedAt);
+  const isSelf = employee.id === currentUserId;
 
   function toggleModule(module: AdminModuleName) {
     setModuleAccess((current) => (current.includes(module) ? current.filter((m) => m !== module) : [...current, module]));
@@ -357,6 +359,29 @@ function EmployeeCard({ employee, onChanged }: { employee: EmployeeListItem; onC
             onConfirm={() => runAction(() => restoreEmployeeAction(employee.id))}
           />
         )}
+
+        {removed && !isSelf ? (
+          <ConfirmDialog
+            trigger={
+              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600">
+                <Flame size={13} /> Excluir permanentemente
+              </button>
+            }
+            title={`Excluir ${employee.name} permanentemente?`}
+            description={
+              <>
+                <strong>Isso não pode ser desfeito.</strong> O registro deste funcionário é apagado do banco — ele não vai mais
+                aparecer nem em &quot;Mostrar removidos&quot;. O histórico de auditoria dele é preservado (sem PIN nem telefone
+                nas ações antigas), e esta exclusão fica registrada com o nome, telefone e papel dele antes de apagar. Digite
+                qualquer confirmação abaixo pra prosseguir.
+              </>
+            }
+            confirmLabel="Excluir permanentemente"
+            requireReason
+            danger
+            onConfirm={() => runAction(() => purgeEmployeeAction(employee.id))}
+          />
+        ) : null}
       </div>
 
       {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}

@@ -148,6 +148,68 @@ export class AdminEmployeesService {
     return toListItem(updated);
   }
 
+  /**
+   * "Excluir permanentemente" — DELETE físico de verdade, único lugar
+   * neste service que faz isso (todo o resto é soft delete). Só chega
+   * aqui quem já está removido (`remove()` já rodou antes); nunca
+   * ativo, nunca SUPER_ADMIN (requireEmployee), nunca o próprio ator.
+   *
+   * A auditoria HISTÓRICA do funcionário nunca é apagada — as linhas
+   * antigas de `admin_audit_events` só perdem o vínculo (`adminUserId
+   * = null`), mesmo padrão frouxo que `adminUserName` denormalizado já
+   * existia pra sustentar (ver comentário no schema). Um evento NOVO é
+   * gravado com o snapshot (nome/telefone/papel — nunca PIN/hash) ANTES
+   * do delete, atribuído a quem executou a exclusão (o alvo está
+   * prestes a deixar de existir, não pode ser o autor do próprio
+   * evento). Tudo dentro de uma transação: se o delete falhar (ex.:
+   * o funcionário já criou bloqueios operacionais — FK obrigatória sem
+   * como desvincular), nada é alterado, nem a auditoria antiga.
+   */
+  async purge(id: string, actorId: string, actorName: string): Promise<{ id: string }> {
+    if (id === actorId) throw new ForbiddenException('Você não pode excluir permanentemente a própria conta.');
+    const target = await this.requireEmployee(id);
+    if (!target.removedAt) throw new BadRequestException('Só é possível excluir permanentemente um funcionário já removido.');
+
+    const snapshot = { name: target.name, phone: target.phone, role: target.role, moduleAccess: target.moduleAccess, removedAt: target.removedAt.toISOString(), createdAt: target.createdAt.toISOString() };
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Revoga (defesa em profundidade — remove() já revogou antes) e
+        // apaga fisicamente as sessões: são efêmeras, nunca precisam
+        // sobreviver à conta que autenticam, e a coluna é NOT NULL (não
+        // dá pra só desvincular).
+        await tx.adminSession.updateMany({ where: { adminUserId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+        await tx.adminSession.deleteMany({ where: { adminUserId: id } });
+
+        // Desvincula (nunca apaga) a auditoria histórica dele.
+        await tx.adminAuditEvent.updateMany({ where: { adminUserId: id }, data: { adminUserId: null } });
+
+        await writeAdminAuditEvent(tx, {
+          adminUserId: actorId,
+          adminUserName: actorName,
+          action: 'EMPLOYEE_PURGED',
+          entityType: 'AdminUser',
+          entityId: id,
+          before: snapshot,
+          after: null,
+          detail: { purgedName: target.name, purgedPhone: target.phone, purgedRole: target.role },
+        });
+
+        await tx.adminUser.delete({ where: { id } });
+      });
+    } catch (err) {
+      if (isForeignKeyViolation(err)) {
+        throw new ConflictException(
+          'Não é possível excluir permanentemente — este funcionário tem bloqueios operacionais registrados em seu nome. Ele continua removido (oculto da lista), mas o registro precisa ser mantido.',
+        );
+      }
+      this.logger.error(`Falha ao excluir permanentemente o funcionário ${id}: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível excluir o funcionário no momento.');
+    }
+
+    return { id };
+  }
+
   async updatePermissions(id: string, moduleAccess: AdminModule[], actorId: string, actorName: string): Promise<EmployeeListItem> {
     const target = await this.requireEmployee(id);
 
@@ -236,6 +298,10 @@ function toListItem(row: {
 
 function isUniqueViolation(err: unknown): boolean {
   return !!err && typeof err === 'object' && 'code' in err && (err as { code: unknown }).code === 'P2002';
+}
+
+function isForeignKeyViolation(err: unknown): boolean {
+  return !!err && typeof err === 'object' && 'code' in err && (err as { code: unknown }).code === 'P2003';
 }
 
 function errorCode(err: unknown): string {
