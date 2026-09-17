@@ -2,10 +2,12 @@ import 'reflect-metadata';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { AdminModule, AdminRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from './admin-pin';
 import { AdminRoleGuard } from './admin-role.guard';
 import { REQUIRE_ROLE_KEY } from './require-role.decorator';
+import { REQUIRE_MODULE_KEY } from './require-module.decorator';
 import { generateSessionToken, hashSessionToken } from './admin-session-token';
 
 /**
@@ -30,10 +32,10 @@ const PHONE_TAG = `9${Date.now()}`;
 let userCounter = 0;
 const tokens = new Map<string, string>();
 
-async function createUser(role: 'ADMIN' | 'STAFF', active = true) {
+async function createUser(role: AdminRole, active = true, moduleAccess: AdminModule[] = []) {
   const pinHash = await hashPin('1234');
   const user = await prisma.adminUser.create({
-    data: { name: 'Guard Teste', phone: `${PHONE_TAG}${userCounter++}`, pinHash, role, active },
+    data: { name: 'Guard Teste', phone: `${PHONE_TAG}${userCounter++}`, pinHash, role, active, moduleAccess },
   });
   const token = generateSessionToken();
   await prisma.adminSession.create({ data: { adminUserId: user.id, tokenHash: hashSessionToken(token), expiresAt: new Date(Date.now() + 60_000) } });
@@ -41,9 +43,19 @@ async function createUser(role: 'ADMIN' | 'STAFF', active = true) {
   return user;
 }
 
-function contextWith(input: { query?: Record<string, unknown>; body?: Record<string, unknown>; requiredRole?: 'ADMIN' | 'STAFF' }): ExecutionContext {
+function contextWith(input: {
+  query?: Record<string, unknown>;
+  body?: Record<string, unknown>;
+  requiredRole?: AdminRole;
+  requiredModule?: AdminModule;
+  requiredModuleOnClass?: boolean;
+}): ExecutionContext {
   const handler = () => undefined;
+  class FakeController {}
   if (input.requiredRole) Reflect.defineMetadata(REQUIRE_ROLE_KEY, input.requiredRole, handler);
+  if (input.requiredModule) {
+    Reflect.defineMetadata(REQUIRE_MODULE_KEY, input.requiredModule, input.requiredModuleOnClass ? FakeController : handler);
+  }
   const request = {
     headers: { 'x-admin-session': tokens.get(String(input.query?.adminUserId ?? input.body?.adminUserId)) },
     query: input.query ?? {},
@@ -52,6 +64,7 @@ function contextWith(input: { query?: Record<string, unknown>; body?: Record<str
   return {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => handler,
+    getClass: () => FakeController,
   } as unknown as ExecutionContext;
 }
 
@@ -98,7 +111,7 @@ describe('AdminRoleGuard — RBAC (integração real, Neon)', () => {
     const ctx = contextWith({ query: { adminUserId: user.id } });
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
     const request = ctx.switchToHttp().getRequest<{ adminUser?: { id: string; role: string } }>();
-    expect(request.adminUser).toEqual({ id: user.id, name: 'Guard Teste', role: 'STAFF', active: true });
+    expect(request.adminUser).toEqual({ id: user.id, name: 'Guard Teste', role: 'STAFF', active: true, isTechnical: false, moduleAccess: [] });
   });
 
   test('5) STAFF ativo tentando rota @RequireRole("ADMIN") → ForbiddenException (nunca escala role)', async () => {
@@ -121,6 +134,63 @@ describe('AdminRoleGuard — RBAC (integração real, Neon)', () => {
     // Um chamador malicioso não pode simplesmente mandar um "role: ADMIN" solto no body — o guard nunca lê isso.
     await expect(
       guard.canActivate(contextWith({ body: { adminUserId: user.id, role: 'ADMIN' }, requiredRole: 'ADMIN' })),
+    ).rejects.toThrow(ForbiddenException);
+  });
+});
+
+/**
+ * Sistema de autorização de funcionários — SUPER_ADMIN satisfaz
+ * @RequireRole('ADMIN') por hierarquia (nunca o inverso), e
+ * @RequireModule é a checagem SEPARADA que SUPER_ADMIN sempre pula
+ * (nunca consulta moduleAccess dele). STAFF/ADMIN sem o módulo
+ * concedido são recusados mesmo em rotas sem @RequireRole nenhum.
+ */
+describe('AdminRoleGuard — hierarquia SUPER_ADMIN e @RequireModule (integração real, Neon)', () => {
+  test('9) SUPER_ADMIN satisfaz @RequireRole("ADMIN") por hierarquia', async () => {
+    const owner = await createUser('SUPER_ADMIN');
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: owner.id }, requiredRole: 'ADMIN' }))).resolves.toBe(true);
+  });
+
+  test('10) ADMIN comum NÃO satisfaz @RequireRole("SUPER_ADMIN") — hierarquia nunca é bidirecional', async () => {
+    const admin = await createUser('ADMIN');
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: admin.id }, requiredRole: 'SUPER_ADMIN' }))).rejects.toThrow(ForbiddenException);
+  });
+
+  test('11) SUPER_ADMIN satisfaz @RequireModule mesmo sem o módulo em moduleAccess (nunca consultado)', async () => {
+    const owner = await createUser('SUPER_ADMIN', true, []);
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: owner.id }, requiredModule: 'AUDIT' }))).resolves.toBe(true);
+  });
+
+  test('12) STAFF sem o módulo concedido → ForbiddenException, mesmo em rota sem @RequireRole', async () => {
+    const staff = await createUser('STAFF', true, ['PIECES']);
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: staff.id }, requiredModule: 'AUDIT' }))).rejects.toThrow(ForbiddenException);
+  });
+
+  test('13) STAFF com o módulo concedido → permitido', async () => {
+    const staff = await createUser('STAFF', true, ['PIECES', 'AUDIT']);
+    await expect(guard.canActivate(contextWith({ query: { adminUserId: staff.id }, requiredModule: 'AUDIT' }))).resolves.toBe(true);
+  });
+
+  test('14) @RequireModule lido do controller (metadata de classe) quando o handler não tem a própria', async () => {
+    const staff = await createUser('STAFF', true, ['RULES']);
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: staff.id }, requiredModule: 'RULES', requiredModuleOnClass: true })),
+    ).resolves.toBe(true);
+    const other = await createUser('STAFF', true, []);
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: other.id }, requiredModule: 'RULES', requiredModuleOnClass: true })),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  test('15) @RequireRole + @RequireModule juntos: ADMIN com o módulo concedido → permitido; ADMIN sem o módulo → recusado', async () => {
+    const withModule = await createUser('ADMIN', true, ['RESERVATIONS']);
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: withModule.id }, requiredRole: 'ADMIN', requiredModule: 'RESERVATIONS' })),
+    ).resolves.toBe(true);
+
+    const withoutModule = await createUser('ADMIN', true, []);
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: withoutModule.id }, requiredRole: 'ADMIN', requiredModule: 'RESERVATIONS' })),
     ).rejects.toThrow(ForbiddenException);
   });
 });

@@ -13,6 +13,7 @@ import { AdminReservationsModule } from './admin-reservations/admin-reservations
 import { ReservationArchiveModule } from './reservation-archive/reservation-archive.module';
 import { AdminAuthModule } from './admin-auth/admin-auth.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
+import { AdminEmployeesModule } from './admin-employees/admin-employees.module';
 import { PdfModule } from './pdf/pdf.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { AppController } from './app.controller';
@@ -35,6 +36,7 @@ import { AppController } from './app.controller';
     ReservationArchiveModule,
     AdminAuthModule,
     AdminPanelModule,
+    AdminEmployeesModule,
     PdfModule,
     RemindersModule,
   ],

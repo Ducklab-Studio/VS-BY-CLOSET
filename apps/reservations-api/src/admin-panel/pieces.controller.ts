@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Req, UseGuards } from '@nestjs/com
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
+import { RequireModule } from '../admin/require-module.decorator';
 import { AdminPiecesService, type PieceListItem, type UpdatePieceInput } from './pieces.service';
 import { UpdatePieceDto } from './dto/update-piece.dto';
 
@@ -14,6 +15,7 @@ interface RequestWithAdminUser {
 
 @Controller('admin/pieces')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
+@RequireModule('PIECES')
 export class AdminPiecesController {
   constructor(private readonly pieces: AdminPiecesService) {}
 

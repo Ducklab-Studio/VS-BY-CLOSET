@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ExternalLink } from 'lucide-react';
-import { requireAdminSession } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listPieces } from '@/lib/admin-data';
 import { listShopifyCatalog } from '@/lib/shopify-admin-data';
 import { AdminApiError } from '@/lib/admin-api';
@@ -18,7 +18,8 @@ export const metadata: Metadata = { title: 'Peças' };
  */
 export default async function ClosetAdminPiecesPage() {
   const session = await requireAdminSession();
-  const isAdmin = session.role === 'ADMIN';
+  requireAdminModule(session, 'PIECES');
+  const isAdmin = hasAdminRole(session, 'ADMIN');
 
   let pieces: Awaited<ReturnType<typeof listPieces>> | null = null;
   let piecesError: string | null = null;

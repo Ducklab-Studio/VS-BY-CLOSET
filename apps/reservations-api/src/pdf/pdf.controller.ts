@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
+import { RequireModule } from '../admin/require-module.decorator';
 import { AdminReservationsService } from '../admin-reservations/admin-reservations.service';
 import { ReservationPdfService } from './reservation-pdf.service';
 import { PeriodReportPdfService } from './period-report-pdf.service';
@@ -37,6 +38,7 @@ export class AdminPdfController {
   ) {}
 
   @Get('reservations/:id/pdf')
+  @RequireModule('RESERVATIONS')
   async reservationPdfRoute(@Param('id') id: string, @Res() res: PdfResponse): Promise<void> {
     const detail = await this.adminReservations.getReservationDetail(id);
     const buffer = await this.reservationPdf.generate(detail);
@@ -44,12 +46,14 @@ export class AdminPdfController {
   }
 
   @Get('reports/period.pdf')
+  @RequireModule('REPORTS')
   async periodReportRoute(@Query() query: PeriodReportQueryDto, @Res() res: PdfResponse): Promise<void> {
     const buffer = await this.periodReportPdf.generate(query);
     sendPdf(res, buffer, `relatorio-${query.from}-a-${query.to}.pdf`);
   }
 
   @Get('reports/operational.pdf')
+  @RequireModule('REPORTS')
   async operationalReportRoute(@Query() query: OperationalReportQueryDto, @Res() res: PdfResponse): Promise<void> {
     const buffer = await this.operationalReportPdf.generate(query.date);
     sendPdf(res, buffer, `relatorio-operacional-${query.date ?? 'hoje'}.pdf`);

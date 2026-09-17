@@ -3,6 +3,7 @@ import { IsUUID } from 'class-validator';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
+import { RequireModule } from '../admin/require-module.decorator';
 import { AdminBlocksService } from './blocks.service';
 import { CreateBlockDto } from './dto/create-block.dto';
 
@@ -24,6 +25,7 @@ class RemoveBlockDto {
 @Controller('admin/blocks')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
 @RequireRole('ADMIN')
+@RequireModule('RULES')
 export class AdminBlocksController {
   constructor(private readonly blocks: AdminBlocksService) {}
 

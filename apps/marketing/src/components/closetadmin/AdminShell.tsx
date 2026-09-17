@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, X } from 'lucide-react';
-import type { AdminSessionUser } from '@/lib/admin-session';
+import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, Users, X } from 'lucide-react';
+import { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUser } from '@/lib/admin-permissions';
 import { logoutAction } from '@/app/closetadmin/actions';
 import { AdminThemeToggle } from './AdminThemeToggle';
 
@@ -12,31 +12,38 @@ interface NavItem {
   readonly href: string;
   readonly label: string;
   readonly icon: React.ComponentType<{ size?: number; className?: string }>;
-  readonly adminOnly?: boolean;
+  readonly module?: AdminModuleName;
+  readonly superAdminOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/closetadmin', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/closetadmin/calendario', label: 'Calendário', icon: CalendarDays },
-  { href: '/closetadmin/reservas', label: 'Reservas', icon: ClipboardList },
-  { href: '/closetadmin/pecas', label: 'Peças', icon: Shirt },
-  { href: '/closetadmin/regras', label: 'Regras e bloqueios', icon: Scale, adminOnly: true },
-  { href: '/closetadmin/auditoria', label: 'Auditoria', icon: ShieldCheck, adminOnly: true },
+  { href: '/closetadmin/calendario', label: 'Calendário', icon: CalendarDays, module: 'CALENDAR' },
+  { href: '/closetadmin/reservas', label: 'Reservas', icon: ClipboardList, module: 'RESERVATIONS' },
+  { href: '/closetadmin/pecas', label: 'Peças', icon: Shirt, module: 'PIECES' },
+  { href: '/closetadmin/regras', label: 'Regras e bloqueios', icon: Scale, module: 'RULES' },
+  { href: '/closetadmin/auditoria', label: 'Auditoria', icon: ShieldCheck, module: 'AUDIT' },
+  { href: '/closetadmin/funcionarios', label: 'Funcionários', icon: Users, superAdminOnly: true },
 ];
 
 /**
- * Fase 9 — chrome próprio do painel (item "UX/Design": sidebar, header,
- * nav mobile). Itens ADMIN-only somem do menu pra STAFF, mas isso é só
+ * Sistema de autorização de funcionários — itens somem do menu conforme
+ * `moduleAccess` do funcionário (RESERVATIONS/CALENDAR/PIECES/RULES/AUDIT);
+ * "Funcionários" é exclusivo de SUPER_ADMIN (proprietário). Isso é só
  * conveniência de navegação — "não confiar em esconder botão no
- * frontend": cada página ADMIN-only chama `requireAdminRole` server-side
- * de qualquer forma (ver src/lib/admin-session.ts), e o reservations-api
- * revalida de novo (`AdminRoleGuard`).
+ * frontend": cada página chama `requireAdminModule`/`requireAdminRole`
+ * server-side de qualquer forma (ver src/lib/admin-session.ts), e o
+ * reservations-api revalida de novo (`AdminRoleGuard`).
  */
 export function AdminShell({ session, children }: { session: AdminSessionUser; children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const items = NAV_ITEMS.filter((item) => !item.adminOnly || session.role === 'ADMIN');
+  const items = NAV_ITEMS.filter((item) => {
+    if (item.superAdminOnly) return hasAdminRole(session, 'SUPER_ADMIN');
+    if (item.module) return hasAdminModule(session, item.module);
+    return true;
+  });
   const isActive = (href: string) => (href === '/closetadmin' ? pathname === href : pathname?.startsWith(href));
 
   return (
@@ -72,7 +79,7 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
             <AdminThemeToggle />
             <div className="h-4 w-[1px] bg-ink/10 dark:bg-white/10" />
             <span className="text-ink/70 dark:text-dark-muted">
-              <strong className="font-medium text-ink dark:text-dark-text">{session.name}</strong> <span className="text-ink/40 dark:text-white/20">·</span> {session.role === 'ADMIN' ? 'Administrador' : 'Equipe'}
+              <strong className="font-medium text-ink dark:text-dark-text">{session.name}</strong> <span className="text-ink/40 dark:text-white/20">·</span> {roleLabel(session)}
             </span>
             <form action={logoutAction}>
               <button type="submit" className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 hover:text-ink dark:hover:text-dark-text transition">
@@ -137,5 +144,11 @@ function SidebarContent({
       </div>
     </>
   );
+}
+
+function roleLabel(session: AdminSessionUser): string {
+  if (session.role === 'SUPER_ADMIN') return 'Proprietário';
+  if (session.role === 'ADMIN') return 'Administrador';
+  return 'Equipe';
 }
 

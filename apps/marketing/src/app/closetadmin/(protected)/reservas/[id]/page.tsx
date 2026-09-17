@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ExternalLink, FileDown } from 'lucide-react';
-import { requireAdminSession } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
@@ -20,6 +20,7 @@ const CANCELLABLE_STATUSES = new Set(['hold', 'pending_payment', 'confirmed']);
  */
 export default async function ClosetAdminReservationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
   const { id } = await params;
 
   let reservation: Awaited<ReturnType<typeof getReservationDetail>> | null = null;
@@ -55,7 +56,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
                 <FileDown size={16} /> Exportar PDF
               </a>
               {canCancel ? <CancelButton reservationId={reservation.id} /> : null}
-              {reservation.archivedAt && session.role === 'ADMIN' ? <RestoreButton reservationId={reservation.id} /> : null}
+              {reservation.archivedAt && hasAdminRole(session, 'ADMIN') ? <RestoreButton reservationId={reservation.id} /> : null}
             </div>
           }
         />

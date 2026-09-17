@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nest
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
+import { RequireModule } from '../admin/require-module.decorator';
 import { ReservationArchiveService, type ArchiveFilters } from './reservation-archive.service';
 import { ExecuteArchiveDto } from './dto/archive-reservations.dto';
 
@@ -10,15 +11,16 @@ interface RequestWithAdminUser {
 }
 
 /**
- * "Limpar históricos" — item do pedido: "Apenas ADMIN ou SUPER_ADMIN
- * podem arquivar". Este projeto só tem os papéis ADMIN/STAFF (ver
- * `AdminRole` no schema) — SUPER_ADMIN não existe aqui, então ADMIN é
- * o papel mais alto disponível e o único autorizado, mesmo padrão já
- * usado por regras/peças/bloqueios/auditoria.
+ * "Limpar históricos"/"Limpar lista" — item do pedido: "Apenas ADMIN ou
+ * SUPER_ADMIN podem arquivar". SUPER_ADMIN (sistema de autorização de
+ * funcionários) satisfaz `@RequireRole('ADMIN')` por hierarquia — ver
+ * satisfiesRole em admin-role.guard.ts. `@RequireModule('RESERVATIONS')`
+ * some para funcionários sem esse módulo concedido, mesmo sendo ADMIN.
  */
 @Controller('admin/reservations-archive')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
 @RequireRole('ADMIN')
+@RequireModule('RESERVATIONS')
 export class ReservationArchiveController {
   constructor(private readonly archive: ReservationArchiveService) {}
 

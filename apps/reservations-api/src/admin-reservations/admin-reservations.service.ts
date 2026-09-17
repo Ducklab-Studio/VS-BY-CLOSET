@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, type AdminRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
 import type { RentalRuleConfig } from '../rental-rules/rental-rule-config';
@@ -255,7 +255,7 @@ export class AdminReservationsService {
       throw new ForbiddenException('Exceção de temporada exige usuário ADMIN autenticado.');
     }
 
-    let adminUser: { active: boolean; role: 'ADMIN' | 'STAFF' } | null;
+    let adminUser: { active: boolean; role: AdminRole } | null;
     try {
       adminUser = await this.prisma.adminUser.findUnique({
         where: { id: adminUserId },
@@ -266,7 +266,9 @@ export class AdminReservationsService {
       throw new ServiceUnavailableException('Não foi possível validar a autorização do override no momento.');
     }
 
-    if (!adminUser || !adminUser.active || adminUser.role !== 'ADMIN') {
+    // SUPER_ADMIN satisfaz qualquer checagem de ADMIN por hierarquia
+    // (ver satisfiesRole em admin-role.guard.ts) — mesmo padrão aqui.
+    if (!adminUser || !adminUser.active || (adminUser.role !== 'ADMIN' && adminUser.role !== 'SUPER_ADMIN')) {
       throw new ForbiddenException('Exceção de temporada é exclusiva de usuário ADMIN.');
     }
   }

@@ -10,7 +10,7 @@ import {
   PackageCheck,
   Plus,
 } from 'lucide-react';
-import { requireAdminSession } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge } from '@/components/closetadmin/ui';
@@ -39,6 +39,7 @@ type SearchParams = {
  */
 export default async function ClosetAdminReservationsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
   const rawFilters = await searchParams;
   const includeArchived = rawFilters.includeArchived === 'true';
   const archivedOnly = rawFilters.archivedOnly === 'true';
@@ -121,7 +122,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
         />
       </section>
 
-      <ReservationFiltersForm initial={rawFilters} showClearList={session.role === 'ADMIN'} estimatedArchivableCount={archivableEstimate} />
+      <ReservationFiltersForm initial={rawFilters} showClearList={hasAdminRole(session, 'ADMIN')} estimatedArchivableCount={archivableEstimate} />
 
       <section className="mt-5 overflow-hidden rounded-xl border border-ink/10 bg-white shadow-sm dark:border-white/10 dark:bg-dark-card">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/10 px-4 py-3.5 dark:border-white/10">

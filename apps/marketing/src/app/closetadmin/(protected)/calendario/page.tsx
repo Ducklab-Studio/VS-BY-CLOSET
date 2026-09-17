@@ -10,7 +10,7 @@ import {
   RotateCcw,
   ShoppingBag,
 } from 'lucide-react';
-import { requireAdminSession } from '@/lib/admin-session';
+import { requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { getCalendar, type CalendarItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge } from '@/components/closetadmin/ui';
@@ -45,6 +45,7 @@ function phaseForDay(day: string, item: CalendarItem): string {
  */
 export default async function ClosetAdminCalendarPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'CALENDAR');
   const { date } = await searchParams;
   const today = civilDateToISOToday();
   const start = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today;

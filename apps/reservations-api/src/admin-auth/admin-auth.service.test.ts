@@ -72,7 +72,7 @@ describe('AdminAuthService — login (integração real, Neon)', () => {
     expect(result.token).toEqual(expect.any(String));
     expect(result.token.length).toBeGreaterThanOrEqual(32);
     expect(new Date(result.expiresAt).getTime()).toBeGreaterThan(Date.now());
-    expect(result.adminUser).toEqual({ id: user.id, name: user.name, role: 'STAFF' });
+    expect(result.adminUser).toEqual({ id: user.id, name: user.name, role: 'STAFF', isTechnical: false, moduleAccess: [] });
     expect(result.adminUser).not.toHaveProperty('pinHash');
     expect(JSON.stringify(result)).not.toContain('pinHash');
 
@@ -128,7 +128,7 @@ describe('AdminAuthService — sessão (integração real, Neon)', () => {
     const { user, pin } = await createUser({ name: 'Sessao Valida', role: 'ADMIN' });
     const { token } = await service.login({ name: user.name, phone: user.phone, pin });
     const result = await service.validateSession(token);
-    expect(result).toEqual({ id: user.id, name: user.name, role: 'ADMIN' });
+    expect(result).toEqual({ id: user.id, name: user.name, role: 'ADMIN', isTechnical: false, moduleAccess: [] });
   });
 
   test('8) token inexistente/inválido → UnauthorizedException', async () => {

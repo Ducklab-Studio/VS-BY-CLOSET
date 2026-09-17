@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
+import { requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import { cancelManualReservation, restoreReservation } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
@@ -14,6 +14,7 @@ import { AdminApiError } from '@/lib/admin-api';
  */
 export async function cancelReservationAction(reservationId: string, reason: string): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
   try {
     await cancelManualReservation(reservationId, session.id, session.name, reason || undefined);
   } catch (err) {

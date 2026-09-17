@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
+import { RequireModule } from '../admin/require-module.decorator';
 import { ImportShopifyUnitsDto } from './dto/import-shopify-units.dto';
 import { ShopifyCatalogService, type ShopifyCatalogItem, type ShopifyMappedUnit } from './shopify-catalog.service';
 
@@ -11,6 +12,7 @@ interface RequestWithAdminUser {
 
 @Controller('admin/shopify')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
+@RequireModule('PIECES')
 export class ShopifyCatalogController {
   constructor(private readonly catalog: ShopifyCatalogService) {}
 

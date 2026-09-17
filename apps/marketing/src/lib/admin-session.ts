@@ -7,11 +7,8 @@ import { adminPost } from './admin-api';
 import { ADMIN_SESSION_COOKIE } from './admin-cookie';
 export { ADMIN_SESSION_COOKIE } from './admin-cookie';
 
-export interface AdminSessionUser {
-  readonly id: string;
-  readonly name: string;
-  readonly role: 'ADMIN' | 'STAFF';
-}
+import { hasAdminModule, type AdminModuleName, type AdminSessionUser } from './admin-permissions';
+export { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUser } from './admin-permissions';
 
 /**
  * Fase 9, item 2 — lê o cookie HttpOnly deste domínio (apps/marketing) e
@@ -49,7 +46,20 @@ export async function requireAdminSession(): Promise<AdminSessionUser> {
  *  dashboard em vez de mostrar uma tela vazia/erro cru. O
  *  `AdminRoleGuard` do reservations-api recusa a chamada de qualquer
  *  forma; isto só evita a viagem de rede pra uma tela que a pessoa não
- *  pode usar. */
-export function requireAdminRole(session: AdminSessionUser, role: 'ADMIN'): void {
+ *  pode usar.
+ *
+ *  Hierarquia (igual ao backend, `satisfiesRole`): SUPER_ADMIN satisfaz
+ *  qualquer checagem de 'ADMIN' — Anderson nunca perde acesso a uma
+ *  tela ADMIN-only por não ser literalmente 'ADMIN'. */
+export function requireAdminRole(session: AdminSessionUser, role: 'ADMIN' | 'SUPER_ADMIN'): void {
+  if (session.role === 'SUPER_ADMIN') return;
   if (session.role !== role) redirect('/closetadmin');
+}
+
+/** Páginas/ações que exigem um módulo específico — "Funcionários não
+ *  podem gerenciar usuários nem alterar permissões" e módulos por área
+ *  vêm daqui. Redireciona pro dashboard em vez de tela vazia/erro cru,
+ *  igual a `requireAdminRole`. */
+export function requireAdminModule(session: AdminSessionUser, module: AdminModuleName): void {
+  if (!hasAdminModule(session, module)) redirect('/closetadmin');
 }

@@ -1,6 +1,15 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import type { AdminRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
+
+/** Mesma classificação de admin-audit.ts, mas pro lado de
+ *  ReservationEvent (criar/cancelar reserva manual não passa por
+ *  writeAdminAuditEvent — ver comentário no topo de AdminAuditEvent no
+ *  schema). Só cancelamento é "crítico" pela definição do pedido
+ *  (alteração/cancelamento/pagamento/permissões/exclusão); criar uma
+ *  reserva manual não está nessa lista. */
+const CRITICAL_RESERVATION_EVENT_TYPES = new Set(['MANUAL_RESERVATION_CANCELLED']);
 
 export interface AuditEntry {
   readonly id: string;
@@ -33,8 +42,21 @@ export class AdminAuditService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(filters: AuditFilters): Promise<AuditEntry[]> {
+  /**
+   * Sistema de autorização de funcionários — "Funcionários não podem
+   * visualizar ações do proprietário/técnico" + "Ações críticas...
+   * devem continuar registradas em auditoria privada... acessível
+   * somente ao Anderson/proprietário". `viewerRole` decide o filtro:
+   * SUPER_ADMIN vê tudo (comportamento idêntico a antes deste sistema
+   * existir); qualquer outro papel nunca recebe uma linha crítica
+   * (`isCritical`) nem uma linha cujo autor era SUPER_ADMIN/técnico
+   * (`isPrivileged`, ou o equivalente calculado aqui pro lado de
+   * ReservationEvent). Nada é apagado nem escondido do SUPER_ADMIN —
+   * só fora da resposta pra quem não pode ver.
+   */
+  async list(filters: AuditFilters, viewerRole: AdminRole): Promise<AuditEntry[]> {
     const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+    const isSuperAdmin = viewerRole === 'SUPER_ADMIN';
 
     try {
       const cleared = await this.prisma.adminAuditEvent.findFirst({
@@ -49,19 +71,51 @@ export class AdminAuditService {
           where: {
             action: { not: 'AUDIT_CLEARED' },
             ...(afterClear ? { createdAt: afterClear } : {}),
+            ...(isSuperAdmin ? {} : { isCritical: false, isPrivileged: false }),
           },
           orderBy: { createdAt: 'desc' },
           take: limit,
         }),
         this.prisma.reservationEvent.findMany({
           where: {
-            type: { in: ['MANUAL_RESERVATION_CREATED', 'MANUAL_RESERVATION_CANCELLED'] },
+            // Cancelamento manual é "crítico" pela definição do pedido —
+            // nunca visível a funcionário, mesmo com o módulo concedido.
+            type: {
+              in: isSuperAdmin
+                ? ['MANUAL_RESERVATION_CREATED', ...CRITICAL_RESERVATION_EVENT_TYPES]
+                : ['MANUAL_RESERVATION_CREATED'],
+            },
             ...(afterClear ? { createdAt: afterClear } : {}),
           },
           orderBy: { createdAt: 'desc' },
           take: limit,
         }),
       ]);
+
+      // ReservationEvent não tem isPrivileged próprio (não passa por
+      // writeAdminAuditEvent) — calculado aqui via lookup em lote dos
+      // autores encontrados em detail.adminUserId, nunca N+1.
+      let visibleReservationEvents = reservationEvents;
+      if (!isSuperAdmin) {
+        const actorIds = [
+          ...new Set(
+            reservationEvents
+              .map((e) => (e.detail as Record<string, unknown> | null)?.adminUserId)
+              .filter((id): id is string => typeof id === 'string'),
+          ),
+        ];
+        const privilegedActors = actorIds.length
+          ? await this.prisma.adminUser.findMany({
+              where: { id: { in: actorIds }, OR: [{ role: 'SUPER_ADMIN' }, { isTechnical: true }] },
+              select: { id: true },
+            })
+          : [];
+        const privilegedIds = new Set(privilegedActors.map((u) => u.id));
+        visibleReservationEvents = reservationEvents.filter((e) => {
+          const actorId = (e.detail as Record<string, unknown> | null)?.adminUserId;
+          return !(typeof actorId === 'string' && privilegedIds.has(actorId));
+        });
+      }
 
       const merged: AuditEntry[] = [
         ...panelEvents.map((e): AuditEntry => ({
@@ -77,7 +131,7 @@ export class AdminAuditService {
           detail: e.detail,
           createdAt: e.createdAt.toISOString(),
         })),
-        ...reservationEvents.map((e): AuditEntry => {
+        ...visibleReservationEvents.map((e): AuditEntry => {
           const detail = (e.detail ?? {}) as Record<string, unknown>;
           return {
             id: e.id,
