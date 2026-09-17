@@ -1,4 +1,4 @@
-import { ArrayUnique, IsArray, IsIn, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 
 const EMPLOYEE_ROLES = ['ADMIN', 'STAFF'] as const;
 const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT'] as const;
@@ -8,6 +8,15 @@ const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDI
  *  direto ao banco). Sistema de autorização de funcionários: só
  *  ADMIN/STAFF nascem daqui. */
 export class CreateEmployeeDto {
+  // `AdminRoleGuard` lê `adminUserId` do body pra validar a sessão (ver
+  // admin-role.guard.ts) — precisa estar declarado aqui, senão o
+  // ValidationPipe global (`forbidNonWhitelisted: true`) recusa a
+  // requisição inteira com "property adminUserId should not exist"
+  // (achado real: `CreateManualReservationDto` já seguia este padrão).
+  @IsOptional()
+  @IsUUID()
+  adminUserId?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(200)
