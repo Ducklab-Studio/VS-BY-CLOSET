@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { RentalCalendar } from '@/components/RentalCalendar';
+import { ValePassPresentation } from '@/components/ValePassPresentation';
 import {
   formatPrice,
   getProductDetail,
@@ -10,6 +11,7 @@ import {
   listAllProductHandles,
 } from '@/lib/shopify';
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
+import { isValePassProduct } from '@/lib/vale-pass-product';
 
 /**
  * Página da peça — onde o cliente escolhe a data e aluga.
@@ -90,6 +92,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   const variant = product.variants[0];
   const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
 
+  // Valle Pass é vale-presente/crédito de compra — produto Shopify
+  // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
+  // disponibilidade, HOLD, reserva). Ver lib/vale-pass-product.ts.
+  const isValePass = isValePassProduct({ productId: product.id, variantId: variant?.id });
+
   return (
     <div className="product-detail mx-auto max-w-6xl px-6 py-12 sm:py-16">
       <nav className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/65">
@@ -151,23 +158,27 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
           )}
 
           <div className="mt-8">
-            {variant ? (
+            {!variant ? (
+              <p className="rounded-xl border border-dashed border-marsala/30 p-5 text-sm text-ink/60">
+                Esta peça ainda não tem variante cadastrada.
+              </p>
+            ) : isValePass ? (
+              <ValePassPresentation variant={variant} productTitle={product.title} />
+            ) : (
               <RentalCalendar
                 variant={variant}
                 productTitle={product.title}
                 whatsapp={process.env.NEXT_PUBLIC_WHATSAPP}
               />
-            ) : (
-              <p className="rounded-xl border border-dashed border-marsala/30 p-5 text-sm text-ink/60">
-                Esta peça ainda não tem variante cadastrada.
-              </p>
             )}
           </div>
 
-          <p className="mt-6 text-[0.75rem] leading-relaxed text-ink/50">
-            Retirada e devolução presenciais na loja, no Chile. O valor não muda com a
-            quantidade de dias.
-          </p>
+          {!isValePass && (
+            <p className="mt-6 text-[0.75rem] leading-relaxed text-ink/50">
+              Retirada e devolução presenciais na loja, no Chile. O valor não muda com a
+              quantidade de dias.
+            </p>
+          )}
         </div>
       </div>
     </div>
