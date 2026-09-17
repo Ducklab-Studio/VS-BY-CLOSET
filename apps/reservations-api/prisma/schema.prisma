@@ -104,6 +104,10 @@ enum AdminModule {
   RULES
   REPORTS
   AUDIT
+  /// Valle Pass — produto totalmente separado do fluxo de aluguel
+  /// (vale-presente/crédito de compra). Concedido explicitamente, nunca
+  /// herdado automaticamente por quem já tinha os outros módulos.
+  VALLE_PASS
 
   @@map("admin_module")
 }
@@ -566,4 +570,107 @@ model ReservationEvent {
   @@index([reservationId])
   @@index([type])
   @@map("reservation_events")
+}
+
+/// Valle Pass — vale-presente/crédito de compra vendido pelo checkout
+/// oficial da Shopify (Mercado Pago já configurado), TOTALMENTE
+/// separado do fluxo de aluguel: nunca lê/grava RentalUnit,
+/// Reservation, disponibilidade ou HOLD. Continua vendável mesmo com
+/// agendamentos de aluguel bloqueados, porque não depende de nada
+/// dessas tabelas.
+enum ValePassStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+
+  @@map("vale_pass_status")
+}
+
+/// A "campanha": configura valor/validade/quantidade de UM produto
+/// Valle Pass já criado manualmente na Shopify (mesmo padrão de
+/// RentalUnit.shopifyVariantId — este código nunca cria produto na
+/// Shopify, só referencia uma variante que já existe). "Encerrar" a
+/// campanha é `active=false`: nunca DELETE, nunca apaga os vales já
+/// vendidos.
+model ValePassCampaign {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  /// Em centavos — nunca float, evita erro de arredondamento monetário.
+  amountCents      Int      @map("amount_cents")
+  /// Dias de validade A PARTIR DA COMPRA (não uma data fixa da
+  /// campanha) — cada vale grava seu próprio `expiresAt` no momento em
+  /// que é emitido.
+  validityDays     Int      @map("validity_days")
+  /// Nulo = sem limite. Comparado contra `count(vouchers)` no momento
+  /// da emissão (dentro da mesma transação do webhook).
+  quantityLimit    Int?     @map("quantity_limit")
+  shopifyVariantId String   @unique @map("shopify_variant_id")
+  active           Boolean  @default(true)
+  /// Sem relação FK de propósito (mesmo padrão de
+  /// Reservation.archivedBy/AdminUser.removedBy) — nunca trava se o
+  /// AdminUser autor for removido/excluído permanentemente no futuro.
+  createdBy        String?  @db.Uuid @map("created_by")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vouchers ValePass[]
+
+  @@map("vale_pass_campaigns")
+}
+
+/// Um vale individual — nasce automaticamente quando `orders/paid`
+/// confirma um pedido com line item de uma campanha ativa (ver
+/// ValePassWebhookService), nunca criado manualmente com valor livre.
+model ValePass {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Código único de resgate (ex.: VALLE-AB12-CD34) — gerado por
+  /// generateValePassCode(), nunca sequencial/previsível.
+  code              String         @unique
+  campaignId        String         @map("campaign_id") @db.Uuid
+  /// Snapshot do valor da campanha NO MOMENTO da compra — nunca muda
+  /// mesmo que a campanha seja editada depois.
+  amountCents       Int            @map("amount_cents")
+  status            ValePassStatus @default(ACTIVE)
+  purchasedAt       DateTime       @map("purchased_at") @db.Timestamptz(6)
+  expiresAt         DateTime       @map("expires_at") @db.Timestamptz(6)
+  customerName      String?        @map("customer_name")
+  customerPhone     String?        @map("customer_phone")
+  customerEmail     String?        @map("customer_email")
+  shopifyOrderId    String?        @map("shopify_order_id")
+  shopifyOrderGid   String?        @map("shopify_order_gid")
+  /// Número legível do pedido (ex.: "#1002") — só pra exibição no
+  /// ClosetAdmin, nunca usado pra correlação/lógica.
+  shopifyOrderName  String?        @map("shopify_order_name")
+  usedAt            DateTime?      @map("used_at") @db.Timestamptz(6)
+  usedBy            String?        @db.Uuid @map("used_by")
+  cancelledAt       DateTime?      @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy       String?        @db.Uuid @map("cancelled_by")
+  cancelReason      String?        @map("cancel_reason")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+  events   ValePassEvent[]
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([shopifyOrderId])
+  @@map("vale_passes")
+}
+
+/// Trilha de eventos por vale (criado, usado, cancelado, expirado) —
+/// mesmo espírito de ReservationEvent, mas num domínio totalmente
+/// separado (nunca mistura com auditoria/eventos de reserva).
+model ValePassEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  valePassId String   @map("vale_pass_id") @db.Uuid
+  type       String
+  detail     Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  valePass ValePass @relation(fields: [valePassId], references: [id])
+
+  @@index([valePassId])
+  @@map("vale_pass_events")
 }

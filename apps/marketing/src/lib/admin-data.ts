@@ -325,6 +325,96 @@ export function purgeEmployee(id: string, adminUserId: string): Promise<{ id: st
   return adminPost(`/admin/employees/${id}/purge`, { adminUserId });
 }
 
+/** Valle Pass — vale-presente/crédito de compra, produto TOTALMENTE
+ *  separado do fluxo de aluguel (nunca depende de disponibilidade,
+ *  HOLD ou datas de retirada/devolução). Vendido pelo checkout oficial
+ *  da Shopify; este painel só configura campanha e opera os vales já
+ *  emitidos pelo webhook. */
+export interface ValePassCampaign {
+  readonly id: string;
+  readonly name: string;
+  readonly amountCents: number;
+  readonly validityDays: number;
+  readonly quantityLimit: number | null;
+  readonly shopifyVariantId: string;
+  readonly active: boolean;
+  readonly soldCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export function listValePassCampaigns(adminUserId: string): Promise<ValePassCampaign[]> {
+  return adminGet('/admin/vale-pass/campaigns', adminUserId);
+}
+
+export interface CreateValePassCampaignInput {
+  name: string;
+  amountCents: number;
+  validityDays: number;
+  quantityLimit?: number;
+  shopifyVariantId: string;
+}
+
+export function createValePassCampaign(input: CreateValePassCampaignInput, adminUserId: string): Promise<ValePassCampaign> {
+  return adminPost('/admin/vale-pass/campaigns', { ...input, adminUserId });
+}
+
+export function activateValePassCampaign(id: string, adminUserId: string): Promise<ValePassCampaign> {
+  return adminPost(`/admin/vale-pass/campaigns/${id}/activate`, { adminUserId });
+}
+
+export function deactivateValePassCampaign(id: string, adminUserId: string): Promise<ValePassCampaign> {
+  return adminPost(`/admin/vale-pass/campaigns/${id}/deactivate`, { adminUserId });
+}
+
+export type ValePassStatus = 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
+
+export interface ValePassVoucher {
+  readonly id: string;
+  readonly code: string;
+  readonly campaignId: string;
+  readonly campaignName: string;
+  readonly amountCents: number;
+  readonly status: ValePassStatus;
+  readonly purchasedAt: string;
+  readonly expiresAt: string;
+  readonly customerName: string | null;
+  readonly customerPhone: string | null;
+  readonly customerEmail: string | null;
+  readonly shopifyOrderId: string | null;
+  readonly shopifyOrderName: string | null;
+  readonly usedAt: string | null;
+  readonly cancelledAt: string | null;
+  readonly cancelReason: string | null;
+}
+
+export interface ValePassVoucherFilters {
+  status?: ValePassStatus;
+  campaignId?: string;
+  search?: string;
+}
+
+export function listValePassVouchers(adminUserId: string, filters: ValePassVoucherFilters): Promise<ValePassVoucher[]> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.campaignId) params.set('campaignId', filters.campaignId);
+  if (filters.search) params.set('search', filters.search);
+  const qs = params.toString();
+  return adminGet(`/admin/vale-pass/vouchers${qs ? `?${qs}` : ''}`, adminUserId);
+}
+
+export function findValePassVoucherByCode(code: string, adminUserId: string): Promise<ValePassVoucher> {
+  return adminGet(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}`, adminUserId);
+}
+
+export function markValePassVoucherUsed(code: string, adminUserId: string): Promise<ValePassVoucher> {
+  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/use`, { adminUserId });
+}
+
+export function cancelValePassVoucher(code: string, reason: string, adminUserId: string): Promise<ValePassVoucher> {
+  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/cancel`, { reason, adminUserId });
+}
+
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
   return adminPut(`/admin/employees/${id}/permissions`, { moduleAccess, adminUserId });
 }

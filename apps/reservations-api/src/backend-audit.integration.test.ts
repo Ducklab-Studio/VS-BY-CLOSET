@@ -20,6 +20,7 @@ import { today } from './rental-rules/rental-engine';
 import { AppController } from './app.controller';
 import { AdminPiecesService } from './admin-panel/pieces.service';
 import { WebhooksService } from './webhooks/webhooks.service';
+import { ValePassWebhookService } from './vale-pass/vale-pass-webhook.service';
 import { ensureStoreConfig } from './holds/store-config';
 
 const prisma = new PrismaService();
@@ -159,7 +160,7 @@ describe('Final backend audit: real PostgreSQL', () => {
     const [unit] = await units();
     const hold = await holds.createHold(holdDto(unit.shopifyVariantId!));
     const webhookId = nextWebhookId();
-    const service = new WebhooksService(prisma);
+    const service = new WebhooksService(prisma, new ValePassWebhookService());
     const input = { topic: 'orders/paid', shopifyWebhookId: webhookId, payload: {
       id: Date.now(), financial_status: 'paid', note_attributes: [],
       line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1, properties: [
@@ -320,7 +321,7 @@ describe('Final backend audit: real PostgreSQL', () => {
     if (reason === 'inactive') await prisma.rentalUnit.update({ where: { id: unit.id }, data: { active: false } });
     else await blocks.create({ scope: 'UNIT', rentalUnitId: unit.id, startDate: pickupDate, endDate: pickupDate, reason: 'Audit block', adminUserId }, adminUserId, 'Audit admin');
     const orderId = Date.now();
-    await new WebhooksService(prisma).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: {
+    await new WebhooksService(prisma, new ValePassWebhookService()).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: {
       id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, financial_status: 'paid',
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })),
       line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
@@ -337,7 +338,7 @@ describe('Final backend audit: real PostgreSQL', () => {
       id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, financial_status: 'paid',
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })), line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
     };
-    const service = new WebhooksService(prisma);
+    const service = new WebhooksService(prisma, new ValePassWebhookService());
     const firstId = nextWebhookId();
     try {
       await service.handleIncoming({ topic, shopifyWebhookId: firstId, payload: topic === 'refunds/create' ? { id: orderId + 1, order_id: orderId, transactions: [] } : payload });
