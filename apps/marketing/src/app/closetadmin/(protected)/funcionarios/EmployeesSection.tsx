@@ -6,6 +6,7 @@ import { Ban, Plus, RotateCcw, ShieldCheck, Trash2, UserPlus, Wrench } from 'luc
 import type { AdminModuleName } from '@/lib/admin-permissions';
 import type { EmployeeListItem } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
+import { PhoneInput } from '@/components/closetadmin/PhoneInput';
 import { EmptyState } from '@/components/closetadmin/ui';
 import {
   blockEmployeeAction,
@@ -110,7 +111,9 @@ function CreateEmployeeForm() {
 
         <label className="lg:col-span-3">
           <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Telefone</span>
-          <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+56 9 1234 5678" className={`${inputClass} mt-1.5`} />
+          <div className="mt-1.5">
+            <PhoneInput value={phone} onChange={setPhone} disabled={pending} required />
+          </div>
         </label>
 
         <label className="lg:col-span-2">
