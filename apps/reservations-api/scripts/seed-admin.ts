@@ -29,6 +29,7 @@
 import { PrismaClient, AdminRole, AdminModule } from '@prisma/client';
 import { hashPin } from '../src/admin/admin-pin';
 import { normalizePhone } from '../src/admin/admin-phone';
+import { writeAdminAuditEvent } from '../src/admin/admin-audit';
 
 const prisma = new PrismaClient();
 const VALID_ROLES: AdminRole[] = ['SUPER_ADMIN', 'ADMIN', 'STAFF'];
@@ -83,6 +84,8 @@ async function main() {
 
   console.log(`Configurando usuário: ${name} (${role}${role === 'SUPER_ADMIN' ? ', acesso total' : `, módulos: ${moduleAccess.join(', ') || '(nenhum)'}`})`);
 
+  const before = await prisma.adminUser.findUnique({ where: { phone: normalizedPhone }, select: { role: true, moduleAccess: true, active: true } });
+
   const user = await prisma.adminUser.upsert({
     where: { phone: normalizedPhone },
     update: { name, pinHash, role, active: true, moduleAccess },
@@ -91,6 +94,22 @@ async function main() {
 
   // Nunca loga telefone/PIN — só o suficiente para confirmar que salvou.
   console.log('Admin user salvo com sucesso:', { id: user.id, name: user.name, role: user.role, active: user.active, moduleAccess: user.moduleAccess });
+
+  // "Alteração segura e auditada" — rodar este script fora do painel (ex.:
+  // promover Anderson a SUPER_ADMIN) ainda precisa deixar rastro pro
+  // proprietário revisar depois. Auto-atribuído (adminUserId = o próprio
+  // registro afetado): não existe uma sessão de operador neste contexto de
+  // bootstrap, e só quem já tem acesso direto ao banco roda este script.
+  await writeAdminAuditEvent(prisma, {
+    adminUserId: user.id,
+    adminUserName: user.name,
+    action: 'ADMIN_SEED_APPLIED',
+    entityType: 'AdminUser',
+    entityId: user.id,
+    before: before ? { role: before.role, moduleAccess: before.moduleAccess, active: before.active } : null,
+    after: { role: user.role, moduleAccess: user.moduleAccess, active: user.active },
+    detail: { source: 'seed-admin.ts' },
+  });
 }
 
 main()
