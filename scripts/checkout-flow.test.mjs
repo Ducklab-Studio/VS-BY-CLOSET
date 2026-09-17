@@ -176,3 +176,61 @@ test('reservation confirmation never mutates Shopify inventory or captures/refun
   assert.match(webhook, /case 'orders\/paid'/);
   assert.doesNotMatch(webhook, /mutation\s+\w*(?:inventory|refund|paymentCapture|orderEdit)/i);
 });
+
+// ---------------------------------------------------------------------------
+// Valle Pass — produto separado do fluxo de aluguel (sem calendário, sem
+// disponibilidade, sem HOLD; só a compra normal via checkout da Shopify).
+// ---------------------------------------------------------------------------
+
+function loadValePassProduct(env = {}) {
+  return load('apps/marketing/src/lib/vale-pass-product.ts', {
+    process: { env: { NEXT_PUBLIC_VALE_PASS_PRODUCT_ID: undefined, NEXT_PUBLIC_VALE_PASS_VARIANT_ID: undefined, ...env } },
+    require: () => ({ storeUrl: (path) => `https://loja-teste.myshopify.com${path}` }),
+  });
+}
+
+const REAL_PRODUCT_ID = '8723909804132';
+const REAL_VARIANT_ID = '49174518595684';
+
+test('1) Valle Pass é identificado tanto por ID numérico quanto por GID da Shopify', () => {
+  const { isValePassProduct } = loadValePassProduct();
+  assert.equal(isValePassProduct({ productId: REAL_PRODUCT_ID }), true);
+  assert.equal(isValePassProduct({ productId: `gid://shopify/Product/${REAL_PRODUCT_ID}` }), true);
+  assert.equal(isValePassProduct({ variantId: REAL_VARIANT_ID }), true);
+  assert.equal(isValePassProduct({ variantId: `gid://shopify/ProductVariant/${REAL_VARIANT_ID}` }), true);
+});
+
+test('1) a página da peça só renderiza ValePassPresentation (nunca RentalCalendar) quando o produto é o Valle Pass', () => {
+  const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
+  assert.match(page, /isValePassProduct\(\{\s*productId:\s*product\.id,\s*variantId:\s*variant\?\.id\s*\}\)/);
+  assert.match(page, /isValePass\s*\?\s*\(\s*<ValePassPresentation/);
+});
+
+test('2) a apresentação do Valle Pass nunca chama HOLD, disponibilidade ou reserva', () => {
+  const source = read('apps/marketing/src/components/ValePassPresentation.tsx');
+  assert.doesNotMatch(source, /createHold|fetchAvailability|addRentalToCart|RentalCalendar|NEXT_PUBLIC_HOLDS_URL|NEXT_PUBLIC_AVAILABILITY_URL|'use client'/);
+  assert.doesNotMatch(source, /\bfetch\s*\(/);
+});
+
+test('3) produto de aluguel comum continua mostrando o calendário', () => {
+  const { isValePassProduct } = loadValePassProduct();
+  assert.equal(isValePassProduct({ productId: 'gid://shopify/Product/1111111111', variantId: 'gid://shopify/ProductVariant/2222222222' }), false);
+
+  const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
+  assert.match(page, /\)\s*:\s*\(\s*<RentalCalendar/);
+});
+
+test('4) o checkout do Valle Pass continua funcionando — link direto pro carrinho oficial da Shopify', () => {
+  const { valePassCheckoutHref } = loadValePassProduct();
+  assert.equal(valePassCheckoutHref(REAL_VARIANT_ID), `https://loja-teste.myshopify.com/cart/${REAL_VARIANT_ID}:1`);
+  assert.equal(
+    valePassCheckoutHref(`gid://shopify/ProductVariant/${REAL_VARIANT_ID}`, 2),
+    `https://loja-teste.myshopify.com/cart/${REAL_VARIANT_ID}:2`,
+  );
+});
+
+test('Valle Pass: IDs de configuração por env (numérico ou GID) sobrepõem o default', () => {
+  const { isValePassProduct } = loadValePassProduct({ NEXT_PUBLIC_VALE_PASS_PRODUCT_ID: 'gid://shopify/Product/9999999999' });
+  assert.equal(isValePassProduct({ productId: '9999999999' }), true);
+  assert.equal(isValePassProduct({ productId: REAL_PRODUCT_ID }), false);
+});
