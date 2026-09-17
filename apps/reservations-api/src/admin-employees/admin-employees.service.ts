@@ -34,9 +34,13 @@ export class AdminEmployeesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(): Promise<EmployeeListItem[]> {
+  /** `includeRemoved` — item do pedido: "A lista padrão deve mostrar
+   *  apenas funcionários ativos... funcionários removidos devem ficar
+   *  ocultos da lista principal". Filtro opcional (nunca o padrão) pra
+   *  quem precisa consultar ou restaurar alguém removido. */
+  async list(includeRemoved = false): Promise<EmployeeListItem[]> {
     const rows = await this.prisma.adminUser.findMany({
-      where: { role: { not: 'SUPER_ADMIN' } },
+      where: { role: { not: 'SUPER_ADMIN' }, ...(includeRemoved ? {} : { removedAt: null }) },
       orderBy: { createdAt: 'asc' },
     });
     return rows.map(toListItem);
@@ -110,6 +114,35 @@ export class AdminEmployeesService {
       entityId: id,
       before: { active: true },
       after: { active: false, removedAt: updated.removedAt },
+    });
+
+    return toListItem(updated);
+  }
+
+  /** "Mostrar removidos... para consultar ou restaurar alguém" — desfaz
+   *  um remove() anterior: limpa removedAt/removedBy e volta a permitir
+   *  login (o PIN/telefone cadastrados continuam os mesmos, nunca
+   *  resetados aqui). Nunca cria registro novo — sempre o mesmo id. */
+  async restore(id: string, actorId: string, actorName: string): Promise<EmployeeListItem> {
+    const target = await this.requireEmployee(id);
+    if (!target.removedAt) throw new BadRequestException('Funcionário não está removido.');
+
+    let updated;
+    try {
+      updated = await this.prisma.adminUser.update({ where: { id }, data: { active: true, removedAt: null, removedBy: null } });
+    } catch (err) {
+      this.logger.error(`Falha ao restaurar funcionário ${id}: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível restaurar o funcionário no momento.');
+    }
+
+    await writeAdminAuditEvent(this.prisma, {
+      adminUserId: actorId,
+      adminUserName: actorName,
+      action: 'EMPLOYEE_RESTORED',
+      entityType: 'AdminUser',
+      entityId: id,
+      before: { active: false, removedAt: target.removedAt },
+      after: { active: true, removedAt: null },
     });
 
     return toListItem(updated);
