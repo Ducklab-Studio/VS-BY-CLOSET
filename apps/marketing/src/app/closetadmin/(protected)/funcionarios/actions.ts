@@ -5,8 +5,10 @@ import { requireAdminRole, requireAdminSession, type AdminModuleName } from '@/l
 import {
   blockEmployee,
   createEmployee,
+  listEmployees,
   reactivateEmployee,
   removeEmployee,
+  restoreEmployee,
   updateEmployeePermissions,
   type CreateEmployeeInput,
   type EmployeeListItem,
@@ -73,6 +75,34 @@ export async function removeEmployeeAction(id: string): Promise<{ error: string 
     await removeEmployee(id, session.id);
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível remover o funcionário.' };
+  }
+  revalidateEmployeesPath();
+  return { error: null };
+}
+
+/** "Mostrar removidos" — usado pra atualizar a lista sem recarregar a
+ *  página (o cliente chama de novo depois de qualquer ação, respeitando
+ *  se o filtro está ligado ou não). */
+export async function listEmployeesAction(includeRemoved: boolean): Promise<{ employees: EmployeeListItem[] | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+
+  try {
+    const employees = await listEmployees(session.id, includeRemoved);
+    return { employees, error: null };
+  } catch (err) {
+    return { employees: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os funcionários.' };
+  }
+}
+
+export async function restoreEmployeeAction(id: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+
+  try {
+    await restoreEmployee(id, session.id);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível restaurar o funcionário.' };
   }
   revalidateEmployeesPath();
   return { error: null };

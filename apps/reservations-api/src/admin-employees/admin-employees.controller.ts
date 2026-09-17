@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -23,8 +23,8 @@ export class AdminEmployeesController {
   constructor(private readonly employees: AdminEmployeesService) {}
 
   @Get()
-  list(): Promise<EmployeeListItem[]> {
-    return this.employees.list();
+  list(@Query('includeRemoved') includeRemoved?: string): Promise<EmployeeListItem[]> {
+    return this.employees.list(includeRemoved === 'true');
   }
 
   @Post()
@@ -45,6 +45,11 @@ export class AdminEmployeesController {
   @Post(':id/remove')
   remove(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.remove(id, req.adminUser!.id, req.adminUser!.name);
+  }
+
+  @Post(':id/restore')
+  restore(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+    return this.employees.restore(id, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Put(':id/permissions')

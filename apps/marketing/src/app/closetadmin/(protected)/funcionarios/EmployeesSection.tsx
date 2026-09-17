@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Ban, Plus, RotateCcw, ShieldCheck, Trash2, UserPlus, Wrench } from 'lucide-react';
+import { Ban, Eye, Plus, RotateCcw, ShieldCheck, Trash2, UserPlus, Wrench } from 'lucide-react';
 import type { AdminModuleName } from '@/lib/admin-permissions';
 import type { EmployeeListItem } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
@@ -11,8 +10,10 @@ import { EmptyState } from '@/components/closetadmin/ui';
 import {
   blockEmployeeAction,
   createEmployeeAction,
+  listEmployeesAction,
   reactivateEmployeeAction,
   removeEmployeeAction,
+  restoreEmployeeAction,
   updateEmployeePermissionsAction,
 } from './actions';
 
@@ -30,16 +31,61 @@ const MODULES: { value: AdminModuleName; label: string }[] = [
 
 const ROLE_LABELS: Record<string, string> = { SUPER_ADMIN: 'Proprietário', ADMIN: 'Administrador', STAFF: 'Equipe' };
 
-export function EmployeesSection({ employees }: { employees: EmployeeListItem[] }) {
+/**
+ * "A lista padrão deve mostrar apenas funcionários ativos... Adicione,
+ * somente para SUPER_ADMIN, um filtro opcional 'Mostrar removidos'" —
+ * como esta tela inteira já é exclusiva de SUPER_ADMIN (page.tsx),
+ * mostrar o filtro aqui não precisa de checagem extra de papel.
+ *
+ * `employees` vem do servidor já filtrado (sem removidos, por padrão).
+ * Depois de montado, toda leitura/ação passa a vir de
+ * `listEmployeesAction`/as próprias ações — nunca `router.refresh()`:
+ * assim a lista atualiza sozinha (sem recarregar a página) e sempre
+ * respeita o estado atual do filtro "Mostrar removidos".
+ */
+export function EmployeesSection({ employees: initialEmployees }: { employees: EmployeeListItem[] }) {
+  const [employees, setEmployees] = useState(initialEmployees);
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  async function refresh(includeRemoved: boolean) {
+    const { employees: fresh, error } = await listEmployeesAction(includeRemoved);
+    if (error || !fresh) {
+      setRefreshError(error ?? 'Não foi possível atualizar a lista.');
+      return;
+    }
+    setRefreshError(null);
+    setEmployees(fresh);
+  }
+
+  async function handleToggleShowRemoved(checked: boolean) {
+    setShowRemoved(checked);
+    await refresh(checked);
+  }
+
+  const visibleEmployees = showRemoved ? employees : employees.filter((e) => !e.removedAt);
+
   return (
     <div className="space-y-4">
-      <CreateEmployeeForm />
-      {employees.length === 0 ? (
-        <EmptyState title="Nenhum funcionário cadastrado ainda" description="Use o formulário acima para criar o primeiro acesso." />
+      <CreateEmployeeForm onCreated={() => refresh(showRemoved)} />
+
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs font-medium text-ink/60 dark:text-dark-muted">
+        <input type="checkbox" checked={showRemoved} onChange={(event) => handleToggleShowRemoved(event.target.checked)} className="rounded border-ink/20 dark:border-white/20" />
+        <Eye size={14} />
+        Mostrar removidos
+      </label>
+
+      {refreshError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{refreshError}</p> : null}
+
+      {visibleEmployees.length === 0 ? (
+        <EmptyState
+          title={showRemoved ? 'Nenhum funcionário encontrado' : 'Nenhum funcionário ativo cadastrado ainda'}
+          description={showRemoved ? undefined : 'Use o formulário acima para criar o primeiro acesso.'}
+        />
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
-          {employees.map((employee) => (
-            <EmployeeCard key={employee.id} employee={employee} />
+          {visibleEmployees.map((employee) => (
+            <EmployeeCard key={employee.id} employee={employee} onChanged={() => refresh(showRemoved)} />
           ))}
         </div>
       )}
@@ -47,8 +93,7 @@ export function EmployeesSection({ employees }: { employees: EmployeeListItem[] 
   );
 }
 
-function CreateEmployeeForm() {
-  const router = useRouter();
+function CreateEmployeeForm({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
@@ -88,7 +133,7 @@ function CreateEmployeeForm() {
     setPin('');
     setRole('STAFF');
     setModuleAccess([]);
-    router.refresh();
+    onCreated();
   }
 
   return (
@@ -167,8 +212,7 @@ function CreateEmployeeForm() {
   );
 }
 
-function EmployeeCard({ employee }: { employee: EmployeeListItem }) {
-  const router = useRouter();
+function EmployeeCard({ employee, onChanged }: { employee: EmployeeListItem; onChanged: () => void }) {
   const [moduleAccess, setModuleAccess] = useState<AdminModuleName[]>([...employee.moduleAccess]);
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,7 +233,7 @@ function EmployeeCard({ employee }: { employee: EmployeeListItem }) {
       setError(saveError);
       return;
     }
-    router.refresh();
+    onChanged();
   }
 
   async function runAction(action: () => Promise<{ error: string | null }>) {
@@ -199,7 +243,7 @@ function EmployeeCard({ employee }: { employee: EmployeeListItem }) {
       setError(actionError);
       throw new Error(actionError);
     }
-    router.refresh();
+    onChanged();
   }
 
   return (
@@ -295,12 +339,24 @@ function EmployeeCard({ employee }: { employee: EmployeeListItem }) {
               </button>
             }
             title={`Remover ${employee.name}?`}
-            description="O acesso é encerrado permanentemente (sessões ativas são revogadas). O histórico de auditoria dele nunca é apagado — só o login deixa de existir."
+            description="O acesso é encerrado imediatamente (sessões ativas são revogadas) e ele some da lista principal. Nada é apagado — o registro e a auditoria continuam guardados, e dá pra restaurar depois em 'Mostrar removidos'."
             confirmLabel="Remover"
             danger
             onConfirm={() => runAction(() => removeEmployeeAction(employee.id))}
           />
-        ) : null}
+        ) : (
+          <ConfirmDialog
+            trigger={
+              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-emerald-500 transition hover:bg-emerald-500/10">
+                <RotateCcw size={13} /> Restaurar
+              </button>
+            }
+            title={`Restaurar ${employee.name}?`}
+            description="Ele volta a aparecer na lista principal e a poder fazer login com o telefone e o PIN já cadastrados."
+            confirmLabel="Restaurar"
+            onConfirm={() => runAction(() => restoreEmployeeAction(employee.id))}
+          />
+        )}
       </div>
 
       {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}

@@ -285,8 +285,9 @@ export interface EmployeeListItem {
   readonly createdAt: string;
 }
 
-export function listEmployees(adminUserId: string): Promise<EmployeeListItem[]> {
-  return adminGet('/admin/employees', adminUserId);
+/** `includeRemoved` — "Mostrar removidos", opcional, nunca o padrão. */
+export function listEmployees(adminUserId: string, includeRemoved = false): Promise<EmployeeListItem[]> {
+  return adminGet(`/admin/employees${includeRemoved ? '?includeRemoved=true' : ''}`, adminUserId);
 }
 
 export interface CreateEmployeeInput {
@@ -311,6 +312,10 @@ export function reactivateEmployee(id: string, adminUserId: string): Promise<Emp
 
 export function removeEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
   return adminPost(`/admin/employees/${id}/remove`, { adminUserId });
+}
+
+export function restoreEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
+  return adminPost(`/admin/employees/${id}/restore`, { adminUserId });
 }
 
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
