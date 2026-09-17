@@ -9,8 +9,8 @@ export const metadata: Metadata = { title: 'Valle Pass' };
 
 /**
  * Valle Pass — produto TOTALMENTE separado do fluxo de aluguel:
- * vale-presente/crédito de compra vendido pelo checkout oficial da
- * Shopify (Mercado Pago já configurado). Nunca exige data de
+ * vale-presente/crédito de compra vendido pelo checkout oficial já
+ * configurado na loja Shopify. Nunca exige data de
  * retirada/devolução, disponibilidade ou HOLD — continua vendável
  * mesmo com agendamentos de aluguel bloqueados, porque esta tela (e o
  * backend por trás dela) nunca lê RentalUnit/Reservation.
