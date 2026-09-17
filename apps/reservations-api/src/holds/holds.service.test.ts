@@ -61,6 +61,11 @@ function pickupSafe(date: CivilDate): CivilDate {
   return d;
 }
 
+// `daysFromToday` precisa ser >= CFG.minAdvanceDays (15) sempre que o
+// teste espera sucesso — `pickupSafe` só ADICIONA dias, nunca subtrai,
+// então qualquer offset >= minAdvanceDays garante a antecedência mínima
+// não importa quanto `pickupSafe` precise empurrar pra escapar do
+// blackout de temporada. Todos os offsets deste arquivo já são >= 20.
 function futurePickup(daysFromToday: number): CivilDate {
   return pickupSafe(addDays(engineToday(CFG), daysFromToday));
 }
@@ -185,7 +190,12 @@ describe('HoldsService — integração real (Neon)', () => {
   });
 
   test('capacidade insuficiente: 1 unidade livre, pede 2 → 409, nada é gravado', async () => {
-    const pickup = futurePickup(22);
+    // pickupWithoutSundayReturn (não futurePickup puro) — achado real:
+    // sem garantir que a devolução calculada evite domingo, este pickup
+    // ocasionalmente caía no cenário de "devolução em domingo — exceção
+    // precisa de escolha explícita" (422), mascarando o teste de
+    // capacidade (409) que era a intenção original.
+    const pickup = pickupWithoutSundayReturn(2, 22);
     await expect(
       service.createHold({
         items: [{ shopifyVariantId: VARIANT_CAPACITY, quantity: 2 }],
