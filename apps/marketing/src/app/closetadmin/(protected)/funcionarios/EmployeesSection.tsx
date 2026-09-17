@@ -28,6 +28,7 @@ const MODULES: { value: AdminModuleName; label: string }[] = [
   { value: 'RULES', label: 'Regras' },
   { value: 'REPORTS', label: 'Relatórios' },
   { value: 'AUDIT', label: 'Auditoria' },
+  { value: 'VALLE_PASS', label: 'Valle Pass' },
 ];
 
 const ROLE_LABELS: Record<string, string> = { SUPER_ADMIN: 'Proprietário', ADMIN: 'Administrador', STAFF: 'Equipe' };

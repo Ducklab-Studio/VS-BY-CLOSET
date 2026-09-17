@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from './webhooks.service';
+import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
 
 /**
  * Itens 20/21 da Fase 7 — "erro de banco durante o processamento" e "o
@@ -21,7 +22,7 @@ function fakePrismaThatThrows(err: Error) {
 describe('WebhooksService — erro de banco durante o processamento', () => {
   test('20) erro inesperado → propaga como ServiceUnavailableException (503), Shopify vai reentregar', async () => {
     const prisma = fakePrismaThatThrows(new Error('connection terminated unexpectedly'));
-    const service = new WebhooksService(prisma);
+    const service = new WebhooksService(prisma, new ValePassWebhookService());
 
     await expect(service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: 'wh-fault-1', payload: { id: 1 } })).rejects.toMatchObject({
       status: 503,
@@ -30,7 +31,7 @@ describe('WebhooksService — erro de banco durante o processamento', () => {
 
   test('21) evento tratado como falha (best-effort) registra status=failed, não "processed"', async () => {
     const prisma = fakePrismaThatThrows(new Error('db down'));
-    const service = new WebhooksService(prisma);
+    const service = new WebhooksService(prisma, new ValePassWebhookService());
 
     await expect(service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: 'wh-fault-2', payload: { id: 2 } })).rejects.toThrow();
 
@@ -43,7 +44,7 @@ describe('WebhooksService — erro de banco durante o processamento', () => {
       $transaction: vi.fn().mockRejectedValue(new Error('original failure')),
       webhookEvent: { createMany: vi.fn().mockRejectedValue(new Error('audit write also failed')) },
     } as unknown as PrismaService;
-    const service = new WebhooksService(prisma);
+    const service = new WebhooksService(prisma, new ValePassWebhookService());
 
     await expect(service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: 'wh-fault-3', payload: { id: 3 } })).rejects.toMatchObject({
       status: 503,

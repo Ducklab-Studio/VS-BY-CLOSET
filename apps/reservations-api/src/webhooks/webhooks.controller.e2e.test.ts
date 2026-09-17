@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
+import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
 
 /**
  * Item 3 da Fase 7 — "Teste explicitamente: assinatura correta;
@@ -35,7 +36,7 @@ const originalDomain = process.env.SHOPIFY_STORE_DOMAIN;
 const originalCurrency = process.env.SHOPIFY_STORE_CURRENCY;
 
 const prisma = new PrismaService();
-const controller = new WebhooksController(new WebhooksService(prisma));
+const controller = new WebhooksController(new WebhooksService(prisma, new ValePassWebhookService()));
 
 let server: Server;
 let baseUrl: string;

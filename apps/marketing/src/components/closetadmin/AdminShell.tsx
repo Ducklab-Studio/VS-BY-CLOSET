@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, Users, X } from 'lucide-react';
+import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, Ticket, Users, X } from 'lucide-react';
 import { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUser } from '@/lib/admin-permissions';
 import { logoutAction } from '@/app/closetadmin/actions';
 import { AdminThemeToggle } from './AdminThemeToggle';
@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/closetadmin/pecas', label: 'Peças', icon: Shirt, module: 'PIECES' },
   { href: '/closetadmin/regras', label: 'Regras e bloqueios', icon: Scale, module: 'RULES' },
   { href: '/closetadmin/auditoria', label: 'Auditoria', icon: ShieldCheck, module: 'AUDIT' },
+  { href: '/closetadmin/valle-pass', label: 'Valle Pass', icon: Ticket, module: 'VALLE_PASS' },
   { href: '/closetadmin/funcionarios', label: 'Funcionários', icon: Users, superAdminOnly: true },
 ];
 

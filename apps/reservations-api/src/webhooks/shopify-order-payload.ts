@@ -36,6 +36,10 @@ interface ShopifyContactContainer {
 export interface ShopifyOrderPayload {
   readonly id: number | string;
   readonly admin_graphql_api_id: string;
+  /// Número legível do pedido (ex.: "#1002") — confirmado contra
+  /// shopify.dev. Usado só pra EXIBIÇÃO no ClosetAdmin (Valle Pass),
+  /// nunca pra correlação/lógica.
+  readonly name?: string;
   readonly financial_status?: string;
   readonly cancelled_at?: string | null;
   readonly cancel_reason?: string | null;

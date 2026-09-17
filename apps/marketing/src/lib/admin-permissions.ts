@@ -8,7 +8,7 @@
  * nunca no typecheck nem no lint, que não seguem essa regra do Next).
  */
 
-export type AdminModuleName = 'RESERVATIONS' | 'CALENDAR' | 'PIECES' | 'RULES' | 'REPORTS' | 'AUDIT';
+export type AdminModuleName = 'RESERVATIONS' | 'CALENDAR' | 'PIECES' | 'RULES' | 'REPORTS' | 'AUDIT' | 'VALLE_PASS';
 
 export interface AdminSessionUser {
   readonly id: string;

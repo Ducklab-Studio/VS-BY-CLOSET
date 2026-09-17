@@ -1,6 +1,7 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { resolveReservationBindingSecret } from '../checkout/checkout.config';
 import { canonicalItemsFingerprint, verifyReservationSignature } from '../reservation-binding';
@@ -41,7 +42,10 @@ import {
 export class WebhooksService {
   private readonly logger = new Logger(WebhooksService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly valePass: ValePassWebhookService,
+  ) {}
 
   async handleIncoming(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
     try {
@@ -127,8 +131,25 @@ export class WebhooksService {
   private async dispatch(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<DispatchResult> {
     switch (topic) {
       case 'orders/create':
-      case 'orders/paid':
-        return this.handleOrderPaidOrCreated(tx, payload as ShopifyOrderPayload, topic);
+      case 'orders/paid': {
+        const order = payload as ShopifyOrderPayload;
+        const reservationResult = await this.handleOrderPaidOrCreated(tx, order, topic);
+        // Valle Pass — produto totalmente separado do fluxo de aluguel
+        // (ver ValePassWebhookService). Passo ADICIONAL, nunca
+        // substitui o resultado acima: um pedido sem reserva já cai em
+        // `ignored` no branch de cima, exatamente como sempre caiu;
+        // isto só soma vales emitidos (se houver) ao mesmo log de
+        // eventos. Só dispara em `orders/paid` já pago — nunca em
+        // `orders/create`, pra nunca emitir código resgatável antes da
+        // confirmação de pagamento.
+        if (topic === 'orders/paid' && order.financial_status === 'paid') {
+          const valePassEvents = await this.valePass.handleOrderPaid(tx, order);
+          if (valePassEvents.length > 0) {
+            return { ...reservationResult, status: 'processed', events: [...reservationResult.events, ...valePassEvents] };
+          }
+        }
+        return reservationResult;
+      }
       case 'orders/cancelled':
         return this.handleOrderCancelled(tx, payload as ShopifyOrderPayload);
       case 'refunds/create':
@@ -437,16 +458,23 @@ export class WebhooksService {
     const orderId = String(order.id);
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/cancelled', orderId } }];
 
+    // Valle Pass — independente do fluxo de reserva abaixo (produto
+    // totalmente separado). Cancela qualquer vale ATIVO deste pedido;
+    // no-op se não houver nenhum.
+    const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled');
+    events.push(...valePassEvents);
+    const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
+
     let reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
     if (!reservation && extractReservationId(order)) {
       const linked = await this.handleOrderPaidOrCreated(tx, order, 'orders/cancelled');
       reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
-      if (!reservation) return linked;
+      if (!reservation) return { ...linked, status: valePassStatus ?? linked.status, events: [...linked.events, ...valePassEvents] };
       events.push(...linked.events);
     }
     if (!reservation) {
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
-      return { status: 'ignored', orderId, events };
+      return { status: valePassStatus ?? 'ignored', orderId, events };
     }
 
     events.push({ type: 'ORDER_CANCELLED', reservationId: reservation.id, detail: { orderId, cancelReason: order.cancel_reason ?? null } });
@@ -502,10 +530,16 @@ export class WebhooksService {
     const orderId = String(refund.order_id);
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'refunds/create', orderId } }];
 
+    // Valle Pass — independente do fluxo de reserva abaixo. Cancela
+    // qualquer vale ATIVO deste pedido; no-op se não houver nenhum.
+    const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'refunds/create');
+    events.push(...valePassEvents);
+    const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
+
     const reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
     if (!reservation) {
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
-      return { status: 'ignored', orderId, events };
+      return { status: valePassStatus ?? 'ignored', orderId, events };
     }
 
     // Só o valor, nunca o objeto de transação inteiro (pode carregar

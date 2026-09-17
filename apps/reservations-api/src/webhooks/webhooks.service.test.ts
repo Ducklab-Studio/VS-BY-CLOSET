@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from './webhooks.service';
+import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
 import { resolveReservationBindingSecret } from '../checkout/checkout.config';
 import { canonicalItemsFingerprint, computeReservationSignature, generateReservationBindingId } from '../reservation-binding';
 import { civilDateToISO, addDays, type CivilDate } from '../rental-rules/civil-date';
@@ -29,7 +30,7 @@ process.env.RESERVATION_BINDING_SECRET ??= 'test-reservation-binding-secret-webh
  * correlação NÃO bater.
  */
 const prisma = new PrismaService();
-const service = new WebhooksService(prisma);
+const service = new WebhooksService(prisma, new ValePassWebhookService());
 const PREFIX = `WH-${Date.now()}`;
 let unitCounter = 0;
 let orderCounter = 1_000_000;
@@ -575,6 +576,37 @@ describe('WebhooksService — cancelamento', () => {
 
     const other = await prisma.reservation.findUniqueOrThrow({ where: { id: otherFixture.reservationId } });
     expect(other.status).toBe('confirmed'); // a reserva que tomou o horário continua intacta
+  });
+
+  test('reprodução do incidente real (staging, 15-16/09): pedido nunca pago (financial_status "pending") cancelado pelo cliente, chegando pra reserva já expirada AINDA NÃO vinculada → vincula e fica "expired", nunca "problem"', async () => {
+    // Achado investigando 2 reservas presas em "problem" em produção: o
+    // pedido tinha assinatura/binding/linhas corretos (a correlação
+    // funcionou perfeitamente — nunca foi bug de HMAC, GID, item ou
+    // valor) e nunca chegou a ser pago (financial_status "pending", por
+    // isso jamais confirmaria automaticamente mesmo sem o bug). O
+    // problema real: reservation.shopifyOrderId ainda era null quando o
+    // orders/cancelled chegou — handleOrderCancelled vincula primeiro
+    // (via handleOrderPaidOrCreated) e SÓ DEPOIS lê `from`. As duas
+    // reservas reais ficaram presas porque essa entrega aconteceu ANTES
+    // da correção "reserva já expirada" (webhooks.service.ts) ir pra
+    // produção — este teste cobre especificamente esse caminho
+    // "vincula-e-cancela" combinado com reserva expirada, que os testes
+    // anteriores (linha 555) não cobriam (lá a reserva já chegava
+    // vinculada).
+    const unit = await createUnit();
+    const fixture = await createReservation([unit], 'expired', 125);
+    const orderId = nextOrderId();
+
+    const res = await service.handleIncoming({
+      topic: 'orders/cancelled',
+      shopifyWebhookId: nextWebhookId(),
+      payload: signedOrderPayload(fixture, { id: orderId, financial_status: 'pending', cancel_reason: 'other' }),
+    });
+    expect(res.outcome).toBe('processed');
+
+    const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: fixture.reservationId } });
+    expect(reservation.shopifyOrderId).toBe(String(orderId)); // vinculou o pedido normalmente
+    expect(reservation.status).toBe('expired'); // nunca virou 'problem' nem 'confirmed'
   });
 });
 
