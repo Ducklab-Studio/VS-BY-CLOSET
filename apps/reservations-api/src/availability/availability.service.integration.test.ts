@@ -42,10 +42,10 @@ const VARIANT_OVERLAP = `avail-test-overlap-${SUFFIX}`;
 
 /**
  * Primeiro dia, a partir de hoje + N dias, que NÃO cai na temporada
- * bloqueada (jun-set) — nunca chuta uma data absoluta. Necessário porque
- * a data de "hoje" desta sessão (03/09/2026) está ELA MESMA dentro do
- * bloqueio de temporada; qualquer offset pequeno a partir de hoje
- * também cairia lá dentro sem este ajuste.
+ * bloqueada (jun-set) — nunca chuta uma data absoluta, porque "hoje"
+ * pode estar dentro do próprio bloqueio dependendo de quando a suíte
+ * roda; qualquer offset pequeno a partir de hoje também cairia lá dentro
+ * sem este ajuste.
  */
 /**
  * Empurra a data até ela ser uma retirada normalmente válida: fora da
@@ -61,6 +61,23 @@ function pickupSafe(date: CivilDate): CivilDate {
   return d;
 }
 
+/**
+ * `daysFromToday` precisa ser >= CFG.minAdvanceDays (15) sempre que o
+ * teste espera "bookable" — não é um detalhe de estilo, é matemático:
+ * `pickupSafe` abaixo só ADICIONA dias (nunca subtrai), então qualquer
+ * offset >= minAdvanceDays garante `diffDays(resultado, hoje) >=
+ * minAdvanceDays` não importa quanto `pickupSafe` precise empurrar pra
+ * escapar do blackout de temporada. Achado real: um teste usava
+ * `futurePickup(10)` (< 15) e só "passava" quando "hoje" caía bem no
+ * início do blackout (jun-set), porque aí `pickupSafe` empurrava a data
+ * adiante o bastante por acidente — com a passagem real dos dias, "hoje"
+ * se aproximou do FIM do blackout, o empurrão deixou de ser suficiente,
+ * e o teste passou a falhar sem nenhuma mudança de código. A correção é
+ * o offset em si, não fixar o relógio: `AvailabilityService` sempre usa
+ * `new Date()` real (correto, nunca deve mudar), então fixar só aqui
+ * quebraria a consistência entre o que o teste pede e o que o serviço
+ * avalia.
+ */
 function futurePickup(daysFromToday: number): CivilDate {
   return pickupSafe(addDays(engineToday(CFG), daysFromToday));
 }
@@ -148,7 +165,7 @@ async function cleanup() {
 
 describe('AvailabilityService — integração real (Neon)', () => {
   test('unidade totalmente livre → bookable, quantityAvailable=1', async () => {
-    const pickup = futurePickup(10);
+    const pickup = futurePickup(20); // ver comentário de futurePickup acima — >= minAdvanceDays sempre
     const res = await service.getAvailability({
       shopifyVariantId: VARIANT_FREE,
       countedPieces: 1,
