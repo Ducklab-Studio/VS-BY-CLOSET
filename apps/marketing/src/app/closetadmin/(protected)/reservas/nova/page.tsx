@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { requireAdminSession } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listPieces } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader } from '@/components/closetadmin/ui';
@@ -9,6 +9,7 @@ export const metadata: Metadata = { title: 'Nova reserva manual' };
 
 export default async function ClosetAdminNewReservationPage() {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
 
   let pieces: Awaited<ReturnType<typeof listPieces>> | null = null;
   let errorMessage: string | null = null;
@@ -25,7 +26,7 @@ export default async function ClosetAdminNewReservationPage() {
   return (
     <div>
       <PageHeader title="Nova reserva manual" description="Cliente → Datas → Peças → Validação → Resumo → Confirmar" />
-      <ManualReservationWizard pieces={pieces} canOverrideSeason={session.role === 'ADMIN'} />
+      <ManualReservationWizard pieces={pieces} canOverrideSeason={hasAdminRole(session, 'ADMIN')} />
     </div>
   );
 }

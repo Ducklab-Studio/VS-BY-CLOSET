@@ -82,6 +82,10 @@ export function adminPatch<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+export function adminPut<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+}
+
 /**
  * Fase 10 — PDF vem como bytes crus (`application/pdf`), não JSON. Não
  * reaproveita `request()` (que sempre faz `res.json()`) — mesmo padrão

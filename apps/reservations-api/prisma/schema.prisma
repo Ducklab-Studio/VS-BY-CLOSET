@@ -82,10 +82,30 @@ enum WebhookStatus {
 /// Fase 9 — papel do funcionário no ClosetAdmin. RBAC sempre validado
 /// server-side (guard), nunca por esconder botão no frontend.
 enum AdminRole {
+  /// Proprietário — único, acima de ADMIN. Gerencia funcionários
+  /// (criar/autorizar/bloquear/reativar/remover) e permissões por
+  /// módulo; ignora `moduleAccess` (acesso total sempre); único papel
+  /// que enxerga a auditoria privada (ações críticas + do
+  /// proprietário/perfil técnico).
+  SUPER_ADMIN
   ADMIN
   STAFF
 
   @@map("admin_role")
+}
+
+/// Sistema de autorização de funcionários — permissões por módulo
+/// operacional. SUPER_ADMIN nunca consulta isto (acesso total by
+/// design); controla só ADMIN/STAFF ("funcionários").
+enum AdminModule {
+  RESERVATIONS
+  CALENDAR
+  PIECES
+  RULES
+  REPORTS
+  AUDIT
+
+  @@map("admin_module")
 }
 
 /// Fase 9 — login simples (nome + telefone + PIN). Nome NUNCA é fator de
@@ -101,6 +121,24 @@ model AdminUser {
   active    Boolean   @default(true)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Marca o perfil técnico (identificado pelo id real da conta, nunca
+  /// por nome/telefone hardcoded em código). Acesso normal ao painel
+  /// (mesmos módulos de um ADMIN), mas login/logout não são auditados e
+  /// suas ações somem da auditoria visível a funcionários — só o
+  /// SUPER_ADMIN as vê (writeAdminAuditEvent computa `isPrivileged`
+  /// automaticamente a partir deste campo).
+  isTechnical Boolean @default(false) @map("is_technical")
+  /// Vazio por padrão — SUPER_ADMIN precisa conceder módulo por módulo
+  /// ao criar um funcionário. Ignorado inteiramente para SUPER_ADMIN
+  /// (sempre acesso total) e para isTechnical=true (idem).
+  moduleAccess AdminModule[] @default([]) @map("module_access")
+  /// "Remover funcionário" nunca é DELETE — preserva a referência em
+  /// auditoria/reservas manuais já registradas. Distinto de "bloquear"
+  /// (active=false, sempre reversível): removido também fica
+  /// active=false, mas carrega quando/por quem foi removido.
+  removedAt DateTime? @map("removed_at") @db.Timestamptz(6)
+  removedBy String?   @map("removed_by") @db.Uuid
 
   sessions           AdminSession[]
   auditEvents        AdminAuditEvent[]
@@ -151,11 +189,22 @@ model AdminAuditEvent {
   detail        Json?
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// Computados automaticamente em writeAdminAuditEvent — nunca passados
+  /// por quem chama. `isCritical`: a ação é alteração/cancelamento/
+  /// permissões/exclusão (lista fixa em admin-audit.ts). `isPrivileged`:
+  /// o autor era SUPER_ADMIN ou isTechnical=true NO MOMENTO da ação.
+  /// Controlam só VISIBILIDADE pra funcionários (AdminAuditService) —
+  /// nunca escondem nem apagam a linha em si; SUPER_ADMIN sempre vê tudo.
+  isCritical    Boolean  @default(false) @map("is_critical")
+  isPrivileged  Boolean  @default(false) @map("is_privileged")
+
   adminUser AdminUser? @relation(fields: [adminUserId], references: [id])
 
   @@index([adminUserId])
   @@index([action])
   @@index([createdAt])
+  @@index([isPrivileged])
+  @@index([isCritical])
   @@map("admin_audit_events")
 }
 

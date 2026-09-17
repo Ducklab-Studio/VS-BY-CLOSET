@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
+import { RequireModule } from '../admin/require-module.decorator';
 import { AdminRulesService } from './rules.service';
 import { UpdateRulesDto } from './dto/update-rules.dto';
 
@@ -11,6 +12,7 @@ interface RequestWithAdminUser {
 
 @Controller('admin/rules')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
+@RequireModule('RULES')
 export class AdminRulesController {
   constructor(private readonly rules: AdminRulesService) {}
 

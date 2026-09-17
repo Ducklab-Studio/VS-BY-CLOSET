@@ -1,10 +1,12 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
+import { RequireModule } from '../admin/require-module.decorator';
 import { AdminCalendarService, type CalendarItem } from './calendar.service';
 
 @Controller('admin/calendar')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
+@RequireModule('CALENDAR')
 export class AdminCalendarController {
   constructor(private readonly calendar: AdminCalendarService) {}
 

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
+import { RequireModule } from '../admin/require-module.decorator';
 import {
   AdminReservationsService,
   type ManualReservationCancelResponse,
@@ -23,6 +24,7 @@ export class AdminReservationsController {
 
   @Post('manual')
   @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.CREATED)
   createManual(
     @Body() dto: CreateManualReservationDto,
@@ -34,6 +36,7 @@ export class AdminReservationsController {
 
   @Post(':id/cancel')
   @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
   cancel(@Param('id') id: string, @Body() dto: CancelManualReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ManualReservationCancelResponse> {
     return this.adminReservations.cancelManual(id, { ...dto, adminUserId: request.adminUser.id, adminUserName: request.adminUser.name });
@@ -41,6 +44,7 @@ export class AdminReservationsController {
 
   @Get()
   @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
   list(@Query() query: Record<string, string | undefined>): Promise<ReservationListItem[]> {
     const filters: ReservationListFilters = {
       status: query.status || undefined,
@@ -59,6 +63,7 @@ export class AdminReservationsController {
 
   @Get(':id')
   @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
   detail(@Param('id') id: string): Promise<ReservationDetailResponse> {
     return this.adminReservations.getReservationDetail(id);
   }

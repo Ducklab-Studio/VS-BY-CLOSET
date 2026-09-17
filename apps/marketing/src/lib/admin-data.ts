@@ -1,6 +1,7 @@
 import 'server-only';
 
-import { adminGet, adminPatch, adminPost } from './admin-api';
+import { adminGet, adminPatch, adminPost, adminPut } from './admin-api';
+import type { AdminModuleName } from './admin-session';
 
 /** Fase 9 — tipos e chamadas ao reservations-api usadas pelas páginas
  *  Server Component do ClosetAdmin. Espelham exatamente as respostas do
@@ -267,4 +268,51 @@ export function executeArchive(
 
 export function restoreReservation(id: string, adminUserId: string, adminUserName: string): Promise<{ reservationId: string; status: string }> {
   return adminPost(`/admin/reservations-archive/${id}/restore`, { adminUserId, adminUserName });
+}
+
+/** Sistema de autorização de funcionários — exclusivo de SUPER_ADMIN no
+ *  backend (ver AdminEmployeesController). Nunca inclui PIN/hash na
+ *  resposta. */
+export interface EmployeeListItem {
+  readonly id: string;
+  readonly name: string;
+  readonly phone: string;
+  readonly role: 'SUPER_ADMIN' | 'ADMIN' | 'STAFF';
+  readonly active: boolean;
+  readonly isTechnical: boolean;
+  readonly moduleAccess: readonly AdminModuleName[];
+  readonly removedAt: string | null;
+  readonly createdAt: string;
+}
+
+export function listEmployees(adminUserId: string): Promise<EmployeeListItem[]> {
+  return adminGet('/admin/employees', adminUserId);
+}
+
+export interface CreateEmployeeInput {
+  name: string;
+  phone: string;
+  pin: string;
+  role: 'ADMIN' | 'STAFF';
+  moduleAccess: AdminModuleName[];
+}
+
+export function createEmployee(input: CreateEmployeeInput, adminUserId: string): Promise<EmployeeListItem> {
+  return adminPost('/admin/employees', { ...input, adminUserId });
+}
+
+export function blockEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
+  return adminPost(`/admin/employees/${id}/block`, { adminUserId });
+}
+
+export function reactivateEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
+  return adminPost(`/admin/employees/${id}/reactivate`, { adminUserId });
+}
+
+export function removeEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
+  return adminPost(`/admin/employees/${id}/remove`, { adminUserId });
+}
+
+export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
+  return adminPut(`/admin/employees/${id}/permissions`, { moduleAccess, adminUserId });
 }

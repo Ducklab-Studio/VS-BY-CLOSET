@@ -11,7 +11,9 @@ const SESSION_TTL_HOURS = 12;
 export interface AdminUserPublic {
   readonly id: string;
   readonly name: string;
-  readonly role: 'ADMIN' | 'STAFF';
+  readonly role: 'SUPER_ADMIN' | 'ADMIN' | 'STAFF';
+  readonly isTechnical: boolean;
+  readonly moduleAccess: readonly string[];
 }
 
 export interface LoginResponse {
@@ -80,9 +82,18 @@ export class AdminAuthService {
       throw new ServiceUnavailableException('Não foi possível autenticar no momento.');
     }
 
-    await writeAdminAuditEvent(this.prisma, { adminUserId: user.id, adminUserName: user.name, action: 'LOGIN', detail: { result: 'success' } });
+    // Perfil técnico: acesso comum (login incluso) não é auditado — só
+    // ações críticas continuam registradas (writeAdminAuditEvent marca
+    // isPrivileged nelas, visível só ao SUPER_ADMIN). Ver AdminUser.isTechnical.
+    if (!user.isTechnical) {
+      await writeAdminAuditEvent(this.prisma, { adminUserId: user.id, adminUserName: user.name, action: 'LOGIN', detail: { result: 'success' } });
+    }
 
-    return { token, expiresAt: expiresAt.toISOString(), adminUser: { id: user.id, name: user.name, role: user.role } };
+    return {
+      token,
+      expiresAt: expiresAt.toISOString(),
+      adminUser: { id: user.id, name: user.name, role: user.role, isTechnical: user.isTechnical, moduleAccess: user.moduleAccess },
+    };
   }
 
   async validateSession(token: string): Promise<AdminUserPublic> {
@@ -99,7 +110,13 @@ export class AdminAuthService {
       throw new UnauthorizedException('Sessão inválida ou expirada.');
     }
 
-    return { id: session.adminUser.id, name: session.adminUser.name, role: session.adminUser.role };
+    return {
+      id: session.adminUser.id,
+      name: session.adminUser.name,
+      role: session.adminUser.role,
+      isTechnical: session.adminUser.isTechnical,
+      moduleAccess: session.adminUser.moduleAccess,
+    };
   }
 
   async logout(token: string): Promise<void> {
@@ -117,7 +134,9 @@ export class AdminAuthService {
 
     if (session) {
       const user = await this.prisma.adminUser.findUnique({ where: { id: session.adminUserId } });
-      await writeAdminAuditEvent(this.prisma, { adminUserId: session.adminUserId, adminUserName: user?.name ?? null, action: 'LOGOUT' });
+      if (!user?.isTechnical) {
+        await writeAdminAuditEvent(this.prisma, { adminUserId: session.adminUserId, adminUserName: user?.name ?? null, action: 'LOGOUT' });
+      }
     }
   }
 

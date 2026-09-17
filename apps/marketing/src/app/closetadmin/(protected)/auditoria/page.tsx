@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listAudit } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { EmptyState, ErrorState, PageHeader } from '@/components/closetadmin/ui';
@@ -25,7 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
 
 export default async function ClosetAdminAuditPage() {
   const session = await requireAdminSession();
-  requireAdminRole(session, 'ADMIN');
+  requireAdminModule(session, 'AUDIT');
 
   let entries: Awaited<ReturnType<typeof listAudit>> | null = null;
   let errorMessage: string | null = null;
@@ -44,7 +44,7 @@ export default async function ClosetAdminAuditPage() {
       <PageHeader
         title="Auditoria"
         description={`${entries.length} evento(s) mais recentes`}
-        action={<ClearAuditButton disabled={entries.length === 0} />}
+        action={hasAdminRole(session, 'SUPER_ADMIN') ? <ClearAuditButton disabled={entries.length === 0} /> : null}
       />
 
       {entries.length === 0 ? (

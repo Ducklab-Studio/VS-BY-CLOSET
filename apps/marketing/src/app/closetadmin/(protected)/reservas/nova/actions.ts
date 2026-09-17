@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { requireAdminSession } from '@/lib/admin-session';
+import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { createManualReservation, type CreateManualReservationInput } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
@@ -36,8 +36,9 @@ export async function createManualReservationAction(
   input: Omit<CreateManualReservationInput, 'adminUserId' | 'adminUserName'>,
 ): Promise<CreateManualResult> {
   const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
 
-  if (input.overrides?.outsideOnlineSeason === true && session.role !== 'ADMIN') {
+  if (input.overrides?.outsideOnlineSeason === true && !hasAdminRole(session, 'ADMIN')) {
     return { ok: false, error: 'Exceção de temporada é exclusiva de usuário ADMIN.' };
   }
 
