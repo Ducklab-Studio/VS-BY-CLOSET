@@ -33,7 +33,10 @@ function resolveKnownValePassVariantId(): string {
   const match = raw.match(/(\d+)\s*$/);
   return match ? match[1] : raw;
 }
-const KNOWN_VALE_PASS_VARIANT_ID = resolveKnownValePassVariantId();
+// Exportado para scripts/backfill-vale-pass-voucher.ts reusar a MESMA
+// resolução (nunca duplicar o "qual é a variante real do Valle Pass" em
+// dois lugares que podem divergir).
+export const KNOWN_VALE_PASS_VARIANT_ID = resolveKnownValePassVariantId();
 
 /**
  * Valle Pass é um produto TOTALMENTE separado do fluxo de aluguel —
