@@ -22,7 +22,12 @@ const service = new WebhooksService(prisma, new ValePassWebhookService());
 // string alfanumérica, ver shopify-order-payload.ts) usado só pra
 // limpeza (nome da campanha) e pra webhookId.
 const SUFFIX = Date.now();
-let orderCounter = 2_000_000;
+// Incorpora SUFFIX (não só um número fixo) — achado real testando o
+// item 10 abaixo: orderId sozinho, sem isso, colide com sobras de
+// OUTRA execução de teste contra o mesmo banco (o contador sempre
+// reiniciava em 2_000_000), fazendo uma busca por orderId bruto achar
+// uma linha de um pedido de teste completamente diferente.
+let orderCounter = 2_000_000_000 + (SUFFIX % 1_000_000);
 let variantCounter = 9_000_000 + (SUFFIX % 1_000_000);
 let webhookIdCounter = 0;
 
@@ -134,6 +139,64 @@ describe('ValePassWebhookService — via WebhooksService.handleIncoming (integra
     expect(result.outcome).toBe('ignored');
     const vouchers = await prisma.valePass.findMany({ where: { shopifyOrderId: String(order.id) } });
     expect(vouchers).toHaveLength(0);
+  });
+
+  /**
+   * Achado real de produção (pedido #1002, pago, 15/09):
+   * a variante REAL do Valle Pass ficou comprável na Shopify dois dias
+   * ANTES de qualquer ValePassCampaign existir no banco — o pagamento
+   * caiu neste exato branch (variante conhecida, zero campanhas) e
+   * ficou sem nenhum rastro pra revisão manual. Estes testes travam o
+   * comportamento corrigido sem nunca criar vale sem campanha.
+   */
+  describe('pedido pago da variante conhecida do Valle Pass sem nenhuma campanha cadastrada', () => {
+    const REAL_VALE_PASS_VARIANT_ID = '49174518595684'; // mesmo default hardcoded em vale-pass-webhook.service.ts
+
+    test('10) variante conhecida sem campanha → processed (não ignored), evento VALE_PASS_ORDER_WITHOUT_CAMPAIGN, nenhum vale criado', async () => {
+      const order = orderPayload({ variantId: REAL_VALE_PASS_VARIANT_ID });
+      const webhookId = nextWebhookId();
+      const result = await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: webhookId, payload: order });
+
+      // Diferença central do fix: NÃO fica indistinguível de um pedido
+      // de aluguel comum (que também cairia em "ignored").
+      expect(result.outcome).toBe('processed');
+
+      const vouchers = await prisma.valePass.findMany({ where: { shopifyOrderId: String(order.id) } });
+      expect(vouchers).toHaveLength(0);
+
+      const webhookEvent = await prisma.webhookEvent.findUnique({ where: { shopifyWebhookId: webhookId } });
+      expect(webhookEvent?.status).toBe('processed');
+      expect(webhookEvent?.orderId).toBe(String(order.id));
+
+      const event = await prisma.reservationEvent.findFirst({
+        where: { webhookEventId: webhookEvent!.id, type: 'VALE_PASS_ORDER_WITHOUT_CAMPAIGN' },
+      });
+      expect(event).not.toBeNull();
+      expect((event!.detail as Record<string, unknown>).orderId).toBe(String(order.id));
+    }, 15_000);
+
+    test('11) assim que a campanha é criada e o MESMO pedido é reentregue → idempotência do WebhooksService bloqueia reprocessamento (nunca cria vale retroativo sozinho)', async () => {
+      const webhookId = nextWebhookId();
+      const order = orderPayload({ variantId: REAL_VALE_PASS_VARIANT_ID });
+
+      const first = await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: webhookId, payload: order });
+      expect(first.outcome).toBe('processed');
+
+      // Campanha criada DEPOIS do pagamento — exatamente a sequência
+      // real que causou o problema em produção.
+      const campaign = await prisma.valePassCampaign.create({
+        data: { name: `Campanha VP-WH-${SUFFIX}-retro`, amountCents: 35000, validityDays: 30, shopifyVariantId: REAL_VALE_PASS_VARIANT_ID, active: true },
+      });
+
+      // Mesmo shopifyWebhookId reentregue (retry da Shopify, ou reenvio manual) → duplicate, nunca reprocessa.
+      const second = await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: webhookId, payload: order });
+      expect(second.outcome).toBe('duplicate');
+
+      const vouchers = await prisma.valePass.findMany({ where: { shopifyOrderId: String(order.id) } });
+      expect(vouchers).toHaveLength(0); // nenhum vale surgiu sozinho — precisa de ação manual, nunca automática
+
+      await prisma.$executeRaw`DELETE FROM vale_pass_campaigns WHERE id = ${campaign.id}::uuid`;
+    }, 15_000);
   });
 
   test('4) orders/create (não pago) NUNCA emite vale — só orders/paid com financial_status=paid', async () => {
