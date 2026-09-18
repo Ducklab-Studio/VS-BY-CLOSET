@@ -10,7 +10,7 @@ import { ReservationPdfService } from './reservation-pdf.service';
 import { PeriodReportPdfService } from './period-report-pdf.service';
 import { OperationalReportPdfService } from './operational-report-pdf.service';
 import { type CivilDate, addDays, civilDateToISO, isSunday } from '../rental-rules/civil-date';
-import { calculateReturnDate, isOnlineReservationAllowed, today as engineToday } from '../rental-rules/rental-engine';
+import { calculateReturnDate, durationForPieces, isOnlineReservationAllowed, today as engineToday } from '../rental-rules/rental-engine';
 import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
 import type { CreateManualReservationDto } from '../admin-reservations/dto/create-manual-reservation.dto';
 
@@ -153,6 +153,13 @@ describe('PDF administrativo — integração real (Neon)', () => {
     await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { blackoutStart: '01-01', blackoutEnd: '01-01' } });
     try {
       const today = engineToday(CFG);
+      // Achado real (mesma classe do PR #23): a devolução calculada pode
+      // cair num domingo dependendo de que dia da semana "hoje" realmente
+      // é quando a suíte roda — nunca muda o pickup (o teste PRECISA ser
+      // retirada HOJE, é isso que ele verifica), só passa a opção de
+      // domingo quando o motor de fato exigir.
+      const engineDurationDays = durationForPieces(1, CFG);
+      const needsSundayChoice = isSunday(calculateReturnDate(today, engineDurationDays));
       const res = await reservations.createManual({
         customerName: 'Cliente Operacional',
         customerPhone: '+56 9 9999 8888',
@@ -160,6 +167,7 @@ describe('PDF administrativo — integração real (Neon)', () => {
         pickupDate: civilDateToISO(today),
         overrides: { minLeadTime: true },
         overrideReason: 'Teste operacional Fase 10',
+        ...(needsSundayChoice ? { sundayReturnOption: 'saturday' as const } : {}),
       } as CreateManualReservationDto);
       expect(res.status).toBe('confirmed');
 
