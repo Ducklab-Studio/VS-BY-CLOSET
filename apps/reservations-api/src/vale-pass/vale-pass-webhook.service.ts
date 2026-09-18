@@ -15,6 +15,27 @@ interface EventInput {
 }
 
 /**
+ * Achado real de produção (pedido #1002, pago, 15/09): a variante REAL
+ * do Valle Pass já estava comprável na Shopify dois dias antes de
+ * qualquer `ValePassCampaign` existir no banco — o pedido pago caiu no
+ * "sem campanha = no-op silencioso" de
+ * baixo, indistinguível de 100% dos pedidos de aluguel normais (que
+ * também não têm nenhuma linha batendo com nenhuma campanha). O
+ * pagamento ficou sem NENHUM rastro para revisão manual.
+ *
+ * Mesmo ID hardcoded como default no frontend
+ * (apps/marketing/src/lib/vale-pass-product.ts) — é o MESMO produto
+ * real, só configurável por variável de ambiente aqui também, pelo
+ * mesmo motivo (pode mudar sem precisar de rebuild).
+ */
+function resolveKnownValePassVariantId(): string {
+  const raw = process.env.VALE_PASS_VARIANT_ID?.trim() || '49174518595684';
+  const match = raw.match(/(\d+)\s*$/);
+  return match ? match[1] : raw;
+}
+const KNOWN_VALE_PASS_VARIANT_ID = resolveKnownValePassVariantId();
+
+/**
  * Valle Pass é um produto TOTALMENTE separado do fluxo de aluguel —
  * este service nunca lê/grava RentalUnit, Reservation, disponibilidade
  * ou HOLD, e é chamado pelo WebhooksService como um passo ADICIONAL
@@ -51,9 +72,23 @@ export class ValePassWebhookService {
 
     const variantIds = [...new Set(lines.map((l) => l.variantId))];
     const campaigns = await tx.valePassCampaign.findMany({ where: { shopifyVariantId: { in: variantIds } } });
-    if (campaigns.length === 0) return [];
-
     const orderId = String(order.id);
+
+    if (campaigns.length === 0) {
+      // Pedido PAGO cuja variante bate com o Valle Pass conhecido, mas
+      // nenhuma campanha existe pra ela agora — sinaliza pra revisão
+      // manual em vez de desaparecer sem rastro (ver comentário de
+      // KNOWN_VALE_PASS_VARIANT_ID acima). Nunca cria vale aqui: só
+      // torna o caso visível, quem decide é uma pessoa.
+      if (variantIds.includes(KNOWN_VALE_PASS_VARIANT_ID)) {
+        this.logger.error(`Pedido ${orderId} pago com a variante conhecida do Valle Pass (${KNOWN_VALE_PASS_VARIANT_ID}), mas nenhuma ValePassCampaign existe para ela — nenhum vale foi emitido.`);
+        return [{
+          type: 'VALE_PASS_ORDER_WITHOUT_CAMPAIGN',
+          detail: { orderId, variantId: KNOWN_VALE_PASS_VARIANT_ID, reason: 'pedido pago da variante do Valle Pass sem nenhuma campanha cadastrada — revisão manual necessária, nenhum vale foi criado automaticamente' },
+        }];
+      }
+      return [];
+    }
 
     // Idempotência (defesa em profundidade — o lock por orderId do
     // WebhooksService já serializa reentregas, mas nunca custa checar):
