@@ -489,7 +489,7 @@ function derivePickupDate(lines: CartLine[]): string | null {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
+      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu closet,<br /><em>peça por peça.</em></h1>
       {children}
     </div>
   );

@@ -5,7 +5,7 @@ import { ArrowUpRight, Plus } from 'lucide-react';
 export const metadata: Metadata = {
   title: 'Perguntas frequentes (FAQ)',
   description:
-    'Dúvidas sobre aluguel de roupa de neve no Chile: prazos, tamanhos, higienização, caução e pagamento.',
+    'Dúvidas sobre reservar peças da VS by Closet no Chile: prazos, tamanhos, higienização, caução e pagamento.',
 };
 
 const faqs = [
