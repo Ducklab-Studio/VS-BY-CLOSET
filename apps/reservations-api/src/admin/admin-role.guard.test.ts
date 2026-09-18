@@ -47,12 +47,15 @@ function contextWith(input: {
   query?: Record<string, unknown>;
   body?: Record<string, unknown>;
   requiredRole?: AdminRole;
+  requiredRoleOnClass?: boolean;
   requiredModule?: AdminModule;
   requiredModuleOnClass?: boolean;
 }): ExecutionContext {
   const handler = () => undefined;
   class FakeController {}
-  if (input.requiredRole) Reflect.defineMetadata(REQUIRE_ROLE_KEY, input.requiredRole, handler);
+  if (input.requiredRole) {
+    Reflect.defineMetadata(REQUIRE_ROLE_KEY, input.requiredRole, input.requiredRoleOnClass ? FakeController : handler);
+  }
   if (input.requiredModule) {
     Reflect.defineMetadata(REQUIRE_MODULE_KEY, input.requiredModule, input.requiredModuleOnClass ? FakeController : handler);
   }
@@ -112,6 +115,29 @@ describe('AdminRoleGuard — RBAC (integração real, Neon)', () => {
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
     const request = ctx.switchToHttp().getRequest<{ adminUser?: { id: string; role: string } }>();
     expect(request.adminUser).toEqual({ id: user.id, name: 'Guard Teste', role: 'STAFF', active: true, isTechnical: false, moduleAccess: [] });
+  });
+
+  /**
+   * Achado real de auditoria: `@RequireRole` declarado no CONTROLLER era
+   * ignorado — o guard só lia a metadata do handler, e `SetMetadata` na
+   * classe grava na classe. Medido contra a API de verdade antes do fix:
+   * um STAFF chamou POST /admin/employees (controller marcado
+   * SUPER_ADMIN) e recebeu 201, criando um funcionário ADMIN. O módulo
+   * já tinha fallback de classe; o papel não. Estes dois testes travam
+   * os dois lados da resolução.
+   */
+  test('5a) papel exigido na CLASSE vale igual ao do handler — STAFF é recusado', async () => {
+    const user = await createUser('STAFF');
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: user.id }, requiredRole: 'SUPER_ADMIN', requiredRoleOnClass: true })),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  test('5b) papel na CLASSE satisfeito pelo usuário certo → permitido', async () => {
+    const user = await createUser('ADMIN');
+    await expect(
+      guard.canActivate(contextWith({ query: { adminUserId: user.id }, requiredRole: 'ADMIN', requiredRoleOnClass: true })),
+    ).resolves.toBe(true);
   });
 
   test('5) STAFF ativo tentando rota @RequireRole("ADMIN") → ForbiddenException (nunca escala role)', async () => {

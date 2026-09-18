@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { allowedOrigins, isOriginAllowed } from './cors-origins';
@@ -11,9 +12,18 @@ async function bootstrap() {
   // parseado/reserializado. O Nest continua populando `req.body`
   // normalmente pra todo o resto da API — isto só ADICIONA `req.rawBody`
   // (Buffer), não muda nada pras rotas existentes.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
   app.use(helmet());
+
+  // Railway/Vercel põem um proxy na frente: sem isto o Express reporta o
+  // IP do proxy pra TODO request, e o ThrottlerGuard (app.module.ts)
+  // vira um balde único global — medido de verdade: esgotado o limite
+  // por um cliente, outro IP tomava 429 na primeira tentativa. Na
+  // prática isso derrubava cliente da vitrine e webhook da Shopify por
+  // causa de tráfego alheio. `1` = confia só no proxy imediato (o da
+  // plataforma), nunca numa cadeia de X-Forwarded-For arbitrária.
+  app.set('trust proxy', 1);
 
   const staticOrigins = allowedOrigins();
   app.enableCors({
