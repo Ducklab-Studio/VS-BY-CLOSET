@@ -1,7 +1,10 @@
 import { ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 
 const EMPLOYEE_ROLES = ['ADMIN', 'STAFF'] as const;
-const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT'] as const;
+// Espelha o enum AdminModule do schema.prisma — VALLE_PASS faltava aqui
+// e no update, então o módulo era impossível de conceder: a API recusava
+// com 400 e só SUPER_ADMIN (que ignora moduleAccess) enxergava a área.
+const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT', 'VALLE_PASS'] as const;
 
 /** Nunca 'SUPER_ADMIN' aqui — o proprietário não se cria por este
  *  endpoint (ver seed-admin.ts, rodado uma vez por quem já tem acesso

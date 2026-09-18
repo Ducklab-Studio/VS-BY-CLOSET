@@ -51,7 +51,16 @@ export class AdminRoleGuard implements CanActivate {
       throw new UnauthorizedException('Usuário administrativo inválido ou inativo.');
     }
 
-    const requiredRole = this.reflector.get<AdminRole | undefined>(REQUIRE_ROLE_KEY, context.getHandler());
+    // Handler primeiro, classe como fallback — MESMA resolução do módulo
+    // logo abaixo. Sem o fallback de classe, `@RequireRole` declarado no
+    // controller (admin-employees, blocks, reservation-archive) era
+    // silenciosamente ignorado: `reflector.get` no handler devolve
+    // undefined pra metadata que o SetMetadata gravou na classe, e o
+    // guard seguia sem checar papel nenhum — um STAFF chegava a criar
+    // funcionário ADMIN. Handler continua vencendo quando declara o seu.
+    const requiredRole =
+      this.reflector.get<AdminRole | undefined>(REQUIRE_ROLE_KEY, context.getHandler()) ??
+      this.reflector.get<AdminRole | undefined>(REQUIRE_ROLE_KEY, context.getClass());
     if (requiredRole && !satisfiesRole(adminUser.role, requiredRole)) {
       throw new ForbiddenException(`Esta ação exige o papel ${requiredRole}.`);
     }

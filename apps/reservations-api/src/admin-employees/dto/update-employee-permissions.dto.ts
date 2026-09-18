@@ -1,6 +1,7 @@
 import { ArrayUnique, IsArray, IsIn, IsOptional, IsUUID } from 'class-validator';
 
-const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT'] as const;
+// Mesma lista de create-employee.dto.ts — espelha o enum AdminModule.
+const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT', 'VALLE_PASS'] as const;
 
 export class UpdateEmployeePermissionsDto {
   // Mesmo motivo de CreateEmployeeDto.adminUserId — AdminRoleGuard lê
