@@ -3,42 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-
-/**
- * Origens que podem chamar esta API a partir do navegador do cliente.
- *
- * Não usa `*`: essa API vai, na Fase 5, criar HOLD e mexer em reserva —
- * um `Access-Control-Allow-Origin: *` deixaria QUALQUER site do mundo
- * fazer essas chamadas usando a sessão do navegador de um cliente
- * (o header CORS não é autenticação, mas é a primeira camada; não faz
- * sentido abrir mão dela sem necessidade).
- *
- * Vem de variável de ambiente — nunca hardcoded — porque muda por
- * ambiente (localhost em dev, o domínio da Vercel em produção) e porque
- * trocar de domínio não pode exigir rebuild do código.
- */
-function allowedOrigins(): string[] {
-  const raw = process.env.CORS_ALLOWED_ORIGINS ?? '';
-  const origins = raw
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean);
-
-  if (origins.length === 0) {
-    // Falha alto em produção — API sem CORS configurado bloquearia o
-    // site de verdade silenciosamente, e o sintoma (erro de CORS no
-    // navegador do cliente) é péssimo de diagnosticar à distância. Em
-    // dev, sem a variável setada, cai pro localhost padrão do Next.
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(
-        'CORS_ALLOWED_ORIGINS não configurada. Defina os domínios permitidos (separados por vírgula) antes de subir em produção.',
-      );
-    }
-    return ['http://localhost:3000'];
-  }
-
-  return origins;
-}
+import { allowedOrigins, isOriginAllowed } from './cors-origins';
 
 async function bootstrap() {
   // rawBody: true — item 3 da Fase 7, OBRIGATÓRIO pro webhook Shopify:
@@ -50,8 +15,18 @@ async function bootstrap() {
 
   app.use(helmet());
 
+  const staticOrigins = allowedOrigins();
   app.enableCors({
-    origin: allowedOrigins(),
+    origin(origin, callback) {
+      // Sem header Origin = chamada server-to-server (curl, healthcheck,
+      // webhook da Shopify) — CORS é uma restrição do navegador, não se
+      // aplica aqui.
+      if (!origin || isOriginAllowed(origin, staticOrigins)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origem não permitida por CORS.'));
+    },
     methods: ['GET', 'POST'],
   });
 
