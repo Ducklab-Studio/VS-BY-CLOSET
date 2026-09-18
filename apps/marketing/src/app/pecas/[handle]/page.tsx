@@ -91,6 +91,10 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   // não existe.
   const variant = product.variants[0];
   const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
+  // Foto principal separada do resto: no mobile (sem coluna dupla), a
+  // ordem no DOM vira a ordem visual — sem isso, quem entra pelo celular
+  // rolava a galeria inteira antes de ver preço e o botão de reservar.
+  const [primaryPhoto, ...restOfGallery] = gallery;
 
   // Valle Pass é vale-presente/crédito de compra — produto Shopify
   // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
@@ -107,27 +111,20 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
         <span className="text-ink/70">{product.title}</span>
       </nav>
 
-      <div className="grid gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-14">
-        {/* galeria */}
-        <div className="space-y-3">
-          {gallery.length > 0 ? (
-            gallery.map((img, i) => (
-              <div
-                key={img.url}
-                className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-ink/[0.04]"
-              >
-                <Image
-                  src={img.url}
-                  alt={img.altText ?? product.title}
-                  fill
-                  sizes="(min-width: 1024px) 55vw, 100vw"
-                  className="object-cover"
-                  // Só a primeira imagem é prioritária: é a única acima da
-                  // dobra. Marcar todas atrasaria justamente essa.
-                  priority={i === 0}
-                />
-              </div>
-            ))
+      <div className="product-detail-grid">
+        {/* foto principal */}
+        <div className="product-detail-primary">
+          {primaryPhoto ? (
+            <div className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-ink/[0.04]">
+              <Image
+                src={primaryPhoto.url}
+                alt={primaryPhoto.altText ?? product.title}
+                fill
+                sizes="(min-width: 1024px) 55vw, 100vw"
+                className="object-cover"
+                priority
+              />
+            </div>
           ) : (
             <div className="grid aspect-[3/4] place-items-center rounded-2xl bg-ink/[0.04] text-sm text-ink/65">
               Sem foto cadastrada
@@ -180,6 +177,26 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             </p>
           )}
         </div>
+
+        {/* resto da galeria — depois do painel de info no mobile, mesma coluna da foto principal no desktop */}
+        {restOfGallery.length > 0 && (
+          <div className="product-detail-gallery-rest space-y-3">
+            {restOfGallery.map((img) => (
+              <div
+                key={img.url}
+                className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-ink/[0.04]"
+              >
+                <Image
+                  src={img.url}
+                  alt={img.altText ?? product.title}
+                  fill
+                  sizes="(min-width: 1024px) 55vw, 100vw"
+                  className="object-cover"
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -27,8 +27,9 @@ body {
 .hero-copy .eyebrow { color: theme('colors.marsala.DEFAULT'); margin-bottom: 38px; }
 .hero-copy h1 { font-size: clamp(64px, 6.6vw, 110px); color: theme('colors.marsala.DEFAULT'); }
 .hero-description { margin: 28px 0; font-size: 17px; line-height: 1.7; color: #6a615a; }
-.editorial-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 30px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); padding: 19px 26px; font-size: 14px; transition: background .25s, transform .25s; }
-.editorial-button:hover { background: theme('colors.marsala.light'); transform: translateY(-3px); }
+.editorial-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 30px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); padding: 19px 26px; font-size: 14px; transition: background .25s, transform .25s, box-shadow .25s; }
+.editorial-button:hover { background: theme('colors.marsala.light'); transform: translateY(-3px); box-shadow: 0 14px 28px #53131e26; }
+.editorial-button:active { transform: translateY(-1px) scale(.985); box-shadow: 0 6px 14px #53131e22; transition-duration: .1s; }
 .editorial-button.light { background: theme('colors.cream'); color: theme('colors.marsala.DEFAULT'); }
 .hero-note { margin-top: 20px; font-size: 12px; color: #6a615a; }
 .hero-photo { position: relative; min-height: 610px; overflow: hidden; background: #c7ced0; }
@@ -80,7 +81,7 @@ body {
 .product-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 25px; }
 .product-editorial { display: block; min-width: 0; }
 .product-photo { position: relative; aspect-ratio: 3/4; background: #e7e1d8; overflow: hidden; transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .3s ease; }
-.product-photo img { object-fit: cover; transition: opacity .5s, transform .7s; }
+.product-photo img { object-fit: cover; transition: opacity .35s ease, transform .5s cubic-bezier(.22,.7,.24,1); }
 .product-secondary { opacity: 0; }
 .product-action { position: absolute; bottom: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; background: #fffcf6ed; padding: 12px; font-size: 13px; }
 .product-category { margin-top: 18px; color: #796b60; font-size: 12px; }
@@ -91,6 +92,8 @@ body {
 .collection-empty p { margin-bottom: 25px; }
 @media(hover:hover) { .product-editorial:hover .product-primary { transform: scale(1.055); } .product-editorial:hover .product-secondary { opacity: 1; transform: scale(1.055); } }
 .product-editorial:focus-visible .product-secondary { opacity: 1; }
+/* Tablet: nem os 4 apertados do desktop, nem os 2 largos do celular. */
+@media(min-width: 761px) and (max-width: 1099px) { .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media(max-width:760px) { .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 25px 14px; } .product-editorial h3 { font-size: 15px; } }
 .storefront-header .header-main { transition: padding .3s; }
 .storefront-header.is-scrolled .header-main { padding-top: 10px; padding-bottom: 10px; }
@@ -368,6 +371,17 @@ body {
 .product-detail-info { padding: 28px; background: #f5f0e8; border: 1px solid #53131e18; border-radius: 4px 28px 4px 4px; }
 .product-detail-info h1 { font: 400 clamp(32px, 3.5vw, 48px)/1.1 Georgia, serif; color: theme('colors.marsala.DEFAULT'); letter-spacing: -.035em; }
 .product-detail > nav { line-height: 1.8; }
+/* Foto principal, painel de info e resto da galeria em áreas nomeadas:
+   no mobile (uma coluna) a ordem visual é foto → info/CTA → mais fotos,
+   pra quem entra pelo celular não rolar a galeria inteira antes de ver
+   preço e conseguir reservar. No desktop, volta ao layout de duas
+   colunas de sempre (fotos à esquerda, info fixa à direita). */
+.product-detail-grid { display: grid; gap: 40px; grid-template-areas: "primary" "info" "gallery"; }
+.product-detail-primary { grid-area: primary; }
+.product-detail-gallery-rest { grid-area: gallery; }
+@media(min-width: 1024px) {
+  .product-detail-grid { grid-template-columns: 1.15fr 1fr; column-gap: 56px; row-gap: 40px; grid-template-areas: "primary info" "gallery info"; }
+}
 .cart-page, .reservation-status-page { margin-block: 40px; background: #f6f1e9; border: 1px solid #53131e1c; border-top: 3px solid theme('colors.marsala.DEFAULT'); border-radius: 4px; }
 .cart-page h1, .reservation-status-page h1 { font: 400 clamp(32px, 4vw, 45px)/1.12 Georgia, serif; letter-spacing: -.035em; color: theme('colors.marsala.DEFAULT'); margin-top: 20px; }
 .cart-page h1 em { font-weight: 400; }

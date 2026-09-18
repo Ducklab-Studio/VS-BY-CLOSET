@@ -7,9 +7,11 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
   const scope = useRef<HTMLDivElement>(null);
   useGSAP(() => {
     const mm = gsap.matchMedia();
+    let introTween: gsap.core.Tween | undefined;
+    let heroPhotoTween: gsap.core.Tween | undefined;
     mm.add('(prefers-reduced-motion: no-preference)', () => {
-      gsap.from('[data-intro]', { y: 32, opacity: 0, stagger: 0.11, duration: 1, ease: 'power3.out', clearProps: 'all' });
-      gsap.from('.hero-photo', { clipPath: 'inset(0 0 100% 0)', duration: 1.4, ease: 'power3.inOut', clearProps: 'clipPath' });
+      introTween = gsap.from('[data-intro]', { y: 32, opacity: 0, stagger: 0.11, duration: 1, ease: 'power3.out', clearProps: 'all' });
+      heroPhotoTween = gsap.from('.hero-photo', { clipPath: 'inset(0 0 100% 0)', duration: 1.4, ease: 'power3.inOut', clearProps: 'clipPath' });
       gsap.utils.toArray<HTMLElement>('[data-reveal]').forEach((item) => {
         gsap.from(item, { y: 35, opacity: 0, duration: 0.8, scrollTrigger: { trigger: item, start: 'top 93%', once: true }, clearProps: 'all' });
       });
@@ -21,7 +23,27 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
         .fromTo('.winter-image', { scale: 1.15 }, { scale: 1, duration: 1 })
         .fromTo('.winter-content h2', { y: 45 }, { y: -15, duration: 1 }, 0);
     });
-    return () => mm.revert();
+
+    /**
+     * Rede de segurança: se a aba perder foco/visibilidade durante a
+     * entrada (o navegador pode pausar o ticker do GSAP nesse caso), as
+     * tweens acima ficam presas num estado intermediário — texto do hero
+     * quase invisível, foto cortada por clip-path. Nunca pode ficar assim
+     * permanentemente. `kill()` primeiro: sem isso, se o ticker retomar
+     * mais tarde a tween original continua viva e volta a escrever por
+     * cima do estado final que o `clearProps` acabou de forçar. Se as
+     * tweens já tiverem terminado sozinhas, tudo isto é um no-op.
+     */
+    const safety = window.setTimeout(() => {
+      introTween?.kill();
+      heroPhotoTween?.kill();
+      gsap.set('[data-intro], .hero-photo', { clearProps: 'all' });
+    }, 2200);
+
+    return () => {
+      window.clearTimeout(safety);
+      mm.revert();
+    };
   }, { scope });
   return <div ref={scope} className="editorial-home">{children}</div>;
 }

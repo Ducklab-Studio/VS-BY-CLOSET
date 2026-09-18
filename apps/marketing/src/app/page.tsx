@@ -17,6 +17,15 @@ export default function HomePage() {
           <p data-intro className="hero-note">Alugue online. Retire ao chegar no Chile.</p>
         </div>
         <div className="hero-photo">
+          {/*
+            Ponto de entrada do futuro vídeo do hero: quando o arquivo
+            estiver disponível, troque a <Image> abaixo por um <video
+            autoPlay muted loop playsInline poster="/editorial/winter-campaign.webp"
+            className="campaign-image"><source src="/editorial/hero.mp4" type="video/mp4" /></video>.
+            A classe "campaign-image" já resolve object-fit/position — não
+            mexe em mais nada. Nenhuma mídia nova foi baixada ou trocada
+            agora; a imagem atual continua sendo usada até lá.
+          */}
           <Image src="/editorial/winter-campaign.webp" alt="Editorial de inverno: look claro em uma paisagem de montanhas nevadas" fill priority sizes="(max-width: 760px) 100vw, 58vw" className="campaign-image" />
           <div className="photo-caption"><span>THE WINTER EDIT</span><span>Estilo em qualquer altitude.</span></div>
           <span className="photo-credit">Imagem editorial ilustrativa</span>
