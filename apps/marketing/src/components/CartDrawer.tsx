@@ -172,7 +172,10 @@ export function CartDrawer() {
 
         <div className="drawer-items" aria-live="polite">
           {loading ? (
-            <p>Carregando suas peças…</p>
+            <p className="flex items-center gap-2.5 text-ink/60">
+              <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Carregando suas peças…
+            </p>
           ) : !cart?.lines.length ? (
             <div className="drawer-empty">
               <ShoppingBag size={40} strokeWidth={1} />

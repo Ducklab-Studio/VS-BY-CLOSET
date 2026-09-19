@@ -218,7 +218,14 @@ export default function CarrinhoPage() {
   }
 
   if (loading) {
-    return <Shell><p className="text-ink/50">Carregando…</p></Shell>;
+    return (
+      <Shell>
+        <p className="flex items-center gap-2.5 text-ink/50">
+          <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          Carregando…
+        </p>
+      </Shell>
+    );
   }
 
   if (!cart || cart.lines.length === 0) {

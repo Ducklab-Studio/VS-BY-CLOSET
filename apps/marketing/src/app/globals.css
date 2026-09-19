@@ -27,8 +27,9 @@ body {
 .hero-copy .eyebrow { color: theme('colors.marsala.DEFAULT'); margin-bottom: 38px; }
 .hero-copy h1 { font-size: clamp(64px, 6.6vw, 110px); color: theme('colors.marsala.DEFAULT'); }
 .hero-description { margin: 28px 0; font-size: 17px; line-height: 1.7; color: #6a615a; }
-.editorial-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 30px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); padding: 19px 26px; font-size: 14px; transition: background .25s, transform .25s; }
-.editorial-button:hover { background: theme('colors.marsala.light'); transform: translateY(-3px); }
+.editorial-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 30px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); padding: 19px 26px; font-size: 14px; transition: background .25s, transform .25s, box-shadow .25s; }
+.editorial-button:hover { background: theme('colors.marsala.light'); transform: translateY(-3px); box-shadow: 0 14px 28px #53131e26; }
+.editorial-button:active { transform: translateY(-1px) scale(.985); box-shadow: 0 6px 14px #53131e22; transition-duration: .1s; }
 .editorial-button.light { background: theme('colors.cream'); color: theme('colors.marsala.DEFAULT'); }
 .hero-note { margin-top: 20px; font-size: 12px; color: #6a615a; }
 .hero-photo { position: relative; min-height: 610px; overflow: hidden; background: #c7ced0; }
@@ -91,6 +92,8 @@ body {
 .collection-empty p { margin-bottom: 25px; }
 @media(hover:hover) { .product-editorial:hover .product-primary { transform: scale(1.055); } .product-editorial:hover .product-secondary { opacity: 1; transform: scale(1.055); } }
 .product-editorial:focus-visible .product-secondary { opacity: 1; }
+/* Tablet: nem os 4 apertados do desktop, nem os 2 largos do celular. */
+@media(min-width: 761px) and (max-width: 1099px) { .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media(max-width:760px) { .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 25px 14px; } .product-editorial h3 { font-size: 15px; } }
 .storefront-header .header-main { transition: padding .3s; }
 .storefront-header.is-scrolled .header-main { padding-top: 10px; padding-bottom: 10px; }
