@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
 import { addRentalToCart, countPiecesInCart, isCartConfigured } from '@/lib/cart';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
+import { RentalAction } from './RentalAction';
 
 /**
  * Calendário de aluguel.
@@ -226,9 +227,9 @@ export function RentalCalendar({
   }
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-cream p-5 sm:p-6">
+    <section id="rental-calendar" aria-labelledby="rental-calendar-title" className="rental-calendar rounded-2xl border border-ink/10 bg-cream p-5 sm:p-6">
       <header className="mb-5">
-        <h2 className="text-[0.95rem] font-semibold uppercase tracking-[0.14em] text-marsala">
+        <h2 id="rental-calendar-title" className="text-[0.95rem] font-semibold uppercase tracking-[0.14em] text-marsala">
           Escolha seu período
         </h2>
         <p className="mt-2 text-[0.8rem] leading-relaxed text-ink/55">
@@ -267,7 +268,8 @@ export function RentalCalendar({
 
       <div
         ref={gridRef}
-        role="grid"
+        role="group"
+        aria-busy={loading}
         aria-label="Calendário de datas de retirada"
         className="mt-1.5 grid min-h-[15rem] grid-cols-7 gap-1"
         onKeyDown={(e) => {
@@ -393,6 +395,7 @@ export function RentalCalendar({
 
       {error && <Status tone="error">{error}</Status>}
 
+      <RentalAction>
       <button
         type="button"
         onClick={handleSubmit}
@@ -402,6 +405,7 @@ export function RentalCalendar({
         {submitting && <Spinner light />}
         Alugar agora
       </button>
+      </RentalAction>
 
       {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
         <a
@@ -479,6 +483,7 @@ function DayCell({
     <button
       type="button"
       data-date={toISO(date)}
+      aria-pressed={isSelected}
       disabled={disabled}
       tabIndex={disabled ? -1 : 0}
       onClick={onSelect}

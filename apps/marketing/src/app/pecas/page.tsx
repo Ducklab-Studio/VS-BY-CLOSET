@@ -1,13 +1,11 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
+import { ProductCard } from '@/components/ProductCard';
 import Link from 'next/link';
 import {
   RENTAL_CATEGORIES,
   type CategorySlug,
-  formatPrice,
   isShopifyConfigured,
   listProducts,
-  productUrl,
 } from '@/lib/shopify';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { CategorySelect } from '@/components/CategorySelect';
@@ -71,7 +69,7 @@ export default async function PecasPage({
   }
 
   return (
-    <div className="catalog-editorial mx-auto max-w-6xl px-6 py-12 sm:py-16">
+    <div className="catalog-editorial catalog-container">
       <header className="catalog-heading mb-8">
         <p className="text-[0.7rem] uppercase tracking-[0.22em] text-ink/65">Aluguel</p>
         <h1 className="mt-2 font-heading text-3xl sm:text-4xl">Peças disponíveis</h1>
@@ -111,39 +109,9 @@ export default async function PecasPage({
             : 'Nenhuma peça cadastrada ainda.'}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3">
-          {products.map((product) => (
-            <Link key={product.id} href={productUrl(product.handle)} className="catalog-product group block">
-              <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-ink/[0.04]">
-                {product.featuredImage ? (
-                  <Image
-                    src={product.featuredImage.url}
-                    alt={product.featuredImage.altText ?? product.title}
-                    fill
-                    sizes="(min-width: 1024px) 30vw, 45vw"
-                    className="object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                  />
-                ) : (
-                  <div className="grid h-full place-items-center text-xs text-ink/35">
-                    Sem foto
-                  </div>
-                )}
-              </div>
-              {product.productType && (
-                <p className="mt-3 text-[0.65rem] uppercase tracking-wider text-ink/65">
-                  {product.productType}
-                </p>
-              )}
-              <h2 className="mt-0.5 text-sm font-medium transition-colors group-hover:text-marsala">
-                {product.title}
-              </h2>
-              <p className="mt-1 text-sm text-ink/60">
-                {formatPrice(
-                  product.priceRange.minVariantPrice.amount,
-                  product.priceRange.minVariantPrice.currencyCode,
-                )}
-              </p>
-            </Link>
+        <div className="catalog-grid">
+          {products.map((product, index) => (
+            <ProductCard key={product.id} product={product} catalog priority={index < 2} />
           ))}
         </div>
       )}
@@ -175,4 +143,3 @@ function CategoryPill({
     </Link>
   );
 }
-
