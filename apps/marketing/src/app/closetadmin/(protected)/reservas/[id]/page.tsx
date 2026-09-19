@@ -5,7 +5,7 @@ import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/adm
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
-import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge } from '@/components/closetadmin/ui';
+import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, reservationStatusLabel } from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
 import { RestoreButton } from './RestoreButton';
 
@@ -102,7 +102,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
                 <li key={item.rentalUnitId} className="py-2.5 text-sm">
                   <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
                   <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
-                    {formatDatePt(item.blockedFrom)} – {formatDatePt(item.blockedUntilExclusive)} · <span className="uppercase">{item.status}</span>
+                    {formatDatePt(item.blockedFrom)} – {formatDatePt(item.blockedUntilExclusive)} · {reservationStatusLabel(item.status)}
                   </p>
                 </li>
               ))}
