@@ -14,6 +14,18 @@ export function civilDateToISOToday(): string {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * 'AAAA-MM-DD' → 'DD/MM/AAAA' por corte de string, nunca via `new Date()`:
+ * uma data civil sem hora interpretada como UTC recua um dia em qualquer
+ * fuso negativo (America/Santiago, America/Sao_Paulo). Devolve a entrada
+ * intacta se não tiver o formato esperado.
+ */
+export function formatIsoDatePt(iso: string): string {
+  const [year, month, day] = iso.split('-');
+  if (!year || !month || !day) return iso;
+  return `${day}/${month}/${year}`;
+}
+
 export function isoAddDays(iso: string, days: number): string {
   const [y, m, d] = iso.split('-').map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
