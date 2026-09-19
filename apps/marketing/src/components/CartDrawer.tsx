@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { ProductImage } from '@/components/ProductImage';
 import { ArrowUpRight, Minus, Plus, ShoppingBag, X } from 'lucide-react';
 import {
   getCart,
@@ -159,7 +159,7 @@ export function CartDrawer() {
       >
         <div className="drawer-heading">
           <div>
-            <p className="eyebrow">Seu próximo inverno</p>
+            <p className="eyebrow">Seu closet, toda estação</p>
             <h2 id="cart-drawer-title">Seu closet de viagem</h2>
           </div>
           <button type="button" onClick={close} aria-label="Fechar carrinho" autoFocus>
@@ -172,12 +172,15 @@ export function CartDrawer() {
 
         <div className="drawer-items" aria-live="polite">
           {loading ? (
-            <p>Carregando suas peças…</p>
+            <p className="flex items-center gap-2.5 text-ink/60">
+              <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Carregando suas peças…
+            </p>
           ) : !cart?.lines.length ? (
             <div className="drawer-empty">
               <ShoppingBag size={40} strokeWidth={1} />
               <h3>Uma viagem cheia de possibilidades.</h3>
-              <p>Escolha suas peças e comece a preparar seu próximo inverno.</p>
+              <p>Escolha suas peças e comece a preparar o seu próximo closet.</p>
               <Link href="/pecas" onClick={close} className="editorial-button">
                 Explorar peças <ArrowUpRight size={18} />
               </Link>
@@ -195,7 +198,7 @@ export function CartDrawer() {
               return (
                 <div className="drawer-item" key={line.id}>
                   {line.merchandise.product.featuredImage && (
-                    <Image
+                    <ProductImage
                       src={line.merchandise.product.featuredImage.url}
                       alt={line.merchandise.product.title}
                       width={80}
@@ -230,7 +233,7 @@ export function CartDrawer() {
                       ) : null}
                     </div>
 
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span className="text-[0.72rem] text-ink/60">Quantidade</span>
                       <div className="inline-flex items-center overflow-hidden rounded-lg border border-ink/15">
                         <button

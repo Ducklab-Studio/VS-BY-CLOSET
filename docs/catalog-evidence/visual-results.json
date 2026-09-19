@@ -1,0 +1,113 @@
+{
+  "fixtures": true,
+  "results": [
+    {
+      "width": 320,
+      "columns": 2,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 360,
+      "columns": 2,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 375,
+      "columns": 2,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 390,
+      "columns": 2,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 414,
+      "columns": 2,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 768,
+      "columns": 3,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 820,
+      "columns": 3,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 900,
+      "columns": 3,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 1024,
+      "columns": 3,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    },
+    {
+      "width": 1440,
+      "columns": 4,
+      "overflow": false,
+      "product": "passed",
+      "gallery": "passed",
+      "calendar": "passed",
+      "cart": "passed",
+      "vallePass": "passed"
+    }
+  ],
+  "states": [
+    "loading",
+    "error",
+    "unavailable",
+    "missing-image",
+    "empty-category"
+  ],
+  "consoleErrors": []
+}

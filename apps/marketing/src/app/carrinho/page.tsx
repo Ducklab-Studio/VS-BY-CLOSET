@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
+import { ProductImage } from '@/components/ProductImage';
 import Link from 'next/link';
 import { ArrowUpRight, Minus, Plus } from 'lucide-react';
 import {
@@ -218,7 +218,14 @@ export default function CarrinhoPage() {
   }
 
   if (loading) {
-    return <Shell><p className="text-ink/50">Carregando…</p></Shell>;
+    return (
+      <Shell>
+        <p className="flex items-center gap-2.5 text-ink/50">
+          <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          Carregando…
+        </p>
+      </Shell>
+    );
   }
 
   if (!cart || cart.lines.length === 0) {
@@ -252,7 +259,7 @@ export default function CarrinhoPage() {
             <li key={line.id} className="flex gap-4 py-5">
               <div className="relative h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-ink/[0.04]">
                 {line.merchandise.product.featuredImage && (
-                  <Image
+                  <ProductImage
                     src={line.merchandise.product.featuredImage.url}
                     alt={line.merchandise.product.featuredImage.altText ?? line.merchandise.product.title}
                     fill
@@ -489,7 +496,7 @@ function derivePickupDate(lines: CartLine[]): string | null {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu próximo inverno,<br /><em>peça por peça.</em></h1>
+      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu closet,<br /><em>peça por peça.</em></h1>
       {children}
     </div>
   );
