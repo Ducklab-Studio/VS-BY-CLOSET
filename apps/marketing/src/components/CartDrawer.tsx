@@ -159,7 +159,7 @@ export function CartDrawer() {
       >
         <div className="drawer-heading">
           <div>
-            <p className="eyebrow">Seu próximo inverno</p>
+            <p className="eyebrow">Seu closet, toda estação</p>
             <h2 id="cart-drawer-title">Seu closet de viagem</h2>
           </div>
           <button type="button" onClick={close} aria-label="Fechar carrinho" autoFocus>
@@ -177,7 +177,7 @@ export function CartDrawer() {
             <div className="drawer-empty">
               <ShoppingBag size={40} strokeWidth={1} />
               <h3>Uma viagem cheia de possibilidades.</h3>
-              <p>Escolha suas peças e comece a preparar seu próximo inverno.</p>
+              <p>Escolha suas peças e comece a preparar o seu próximo closet.</p>
               <Link href="/pecas" onClick={close} className="editorial-button">
                 Explorar peças <ArrowUpRight size={18} />
               </Link>

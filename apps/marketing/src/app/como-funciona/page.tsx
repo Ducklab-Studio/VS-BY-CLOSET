@@ -5,7 +5,7 @@ import { ArrowUpRight } from 'lucide-react';
 export const metadata: Metadata = {
   title: 'Como funciona',
   description:
-    'Reserve online no Brasil, retire e devolva a roupa de neve numa loja física no Chile — sem frete, sem alfândega, sem risco de extravio.',
+    'Reserve online no Brasil, retire e devolva suas peças numa loja física no Chile — sem frete, sem alfândega, sem risco de extravio.',
 };
 
 const passos = [
@@ -27,7 +27,7 @@ const passos = [
   {
     titulo: 'Retire na loja, no Chile',
     texto:
-      'Chegou ao Chile, vai até a loja com o e-mail de confirmação. As peças já estão separadas no seu tamanho — prova, ajusta, sai vestido pra neve.',
+      'Chegou ao Chile, vai até a loja com o e-mail de confirmação. As peças já estão separadas no seu tamanho — prova, ajusta e já sai usando.',
   },
   {
     titulo: 'Devolva antes de embarcar',
@@ -42,7 +42,7 @@ export default function ComoFuncionaPage() {
       <header className="guide-heading">
         <p className="privacy-eyebrow">Como funciona</p><h1>Você escolhe o look.<br /><em>A gente cuida do closet.</em></h1>
         <p className="mt-2 text-sm text-ink/60">
-          Aluguel de roupa de neve em cinco passos — sem frete, sem alfândega, sem comprar peça que
+          Reserva em cinco passos — sem frete, sem alfândega, sem comprar peça que
           você usaria uma semana por ano.
         </p>
       </header>
