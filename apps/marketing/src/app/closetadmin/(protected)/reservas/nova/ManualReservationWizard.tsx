@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PieceListItem } from '@/lib/admin-data';
 import { PhoneInput } from '@/components/closetadmin/PhoneInput';
+import { formatIsoDatePt } from '@/lib/closetadmin-dates';
 import { createManualReservationAction } from './actions';
 
 const VIOLATION_LABELS: Record<string, string> = {
@@ -57,6 +58,10 @@ export function ManualReservationWizard({
   const [overrideReason, setOverrideReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Só preenchido quando o navegador bloqueou a nova aba do WhatsApp: a
+  // reserva JÁ foi criada, então em vez de voltar ao passo 4 (onde um novo
+  // clique em "Confirmar" tentaria criar de novo) mostramos o link.
+  const [created, setCreated] = useState<{ reservationId: string; whatsappUrl: string } | null>(null);
 
   const overridable = useMemo(
     () =>
@@ -118,7 +123,22 @@ export function ManualReservationWizard({
 
     setPending(false);
     if (result.ok && result.reservationId) {
-      router.push(`/closetadmin/reservas/${result.reservationId}`);
+      const detailPath = `/closetadmin/reservas/${result.reservationId}`;
+      if (!result.whatsappUrl) {
+        router.push(detailPath);
+        return;
+      }
+      // Sem 'noopener' na string de features de propósito: com ele o
+      // window.open devolve sempre null e não dá para saber se o
+      // navegador bloqueou. O opener é zerado logo em seguida para a
+      // página do WhatsApp nunca alcançar o painel via window.opener.
+      const whatsappTab = window.open(result.whatsappUrl, '_blank');
+      if (whatsappTab) {
+        whatsappTab.opener = null;
+        router.push(detailPath);
+        return;
+      }
+      setCreated({ reservationId: result.reservationId, whatsappUrl: result.whatsappUrl });
       return;
     }
     if (result.violations) {
@@ -133,6 +153,34 @@ export function ManualReservationWizard({
       return;
     }
     setError(result.error ?? 'Não foi possível criar a reserva.');
+  }
+
+  if (created) {
+    return (
+      <div className="max-w-2xl">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900 shadow-sm dark:border-emerald-800/40 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <p className="font-semibold">Reserva criada com sucesso.</p>
+          <p className="mt-1">O navegador bloqueou a abertura automática do WhatsApp. Use o botão abaixo para enviar a confirmação ao cliente.</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a
+              href={created.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-marsala dark:bg-marsala-light px-5 py-2.5 text-sm font-medium text-cream dark:text-sand hover:bg-marsala/90 dark:hover:bg-marsala-glow transition shadow-sm"
+            >
+              Abrir WhatsApp do cliente
+            </a>
+            <button
+              type="button"
+              onClick={() => router.push(`/closetadmin/reservas/${created.reservationId}`)}
+              className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/70 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition"
+            >
+              Ver reserva
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -229,7 +277,7 @@ export function ManualReservationWizard({
               <strong className="text-marsala dark:text-gold font-semibold">{customerName}</strong> · {customerPhone}
             </p>
             <p className="mt-1 text-ink/60 dark:text-dark-muted">
-              Retirada: {pickupDate || '—'} {returnDate ? `· Devolução: ${returnDate}` : ''}
+              Retirada: {pickupDate ? formatIsoDatePt(pickupDate) : '—'} {returnDate ? `· Devolução: ${formatIsoDatePt(returnDate)}` : ''}
             </p>
             <p className="mt-1 text-ink/60 dark:text-dark-muted">{selectedUnitIds.length} peça(s) selecionada(s)</p>
           </div>

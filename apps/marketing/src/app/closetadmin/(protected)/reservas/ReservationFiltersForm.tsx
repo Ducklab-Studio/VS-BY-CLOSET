@@ -10,7 +10,14 @@ const STATUS_OPTIONS = [
   { value: 'hold', label: 'Em espera' },
   { value: 'pending_payment', label: 'Aguardando pagamento' },
   { value: 'confirmed', label: 'Confirmada' },
+  // Etapas operacionais que existem no enum e ocupam peça
+  // (OCCUPYING_RESERVATION_STATUSES) mas não eram filtráveis — uma
+  // reserva nesses estados só aparecia em "Todos os status".
+  { value: 'preparing', label: 'Em preparação' },
+  { value: 'ready_for_pickup', label: 'Pronta para retirada' },
   { value: 'picked_up', label: 'Retirada' },
+  { value: 'returned', label: 'Devolvida' },
+  { value: 'cleaning', label: 'Em higienização' },
   { value: 'cancelled', label: 'Cancelada' },
   { value: 'expired', label: 'Expirada' },
   { value: 'problem', label: 'Requer atenção' },
