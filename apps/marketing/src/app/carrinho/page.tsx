@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
+import { ProductImage } from '@/components/ProductImage';
 import Link from 'next/link';
 import { ArrowUpRight, Minus, Plus } from 'lucide-react';
 import {
@@ -252,7 +252,7 @@ export default function CarrinhoPage() {
             <li key={line.id} className="flex gap-4 py-5">
               <div className="relative h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-ink/[0.04]">
                 {line.merchandise.product.featuredImage && (
-                  <Image
+                  <ProductImage
                     src={line.merchandise.product.featuredImage.url}
                     alt={line.merchandise.product.featuredImage.altText ?? line.merchandise.product.title}
                     fill

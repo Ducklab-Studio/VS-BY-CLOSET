@@ -1,0 +1,77 @@
+[
+  {
+    "name": "catalog",
+    "width": 320,
+    "violations": []
+  },
+  {
+    "name": "product",
+    "width": 320,
+    "violations": []
+  },
+  {
+    "name": "drawer",
+    "width": 320,
+    "violations": []
+  },
+  {
+    "name": "cart",
+    "width": 320,
+    "violations": []
+  },
+  {
+    "name": "valle-pass",
+    "width": 320,
+    "violations": []
+  },
+  {
+    "name": "catalog",
+    "width": 768,
+    "violations": []
+  },
+  {
+    "name": "product",
+    "width": 768,
+    "violations": []
+  },
+  {
+    "name": "drawer",
+    "width": 768,
+    "violations": []
+  },
+  {
+    "name": "cart",
+    "width": 768,
+    "violations": []
+  },
+  {
+    "name": "valle-pass",
+    "width": 768,
+    "violations": []
+  },
+  {
+    "name": "catalog",
+    "width": 1440,
+    "violations": []
+  },
+  {
+    "name": "product",
+    "width": 1440,
+    "violations": []
+  },
+  {
+    "name": "drawer",
+    "width": 1440,
+    "violations": []
+  },
+  {
+    "name": "cart",
+    "width": 1440,
+    "violations": []
+  },
+  {
+    "name": "valle-pass",
+    "width": 1440,
+    "violations": []
+  }
+]

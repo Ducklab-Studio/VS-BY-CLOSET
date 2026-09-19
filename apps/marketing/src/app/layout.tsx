@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Script from 'next/script';
 import './globals.css';
+import './catalog.css';
 import { SiteChrome } from '@/components/SiteChrome';
 import { ExtensionAttrGuard } from '@/components/ExtensionAttrGuard';
 import { EXTENSION_ATTR_SCRIPT } from '@/lib/extension-attrs';

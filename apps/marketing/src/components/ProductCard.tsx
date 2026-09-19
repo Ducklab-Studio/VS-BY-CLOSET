@@ -1,25 +1,17 @@
-'use client';
-import { useRef } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { ArrowUpRight } from 'lucide-react';
-import type { StorefrontProduct } from '@/lib/shopify';
+import { formatPrice, productUrl, type StorefrontProduct } from '@/lib/shopify';
+import { ProductImage } from './ProductImage';
 
-export function ProductCard({ product }: { product: StorefrontProduct }) {
-  const card = useRef<HTMLAnchorElement>(null);
-  const second = product.images?.nodes.find(image => image.url !== product.featuredImage?.url);
-  return <Link ref={card} href={`/pecas/${product.handle}`} className="product-editorial" onPointerMove={event => {
-    if (!window.matchMedia('(pointer: fine) and (prefers-reduced-motion: no-preference)').matches) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    event.currentTarget.style.setProperty('--rx', `${-(event.clientY - bounds.top - bounds.height / 2) / bounds.height * 5}deg`);
-    event.currentTarget.style.setProperty('--ry', `${(event.clientX - bounds.left - bounds.width / 2) / bounds.width * 5}deg`);
-  }} onPointerLeave={() => { card.current?.style.setProperty('--rx', '0deg'); card.current?.style.setProperty('--ry', '0deg'); }}>
+export function ProductCard({ product, catalog = false, priority = false }: { product: StorefrontProduct; catalog?: boolean; priority?: boolean }) {
+  const Heading = catalog ? 'h2' : 'h3';
+  return <Link href={productUrl(product.handle)} className={`product-editorial ${catalog ? 'catalog-product' : ''}`}>
     <div className="product-photo">
-      {product.featuredImage ? <Image src={product.featuredImage.url} alt={product.featuredImage.altText ?? product.title} fill sizes="(max-width: 760px) 45vw, 25vw" className="product-primary" /> : <span className="product-no-photo">Foto em breve</span>}
-      {second && <Image src={second.url} alt={second.altText ?? `${product.title}, outro ângulo`} fill sizes="(max-width: 760px) 45vw, 25vw" className="product-secondary" />}
-      <span className="product-action">Ver peça <ArrowUpRight size={16} /></span>
+      {product.featuredImage ? <ProductImage src={product.featuredImage.url} alt={product.featuredImage.altText || product.title} fill priority={priority} sizes="(min-width: 1440px) 320px, (min-width: 1100px) 25vw, (min-width: 768px) 33vw, 50vw" /> : <span className="product-no-photo">{catalog ? 'Sem foto' : 'Foto em breve'}</span>}
+      {!catalog && <span className="product-action">Ver peça <ArrowUpRight size={16} /></span>}
     </div>
-    <p className="product-category">{product.productType || 'Seleção do closet'}</p><h3>{product.title}</h3>
-    <p className="product-price">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: product.priceRange.minVariantPrice.currencyCode }).format(Number(product.priceRange.minVariantPrice.amount))}</p>
+    <p className="product-category">{product.productType || (catalog ? '' : 'Seleção do closet')}</p>
+    <Heading>{product.title}</Heading>
+    <p className="product-price">{formatPrice(product.priceRange.minVariantPrice.amount, product.priceRange.minVariantPrice.currencyCode)}</p>
   </Link>;
 }
