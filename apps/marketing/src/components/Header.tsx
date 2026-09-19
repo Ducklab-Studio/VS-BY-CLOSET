@@ -54,7 +54,7 @@ export function Header() {
         </div>
       </div>
       {mobileOpen && <nav id="mobile-navigation" className="boutique-mobile-nav" aria-label="Menu mobile">
-        <p className="boutique-menu-eyebrow">Seu próximo inverno começa aqui</p>
+        <p className="boutique-menu-eyebrow">Seu closet em todas as estações</p>
         {navLinks.map((link, index) => <Link key={link.href} href={link.href} aria-current={pathname === link.href ? 'page' : undefined} onClick={() => setMobileOpen(false)}><span className="boutique-menu-number">0{index + 1}</span><span>{link.label}</span><ArrowUpRight size={19} strokeWidth={1.3} /></Link>)}
         {isStoreUrlConfigured && <a href={storeUrl('/account')} className="boutique-mobile-account"><User size={18} strokeWidth={1.5} /><span>Minha conta e reservas</span><ArrowUpRight size={17} /></a>}
       </nav>}

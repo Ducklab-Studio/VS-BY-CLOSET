@@ -18,7 +18,7 @@ export default function ContactPage() {
         <Link href="/" className="contact-back"><ArrowLeft size={15} /> Voltar ao início</Link>
         <header className="contact-intro">
           <div><p className="contact-kicker">Estamos por aqui</p><h1>Sua viagem começa<br />com uma <em>conversa.</em></h1></div>
-          <p>O tamanho certo. A peça ideal.<br />Conte com a gente para preparar<br className="contact-desktop-break" /> seu próximo inverno.</p>
+          <p>O tamanho certo. A peça ideal.<br />Conte com a gente para preparar<br className="contact-desktop-break" /> o seu próximo closet.</p>
         </header>
         <div className="contact-cards">
           <a href={whatsapp ?? email} target={whatsapp ? '_blank' : undefined} rel={whatsapp ? 'noopener noreferrer' : undefined} className="contact-primary">
