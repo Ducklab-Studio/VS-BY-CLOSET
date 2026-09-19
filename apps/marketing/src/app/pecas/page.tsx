@@ -111,7 +111,7 @@ export default async function PecasPage({
             : 'Nenhuma peça cadastrada ainda.'}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-5 gap-y-10 md:grid-cols-3 xl:grid-cols-4">
           {products.map((product) => (
             <Link key={product.id} href={productUrl(product.handle)} className="catalog-product group block">
               <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-ink/[0.04]">
