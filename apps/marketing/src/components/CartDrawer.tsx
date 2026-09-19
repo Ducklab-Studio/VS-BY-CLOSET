@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { ProductImage } from '@/components/ProductImage';
 import { ArrowUpRight, Minus, Plus, ShoppingBag, X } from 'lucide-react';
 import {
   getCart,
@@ -195,7 +195,7 @@ export function CartDrawer() {
               return (
                 <div className="drawer-item" key={line.id}>
                   {line.merchandise.product.featuredImage && (
-                    <Image
+                    <ProductImage
                       src={line.merchandise.product.featuredImage.url}
                       alt={line.merchandise.product.title}
                       width={80}
@@ -230,7 +230,7 @@ export function CartDrawer() {
                       ) : null}
                     </div>
 
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span className="text-[0.72rem] text-ink/60">Quantidade</span>
                       <div className="inline-flex items-center overflow-hidden rounded-lg border border-ink/15">
                         <button
