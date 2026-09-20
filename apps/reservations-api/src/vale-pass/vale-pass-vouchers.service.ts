@@ -86,13 +86,27 @@ export class ValePassVouchersService {
       throw new BadRequestException(`Este Valle Pass não pode ser utilizado — status atual: ${STATUS_LABELS[target.status]}.`);
     }
 
-    let updated;
+    // UPDATE condicional: o status lido entra no WHERE, então a checagem
+    // acima e a gravação viram uma coisa só para o banco. Sem isto, dois
+    // resgates simultâneos do mesmo código — dois operadores no balcão ou
+    // duas chamadas diretas à API — passavam os dois pela checagem e
+    // gravavam USED os dois, entregando o mesmo crédito duas vezes. Mesmo
+    // padrão já usado em reservas e webhooks (`status` no WHERE + conferir
+    // a contagem).
+    let changed;
     try {
-      updated = await this.prisma.valePass.update({ where: { id: target.id }, data: { status: 'USED', usedAt: new Date(), usedBy: actorId } });
+      changed = await this.prisma.valePass.updateMany({
+        where: { id: target.id, status: target.status },
+        data: { status: 'USED', usedAt: new Date(), usedBy: actorId },
+      });
     } catch (err) {
       this.logger.error(`Falha ao marcar Valle Pass ${target.id} como utilizado: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível marcar o Valle Pass como utilizado no momento.');
     }
+    if (changed.count !== 1) {
+      throw new ConflictException('O status deste Valle Pass mudou durante a operação — recarregue a tela e confira antes de tentar de novo.');
+    }
+    const updated = await this.prisma.valePass.findUniqueOrThrow({ where: { id: target.id } });
 
     await this.prisma.valePassEvent.create({ data: { valePassId: target.id, type: 'USED', detail: { actorId } } });
     await writeAdminAuditEvent(this.prisma, {
@@ -116,16 +130,23 @@ export class ValePassVouchersService {
     if (target.status === 'USED') throw new ConflictException('Este Valle Pass já foi utilizado — não pode ser cancelado.');
     if (target.status === 'CANCELLED') throw new BadRequestException('Este Valle Pass já está cancelado.');
 
-    let updated;
+    // Mesmo UPDATE condicional do markUsed: sem o status no WHERE, um
+    // cancelamento e um resgate simultâneos gravavam os dois, e o vale
+    // terminava cancelado depois de já ter sido entregue como crédito.
+    let changed;
     try {
-      updated = await this.prisma.valePass.update({
-        where: { id: target.id },
+      changed = await this.prisma.valePass.updateMany({
+        where: { id: target.id, status: target.status },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: actorId, cancelReason: reason },
       });
     } catch (err) {
       this.logger.error(`Falha ao cancelar Valle Pass ${target.id}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível cancelar o Valle Pass no momento.');
     }
+    if (changed.count !== 1) {
+      throw new ConflictException('O status deste Valle Pass mudou durante a operação — recarregue a tela e confira antes de tentar de novo.');
+    }
+    const updated = await this.prisma.valePass.findUniqueOrThrow({ where: { id: target.id } });
 
     await this.prisma.valePassEvent.create({ data: { valePassId: target.id, type: 'CANCELLED', detail: { actorId, reason } } });
     await writeAdminAuditEvent(this.prisma, {
