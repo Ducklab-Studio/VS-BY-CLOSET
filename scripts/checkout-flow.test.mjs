@@ -163,6 +163,28 @@ test('Shopify production config audits order creation before payment', () => {
   const config = read('apps/shopify-app/shopify.app.production.toml');
   assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"refunds\/create"\s*\]/);
 });
+test('no draft config can target the production app, and production scopes are never placeholders', () => {
+  // `shopify app config use <nome>` + `deploy` publica o arquivo escolhido
+  // POR CIMA da config remota do app que o `client_id` apontar. Um rascunho
+  // com o client_id de produção e scopes PLACEHOLDER zera os scopes do app
+  // real e derruba a instalação da loja junto com os webhooks de aluguel —
+  // o cabeçalho de shopify.app.toml registra que isso já aconteceu uma vez.
+  const clientIdOf = (file) => (read(`apps/shopify-app/${file}`).match(/^client_id\s*=\s*"([^"]*)"/m) ?? [])[1];
+  const scopesOf = (file) => (read(`apps/shopify-app/${file}`).match(/^scopes\s*=\s*"([^"]*)"/m) ?? [])[1];
+
+  const productionClientId = clientIdOf('shopify.app.production.toml');
+  assert.ok(productionClientId, 'shopify.app.production.toml precisa declarar client_id');
+  assert.doesNotMatch(scopesOf('shopify.app.production.toml') ?? '', /PLACEHOLDER/,
+    'a config de produção nunca pode ir ao ar com scopes placeholder');
+
+  const drafts = readdirSync(new URL('apps/shopify-app/', root))
+    .filter((file) => /^shopify\.app\..*\.toml$/.test(file) && file !== 'shopify.app.production.toml');
+  assert.ok(drafts.length > 0, 'a guarda só faz sentido se houver outros arquivos de config para vigiar');
+  for (const draft of drafts) {
+    assert.notEqual(clientIdOf(draft), productionClientId,
+      `${draft} carrega o client_id de produção: um deploy a partir dele sobrescreve o app real`);
+  }
+});
 test('active application code has no direct Mercado Pago integration', () => {
   const source = [
     ...activeFiles('apps/marketing/src'),
