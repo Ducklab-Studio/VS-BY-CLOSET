@@ -12,6 +12,7 @@ import {
 } from '@/lib/shopify';
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { isValePassProduct } from '@/lib/vale-pass-product';
+import { sanitizeProductDescription } from '@/lib/product-description';
 
 /**
  * Página da peça — onde o cliente escolhe a data e aluga.
@@ -93,7 +94,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
   // Shopify rich text can contain spacer-only paragraphs. Keep all written
   // content, but avoid a large blank gap between the price and the calendar.
-  const descriptionHtml = product.descriptionHtml.replace(/<p(?:\s[^>]*)?>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, '');
+  // A limpeza é cosmética; quem torna este HTML seguro de renderizar é
+  // sanitizeProductDescription, que roda por último (ver lib/product-description.ts).
+  const descriptionHtml = sanitizeProductDescription(
+    product.descriptionHtml.replace(/<p(?:\s[^>]*)?>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, ''),
+  );
 
   // Valle Pass é vale-presente/crédito de compra — produto Shopify
   // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
