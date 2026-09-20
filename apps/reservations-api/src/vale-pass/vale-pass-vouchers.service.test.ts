@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../admin/admin-pin';
 import { ValePassVouchersService } from './vale-pass-vouchers.service';
@@ -176,4 +176,66 @@ describe('ValePassVouchersService — listar/buscar/validar/usar/cancelar (integ
     const found = list.find((v) => v.id === voucher.id);
     expect(found?.status).toBe('EXPIRED');
   });
+
+  // Dois operadores atendendo ao mesmo tempo, ou duas chamadas diretas à
+  // API, chegavam os dois na gravação depois de passar pela checagem de
+  // status — e o mesmo crédito era entregue duas vezes. A invariante
+  // verificada aqui é a que interessa: aconteça qual interleaving
+  // acontecer, no máximo UMA chamada pode vencer.
+  test('12) resgates simultâneos do mesmo código: exatamente um vence, e o vale é gasto uma vez só', async () => {
+    const owner = await createOwner();
+    const campaign = await createCampaign();
+    const voucher = await createVoucher(campaign.id);
+
+    // Cinco tentativas em paralelo, e não duas: com duas, o par podia não
+    // se sobrepor de fato e o teste passava mesmo contra o código
+    // vulnerável. Cinco tornam a sobreposição confiável sem depender de
+    // sorte no agendamento.
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => vouchers.markUsed(voucher.code, owner.id, owner.name)),
+    );
+
+    const wins = results.filter((r) => r.status === 'fulfilled');
+    expect(wins).toHaveLength(1);
+    expect((wins[0] as PromiseFulfilledResult<{ status: string }>).value.status).toBe('USED');
+
+    // As perdedoras precisam falhar de forma explícita, nunca em silêncio.
+    const losers = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(losers).toHaveLength(4);
+    for (const loser of losers) expect(loser.reason).toBeInstanceOf(HttpException);
+
+    const reloaded = await prisma.valePass.findUniqueOrThrow({ where: { id: voucher.id } });
+    expect(reloaded.status).toBe('USED');
+
+    // Uma única gravação de uso, e uma única linha na trilha de auditoria:
+    // é isso que prova que o crédito não saiu duas vezes.
+    const usedEvents = await prisma.valePassEvent.findMany({ where: { valePassId: voucher.id, type: 'USED' } });
+    expect(usedEvents).toHaveLength(1);
+    const auditEvents = await prisma.adminAuditEvent.findMany({ where: { action: 'VALE_PASS_MARKED_USED', entityId: voucher.id } });
+    expect(auditEvents).toHaveLength(1);
+  }, 20_000);
+
+  test('13) cancelamento e resgate simultâneos: um só vence, e o vale não termina nos dois estados', async () => {
+    const owner = await createOwner();
+    const campaign = await createCampaign();
+    const voucher = await createVoucher(campaign.id);
+
+    const results = await Promise.allSettled([
+      vouchers.markUsed(voucher.code, owner.id, owner.name),
+      vouchers.cancel(voucher.code, 'cancelamento concorrente de teste', owner.id, owner.name),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+
+    const reloaded = await prisma.valePass.findUniqueOrThrow({ where: { id: voucher.id } });
+    expect(['USED', 'CANCELLED']).toContain(reloaded.status);
+
+    // O estado final tem de ter UMA causa só: ou foi usado, ou foi
+    // cancelado. Os dois carimbos ao mesmo tempo seria a corrida.
+    const stamps = [reloaded.usedAt, reloaded.cancelledAt].filter((value) => value !== null);
+    expect(stamps).toHaveLength(1);
+
+    const events = await prisma.valePassEvent.findMany({ where: { valePassId: voucher.id, type: { in: ['USED', 'CANCELLED'] } } });
+    expect(events).toHaveLength(1);
+  }, 20_000);
 });
