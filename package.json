@@ -4,8 +4,9 @@
   "private": true,
   "description": "Aluguel de roupa de neve — Next.js (vitrine) + Shopify/PRP (produto, carrinho, checkout)",
   "packageManager": "pnpm@10.30.3",
+  "//engines": "20.9 e não 20.0 porque o sharp 0.35.x exige `node >=20.9.0`. Não há engine-strict, então a faixa antiga não quebrava nada — só passou a ser mentira no dia em que o sharp subiu. A CI e a Vercel usam o Node 20 mais recente, bem acima disso.",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.9.0"
   },
   "scripts": {
     "dev": "pnpm --filter @valle/marketing dev",
