@@ -28,6 +28,11 @@
       "prisma",
       "sharp",
       "unrs-resolver"
-    ]
+    ],
+    "//overrides": "Duas dependências TRANSITIVAS da API com aviso de severidade alta, nenhuma delas declarada por nós. O NestJS 10 as fixa em versão exata (@nestjs/platform-express@10.4.22 pede multer 2.0.2; @nestjs/config@3.3.0 pede lodash 4.17.21), e a 10.4.22 já é a última 10.x — não existe atualização dentro da mesma major que resolva. Subir de major (platform-express 11, config 12) seria trocar um risco conhecido por um risco de regressão em produção, num sistema que já está no ar. Override é o caminho cirúrgico: mesma major, só a dependência vulnerável. Remova quando a API subir de major e as versões corrigidas vierem naturalmente.",
+    "overrides": {
+      "multer": "^2.3.0",
+      "lodash": "^4.18.1"
+    }
   }
 }
