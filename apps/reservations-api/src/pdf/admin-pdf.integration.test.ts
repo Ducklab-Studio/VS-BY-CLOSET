@@ -152,12 +152,23 @@ describe('PDF administrativo — integração real (Neon)', () => {
     const original = await prisma.rentalRuleConfig.findUniqueOrThrow({ where: { id: 'default' } });
     await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { blackoutStart: '01-01', blackoutEnd: '01-01' } });
     try {
-      const today = engineToday(CFG);
+      // "Hoje" aqui é a data de referência que o relatório recebe
+      // (`generate(referenceDateIso)`): o serviço só compara as retiradas
+      // com ela e nunca lê o relógio. Por isso o teste escolhe uma data de
+      // referência VÁLIDA em vez de depender do dia real da execução —
+      // achado real: rodando num domingo, "hoje" era uma retirada proibida
+      // (`pickup_is_sunday`) e o teste falhava sem nenhuma mudança de
+      // código. Só ADICIONA dias a partir de hoje (nunca cai no passado),
+      // pulando domingo e 01/01, único dia bloqueado pela temporada
+      // temporária configurada acima. Nos dias comuns continua sendo o
+      // próprio dia real.
+      let today = engineToday(CFG);
+      for (let i = 0; i < 10 && (isSunday(today) || (today.month === 1 && today.day === 1)); i++) today = addDays(today, 1);
       // Achado real (mesma classe do PR #23): a devolução calculada pode
-      // cair num domingo dependendo de que dia da semana "hoje" realmente
-      // é quando a suíte roda — nunca muda o pickup (o teste PRECISA ser
-      // retirada HOJE, é isso que ele verifica), só passa a opção de
-      // domingo quando o motor de fato exigir.
+      // cair num domingo dependendo de que dia da semana a referência
+      // realmente é — nunca muda o pickup (a retirada TEM de coincidir com
+      // a data de referência, é isso que o teste verifica), só passa a
+      // opção de domingo quando o motor de fato exigir.
       const engineDurationDays = durationForPieces(1, CFG);
       const needsSundayChoice = isSunday(calculateReturnDate(today, engineDurationDays));
       const res = await reservations.createManual({

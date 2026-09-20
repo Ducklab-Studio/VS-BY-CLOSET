@@ -196,10 +196,20 @@ describe('AvailabilityService — integração real (Neon)', () => {
   });
 
   test('domingo → bookable=false, reason=pickup_is_sunday', async () => {
-    let d = futurePickup(10);
-    while (!isSunday(d)) d = addDays(d, 1);
-    // Garante que o domingo achado não caiu, por coincidência, dentro do
-    // bloqueio de temporada — se caiu, o teste avisa em vez de mascarar.
+    // Primeiro domingo que esteja FORA da temporada bloqueada e já além da
+    // antecedência mínima. O motor avalia a antecedência antes do domingo:
+    // com um domingo a menos de `minAdvanceDays` de hoje o teste recebia
+    // `pickup_before_minimum_advance` e falhava conforme o dia real da
+    // execução (achado real: CI rodada num domingo, em que o próximo
+    // domingo achado a partir de `futurePickup(10)` ficou a 14 dias). Mesma
+    // regra já documentada em `futurePickup`: partir de um offset >=
+    // `minAdvanceDays` só ADICIONA dias, então o resultado nunca fica
+    // aquém da antecedência. O laço exige também estar fora da temporada,
+    // em vez de torcer para o domingo achado não cair nela.
+    let d = futurePickup(CFG.minAdvanceDays);
+    for (let i = 0; i < 400 && !(isSunday(d) && isOnlineReservationAllowed(d, CFG)); i++) d = addDays(d, 1);
+    // Travas: se o laço não achou (nunca deveria), o teste avisa em vez de mascarar.
+    expect(isSunday(d)).toBe(true);
     expect(isOnlineReservationAllowed(d, CFG)).toBe(true);
 
     const res = await service.getAvailability({
