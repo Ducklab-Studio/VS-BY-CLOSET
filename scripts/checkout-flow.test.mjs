@@ -159,9 +159,9 @@ test('Railway uses the package start command and preserves migrations and health
   assert.equal(railway.deploy.healthcheckPath, '/health');
   assert.deepEqual(railway.deploy.preDeployCommand, ['pnpm --filter @valle/reservations-api run db:migrate']);
 });
-test('Shopify production config audits order creation before payment', () => {
+test('Shopify production config audits order creation before payment and syncs updates/deletes', () => {
   const config = read('apps/shopify-app/shopify.app.production.toml');
-  assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"refunds\/create"\s*\]/);
+  assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"orders\/updated",\s*"orders\/delete",\s*"refunds\/create"\s*\]/);
 });
 test('no draft config can target the production app, and production scopes are never placeholders', () => {
   // `shopify app config use <nome>` + `deploy` publica o arquivo escolhido
