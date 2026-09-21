@@ -47,16 +47,20 @@ export class AdminCalendarService {
     try {
       return await this.prisma.$queryRaw<CalendarItem[]>`
         SELECT
-          ri.reservation_id AS "reservationId", r.status, r.source, r.customer_name AS "customerName",
+          ri.reservation_id AS "reservationId", ri.status, r.source, r.customer_name AS "customerName",
           ri.rental_unit_id AS "rentalUnitId", ru.code AS "rentalUnitCode",
           r.pickup_date::text AS "pickupDate", r.return_date::text AS "effectiveReturnDate",
-          lower(ri.blocked_range)::text AS "blockedFrom", upper(ri.blocked_range)::text AS "blockedUntilExclusive"
+          (CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${civilDateToISO(from)}::date ELSE lower(ri.blocked_range) END)::text AS "blockedFrom",
+          (CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${civilDateToISO(to)}::date ELSE upper(ri.blocked_range) END)::text AS "blockedUntilExclusive"
         FROM reservation_items ri
         JOIN reservations r ON r.id = ri.reservation_id
         JOIN rental_units ru ON ru.id = ri.rental_unit_id
         WHERE ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND ri.blocked_range && daterange(${civilDateToISO(from)}::date, ${civilDateToISO(to)}::date, '[)')
-        ORDER BY ri.blocked_range
+          AND (
+            ri.blocked_range && daterange(${civilDateToISO(from)}::date, ${civilDateToISO(to)}::date, '[)')
+            OR (ri.status IN ('returned', 'cleaning') AND lower(ri.blocked_range) <= ${civilDateToISO(to)}::date)
+          )
+        ORDER BY "blockedFrom"
       `;
     } catch (err) {
       this.logger.error(`Falha ao consultar calendário: ${errorCode(err)}`);

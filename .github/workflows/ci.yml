@@ -89,6 +89,18 @@ jobs:
       - name: Build API
         run: pnpm --filter @valle/reservations-api run build
 
+      - name: Build ClosetAdmin para navegador isolado
+        run: pnpm --filter @valle/marketing build
+        env:
+          NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: ci-placeholder.myshopify.com
+          NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: ci-placeholder
+
+      - name: Instalar navegador de teste
+        run: pnpm --filter @valle/marketing exec playwright install --with-deps chromium
+
+      - name: Testar cancelamento e devolução pelo painel isolado
+        run: pnpm --filter @valle/marketing run test:operational-browser
+
   build:
     name: Build da vitrine (Next.js)
     runs-on: ubuntu-latest

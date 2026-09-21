@@ -47,7 +47,10 @@ export class AdminPiecesService {
             SELECT 1 FROM reservation_items ri
             WHERE ri.rental_unit_id = ru.id
               AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-              AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+              AND (
+                ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+                OR ri.status IN ('returned', 'cleaning')
+              )
           ) AS "currentlyOccupied",
           (
             SELECT count(*)::int FROM reservation_items ri
@@ -98,7 +101,10 @@ export class AdminPiecesService {
           SELECT 1 FROM reservation_items ri
           WHERE ri.rental_unit_id = ru.id
             AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+            AND (
+              ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+              OR ri.status IN ('returned', 'cleaning')
+            )
         ) AS "currentlyOccupied",
         (
           SELECT count(*)::int FROM reservation_items ri

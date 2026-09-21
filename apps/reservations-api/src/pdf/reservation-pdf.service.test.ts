@@ -39,7 +39,17 @@ function baseReservation(overrides: Partial<ReservationDetailResponse> = {}): Re
     archivedAt: null,
     archivedBy: null,
     archiveReason: null,
-    items: [{ rentalUnitId: 'u1', code: 'VS-SOB-001', status: 'confirmed', blockedFrom: '2026-11-07', blockedUntilExclusive: '2026-11-14' }],
+    items: [{
+      id: '22222222-2222-2222-2222-222222222222',
+      rentalUnitId: 'u1',
+      code: 'VS-SOB-001',
+      status: 'confirmed',
+      blockedFrom: '2026-11-07',
+      blockedUntilExclusive: '2026-11-14',
+      returnedAt: null,
+      cleaningStartedAt: null,
+      cleaningCompletedAt: null,
+    }],
     events: [],
     ...overrides,
   };

@@ -89,12 +89,12 @@ export class ReservationArchiveService {
    *  explícito, ex.: "Limpar lista" pedindo expired+cancelled numa só
    *  chamada) tem prioridade máxima; depois os atalhos
    *  (`onlyCancelled`/`onlyReturned`); depois `status` único; sem
-   *  nenhum dos anteriores, todos os 4 terminais entram. */
+   *  nenhum dos anteriores, os três status terminais entram. */
   private resolveStatuses(filters: ArchiveFilters): readonly string[] {
-    if (filters.statuses && filters.statuses.length > 0) return [...new Set(filters.statuses)];
+    if (filters.statuses && filters.statuses.length > 0) return [...new Set(filters.statuses)].filter((s) => (ARCHIVABLE_TERMINAL_STATUSES as readonly string[]).includes(s));
     if (filters.onlyCancelled) return ['cancelled'];
-    if (filters.onlyReturned) return ['returned'];
-    if (filters.status) return [filters.status];
+    if (filters.onlyReturned) return ['completed']; // compatibilidade: apenas devoluções já higienizadas
+    if (filters.status) return (ARCHIVABLE_TERMINAL_STATUSES as readonly string[]).includes(filters.status) ? [filters.status] : [];
     return ARCHIVABLE_TERMINAL_STATUSES;
   }
 
@@ -127,7 +127,7 @@ export class ReservationArchiveService {
    * comportamento original.
    */
   private closureExpr(): Prisma.Sql {
-    return Prisma.sql`(CASE WHEN r.status IN ('cancelled', 'expired') THEN r.updated_at::date ELSE COALESCE(r.calculated_return_date, r.return_date, r.updated_at::date) END)`;
+    return Prisma.sql`(CASE WHEN r.status IN ('cancelled', 'expired') THEN r.updated_at::date WHEN r.status = 'completed' THEN COALESCE((SELECT max(ri.cleaning_completed_at)::date FROM reservation_items ri WHERE ri.reservation_id = r.id), r.return_date, r.updated_at::date) ELSE COALESCE(r.calculated_return_date, r.return_date, r.updated_at::date) END)`;
   }
 
   /**

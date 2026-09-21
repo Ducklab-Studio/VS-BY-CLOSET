@@ -70,7 +70,17 @@ export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'
   readonly updatedAt: string;
   readonly archivedBy: string | null;
   readonly archiveReason: string | null;
-  readonly items: readonly { rentalUnitId: string; code: string; status: string; blockedFrom: string; blockedUntilExclusive: string }[];
+  readonly items: readonly {
+    id: string;
+    rentalUnitId: string;
+    code: string;
+    status: string;
+    blockedFrom: string;
+    blockedUntilExclusive: string;
+    returnedAt: string | null;
+    cleaningStartedAt: string | null;
+    cleaningCompletedAt: string | null;
+  }[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
 
@@ -98,8 +108,12 @@ export function createManualReservation(input: CreateManualReservationInput) {
   return adminPost('/admin/reservations/manual', input);
 }
 
-export function cancelManualReservation(id: string, adminUserId: string, adminUserName: string, reason?: string) {
-  return adminPost(`/admin/reservations/${id}/cancel`, { adminUserId, adminUserName, reason });
+export function cancelManualReservation(id: string, reason?: string) {
+  return adminPost(`/admin/reservations/${id}/cancel`, { reason });
+}
+
+export function advanceReservationItem(id: string, itemId: string, action: 'receive' | 'start-cleaning' | 'complete-cleaning', note?: string) {
+  return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string }>(`/admin/reservations/${id}/items/${itemId}/${action}`, { note });
 }
 
 export interface PieceListItem {
@@ -206,10 +220,10 @@ export function clearAudit(adminUserId: string, adminUserName: string): Promise<
 /** "Limpar históricos" — arquivamento (soft delete) de reservas em
  *  estado terminal. Ver apps/reservations-api/src/reservation-archive. */
 export interface ArchiveFilters {
-  status?: 'cancelled' | 'expired' | 'returned' | 'completed';
+  status?: 'cancelled' | 'expired' | 'completed';
   /** "Limpar lista" — conjunto explícito de status numa única chamada
    *  (ex.: ['expired', 'cancelled']). Prioridade sobre os demais campos. */
-  statuses?: ('cancelled' | 'expired' | 'returned' | 'completed')[];
+  statuses?: ('cancelled' | 'expired' | 'completed')[];
   source?: string;
   closedBefore?: string;
   minSafetyDays?: number;

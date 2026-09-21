@@ -57,7 +57,7 @@ const STATUS_LABELS: Record<string, string> = {
   preparing: 'Em preparação',
   ready_for_pickup: 'Pronta para retirada',
   picked_up: 'Retirada',
-  returned: 'Devolvida',
+  returned: 'Devolvida · aguardando higienização',
   cleaning: 'Em higienização',
   cancelled: 'Cancelada',
   expired: 'Expirada',

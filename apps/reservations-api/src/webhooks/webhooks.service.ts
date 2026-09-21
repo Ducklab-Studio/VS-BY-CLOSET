@@ -415,7 +415,10 @@ export class WebhooksService {
         WHERE rental_unit_id = ${item.rentalUnitId}::uuid
           AND reservation_id != ${reservationId}::uuid
           AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND blocked_range && daterange(${from}::date, ${until}::date, '[)')
+          AND (
+            blocked_range && daterange(${from}::date, ${until}::date, '[)')
+            OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${until}::date)
+          )
         LIMIT 1
       `;
       if (conflict.length > 0) {

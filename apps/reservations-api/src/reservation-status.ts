@@ -37,7 +37,7 @@ export const OCCUPYING_RESERVATION_STATUSES = [
  * esconder algo que ainda pode mudar. Deliberadamente DE FORA:
  *
  * - `hold`/`pending_payment`/`confirmed`/`preparing`/`ready_for_pickup`/
- *   `picked_up`/`cleaning` — ainda em andamento.
+ *   `picked_up`/`returned`/`cleaning` — ainda em andamento.
  * - `problem`/`late_payment_conflict` — precisam de revisão humana
  *   (ocorrência operacional aberta); só saem de `problem` por ação
  *   manual futura, nunca automaticamente.
@@ -49,4 +49,4 @@ export const OCCUPYING_RESERVATION_STATUSES = [
  * webhooks.service.ts) — a proteção contra isso é o período mínimo de
  * segurança (ReservationArchiveService), não a exclusão do status.
  */
-export const ARCHIVABLE_TERMINAL_STATUSES = ['cancelled', 'expired', 'returned', 'completed'] as const;
+export const ARCHIVABLE_TERMINAL_STATUSES = ['cancelled', 'expired', 'completed'] as const;

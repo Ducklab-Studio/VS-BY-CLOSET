@@ -9,7 +9,10 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
  *  schema). Só cancelamento é "crítico" pela definição do pedido
  *  (alteração/cancelamento/pagamento/permissões/exclusão); criar uma
  *  reserva manual não está nessa lista. */
-const CRITICAL_RESERVATION_EVENT_TYPES = new Set(['MANUAL_RESERVATION_CANCELLED']);
+const CRITICAL_RESERVATION_EVENT_TYPES = new Set([
+  'MANUAL_RESERVATION_CANCELLED', 'RESERVATION_ITEM_RETURNED',
+  'RESERVATION_ITEM_CLEANING_STARTED', 'RESERVATION_ITEM_CLEANING_COMPLETED',
+]);
 
 export interface AuditEntry {
   readonly id: string;

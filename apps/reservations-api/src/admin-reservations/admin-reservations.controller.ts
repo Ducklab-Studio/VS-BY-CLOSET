@@ -5,6 +5,7 @@ import { RequireModule } from '../admin/require-module.decorator';
 import {
   AdminReservationsService,
   type ManualReservationCancelResponse,
+  type OperationalReservationResponse,
   type ManualReservationResponse,
   type ReservationDetailResponse,
   type ReservationListFilters,
@@ -12,6 +13,7 @@ import {
 } from './admin-reservations.service';
 import { CreateManualReservationDto } from './dto/create-manual-reservation.dto';
 import { CancelManualReservationDto } from './dto/cancel-manual-reservation.dto';
+import { OperationalReservationDto } from './dto/operational-reservation.dto';
 
 /**
  * Every read/write requires the server bearer and a live user session.
@@ -40,6 +42,30 @@ export class AdminReservationsController {
   @HttpCode(HttpStatus.OK)
   cancel(@Param('id') id: string, @Body() dto: CancelManualReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ManualReservationCancelResponse> {
     return this.adminReservations.cancelManual(id, { ...dto, adminUserId: request.adminUser.id, adminUserName: request.adminUser.name });
+  }
+
+  @Post(':id/items/:itemId/receive')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.OK)
+  receive(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+    return this.adminReservations.advanceOperational(id, itemId, 'receive', request.adminUser, dto.note);
+  }
+
+  @Post(':id/items/:itemId/start-cleaning')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.OK)
+  startCleaning(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+    return this.adminReservations.advanceOperational(id, itemId, 'start-cleaning', request.adminUser, dto.note);
+  }
+
+  @Post(':id/items/:itemId/complete-cleaning')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.OK)
+  completeCleaning(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+    return this.adminReservations.advanceOperational(id, itemId, 'complete-cleaning', request.adminUser, dto.note);
   }
 
   @Get()
