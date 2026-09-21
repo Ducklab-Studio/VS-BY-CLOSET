@@ -12,6 +12,7 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
 const CRITICAL_RESERVATION_EVENT_TYPES = new Set([
   'MANUAL_RESERVATION_CANCELLED', 'RESERVATION_ITEM_RETURNED',
   'RESERVATION_ITEM_CLEANING_STARTED', 'RESERVATION_ITEM_CLEANING_COMPLETED',
+  'SHOPIFY_ORDER_SYNC',
 ]);
 
 export interface AuditEntry {

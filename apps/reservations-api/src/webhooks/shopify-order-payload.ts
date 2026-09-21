@@ -42,6 +42,10 @@ export interface ShopifyOrderPayload {
   readonly name?: string;
   readonly financial_status?: string;
   readonly cancelled_at?: string | null;
+  /// `closed_at` preenchido = pedido arquivado/fechado na Shopify;
+  /// `updated_at` ordena entregas fora de ordem de `orders/updated`.
+  readonly closed_at?: string | null;
+  readonly updated_at?: string | null;
   readonly cancel_reason?: string | null;
   readonly note_attributes?: readonly ShopifyNoteAttribute[];
   readonly line_items?: readonly ShopifyOrderLineItem[];

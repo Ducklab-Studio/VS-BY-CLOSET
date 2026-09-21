@@ -1,3 +1,4 @@
+import { ShopifyOrderSyncService } from '../webhooks/shopify-order-sync.service';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
@@ -16,7 +17,7 @@ import type { ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
  * mesmo sem nenhuma peça de aluguel existir/estar disponível.
  */
 const prisma = new PrismaService();
-const service = new WebhooksService(prisma, new ValePassWebhookService());
+const service = new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService());
 // Prefixo do próprio suite (não pode ir dentro do variant_id — é
 // confirmado como sempre numérico cru no REST da Shopify, nunca uma
 // string alfanumérica, ver shopify-order-payload.ts) usado só pra

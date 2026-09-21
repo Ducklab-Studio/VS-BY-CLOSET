@@ -1,3 +1,4 @@
+import { ShopifyOrderSyncService } from './shopify-order-sync.service';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from './webhooks.service';
@@ -30,7 +31,7 @@ process.env.RESERVATION_BINDING_SECRET ??= 'test-reservation-binding-secret-webh
  * correlação NÃO bater.
  */
 const prisma = new PrismaService();
-const service = new WebhooksService(prisma, new ValePassWebhookService());
+const service = new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService());
 const PREFIX = `WH-${Date.now()}`;
 let unitCounter = 0;
 let orderCounter = 1_000_000;

@@ -21,6 +21,23 @@ export interface ShopifyCatalogVariant {
   };
 }
 
+/** Estado comercial de um pedido, só leitura (usado pela reconciliação). */
+export interface ShopifyOrderState {
+  /** GID (gid://shopify/Order/123). */
+  readonly gid: string;
+  /** Id numérico — o mesmo valor que os webhooks trazem em `id`. */
+  readonly orderId: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly cancelledAt: string | null;
+  readonly closedAt: string | null;
+  /** Minúsculo: paid, pending, voided, expired, refunded... */
+  readonly financialStatus: string | null;
+  /** `reservation_id` gravado nos atributos do pedido, se houver. */
+  readonly reservationId: string | null;
+}
+
 interface ShopifyAdminCredentials {
   readonly shopifyDomain: string;
   readonly clientId: string;
@@ -82,6 +99,45 @@ const VARIANTS_QUERY = `
   }
 `;
 
+const ORDER_FIELDS = `
+  id
+  name
+  createdAt
+  updatedAt
+  cancelledAt
+  closedAt
+  displayFinancialStatus
+  customAttributes { key value }
+`;
+
+const ORDERS_BY_ID_QUERY = `
+  query ClosetAdminOrdersById($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order { ${ORDER_FIELDS} }
+    }
+  }
+`;
+
+const RECENT_ORDERS_QUERY = `
+  query ClosetAdminRecentOrders($first: Int!, $after: String, $query: String!) {
+    orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+      nodes { ${ORDER_FIELDS} }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+interface RawShopifyOrder {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly cancelledAt: string | null;
+  readonly closedAt: string | null;
+  readonly displayFinancialStatus: string | null;
+  readonly customAttributes: readonly { key: string; value: string | null }[];
+}
+
 const VARIANT_QUERY = `
   query ClosetAdminVariant($id: ID!) {
     productVariant(id: $id) {
@@ -129,6 +185,42 @@ export class ShopifyAdminClient {
   async getVariant(id: string): Promise<ShopifyCatalogVariant | null> {
     const data = await this.graphql<VariantQueryData>(VARIANT_QUERY, { id });
     return data.productVariant ? normalizeVariant(data.productVariant) : null;
+  }
+
+  /** Pedidos por GID. `null` = a Shopify não devolveu o pedido (excluído — ou
+   *  fora da janela de leitura do app; quem chama decide o que isso significa). */
+  async getOrdersByGid(gids: readonly string[]): Promise<Map<string, ShopifyOrderState | null>> {
+    const result = new Map<string, ShopifyOrderState | null>();
+    for (let i = 0; i < gids.length; i += 100) {
+      const chunk = gids.slice(i, i + 100);
+      const data = await this.graphql<{ nodes: (RawShopifyOrder | null)[] }>(ORDERS_BY_ID_QUERY, { ids: chunk });
+      chunk.forEach((gid, index) => {
+        const node = data.nodes[index];
+        result.set(gid, node && node.id ? normalizeOrder(node) : null);
+      });
+    }
+    return result;
+  }
+
+  /** Pedidos criados desde `sinceIso`, do mais novo para o mais antigo. */
+  async listOrdersCreatedSince(sinceIso: string, max: number): Promise<{ orders: ShopifyOrderState[]; truncated: boolean }> {
+    const orders: ShopifyOrderState[] = [];
+    let after: string | null = null;
+    let truncated = false;
+    do {
+      const data: { orders: { nodes: RawShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await this.graphql(RECENT_ORDERS_QUERY, {
+        first: 100,
+        after,
+        query: `created_at:>=${sinceIso}`,
+      });
+      orders.push(...data.orders.nodes.map(normalizeOrder));
+      after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+      if (after && orders.length >= max) {
+        truncated = true;
+        after = null;
+      }
+    } while (after);
+    return { orders: orders.slice(0, max), truncated };
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -223,6 +315,21 @@ export class ShopifyAdminClient {
     };
     return json.access_token;
   }
+}
+
+function normalizeOrder(raw: RawShopifyOrder): ShopifyOrderState {
+  const reservationId = raw.customAttributes?.find((attribute) => attribute.key === 'reservation_id')?.value?.trim();
+  return {
+    gid: raw.id,
+    orderId: raw.id.slice(raw.id.lastIndexOf("/") + 1),
+    name: raw.name,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    cancelledAt: raw.cancelledAt,
+    closedAt: raw.closedAt,
+    financialStatus: raw.displayFinancialStatus ? raw.displayFinancialStatus.toLowerCase() : null,
+    reservationId: reservationId || null,
+  };
 }
 
 function normalizeVariant(raw: RawShopifyVariant): ShopifyCatalogVariant {

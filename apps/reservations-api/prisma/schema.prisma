@@ -403,6 +403,10 @@ model Reservation {
   archivedBy     String?   @map("archived_by") @db.Uuid
   archiveReason  String?   @map("archive_reason")
 
+  /// `updated_at` do último estado de pedido Shopify aplicado (webhook ou
+  /// reconciliação). Ignora entrega atrasada que desfaria um estado mais novo.
+  shopifyOrderUpdatedAt DateTime? @map("shopify_order_updated_at") @db.Timestamptz(6)
+
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
   idempotencyKeys       HoldIdempotencyKey[]
