@@ -88,8 +88,9 @@ Divergências: `missing_in_shopify`, `cancelled_in_shopify`, `closed_in_shopify`
   pedidos cumpridos automaticamente) e não é arquivada.
 - A reconciliação é manual (endpoint), não agendada. Não há job periódico.
 - Os tópicos `orders/updated` e `orders/delete` foram adicionados a
-  `apps/shopify-app/shopify.app.production.toml` e `shopify.app.cl.toml`; só passam a
-  valer depois de `shopify app deploy` (não executado por esta mudança).
+  `apps/shopify-app/shopify.app.production.toml`; só passam a valer depois de
+  `shopify app deploy --config production` e do release da versão (não executados
+  por esta mudança).
 
 ## Testes
 
