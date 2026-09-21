@@ -354,41 +354,104 @@ localDescribe('sincronização Shopify → reserva (PostgreSQL isolado)', () => 
   });
 
   describe('orders/delete', () => {
-    test('arquiva a reserva sem hard delete e preserva itens, vínculo e auditoria', async () => {
+    const OCCUPYING = ['hold', 'pending_payment', 'confirmed', 'preparing', 'ready_for_pickup', 'picked_up', 'returned', 'cleaning', 'problem'];
+    const occupied = async (id: string) => {
+      const [row] = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM reservation_items WHERE reservation_id = ${id}::uuid AND status::text = ANY(${OCCUPYING})`;
+      return row.n > 0;
+    };
+
+    test('confirmada e não recebida → problem (revisão); NÃO cancela, NÃO libera, NÃO arquiva', async () => {
       const r = await createReservation('confirmed');
-      await deliver('orders/updated', payload(r, { financial_status: 'paid', updated_at: stamp(1) }));
       expect((await deliver('orders/delete', { id: r.orderId })).outcome).toBe('processed');
+
+      const row = await reservation(r.id);
+      expect(row.status).toBe('problem');
+      expect(row.archivedAt).toBeNull();
+      expect(row.shopifyOrderId).toBe(r.orderId);
+      expect(await occupied(r.id)).toBe(true);
+      expect(await prisma.reservation.count({ where: { id: r.id } })).toBe(1);
+      const [audit] = await events(r.id, 'SHOPIFY_ORDER_SYNC');
+      expect(audit.detail).toMatchObject({ source: 'SHOPIFY', origin: 'shopify_webhook', topic: 'orders/delete', action: 'flagged_for_review', from: 'confirmed', to: 'problem' });
+      expect((await events(r.id, 'ORDER_DELETED'))[0].detail).toMatchObject({ origin: 'shopify_webhook', topic: 'orders/delete' });
+    });
+
+    test('HOLD → nenhuma transição (fluxo de checkout); reserva segue ocupando e sem arquivar', async () => {
+      const r = await createReservation('hold');
+      await deliver('orders/delete', { id: r.orderId });
+
+      const row = await reservation(r.id);
+      expect(row.status).toBe('hold');
+      expect(row.archivedAt).toBeNull();
+      expect(await occupied(r.id)).toBe(true);
+      expect(await events(r.id, 'ORDER_DELETE_NOT_APPLIED')).toHaveLength(1);
+      expect(await events(r.id, 'SHOPIFY_ORDER_SYNC')).toHaveLength(0);
+    });
+
+    test('aguardando pagamento (não iniciada; a regra permite) → cancela e arquiva', async () => {
+      const r = await createReservation('pending_payment');
+      await deliver('orders/delete', { id: r.orderId });
 
       const row = await reservation(r.id);
       expect(row.status).toBe('cancelled');
       expect(row.archivedAt).not.toBeNull();
       expect(row.archiveReason).toBe('Shopify: pedido excluído');
-      expect(row.shopifyOrderId).toBe(r.orderId);
       expect(await itemStatuses(r.id)).toEqual(['cancelled']);
-      expect(await prisma.reservationEvent.count({ where: { reservationId: r.id } })).toBeGreaterThan(2);
-      expect((await events(r.id, 'ORDER_DELETED'))[0].detail).toMatchObject({ origin: 'shopify_webhook', topic: 'orders/delete' });
+      expect(await occupied(r.id)).toBe(false);
     });
 
-    test('duplicado e reprocessado: mesmo resultado, uma única mudança de estado e um único arquivamento', async () => {
+    test.each(['returned', 'cleaning'])('%s (peça no ciclo físico) → problem, progresso da peça preservado, não arquiva', async (status) => {
+      const r = await createReservation(status);
+      await deliver('orders/delete', { id: r.orderId });
+
+      const row = await reservation(r.id);
+      expect(row.status).toBe('problem');
+      expect(row.archivedAt).toBeNull();
+      expect(await itemStatuses(r.id)).toEqual([status]);
+      expect(await occupied(r.id)).toBe(true);
+      expect((await events(r.id, 'SHOPIFY_ORDER_SYNC'))[0].detail).toMatchObject({ action: 'flagged_for_review', from: status, to: 'problem' });
+    });
+
+    test.each(['completed', 'cancelled', 'expired'])('%s (terminal) → só arquiva; estado e peças intactos', async (status) => {
+      const r = await createReservation(status);
+      await deliver('orders/delete', { id: r.orderId });
+
+      const row = await reservation(r.id);
+      expect(row.status).toBe(status);
+      expect(row.archivedAt).not.toBeNull();
+      expect(row.archiveReason).toBe('Shopify: pedido excluído');
+      expect(row.shopifyOrderId).toBe(r.orderId);
+      expect(await itemStatuses(r.id)).toEqual([status]);
+      expect(await prisma.reservation.count({ where: { id: r.id } })).toBe(1);
+      expect(await events(r.id, 'RESERVATION_ARCHIVED')).toHaveLength(1);
+      expect((await events(r.id, 'SHOPIFY_ORDER_SYNC')).map((e) => (e.detail as { action: string }).action)).toEqual(['archived']);
+    });
+
+    test('reserva com várias peças, uma já recebida: vai para problem e o progresso de cada peça é mantido', async () => {
+      const r = await createReservation('confirmed', { pieces: 2, itemStatuses: ['returned', 'confirmed'] });
+      await deliver('orders/delete', { id: r.orderId });
+
+      expect((await reservation(r.id)).status).toBe('problem');
+      expect((await itemStatuses(r.id)).sort()).toEqual(['problem', 'returned']);
+    });
+
+    test('duplicado e reprocessado: uma única marcação de revisão e nenhuma mudança extra', async () => {
       const r = await createReservation('confirmed');
       const webhookId = nextWebhookId();
       await deliver('orders/delete', { id: r.orderId }, webhookId);
       expect((await deliver('orders/delete', { id: r.orderId }, webhookId)).outcome).toBe('duplicate');
       await deliver('orders/delete', { id: r.orderId });
 
-      expect((await reservation(r.id)).status).toBe('cancelled');
-      expect(await events(r.id, 'RESERVATION_ARCHIVED')).toHaveLength(1);
-      expect((await events(r.id, 'SHOPIFY_ORDER_SYNC')).map((e) => (e.detail as { action: string }).action).sort()).toEqual(['archived', 'cancelled']);
-      expect(await prisma.reservation.count({ where: { id: r.id } })).toBe(1);
+      expect((await reservation(r.id)).status).toBe('problem');
+      expect(await events(r.id, 'SHOPIFY_ORDER_SYNC')).toHaveLength(1);
+      expect(await events(r.id, 'ORDER_DELETE_NOT_APPLIED')).toHaveLength(1);
+      expect((await reservation(r.id)).archivedAt).toBeNull();
     });
 
-    test('peça já recebida: vai para revisão e NÃO é arquivada', async () => {
-      const r = await createReservation('confirmed', { itemStatuses: ['returned'] });
+    test('terminal reprocessado: um único arquivamento', async () => {
+      const r = await createReservation('completed');
       await deliver('orders/delete', { id: r.orderId });
-      const row = await reservation(r.id);
-      expect(row.status).toBe('problem');
-      expect(row.archivedAt).toBeNull();
-      expect(await events(r.id, 'ORDER_ARCHIVE_SKIPPED')).toHaveLength(1);
+      await deliver('orders/delete', { id: r.orderId });
+      expect(await events(r.id, 'RESERVATION_ARCHIVED')).toHaveLength(1);
     });
 
     test('pedido desconhecido → ignored, nada é tocado', async () => {
@@ -455,7 +518,8 @@ localDescribe('sincronização Shopify → reserva (PostgreSQL isolado)', () => 
       expect((await reservation(r.id)).archivedAt).toBeNull();
 
       await expect(controller.receive({ rawBody: Buffer.from(body) }, sign(body), 'orders/delete', nextWebhookId(), DOMAIN)).resolves.toEqual({ ok: true });
-      expect((await reservation(r.id)).archivedAt).not.toBeNull();
+      expect((await reservation(r.id)).status).toBe('problem');
+      expect((await reservation(r.id)).archivedAt).toBeNull();
     });
 
     test('corpo assinado mas malformado → 400', async () => {

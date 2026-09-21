@@ -19,22 +19,34 @@ transação, com rollback total em caso de erro (a Shopify reentrega).
 | `orders/cancelled` | (já existia) | ver "Cancelamento" |
 | `refunds/create` | (já existia) | `problem` (revisão), nunca libera peça |
 | **`orders/updated`** | novo | pago → confirma; `cancelled_at` → cancelamento; `financial_status` `voided`/`expired` → falha de pagamento; `closed_at` → arquivamento; sincroniza cliente; sinaliza linhas divergentes |
-| **`orders/delete`** | novo | cancelamento + arquivamento |
+| **`orders/delete`** | novo | reserva terminal → só arquiva; ativa/confirmada → `problem` (revisão); ver "Excluído" |
 
 ### Regras
 
-- **Cancelamento** (`orders/cancelled`, `cancelled_at`, exclusão): peça ainda não
+- **Cancelamento** (`orders/cancelled`, `cancelled_at`): peça ainda não
   recebida → `cancelled` (libera a peça). Qualquer peça já no ciclo físico
   (`returned`/`cleaning`/`completed`) ou reserva retirada → `problem`, sem liberar e
   sem reescrever o progresso das peças (a trigger `sync_reservation_item_status`
   agora preserva itens em `returned`/`cleaning`/`completed`).
 - **Pagamento falho/expirado** (`voided`/`expired`): `pending_payment` → `expired`
   (libera a peça); já `confirmed` → `problem`.
-- **Arquivado / excluído**: arquiva (`archived_at`, `archive_reason`, `archived_by`
-  nulo = sistema) **somente reserva terminal** (`cancelled`, `expired`, `completed`).
-  Reserva ainda ativa ou em revisão **não** é arquivada — a peça continua
-  operacionalmente com a loja — e o evento `ORDER_ARCHIVE_SKIPPED` registra o motivo.
-  Reserva restaurada manualmente não é re-arquivada automaticamente.
+- **Excluído** (`orders/delete`): excluir **não é cancelar**. Uma reserva paga/ativa
+  nunca é cancelada nem liberada automaticamente por isso.
+
+  | Reserva | Efeito |
+  |---|---|
+  | `confirmed`, `preparing`, `ready_for_pickup`, `picked_up`, `returned`, `cleaning` | `problem` + auditoria `SHOPIFY_ORDER_SYNC` (`flagged_for_review`); a peça continua ocupada; não arquiva; progresso por peça preservado |
+  | `pending_payment` (não iniciada; a máquina de estados permite) | `cancelled`, depois arquiva |
+  | `hold` (fluxo de checkout) | nenhuma transição; evento `ORDER_DELETE_NOT_APPLIED` |
+  | `problem` | nada muda (já em revisão) |
+  | `cancelled`, `expired`, `completed` | só arquiva (estado e peças intactos) |
+
+- **Arquivado** (`closed_at`) e o arquivamento de terminais: arquiva (`archived_at`,
+  `archive_reason`, `archived_by` nulo = sistema) **somente reserva terminal**
+  (`cancelled`, `expired`, `completed`). Reserva ainda ativa ou em revisão **não** é
+  arquivada — a peça continua operacionalmente com a loja — e o evento
+  `ORDER_ARCHIVE_SKIPPED` registra o motivo. Reserva restaurada manualmente não é
+  re-arquivada automaticamente. Nada é apagado.
 - **Pago/atualizado**: confirma pagamento uma vez; cliente (e-mail, nome, telefone)
   passa a refletir o pedido; auditoria só lista *quais campos* mudaram, nunca os valores.
   Datas e peças são do sistema (HOLD assinado): se as linhas do pedido divergirem das
@@ -57,6 +69,10 @@ pela Admin API (somente leitura na Shopify):
 
 Acesso: bearer do servidor + sessão administrativa + `ADMIN` com módulo `RESERVATIONS`;
 o ator vem da sessão (o corpo só aceita `days`); limite de 6 chamadas/min.
+
+`missing_in_shopify` (pedido inexistente) segue a mesma regra de "Excluído":
+terminal → arquiva; ativa/confirmada → `problem` (ação `review`, a divergência
+continua listada até um humano resolver).
 
 Divergências: `missing_in_shopify`, `cancelled_in_shopify`, `closed_in_shopify`,
 `payment_failed_in_shopify`, `paid_in_shopify_not_confirmed` (só relatório),

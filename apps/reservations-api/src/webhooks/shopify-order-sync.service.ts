@@ -107,12 +107,11 @@ export class ShopifyOrderSyncService {
       return events;
     }
 
-    if (snapshot.deleted || snapshot.cancelledAt) {
-      events.push({
-        type: snapshot.deleted ? 'ORDER_DELETED' : 'ORDER_CANCELLED',
-        reservationId: reservation.id,
-        detail: { ...base, ...(snapshot.deleted ? {} : { cancelledAt: snapshot.cancelledAt }) },
-      });
+    if (snapshot.deleted) {
+      events.push({ type: 'ORDER_DELETED', reservationId: reservation.id, detail: base });
+      await this.handleDeletedOrder(tx, reservation, events, base);
+    } else if (snapshot.cancelledAt) {
+      events.push({ type: 'ORDER_CANCELLED', reservationId: reservation.id, detail: { ...base, cancelledAt: snapshot.cancelledAt } });
       await this.cancelForOrder(tx, reservation, events, base);
     } else if (snapshot.financialStatus === 'voided' || snapshot.financialStatus === 'expired') {
       await this.handleFailedPayment(tx, reservation, snapshot.financialStatus, events, base);
@@ -126,6 +125,44 @@ export class ShopifyOrderSyncService {
       await tx.reservation.update({ where: { id: reservation.id }, data: { shopifyOrderUpdatedAt: snapshot.updatedAt } });
     }
     return events;
+  }
+
+  /**
+   * Pedido EXCLUÍDO na Shopify. Excluir não é cancelar: uma reserva paga/ativa
+   * nunca é cancelada nem liberada por isso — vai para `problem` (a peça
+   * continua ocupada) e um humano decide. Só o que ainda não começou e a
+   * máquina de estados já permite cancelar (aguardando pagamento) é cancelado;
+   * HOLD pertence ao fluxo de checkout e não sofre transição. Reserva já
+   * terminal (cancelada/expirada/concluída) só é arquivada, depois, pelo
+   * chamador.
+   */
+  private async handleDeletedOrder(
+    tx: Prisma.TransactionClient,
+    reservation: SyncableReservation,
+    events: SyncEvent[],
+    base: Record<string, unknown>,
+  ): Promise<void> {
+    const from = reservation.status as ReservationStatusValue;
+    if (!isOccupying(from)) return;
+
+    if (from === 'pending_payment') {
+      await this.cancelForOrder(tx, reservation, events, base);
+      return;
+    }
+    if (from === 'hold' || from === 'problem' || !canTransition(from, 'problem')) {
+      const reason = from === 'hold' ? 'HOLD pertence ao fluxo de checkout; nenhuma transição aplicada' : 'reserva já em revisão ou sem transição permitida';
+      events.push({ type: 'ORDER_DELETE_NOT_APPLIED', reservationId: reservation.id, detail: { ...base, status: from, reason } });
+      return;
+    }
+
+    const updated = await tx.reservation.updateMany({ where: { id: reservation.id, status: from }, data: { status: 'problem' } });
+    if (updated.count !== 1) return;
+    events.push({
+      type: 'RESERVATION_STATUS_CHANGED',
+      reservationId: reservation.id,
+      detail: { ...base, from, to: 'problem', note: 'pedido excluído na Shopify — revisão manual; peça NÃO liberada' },
+    });
+    events.push(auditEvent(reservation.id, 'flagged_for_review', from, 'problem', base));
   }
 
   /** Pagamento falho/expirado: reserva aguardando pagamento → `expired`

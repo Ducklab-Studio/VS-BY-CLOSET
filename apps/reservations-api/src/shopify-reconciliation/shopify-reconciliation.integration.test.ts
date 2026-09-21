@@ -130,7 +130,7 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     const report = await service.reconcile({ days: 30, apply: false, orderIds: ids.map((r) => r.orderId) });
 
     expect(report.mode).toBe('report');
-    expect(kindOf(report, missing.orderId)).toMatchObject({ kind: 'missing_in_shopify', action: 'archive', applied: false });
+    expect(kindOf(report, missing.orderId)).toMatchObject({ kind: 'missing_in_shopify', action: 'review', applied: false });
     expect(kindOf(report, cancelled.orderId)?.kind).toBe('cancelled_in_shopify');
     expect(kindOf(report, closed.orderId)?.kind).toBe('closed_in_shopify');
     expect(kindOf(report, failed.orderId)?.kind).toBe('payment_failed_in_shopify');
@@ -141,6 +141,7 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
 
   test('apply aplica só o subconjunto seguro, audita com origem e ator, e é idempotente', async () => {
     const missing = await createReservation('confirmed');
+    const gone = await createReservation('completed');
     const cancelled = await createReservation('confirmed');
     const closed = await createReservation('completed');
     const failed = await createReservation('pending_payment');
@@ -149,13 +150,16 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     setState(closed.orderId, { closedAt: '2029-01-02T00:00:00Z' });
     setState(failed.orderId, { financialStatus: 'voided' });
     setState(paid.orderId, { financialStatus: 'paid' });
-    const scope = [missing, cancelled, closed, failed, paid].map((r) => r.orderId);
+    const scope = [missing, gone, cancelled, closed, failed, paid].map((r) => r.orderId);
 
     const report = await service.reconcile({ days: 30, apply: true, actor: ACTOR, orderIds: scope });
 
     expect(report.mode).toBe('apply');
-    expect((await reservation(missing.id))).toMatchObject({ status: 'cancelled', archiveReason: 'Shopify: pedido excluído' });
-    expect((await reservation(missing.id)).archivedAt).not.toBeNull();
+    // pedido inexistente + reserva confirmada: nunca cancela nem libera — vai para revisão
+    expect(await snapshot([missing.id])).toEqual([{ id: missing.id, status: 'problem', archivedAt: null }]);
+    // pedido inexistente + reserva terminal: só arquiva
+    expect((await reservation(gone.id))).toMatchObject({ status: 'completed', archiveReason: 'Shopify: pedido excluído' });
+    expect((await reservation(gone.id)).archivedAt).not.toBeNull();
     expect((await reservation(cancelled.id)).status).toBe('cancelled');
     expect((await reservation(closed.id)).archivedAt).not.toBeNull();
     expect((await reservation(failed.id)).status).toBe('expired');
@@ -166,7 +170,7 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     const audit = await prisma.reservationEvent.findMany({ where: { reservationId: cancelled.id, type: 'SHOPIFY_ORDER_SYNC' } });
     expect(audit).toHaveLength(1);
     expect(audit[0].detail).toMatchObject({ source: 'SHOPIFY', origin: 'shopify_reconciliation', action: 'cancelled', adminUserId: ACTOR.id });
-    expect(await prisma.reservation.count({ where: { id: { in: [missing.id, cancelled.id, closed.id, failed.id, paid.id] } } })).toBe(5);
+    expect(await prisma.reservation.count({ where: { id: { in: [missing.id, gone.id, cancelled.id, closed.id, failed.id, paid.id] } } })).toBe(6);
 
     const again = await service.reconcile({ days: 30, apply: true, actor: ACTOR, orderIds: scope });
     expect(again.divergences.filter((d) => d.applied)).toHaveLength(0);

@@ -23,7 +23,7 @@ export interface Divergence {
   readonly reservationStatus: string | null;
   readonly shopify: { readonly cancelled: boolean; readonly closed: boolean; readonly financialStatus: string | null } | null;
   /** Ação que o modo `apply` executa. `none` = só relatório. */
-  readonly action: 'cancel' | 'archive' | 'expire' | 'none';
+  readonly action: 'cancel' | 'archive' | 'expire' | 'review' | 'none';
   readonly applied: boolean;
   readonly note: string;
 }
@@ -103,10 +103,10 @@ export class ShopifyReconciliationService {
           reservationId: reservation.id,
           reservationStatus: reservation.status,
           shopify: null,
-          action: verifiable ? 'archive' : 'none',
+          action: !verifiable ? 'none' : isArchivable(reservation.status) ? 'archive' : 'review',
           applied: false,
           note: verifiable
-            ? 'pedido não existe mais na Shopify; a reserva é cancelada (se possível) e arquivada, sem apagar dados'
+            ? 'pedido não existe mais na Shopify; reserva terminal é arquivada, aguardando pagamento é cancelada e reserva ativa/confirmada vai para revisão (peça não liberada). Nada é apagado'
             : 'pedido não retornado, mas fora da janela de leitura ou todos vieram vazios — não tratado como exclusão',
         });
         if (verifiable) applicable.push({ index: divergences.length - 1, snapshot: { orderId, updatedAt: null, cancelledAt: null, closedAt: null, financialStatus: null, deleted: true } });
