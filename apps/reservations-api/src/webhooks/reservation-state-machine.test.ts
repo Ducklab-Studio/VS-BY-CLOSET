@@ -30,6 +30,15 @@ describe('canTransition', () => {
     expect(canTransition('confirmed', 'cancelled')).toBe(true);
   });
 
+  test('ciclo físico: recebimento, higienização e liberação são transições separadas', () => {
+    expect(canTransition('confirmed', 'returned')).toBe(true);
+    expect(canTransition('picked_up', 'returned')).toBe(true);
+    expect(canTransition('returned', 'cleaning')).toBe(true);
+    expect(canTransition('cleaning', 'completed')).toBe(true);
+    expect(canTransition('returned', 'completed')).toBe(false);
+    expect(canTransition('confirmed', 'cleaning')).toBe(false);
+  });
+
   test.each([
     ['completed', 'pending_payment'],
     ['cancelled', 'hold'],
@@ -46,7 +55,7 @@ describe('canTransition', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  test('picked_up/returned/cleaning só podem ir pra problem (revisão manual)', () => {
+  test('picked_up/returned/cleaning também podem ir para problem (revisão)', () => {
     expect(canTransition('picked_up', 'problem')).toBe(true);
     expect(canTransition('returned', 'problem')).toBe(true);
     expect(canTransition('cleaning', 'problem')).toBe(true);

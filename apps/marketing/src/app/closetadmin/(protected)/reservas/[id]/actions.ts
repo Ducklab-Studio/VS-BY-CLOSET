@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
-import { cancelManualReservation, restoreReservation } from '@/lib/admin-data';
+import { advanceReservationItem, cancelManualReservation, restoreReservation } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /**
@@ -16,7 +16,7 @@ export async function cancelReservationAction(reservationId: string, reason: str
   const session = await requireAdminSession();
   requireAdminModule(session, 'RESERVATIONS');
   try {
-    await cancelManualReservation(reservationId, session.id, session.name, reason || undefined);
+    await cancelManualReservation(reservationId, reason || undefined);
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível cancelar a reserva.' };
   }
@@ -27,6 +27,25 @@ export async function cancelReservationAction(reservationId: string, reason: str
   revalidatePath('/closetadmin/calendario');
   revalidatePath('/closetadmin/pecas');
   revalidatePath('/closetadmin/auditoria');
+  return { error: null };
+}
+
+export async function operationalReservationAction(
+  reservationId: string,
+  reservationItemId: string,
+  action: 'receive' | 'start-cleaning' | 'complete-cleaning',
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
+  try {
+    await advanceReservationItem(reservationId, reservationItemId, action);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a reserva.' };
+  }
+  for (const path of [
+    `/closetadmin/reservas/${reservationId}`, '/closetadmin/reservas',
+    '/closetadmin/calendario', '/closetadmin/pecas', '/closetadmin/auditoria',
+  ]) revalidatePath(path);
   return { error: null };
 }
 

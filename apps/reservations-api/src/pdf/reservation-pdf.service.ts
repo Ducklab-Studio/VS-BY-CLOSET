@@ -7,6 +7,9 @@ const STATUS_LABELS: Record<string, string> = {
   pending_payment: 'Aguardando pagamento',
   confirmed: 'Confirmada',
   picked_up: 'Retirada',
+  returned: 'Devolvida - aguardando higienização',
+  cleaning: 'Em higienização',
+  completed: 'Concluída',
   cancelled: 'Cancelada',
   expired: 'Expirada',
   problem: 'Requer atenção',
@@ -37,13 +40,13 @@ export class ReservationPdfService {
 
     drawSectionTitle(doc, 'Datas');
     drawField(doc, 'Retirada:', formatDate(reservation.pickupDate));
-    drawField(doc, 'Devolução:', formatDate(reservation.returnDate));
+    drawField(doc, 'Devolução prevista:', formatDate(reservation.returnDate));
 
     const phases = computePhases(reservation);
     if (phases) {
       drawField(doc, 'Preparação:', `${formatDate(phases.prepStart)} a ${formatDate(phases.prepEnd)}`);
       drawField(doc, 'Aluguel:', `${formatDate(phases.rentalStart)} a ${formatDate(phases.rentalEnd)}`);
-      drawField(doc, 'Limpeza:', `${formatDate(phases.cleaningStart)} a ${formatDate(phases.cleaningEnd)}`);
+      drawField(doc, 'Limpeza prevista:', `${formatDate(phases.cleaningStart)} a ${formatDate(phases.cleaningEnd)}`);
     }
 
     drawSectionTitle(doc, 'Peças físicas');
@@ -51,7 +54,16 @@ export class ReservationPdfService {
       doc.fillColor(BRAND.inkMuted).font('Helvetica').fontSize(9).text('Nenhuma peça associada.');
     } else {
       for (const item of reservation.items) {
-        drawField(doc, `${item.code}:`, `${formatDate(item.blockedFrom)} a ${formatDate(item.blockedUntilExclusive)}`);
+        const actuals = [
+          item.returnedAt ? `recebida ${formatDateTime(item.returnedAt)}` : null,
+          item.cleaningStartedAt ? `higienização ${formatDateTime(item.cleaningStartedAt)}` : null,
+          item.cleaningCompletedAt ? `concluída ${formatDateTime(item.cleaningCompletedAt)}` : null,
+        ].filter(Boolean).join(' · ');
+        drawField(
+          doc,
+          `${item.code}:`,
+          `${STATUS_LABELS[item.status] ?? item.status} · ${formatDate(item.blockedFrom)} a ${formatDate(item.blockedUntilExclusive)}${actuals ? ` · ${actuals}` : ''}`,
+        );
       }
     }
 
@@ -96,4 +108,8 @@ function formatDate(iso: string | null): string {
   if (!iso) return '—';
   const [y, m, d] = iso.slice(0, 10).split('-');
   return `${d}/${m}/${y}`;
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Santiago' });
 }

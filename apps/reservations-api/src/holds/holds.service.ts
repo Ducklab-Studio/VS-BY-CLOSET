@@ -315,7 +315,10 @@ export class HoldsService {
           FROM reservation_items
           WHERE rental_unit_id = ANY(${candidateIds}::uuid[])
             AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
+            AND (
+              blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
+              OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date)
+            )
         `
       : [];
     const occupiedIds = new Set(occupiedRows.map((r) => r.rentalUnitId));

@@ -210,12 +210,15 @@ export class AvailabilityService {
       rows = await this.prisma.$queryRaw<Row[]>`
         SELECT
           rental_unit_id AS "rentalUnitId",
-          lower(blocked_range) AS "lo",
-          upper(blocked_range) AS "hi"
+          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchFrom)}::date ELSE lower(blocked_range) END AS "lo",
+          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchTo)}::date ELSE upper(blocked_range) END AS "hi"
         FROM reservation_items
         WHERE rental_unit_id = ANY(${unitIds}::uuid[])
           AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND blocked_range && daterange(${civilDateToISO(searchFrom)}::date, ${civilDateToISO(searchTo)}::date, '[)')
+          AND (
+            blocked_range && daterange(${civilDateToISO(searchFrom)}::date, ${civilDateToISO(searchTo)}::date, '[)')
+            OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(searchTo)}::date)
+          )
       `;
     } catch (err) {
       this.logger.error(`Falha ao consultar reservation_items: ${errorCode(err)}`);

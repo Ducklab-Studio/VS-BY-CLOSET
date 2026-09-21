@@ -108,10 +108,12 @@ describe('ReservationArchiveService — elegibilidade e proteção', () => {
     expect(row?.status).toBe('cancelled'); // arquivar nunca muda o status
   });
 
-  test('2) arquiva reserva concluída/devolvida antiga (status "returned")', async () => {
-    const id = await createReservation({ status: 'returned', daysAgoClosed: 45 });
+  test('2) arquiva apenas devolução com higienização concluída', async () => {
+    const id = await createReservation({ status: 'completed', daysAgoClosed: 45 });
+    const pendingCleaningId = await createReservation({ status: 'returned', daysAgoClosed: 45 });
     const result = await archiveService.execute({ onlyReturned: true, minSafetyDays: 30 }, 'LIMPAR HISTÓRICOS', `${PREFIX} teste 2`, ADMIN_USER_ID, 'Teste');
     expect(result.archivedIds).toContain(id);
+    expect(result.archivedIds).not.toContain(pendingCleaningId);
   });
 
   test('3) NUNCA arquiva reserva "returned"/"completed" futura (pickupDate ainda não chegou — dado incomum, mas a guarda continua valendo pra esses dois status)', async () => {

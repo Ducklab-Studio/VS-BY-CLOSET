@@ -18,9 +18,8 @@ datasource db {
 }
 
 enum ReservationStatus {
-  // `pending`/`completed` — de fato legado da Fase 1, sem uso desde a
-  // Fase 4. Mantidos só porque o Postgres não remove valor de enum de
-  // forma simples.
+  // `pending` permanece legado da Fase 1. `completed` agora marca a
+  // higienização concluída e a liberação operacional da unidade.
   pending
   completed
 
@@ -307,9 +306,9 @@ model RentalUnit {
 }
 
 /// A reserva. `pickupDate`/`returnDate` são datas civis (sem hora) — ver
-/// o motor de regras em src/rental-rules. `status` é a fonte da verdade;
-/// `ReservationItem.status` é espelho garantido por trigger (nunca
-/// escrito direto pela aplicação).
+/// o motor de regras em src/rental-rules. O status da reserva representa
+/// o agregado operacional; cada `ReservationItem` carrega sua própria
+/// etapa de devolução/higienização.
 model Reservation {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
@@ -385,7 +384,6 @@ model Reservation {
   /// — nunca por redirect do cliente, nunca pelo frontend. Ver
   /// WebhooksService.
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
-
   // Legado (Fase 1) — não usado por reserva nova. Mantido até uma
   // migration de limpeza futura, depois que nada mais ler/escrever aqui.
   sku       String?                    @map("sku")
@@ -466,6 +464,16 @@ model ReservationItem {
   /// Janela de ocupação já com preparo+higienização embutidos —
   /// calculada e gravada na criação, não derivada depois.
   blockedRange Unsupported("daterange") @map("blocked_range")
+
+  /// Recebimento e higienização são por peça física. `completed` libera
+  /// esta unidade; `returned` e `cleaning` continuam bloqueando mesmo
+  /// depois da janela planejada em `blocked_range`.
+  returnedAt DateTime? @map("returned_at") @db.Timestamptz(6)
+  returnedBy String? @map("returned_by") @db.Uuid
+  cleaningStartedAt DateTime? @map("cleaning_started_at") @db.Timestamptz(6)
+  cleaningStartedBy String? @map("cleaning_started_by") @db.Uuid
+  cleaningCompletedAt DateTime? @map("cleaning_completed_at") @db.Timestamptz(6)
+  cleaningCompletedBy String? @map("cleaning_completed_by") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

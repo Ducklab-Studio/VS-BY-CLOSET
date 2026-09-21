@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 /**
  * Item "UX/Design": "Evitar window.confirm." Modal simples e controlado
@@ -28,13 +28,16 @@ export function ConfirmDialog({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleConfirm() {
+    if (pendingRef.current) return;
     if (requireReason && reason.trim().length < 3) {
       setError('Informe um motivo (mínimo 3 caracteres).');
       return;
     }
+    pendingRef.current = true;
     setPending(true);
     setError(null);
     try {
@@ -44,6 +47,7 @@ export function ConfirmDialog({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível concluir a ação.');
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   }
