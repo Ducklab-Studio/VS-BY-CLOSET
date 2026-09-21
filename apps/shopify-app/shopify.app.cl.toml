@@ -46,7 +46,7 @@ api_version = "2026-10"
   # vale, com a URL pública real, está em `shopify.app.production.toml`.
   [[webhooks.subscriptions]]
   uri = "PLACEHOLDER — a assinatura real vive em shopify.app.production.toml"
-  topics = [ "orders/create", "orders/paid", "orders/cancelled", "refunds/create" ]
+  topics = [ "orders/create", "orders/paid", "orders/cancelled", "orders/updated", "orders/delete", "refunds/create" ]
 
 [auth]
 redirect_urls = [ "PLACEHOLDER — nunca deployar a partir deste arquivo" ]

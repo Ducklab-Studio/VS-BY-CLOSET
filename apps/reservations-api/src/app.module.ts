@@ -17,6 +17,7 @@ import { AdminEmployeesModule } from './admin-employees/admin-employees.module';
 import { ValePassModule } from './vale-pass/vale-pass.module';
 import { PdfModule } from './pdf/pdf.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { ShopifyReconciliationModule } from './shopify-reconciliation/shopify-reconciliation.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -32,6 +33,7 @@ import { AppController } from './app.controller';
     HoldsModule,
     CheckoutModule,
     WebhooksModule,
+    ShopifyReconciliationModule,
     ReservationsModule,
     AdminReservationsModule,
     ReservationArchiveModule,
