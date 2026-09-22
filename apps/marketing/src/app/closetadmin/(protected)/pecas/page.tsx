@@ -103,7 +103,9 @@ export default async function ClosetAdminPiecesPage() {
                       <div className="min-w-0">
                         <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
                         <p className="mt-0.5 font-medium text-ink dark:text-dark-text">{piece.name}</p>
-                        <p className="mt-0.5 font-mono text-xs text-ink/60 dark:text-dark-muted">SKU {piece.shopifySku ?? '—'}</p>
+                        <p className="mt-0.5 font-mono text-xs text-ink/60 dark:text-dark-muted">
+                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : <>SKU {piece.shopifySku ?? '—'}</>}
+                        </p>
                       </div>
                       <StatusBadge piece={piece} />
                     </div>
@@ -186,7 +188,9 @@ export default async function ClosetAdminPiecesPage() {
                           {piece.name}
                           {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">{piece.shopifySku ?? '—'}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">
+                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : (piece.shopifySku ?? '—')}
+                        </td>
                         <td className="px-4 py-3">
                           <StatusBadge piece={piece} />
                         </td>
@@ -240,6 +244,22 @@ export default async function ClosetAdminPiecesPage() {
 
 function ReadOnlyDot({ value }: { value: boolean }) {
   return <span className={`inline-block h-2.5 w-2.5 rounded-full ${value ? 'bg-marsala dark:bg-gold' : 'bg-ink/15 dark:bg-white/15'}`} />;
+}
+
+/**
+ * SKU "desvinculado": active=false + variante Shopify ausente
+ * (shopifyVariantMissingAt) — o mesmo par de condições do badge "Desativada".
+ * O SKU antigo continua gravado em rental_units.shopify_sku (histórico,
+ * reativação), só não é mostrado como se ainda fosse válido. Peça
+ * desativada por outro motivo, com o vínculo Shopify intacto, continua
+ * mostrando o SKU real normalmente.
+ */
+function isSkuUnlinked(piece: PieceListItem): boolean {
+  return !piece.active && !!piece.shopifyVariantMissingAt;
+}
+
+function SkuUnlinkedLabel() {
+  return <span className="italic text-ink/40 dark:text-dark-subtle">SKU desvinculado</span>;
 }
 
 /**
