@@ -68,6 +68,11 @@ export function RentalCalendar({
   const [pieces, setPieces] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  // 404/422 do servidor = "sem peça física pra alugar agora" (nenhuma
+  // RentalUnit ativa e reservável) — estado de negócio normal, nunca
+  // reserva. Distinto de uma falha técnica (rede, 5xx): mensagem própria,
+  // sem parecer que algo quebrou. Fonte da verdade continua o backend.
+  const [notAvailable, setNotAvailable] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -81,6 +86,7 @@ export function RentalCalendar({
     async function load() {
       setLoading(true);
       setLoadFailed(false);
+      setNotAvailable(false);
       setData(null);
       setError(null);
 
@@ -100,9 +106,14 @@ export function RentalCalendar({
       const result = await fetchAvailability(variant.id, countedPieces, today, rangeEnd);
       if (cancelled) return;
 
-      if (result) {
-        setData(result);
-        setLoadFailed(false);
+      if (result.ok) {
+        setData(result.data);
+      } else if (result.status === 404 || result.status === 422) {
+        // Sem unidade cadastrada (404) ou nenhuma reservável online (422)
+        // — nos dois casos, "esta peça não pode ser alugada agora", não
+        // uma falha de rede. Mesma condição que já bloqueia HOLD/reserva
+        // no servidor.
+        setNotAvailable(true);
       } else {
         setLoadFailed(true);
       }
@@ -285,6 +296,11 @@ export function RentalCalendar({
             <Spinner />
             Carregando disponibilidade…
           </div>
+        ) : notAvailable ? (
+          <div className="col-span-7 flex min-h-[15rem] flex-col items-center justify-center gap-1.5 px-4 text-center">
+            <span className="text-[0.85rem] font-semibold text-marsala">Indisponível</span>
+            <span className="text-[0.8rem] text-ink/55">Esta peça não está disponível para reserva no momento.</span>
+          </div>
         ) : loadFailed ? (
           <div className="col-span-7 flex min-h-[15rem] items-center justify-center px-4 text-center text-[0.8rem] text-ink/50">
             Não foi possível consultar a disponibilidade no momento.
@@ -378,19 +394,21 @@ export function RentalCalendar({
       )}
 
       <Status
-        tone={loadFailed ? 'error' : freeCount === 0 && !loading ? 'warn' : selected ? 'ok' : null}
+        tone={loadFailed ? 'error' : notAvailable || (freeCount === 0 && !loading) ? 'warn' : selected ? 'ok' : null}
       >
         {loadFailed
           ? 'Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.'
-          : isMaxPiecesExceeded
-            ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
-            : isBlackoutSeason
-              ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
-              : freeCount === 0 && !loading
-                ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
-                : selected && selectedInfo?.bookable
-                  ? 'Disponível para retirada nesta data.'
-                  : null}
+          : notAvailable
+            ? 'Esta peça não está disponível para reserva online no momento. Fale com o atendimento para verificar outras opções.'
+            : isMaxPiecesExceeded
+              ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
+              : isBlackoutSeason
+                ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
+                : freeCount === 0 && !loading
+                  ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
+                  : selected && selectedInfo?.bookable
+                    ? 'Disponível para retirada nesta data.'
+                    : null}
       </Status>
 
       {error && <Status tone="error">{error}</Status>}
@@ -407,7 +425,7 @@ export function RentalCalendar({
       </button>
       </RentalAction>
 
-      {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
+      {whatsappHref && (loadFailed || notAvailable || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
         <a
           href={whatsappHref}
           target="_blank"
@@ -427,18 +445,24 @@ const LONG_DATE: Intl.DateTimeFormatOptions = {
   year: 'numeric',
 };
 
+type FetchAvailabilityResult = { ok: true; data: AvailabilityResponse } | { ok: false; status: number };
+
 /**
  * Consulta a disponibilidade real. Sem fallback inventado: por padrão usa
  * o proxy same-origin do Next; uma URL pública explícita continua aceita.
  * `new URL(base, window.location.origin)` suporta os dois formatos e evita
  * o crash que ocorria com `new URL('/api/availability')`.
+ *
+ * `status` no retorno de erro é o que separa "esta peça não existe/não é
+ * reservável online" (404/422 — ver `notAvailable` acima) de uma falha
+ * técnica de verdade; `0` cobre erro de rede (sem status HTTP nenhum).
  */
 async function fetchAvailability(
   shopifyVariantId: string,
   countedPieces: number,
   from: Date,
   to: Date,
-): Promise<AvailabilityResponse | null> {
+): Promise<FetchAvailabilityResult> {
   const base = process.env.NEXT_PUBLIC_AVAILABILITY_URL?.trim() || '/api/availability';
   const url = new URL(base, window.location.origin);
   url.searchParams.set('shopifyVariantId', shopifyVariantId);
@@ -451,10 +475,10 @@ async function fetchAvailability(
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
-    if (!res.ok) return null;
-    return (await res.json()) as AvailabilityResponse;
+    if (!res.ok) return { ok: false, status: res.status };
+    return { ok: true, data: (await res.json()) as AvailabilityResponse };
   } catch {
-    return null;
+    return { ok: false, status: 0 };
   }
 }
 

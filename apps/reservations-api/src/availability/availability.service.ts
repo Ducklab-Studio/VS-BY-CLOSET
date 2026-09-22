@@ -46,6 +46,14 @@ export interface AvailabilityResponse {
   readonly days: readonly AvailabilityDay[];
 }
 
+export interface ReservableVariantsResponse {
+  /** Subconjunto de `shopifyVariantIds` da consulta que tem pelo menos uma
+   *  RentalUnit `active=true AND reservableOnline=true` agora — sem data,
+   *  sem calcular grade nenhuma. É "esta peça existe fisicamente e pode
+   *  ser reservada", não "há data livre" (isso é o /availability normal). */
+  readonly reservable: readonly string[];
+}
+
 @Injectable()
 export class AvailabilityService {
   private readonly logger = new Logger(AvailabilityService.name);
@@ -183,6 +191,31 @@ export class AvailabilityService {
         window: o.window,
       })),
     };
+  }
+
+  /**
+   * Catálogo público (listagem e página da peça) usam isto pra decidir se
+   * uma variante pode SER OFERECIDA como reservável — nunca inferem isso
+   * de estoque Shopify nem de cache do produto. Consulta única, sem motor
+   * de regras, sem intervalo de datas: é exatamente `RentalUnit.active
+   * AND RentalUnit.reservableOnline`, a mesma condição que já bloqueia
+   * HOLD/reserva no servidor (HoldsService, AdminReservationsService) —
+   * só exposta como leitura pública, em lote, pra não custar 1 requisição
+   * de disponibilidade completa por peça do catálogo.
+   */
+  async getReservableVariants(shopifyVariantIds: readonly string[]): Promise<ReservableVariantsResponse> {
+    if (shopifyVariantIds.length === 0) return { reservable: [] };
+    try {
+      const rows = await this.prisma.rentalUnit.findMany({
+        where: { shopifyVariantId: { in: [...shopifyVariantIds] }, active: true, reservableOnline: true },
+        select: { shopifyVariantId: true },
+        distinct: ['shopifyVariantId'],
+      });
+      return { reservable: rows.map((r) => r.shopifyVariantId as string) };
+    } catch (err) {
+      this.logger.error(`Falha ao consultar variantes reserváveis: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
+    }
   }
 
   private async loadUnits(shopifyVariantId: string): Promise<{ id: string; reservableOnline: boolean }[]> {

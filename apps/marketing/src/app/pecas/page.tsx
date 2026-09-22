@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { ProductCard } from '@/components/ProductCard';
 import Link from 'next/link';
 import {
   RENTAL_CATEGORIES,
@@ -7,8 +6,10 @@ import {
   isShopifyConfigured,
   listProducts,
 } from '@/lib/shopify';
+import { isValePassProduct } from '@/lib/vale-pass-product';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { CategorySelect } from '@/components/CategorySelect';
+import { CatalogGrid } from '@/components/CatalogGrid';
 
 export const metadata: Metadata = {
   title: 'Peças',
@@ -109,11 +110,15 @@ export default async function PecasPage({
             : 'Nenhuma peça cadastrada ainda.'}
         </p>
       ) : (
-        <div className="catalog-grid">
-          {products.map((product, index) => (
-            <ProductCard key={product.id} product={product} catalog priority={index < 2} />
-          ))}
-        </div>
+        <CatalogGrid
+          products={products.map((product) => ({
+            ...product,
+            // Valle Pass (e qualquer produto fora do fluxo de aluguel) nunca
+            // entra na checagem de disponibilidade — não depende de peça
+            // física nenhuma; ver isValePassProduct.
+            checkVariantId: isValePassProduct({ productId: product.id }) ? null : (product.variantId ?? null),
+          }))}
+        />
       )}
     </div>
   );
