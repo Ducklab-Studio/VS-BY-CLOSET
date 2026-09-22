@@ -3,12 +3,29 @@
 import { useState, useTransition } from 'react';
 import { updatePieceAction } from './actions';
 
-export function PieceToggle({ pieceId, field, initialValue }: { pieceId: string; field: 'active' | 'reservableOnline' | 'countsTowardRentalDuration'; initialValue: boolean }) {
+/** `field="active"` saiu daqui — ver PieceActiveToggle (reativar exige
+ *  confirmação explícita; desativar é instantâneo, igual sempre foi). */
+export function PieceToggle({
+  pieceId,
+  field,
+  initialValue,
+  disabled,
+  disabledTitle,
+}: {
+  pieceId: string;
+  field: 'reservableOnline' | 'countsTowardRentalDuration';
+  initialValue: boolean;
+  /** Peça desativada: editar isto aqui é moot enquanto ela não volta a ficar
+   *  ativa — bloqueado pra não sugerir um controle que não tem efeito. */
+  disabled?: boolean;
+  disabledTitle?: string;
+}) {
   const [value, setValue] = useState(initialValue);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   function toggle() {
+    if (disabled) return;
     const next = !value;
     setValue(next);
     setError(null);
@@ -26,9 +43,10 @@ export function PieceToggle({ pieceId, field, initialValue }: { pieceId: string;
       <button
         type="button"
         onClick={toggle}
-        disabled={pending}
+        disabled={pending || disabled}
         aria-pressed={value}
-        className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${
+        title={disabled ? disabledTitle : undefined}
+        className={`relative h-6 w-11 rounded-full transition-colors disabled:opacity-40 ${
           value ? 'bg-marsala dark:bg-gold shadow-sm' : 'bg-ink/15 dark:bg-white/20'
         }`}
       >

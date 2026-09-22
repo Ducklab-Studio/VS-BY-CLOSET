@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start -p 3000",
     "test:operational-browser": "node test/operational-browser.mjs",
+    "test:pecas-sku-inactive": "node test/pecas-sku-inactive.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

@@ -101,6 +101,9 @@ jobs:
       - name: Testar cancelamento e devolução pelo painel isolado
         run: pnpm --filter @valle/marketing run test:operational-browser
 
+      - name: Testar SKU desvinculado na tela de peças
+        run: pnpm --filter @valle/marketing run test:pecas-sku-inactive
+
   build:
     name: Build da vitrine (Next.js)
     runs-on: ubuntu-latest
