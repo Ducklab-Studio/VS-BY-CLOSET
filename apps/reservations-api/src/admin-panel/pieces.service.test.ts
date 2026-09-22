@@ -115,4 +115,18 @@ describe('AdminPiecesService — /closetadmin/pecas (integração real, Neon)', 
     const unit = await createUnit();
     await expect(pieces.update(unit.id, {}, adminUserId, 'Admin Pecas Teste')).rejects.toThrow(BadRequestException);
   });
+
+  test('9) reativação manual (active=true) limpa shopifyVariantMissingAt — a sincronização não re-tocará sozinha', async () => {
+    const unit = await createUnit({ active: false });
+    await prisma.rentalUnit.update({ where: { id: unit.id }, data: { shopifyVariantMissingAt: new Date() } });
+    const updated = await pieces.update(unit.id, { active: true }, adminUserId, 'Admin Pecas Teste');
+    expect(updated.shopifyVariantMissingAt).toBeNull();
+  });
+
+  test('10) atualizar outro campo (sem mexer em active) NÃO limpa shopifyVariantMissingAt', async () => {
+    const unit = await createUnit({ active: false });
+    await prisma.rentalUnit.update({ where: { id: unit.id }, data: { shopifyVariantMissingAt: new Date() } });
+    const updated = await pieces.update(unit.id, { reservableOnline: false }, adminUserId, 'Admin Pecas Teste');
+    expect(updated.shopifyVariantMissingAt).not.toBeNull();
+  });
 });

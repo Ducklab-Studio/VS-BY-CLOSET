@@ -128,6 +128,9 @@ export interface PieceListItem {
   readonly countsTowardRentalDuration: boolean;
   readonly currentlyOccupied: boolean;
   readonly upcomingReservations: number;
+  /// Presente = a sincronização de catálogo desativou esta peça porque a
+  /// variante vinculada não existe mais na Shopify (ver docs/shopify-catalog-sync.md).
+  readonly shopifyVariantMissingAt: string | null;
 }
 
 export function listPieces(adminUserId: string): Promise<PieceListItem[]> {

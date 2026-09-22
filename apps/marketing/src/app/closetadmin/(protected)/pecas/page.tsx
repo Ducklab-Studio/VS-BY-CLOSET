@@ -2,12 +2,13 @@ import type { Metadata } from 'next';
 import { ExternalLink } from 'lucide-react';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listPieces } from '@/lib/admin-data';
-import { listShopifyCatalog } from '@/lib/shopify-admin-data';
+import { listShopifyCatalog, getCatalogReconciliation } from '@/lib/shopify-admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyProductAdminUrl } from '@/lib/closetadmin-shopify';
 import { EmptyState, ErrorState, PageHeader } from '@/components/closetadmin/ui';
 import { PieceToggle } from './PieceToggle';
 import { ShopifyCatalog } from './ShopifyCatalog';
+import { CatalogSyncPanel } from './CatalogSyncPanel';
 
 export const metadata: Metadata = { title: 'Peças' };
 
@@ -41,9 +42,21 @@ export default async function ClosetAdminPiecesPage() {
     catalogError = err instanceof AdminApiError ? err.message : 'Não foi possível consultar a Shopify.';
   }
 
+  // Item 11/12 — relatório somente-leitura de divergências peça × variante
+  // Shopify, e "última sincronização". Indisponível não impede o resto da
+  // página (mesmo tratamento de erro do catálogo acima).
+  let syncReport: Awaited<ReturnType<typeof getCatalogReconciliation>> | null = null;
+  try {
+    syncReport = await getCatalogReconciliation(session.id);
+  } catch {
+    syncReport = null;
+  }
+
   return (
     <div>
       <PageHeader title="Peças" description={`${pieces.length} peça(s) física(s) cadastrada(s)`} />
+
+      {syncReport ? <CatalogSyncPanel initialReport={syncReport} isAdmin={isAdmin} /> : null}
 
       <section className="mb-8">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
@@ -94,6 +107,7 @@ export default async function ClosetAdminPiecesPage() {
                         {piece.currentlyOccupied ? 'Ocupada' : 'Livre'}
                       </span>
                     </div>
+                    {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
 
                     <dl className="mt-3.5 grid grid-cols-3 gap-2 border-t border-ink/5 pt-3.5 text-center dark:border-white/5">
                       <div>
@@ -144,7 +158,10 @@ export default async function ClosetAdminPiecesPage() {
                     return (
                       <tr key={piece.id} className="transition hover:bg-ink/5 dark:hover:bg-white/5">
                         <td className="px-4 py-3 font-mono text-xs font-medium text-ink dark:text-dark-text">{piece.code}</td>
-                        <td className="px-4 py-3 text-ink/80 dark:text-dark-text">{piece.name}</td>
+                        <td className="px-4 py-3 text-ink/80 dark:text-dark-text">
+                          {piece.name}
+                          {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
+                        </td>
                         <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">{piece.shopifySku ?? '—'}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${piece.currentlyOccupied ? 'bg-amber-100 text-amber-800 dark:border dark:border-amber-700/40 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:border dark:border-emerald-700/40 dark:bg-emerald-950/60 dark:text-emerald-300'}`}>
@@ -177,4 +194,14 @@ export default async function ClosetAdminPiecesPage() {
 
 function ReadOnlyDot({ value }: { value: boolean }) {
   return <span className={`inline-block h-2.5 w-2.5 rounded-full ${value ? 'bg-marsala dark:bg-gold' : 'bg-ink/15 dark:bg-white/15'}`} />;
+}
+
+/** Motivo da inativação (item 12) — só aparece quando foi a SINCRONIZAÇÃO
+ *  que desativou a peça, nunca uma decisão manual (ver shopifyVariantMissingAt). */
+function MissingVariantBadge() {
+  return (
+    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border dark:border-amber-700/40 dark:bg-amber-950/60 dark:text-amber-300">
+      Inativa — variante removida da Shopify
+    </span>
+  );
 }

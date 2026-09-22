@@ -14,6 +14,8 @@ import { AdminAuditService } from './audit.service';
 import { ShopifyAdminClient } from './shopify-admin.client';
 import { ShopifyCatalogController } from './shopify-catalog.controller';
 import { ShopifyCatalogService } from './shopify-catalog.service';
+import { ShopifyCatalogSyncController } from './shopify-catalog-sync.controller';
+import { ShopifyCatalogSyncService } from './shopify-catalog-sync.service';
 
 @Module({
   imports: [PrismaModule],
@@ -24,6 +26,7 @@ import { ShopifyCatalogService } from './shopify-catalog.service';
     AdminBlocksController,
     AdminAuditController,
     ShopifyCatalogController,
+    ShopifyCatalogSyncController,
   ],
   providers: [
     AdminRoleGuard,
@@ -34,6 +37,7 @@ import { ShopifyCatalogService } from './shopify-catalog.service';
     AdminAuditService,
     ShopifyAdminClient,
     ShopifyCatalogService,
+    ShopifyCatalogSyncService,
   ],
   exports: [AdminCalendarService],
 })

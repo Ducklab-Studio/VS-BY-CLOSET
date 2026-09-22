@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
 import { updatePiece } from '@/lib/admin-data';
-import { importShopifyUnits } from '@/lib/shopify-admin-data';
+import { importShopifyUnits, syncCatalog, type CatalogSyncReport } from '@/lib/shopify-admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /** Item 11 — só campos operacionais, e só ADMIN ("gestão operacional de
@@ -63,6 +63,26 @@ export async function importShopifyUnitsAction(
 
   revalidatePieceDependentViews();
   return { error: null };
+}
+
+/**
+ * Item 10 — sincroniza peça física × variante Shopify. Só ADMIN (mesma regra
+ * de `updatePieceAction`/`importShopifyUnitsAction` — "gestão operacional de
+ * RentalUnits"). Nenhum dado vem do cliente: o servidor decide tudo.
+ */
+export async function syncCatalogAction(): Promise<{ error: string | null; report: CatalogSyncReport | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'ADMIN');
+
+  let report: CatalogSyncReport;
+  try {
+    report = await syncCatalog();
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível sincronizar o catálogo.', report: null };
+  }
+
+  revalidatePieceDependentViews();
+  return { error: null, report };
 }
 
 function revalidatePieceDependentViews() {
