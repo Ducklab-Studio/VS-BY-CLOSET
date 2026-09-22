@@ -86,8 +86,8 @@ export class AdminAuditService {
             // nunca visível a funcionário, mesmo com o módulo concedido.
             type: {
               in: isSuperAdmin
-                ? ['MANUAL_RESERVATION_CREATED', ...CRITICAL_RESERVATION_EVENT_TYPES]
-                : ['MANUAL_RESERVATION_CREATED'],
+                ? ['MANUAL_RESERVATION_CREATED', 'SHOPIFY_CATALOG_UNIT_MISSING_RESERVATION_ALERT', ...CRITICAL_RESERVATION_EVENT_TYPES]
+                : ['MANUAL_RESERVATION_CREATED', 'SHOPIFY_CATALOG_UNIT_MISSING_RESERVATION_ALERT'],
             },
             ...(afterClear ? { createdAt: afterClear } : {}),
           },

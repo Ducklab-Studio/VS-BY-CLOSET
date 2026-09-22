@@ -297,12 +297,42 @@ model RentalUnit {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// Quando a sincronização de catálogo (ShopifyCatalogSyncService) detectou
+  /// que `shopifyVariantId` não existe mais na Shopify. NÃO apaga/esvazia
+  /// `shopifyVariantId` — perder o valor impediria casar a MESMA variante se
+  /// ela voltar a existir (reativação segura, sem duplicar peça). Este campo
+  /// é quem "invalida" o vínculo pra fins de negócio; `active=false` é quem
+  /// efetivamente bloqueia reserva/disponibilidade — mesmos checks que já
+  /// existiam (AvailabilityService, HoldsService, AdminReservationsService).
+  /// Só a própria sincronização escreve aqui; uma reativação MANUAL pelo
+  /// painel (PATCH /admin/pieces/:id com active=true) limpa este campo, pra
+  /// nunca haver duas fontes de verdade competindo pelo mesmo estado.
+  shopifyVariantMissingAt DateTime? @map("shopify_variant_missing_at") @db.Timestamptz(6)
+
   reservationItems  ReservationItem[]
   operationalBlocks OperationalBlock[]
 
   @@index([shopifyVariantId])
   @@index([active])
   @@map("rental_units")
+}
+
+/// Singleton (mesmo padrão de RentalRuleConfig) — só a última execução da
+/// sincronização de catálogo Shopify → peças físicas. Sem linha = nunca
+/// sincronizado (estado válido, não erro; ao contrário de RentalRuleConfig,
+/// que É seedada na migration porque a ausência dela SIGNIFICA erro).
+model CatalogSyncState {
+  id String @id @default("default")
+
+  lastSyncedAt     DateTime @map("last_synced_at") @db.Timestamptz(6)
+  lastSyncedBy     String?  @map("last_synced_by") @db.Uuid
+  lastSyncedByName String?  @map("last_synced_by_name")
+
+  checkedVariants  Int @default(0) @map("checked_variants")
+  deactivatedCount Int @default(0) @map("deactivated_count")
+  reactivatedCount Int @default(0) @map("reactivated_count")
+
+  @@map("catalog_sync_state")
 }
 
 /// A reserva. `pickupDate`/`returnDate` são datas civis (sem hora) — ver
