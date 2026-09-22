@@ -10,6 +10,7 @@ import {
   listValePassCampaigns,
   listValePassVouchers,
   markValePassVoucherUsed,
+  restoreValePassVoucher,
   type CreateValePassCampaignInput,
   type ValePassCampaign,
   type ValePassVoucher,
@@ -99,6 +100,24 @@ export async function cancelValePassVoucherAction(code: string, reason: string):
     return { voucher, error: null };
   } catch (err) {
     return { voucher: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível cancelar o vale.' };
+  }
+}
+
+/** Reverte um cancelamento — reabre um crédito já vendido, mesma
+ *  sensibilidade de cancelar: exige ADMIN por cima do módulo. O backend
+ *  é quem decide se é permitido (nunca utilizado, não expirado, cancelado
+ *  por um admin — não pela Shopify — e sem conflito com o pedido); esta
+ *  action só encaminha e traduz o erro. */
+export async function restoreValePassVoucherAction(code: string, reason: string): Promise<{ voucher: ValePassVoucher | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const voucher = await restoreValePassVoucher(code, reason);
+    revalidateValePassPath();
+    return { voucher, error: null };
+  } catch (err) {
+    return { voucher: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível restaurar o vale.' };
   }
 }
 
