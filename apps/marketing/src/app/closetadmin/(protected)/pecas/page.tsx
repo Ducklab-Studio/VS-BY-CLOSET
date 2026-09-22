@@ -7,8 +7,10 @@ import { AdminApiError } from '@/lib/admin-api';
 import { shopifyProductAdminUrl } from '@/lib/closetadmin-shopify';
 import { EmptyState, ErrorState, PageHeader } from '@/components/closetadmin/ui';
 import { PieceToggle } from './PieceToggle';
+import { PieceActiveToggle } from './PieceActiveToggle';
 import { ShopifyCatalog } from './ShopifyCatalog';
 import { CatalogSyncPanel } from './CatalogSyncPanel';
+import type { PieceListItem } from '@/lib/admin-data';
 
 export const metadata: Metadata = { title: 'Peças' };
 
@@ -103,24 +105,46 @@ export default async function ClosetAdminPiecesPage() {
                         <p className="mt-0.5 font-medium text-ink dark:text-dark-text">{piece.name}</p>
                         <p className="mt-0.5 font-mono text-xs text-ink/60 dark:text-dark-muted">SKU {piece.shopifySku ?? '—'}</p>
                       </div>
-                      <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${piece.currentlyOccupied ? 'bg-amber-100 text-amber-800 dark:border dark:border-amber-700/40 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:border dark:border-emerald-700/40 dark:bg-emerald-950/60 dark:text-emerald-300'}`}>
-                        {piece.currentlyOccupied ? 'Ocupada' : 'Livre'}
-                      </span>
+                      <StatusBadge piece={piece} />
                     </div>
                     {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
 
                     <dl className="mt-3.5 grid grid-cols-3 gap-2 border-t border-ink/5 pt-3.5 text-center dark:border-white/5">
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Ativa</dt>
-                        <dd className="mt-1.5 flex justify-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="active" initialValue={piece.active} /> : <ReadOnlyDot value={piece.active} />}</dd>
+                        <dd className="mt-1.5 flex justify-center">
+                          {isAdmin ? (
+                            <PieceActiveToggle pieceId={piece.id} pieceName={piece.name} initialValue={piece.active} missingVariantReason={!!piece.shopifyVariantMissingAt} />
+                          ) : (
+                            <ReadOnlyDot value={piece.active} />
+                          )}
+                        </dd>
                       </div>
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Online</dt>
-                        <dd className="mt-1.5 flex justify-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} /> : <ReadOnlyDot value={piece.reservableOnline} />}</dd>
+                        <dd className="mt-1.5 flex justify-center">
+                          {isAdmin ? (
+                            <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} disabled={!piece.active} disabledTitle="Peça desativada — reative para editar." />
+                          ) : (
+                            <ReadOnlyDot value={piece.reservableOnline} />
+                          )}
+                        </dd>
                       </div>
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Na duração</dt>
-                        <dd className="mt-1.5 flex justify-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="countsTowardRentalDuration" initialValue={piece.countsTowardRentalDuration} /> : <ReadOnlyDot value={piece.countsTowardRentalDuration} />}</dd>
+                        <dd className="mt-1.5 flex justify-center">
+                          {isAdmin ? (
+                            <PieceToggle
+                              pieceId={piece.id}
+                              field="countsTowardRentalDuration"
+                              initialValue={piece.countsTowardRentalDuration}
+                              disabled={!piece.active}
+                              disabledTitle="Peça desativada — reative para editar."
+                            />
+                          ) : (
+                            <ReadOnlyDot value={piece.countsTowardRentalDuration} />
+                          )}
+                        </dd>
                       </div>
                     </dl>
 
@@ -164,13 +188,35 @@ export default async function ClosetAdminPiecesPage() {
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">{piece.shopifySku ?? '—'}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${piece.currentlyOccupied ? 'bg-amber-100 text-amber-800 dark:border dark:border-amber-700/40 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:border dark:border-emerald-700/40 dark:bg-emerald-950/60 dark:text-emerald-300'}`}>
-                            {piece.currentlyOccupied ? 'Ocupada' : 'Livre'}
-                          </span>
+                          <StatusBadge piece={piece} />
                         </td>
-                        <td className="px-4 py-3 text-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="active" initialValue={piece.active} /> : <ReadOnlyDot value={piece.active} />}</td>
-                        <td className="px-4 py-3 text-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} /> : <ReadOnlyDot value={piece.reservableOnline} />}</td>
-                        <td className="px-4 py-3 text-center">{isAdmin ? <PieceToggle pieceId={piece.id} field="countsTowardRentalDuration" initialValue={piece.countsTowardRentalDuration} /> : <ReadOnlyDot value={piece.countsTowardRentalDuration} />}</td>
+                        <td className="px-4 py-3 text-center">
+                          {isAdmin ? (
+                            <PieceActiveToggle pieceId={piece.id} pieceName={piece.name} initialValue={piece.active} missingVariantReason={!!piece.shopifyVariantMissingAt} />
+                          ) : (
+                            <ReadOnlyDot value={piece.active} />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {isAdmin ? (
+                            <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} disabled={!piece.active} disabledTitle="Peça desativada — reative para editar." />
+                          ) : (
+                            <ReadOnlyDot value={piece.reservableOnline} />
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {isAdmin ? (
+                            <PieceToggle
+                              pieceId={piece.id}
+                              field="countsTowardRentalDuration"
+                              initialValue={piece.countsTowardRentalDuration}
+                              disabled={!piece.active}
+                              disabledTitle="Peça desativada — reative para editar."
+                            />
+                          ) : (
+                            <ReadOnlyDot value={piece.countsTowardRentalDuration} />
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-ink/60 dark:text-dark-muted">{piece.upcomingReservations}</td>
                         <td className="px-4 py-3">
                           {productUrl ? (
@@ -194,6 +240,35 @@ export default async function ClosetAdminPiecesPage() {
 
 function ReadOnlyDot({ value }: { value: boolean }) {
   return <span className={`inline-block h-2.5 w-2.5 rounded-full ${value ? 'bg-marsala dark:bg-gold' : 'bg-ink/15 dark:bg-white/15'}`} />;
+}
+
+/**
+ * Situação da peça — "Livre" só existe quando ATIVA e sem reserva agora.
+ * Peça desativada (por sincronização ou decisão manual) nunca mostra
+ * "Livre"/"Ocupada": esses dois estados descrevem disponibilidade
+ * OPERACIONAL de uma peça que ainda está no catálogo, não uma peça fora
+ * dele. Corrige o bug relatado: peça 02 com active=false aparecia como
+ * "Livre" porque o badge só olhava `currentlyOccupied`, nunca `active`.
+ */
+function StatusBadge({ piece }: { piece: PieceListItem }) {
+  if (!piece.active) {
+    return (
+      <span className="inline-flex shrink-0 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:border dark:border-red-700/40 dark:bg-red-950/60 dark:text-red-300">
+        Desativada
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+        piece.currentlyOccupied
+          ? 'bg-amber-100 text-amber-800 dark:border dark:border-amber-700/40 dark:bg-amber-950/60 dark:text-amber-300'
+          : 'bg-emerald-100 text-emerald-800 dark:border dark:border-emerald-700/40 dark:bg-emerald-950/60 dark:text-emerald-300'
+      }`}
+    >
+      {piece.currentlyOccupied ? 'Ocupada' : 'Livre'}
+    </span>
+  );
 }
 
 /** Motivo da inativação (item 12) — só aparece quando foi a SINCRONIZAÇÃO
