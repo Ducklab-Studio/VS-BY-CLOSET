@@ -6,6 +6,7 @@ import { RequireRole } from '../admin/require-role.decorator';
 import { RequireModule } from '../admin/require-module.decorator';
 import { ValePassVouchersService, type ValePassVoucherItem } from './vale-pass-vouchers.service';
 import { CancelValePassDto } from './dto/cancel-vale-pass.dto';
+import { RestoreValePassDto } from './dto/restore-vale-pass.dto';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string };
@@ -45,5 +46,13 @@ export class ValePassVouchersController {
   @RequireRole('ADMIN')
   cancel(@Param('code') code: string, @Body() dto: CancelValePassDto, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
     return this.vouchers.cancel(code, dto.reason, req.adminUser!.id, req.adminUser!.name);
+  }
+
+  /** Reverte um cancelamento — reabre um crédito já vendido, mesma
+   *  sensibilidade de `cancel`: exige ADMIN. */
+  @Post(':code/restore')
+  @RequireRole('ADMIN')
+  restore(@Param('code') code: string, @Body() dto: RestoreValePassDto, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
+    return this.vouchers.restore(code, dto.reason, req.adminUser!.id, req.adminUser!.name);
   }
 }

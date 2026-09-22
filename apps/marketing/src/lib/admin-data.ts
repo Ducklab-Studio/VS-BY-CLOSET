@@ -403,6 +403,11 @@ export interface ValePassVoucher {
   readonly usedAt: string | null;
   readonly cancelledAt: string | null;
   readonly cancelReason: string | null;
+  /** Só tem sentido quando `status === 'CANCELLED'`. O backend já checa
+   *  utilização, validade, origem do cancelamento (admin × Shopify) e
+   *  conflito com o pedido — a tela só mostra o resultado, nunca decide. */
+  readonly canBeRestored: boolean;
+  readonly restoreBlockedReason: string | null;
 }
 
 export interface ValePassVoucherFilters {
@@ -430,6 +435,13 @@ export function markValePassVoucherUsed(code: string, adminUserId: string): Prom
 
 export function cancelValePassVoucher(code: string, reason: string, adminUserId: string): Promise<ValePassVoucher> {
   return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/cancel`, { reason, adminUserId });
+}
+
+/** Sem `adminUserId` no corpo — RestoreValePassDto não aceita esse campo;
+ *  identidade só vem da sessão validada (mesmo padrão mais novo já usado
+ *  em outras ações administrativas deste projeto). */
+export function restoreValePassVoucher(code: string, reason: string): Promise<ValePassVoucher> {
+  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/restore`, { reason });
 }
 
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {

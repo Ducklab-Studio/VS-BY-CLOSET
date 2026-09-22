@@ -20,6 +20,12 @@ export interface ValePassVoucherItem {
   readonly usedAt: string | null;
   readonly cancelledAt: string | null;
   readonly cancelReason: string | null;
+  /** Só tem sentido quando `status === 'CANCELLED'`; `false`/`null` nos
+   *  demais status. O frontend nunca decide isto sozinho — é só o que
+   *  `restore()` já checaria, exposto pra mostrar o botão ou o motivo
+   *  sem precisar de uma tentativa que sempre falharia. */
+  readonly canBeRestored: boolean;
+  readonly restoreBlockedReason: string | null;
 }
 
 export interface ValePassVoucherFilters {
@@ -69,13 +75,15 @@ export class ValePassVouchersService {
       orderBy: { purchasedAt: 'desc' },
       take: 200,
     });
-    return rows.map((row) => toItem(row, row.campaign.name));
+    const autoCancelledOrderIds = await this.loadAutoCancelledOrderIds();
+    return rows.map((row) => toItem(row, row.campaign.name, autoCancelledOrderIds));
   }
 
   async findByCode(code: string): Promise<ValePassVoucherItem> {
     await this.expireStale();
     const row = await this.requireByCode(code);
-    return toItem(row, (await this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: row.campaignId }, select: { name: true } })).name);
+    const autoCancelledOrderIds = await this.loadAutoCancelledOrderIds();
+    return toItem(row, (await this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: row.campaignId }, select: { name: true } })).name, autoCancelledOrderIds);
   }
 
   async markUsed(code: string, actorId: string, actorName: string): Promise<ValePassVoucherItem> {
@@ -120,7 +128,7 @@ export class ValePassVouchersService {
       detail: { code: target.code },
     });
 
-    return toItem(updated, (await this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: updated.campaignId }, select: { name: true } })).name);
+    return this.toItemFresh(updated);
   }
 
   async cancel(code: string, reason: string, actorId: string, actorName: string): Promise<ValePassVoucherItem> {
@@ -160,7 +168,131 @@ export class ValePassVouchersService {
       detail: { code: target.code, reason },
     });
 
-    return toItem(updated, (await this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: updated.campaignId }, select: { name: true } })).name);
+    return this.toItemFresh(updated);
+  }
+
+  /**
+   * Restaura um Valle Pass CANCELADO pra ACTIVE — item novo do pedido:
+   * "permitir restauração segura quando for permitido pelas regras do
+   * sistema". Nenhum status novo: ACTIVE já existe, é literalmente o
+   * status de antes do cancelamento, só reaberto pela mesma máquina.
+   *
+   * Elegível SOMENTE se, simultaneamente:
+   *  - status atual é CANCELLED;
+   *  - nunca foi utilizado (`usedAt` nulo — CANCELLED só é alcançado a
+   *    partir de ACTIVE hoje, então isto é defesa em profundidade, não
+   *    um caminho que hoje existe);
+   *  - ainda não expirou (`expiresAt` no futuro) — se já expirou,
+   *    restaurar reabriria um crédito que a próxima leitura reverteria
+   *    pra EXPIRED sozinha; a regra exige recusar aqui, não reabrir e
+   *    deixar expirar nesse mesmo instante;
+   *  - foi cancelado por um ADMIN (`cancelledBy` preenchido) — cancelado
+   *    pelo webhook (`orders/cancelled`/`refunds/create`, `cancelledBy`
+   *    nulo) é uma operação irreversível: o pedido foi cancelado/
+   *    reembolsado de verdade na Shopify, a fonte de verdade comercial,
+   *    e não pode ser desfeita por aqui;
+   *  - nenhum OUTRO vale do MESMO pedido Shopify foi cancelado pelo
+   *    webhook — sinal de que o pedido inteiro foi cancelado/reembolsado
+   *    mesmo que ESTE vale específico já estivesse cancelado por um
+   *    admin antes disso acontecer (conflito com o pedido).
+   */
+  async restore(code: string, reason: string, actorId: string, actorName: string): Promise<ValePassVoucherItem> {
+    await this.expireStale();
+    const target = await this.requireByCode(code);
+    await this.assertRestorable(target);
+
+    // UPDATE condicional (mesmo padrão de markUsed/cancel): status no
+    // WHERE, então duplo clique ou duas abas restaurando ao mesmo tempo
+    // só uma grava — a outra recebe count!==1 e vira 409, nunca dois
+    // eventos/duas auditorias pro mesmo vale.
+    let changed;
+    try {
+      changed = await this.prisma.valePass.updateMany({
+        where: { id: target.id, status: 'CANCELLED' },
+        // Nunca apaga histórico: cancelledAt/cancelledBy/cancelReason
+        // são limpos da linha ATUAL (ela volta a representar um vale
+        // ativo, sem residual de cancelamento), mas o valor anterior vai
+        // pro detail do evento/auditoria abaixo, pra sempre — mesmo
+        // padrão de ReservationArchiveService.restore (archivedAt/
+        // archivedBy/archiveReason limpos, motivo anterior no evento).
+        data: { status: 'ACTIVE', cancelledAt: null, cancelledBy: null, cancelReason: null },
+      });
+    } catch (err) {
+      this.logger.error(`Falha ao restaurar Valle Pass ${target.id}: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível restaurar o Valle Pass no momento.');
+    }
+    if (changed.count !== 1) {
+      throw new ConflictException('O status deste Valle Pass mudou durante a operação — recarregue a tela e confira antes de tentar de novo.');
+    }
+    const updated = await this.prisma.valePass.findUniqueOrThrow({ where: { id: target.id } });
+
+    await this.prisma.valePassEvent.create({
+      data: {
+        valePassId: target.id,
+        type: 'RESTORED',
+        detail: { actorId, reason, previousCancelledAt: target.cancelledAt?.toISOString() ?? null, previousCancelledBy: target.cancelledBy, previousCancelReason: target.cancelReason },
+      },
+    });
+    await writeAdminAuditEvent(this.prisma, {
+      adminUserId: actorId,
+      adminUserName: actorName,
+      action: 'VALE_PASS_RESTORED',
+      entityType: 'ValePass',
+      entityId: target.id,
+      before: { status: target.status, cancelledAt: target.cancelledAt, cancelledBy: target.cancelledBy, cancelReason: target.cancelReason },
+      after: { status: 'ACTIVE' },
+      detail: { code: target.code, reason },
+    });
+
+    return this.toItemFresh(updated);
+  }
+
+  /** Mesmas checagens que `list()`/`findByCode()` já reportam como
+   *  `canBeRestored`/`restoreBlockedReason` — repetidas aqui porque a
+   *  decisão que TRAVA a operação nunca pode depender só do que a tela
+   *  mostrou antes do clique (pode estar desatualizado). */
+  private async assertRestorable(target: ValePass): Promise<void> {
+    if (target.status !== 'CANCELLED') {
+      throw new BadRequestException(`Este Valle Pass não pode ser restaurado — status atual: ${STATUS_LABELS[target.status]}.`);
+    }
+    if (target.usedAt) {
+      throw new ConflictException('Este Valle Pass já foi utilizado e não pode ser restaurado.');
+    }
+    if (target.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Este Valle Pass já expirou. Restaurar um vale cancelado não reabre a validade — isso exige uma ação separada e explícita.');
+    }
+    if (!target.cancelledBy) {
+      throw new ConflictException('Este Valle Pass foi cancelado automaticamente por um cancelamento ou reembolso do pedido na Shopify — não pode ser restaurado por aqui.');
+    }
+    if (target.shopifyOrderId) {
+      const conflictingSibling = await this.prisma.valePass.findFirst({
+        where: { shopifyOrderId: target.shopifyOrderId, status: 'CANCELLED', cancelledBy: null, id: { not: target.id } },
+        select: { id: true },
+      });
+      if (conflictingSibling) {
+        throw new ConflictException('O pedido Shopify deste Valle Pass foi cancelado ou reembolsado — não é possível restaurar.');
+      }
+    }
+  }
+
+  /** Pedidos com ao menos um vale cancelado pelo WEBHOOK (`cancelledBy`
+   *  nulo) — usado só pra reportar `restoreBlockedReason` em lote em
+   *  `list()`/`findByCode()`. Uma consulta só, nunca N+1. */
+  private async loadAutoCancelledOrderIds(): Promise<ReadonlySet<string>> {
+    const rows = await this.prisma.valePass.findMany({
+      where: { status: 'CANCELLED', cancelledBy: null, shopifyOrderId: { not: null } },
+      select: { shopifyOrderId: true },
+      distinct: ['shopifyOrderId'],
+    });
+    return new Set(rows.map((r) => r.shopifyOrderId as string));
+  }
+
+  private async toItemFresh(row: ValePass): Promise<ValePassVoucherItem> {
+    const [campaign, autoCancelledOrderIds] = await Promise.all([
+      this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: row.campaignId }, select: { name: true } }),
+      this.loadAutoCancelledOrderIds(),
+    ]);
+    return toItem(row, campaign.name, autoCancelledOrderIds);
   }
 
   private async requireByCode(code: string): Promise<ValePass> {
@@ -180,7 +312,22 @@ export class ValePassVouchersService {
 
 const STATUS_LABELS: Record<ValePassStatus, string> = { ACTIVE: 'ativo', USED: 'utilizado', EXPIRED: 'expirado', CANCELLED: 'cancelado' };
 
-function toItem(row: ValePass, campaignName: string): ValePassVoucherItem {
+/** Mesmas regras de `ValePassVouchersService.assertRestorable`, versão
+ *  só-leitura (sem consulta extra por linha — `autoCancelledOrderIds` já
+ *  vem carregado em lote) pra reportar o motivo antes de qualquer clique. */
+function restoreEligibility(row: ValePass, autoCancelledOrderIds: ReadonlySet<string>): { canBeRestored: boolean; restoreBlockedReason: string | null } {
+  if (row.status !== 'CANCELLED') return { canBeRestored: false, restoreBlockedReason: null };
+  if (row.usedAt) return { canBeRestored: false, restoreBlockedReason: 'Já foi utilizado.' };
+  if (row.expiresAt.getTime() <= Date.now()) return { canBeRestored: false, restoreBlockedReason: 'A validade já expirou.' };
+  if (!row.cancelledBy) return { canBeRestored: false, restoreBlockedReason: 'Cancelado automaticamente por um cancelamento/reembolso do pedido na Shopify.' };
+  if (row.shopifyOrderId && autoCancelledOrderIds.has(row.shopifyOrderId)) {
+    return { canBeRestored: false, restoreBlockedReason: 'O pedido Shopify deste vale foi cancelado ou reembolsado.' };
+  }
+  return { canBeRestored: true, restoreBlockedReason: null };
+}
+
+function toItem(row: ValePass, campaignName: string, autoCancelledOrderIds: ReadonlySet<string>): ValePassVoucherItem {
+  const { canBeRestored, restoreBlockedReason } = restoreEligibility(row, autoCancelledOrderIds);
   return {
     id: row.id,
     code: row.code,
@@ -198,6 +345,8 @@ function toItem(row: ValePass, campaignName: string): ValePassVoucherItem {
     usedAt: row.usedAt?.toISOString() ?? null,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     cancelReason: row.cancelReason,
+    canBeRestored,
+    restoreBlockedReason,
   };
 }
 
