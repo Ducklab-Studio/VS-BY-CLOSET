@@ -9,6 +9,7 @@ import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 import { canTransition, type ReservationStatusValue } from './reservation-state-machine';
 import { ShopifyOrderSyncService } from './shopify-order-sync.service';
+import { lockShopifyOrder } from './shopify-order-lock';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import {
@@ -70,7 +71,7 @@ export class WebhooksService {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.shopifyWebhookId}))`;
         const payload = input.payload as { id?: unknown; order_id?: unknown } | null;
         const orderKey = String(input.topic === 'refunds/create' ? payload?.order_id : payload?.id);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'shopify-order:' + orderKey}))`;
+        await lockShopifyOrder(tx, orderKey);
 
         await ensureStoreConfig(tx, store);
 
@@ -474,8 +475,8 @@ export class WebhooksService {
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/cancelled', orderId } }];
 
     // Valle Pass — independente do fluxo de reserva abaixo (produto
-    // totalmente separado). Cancela qualquer vale ATIVO deste pedido;
-    // no-op se não houver nenhum.
+    // totalmente separado). Registra o cancelamento do pedido e cancela
+    // os vales ATIVOS dele (ver handleOrderCancelledOrRefunded).
     const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled');
     events.push(...valePassEvents);
     const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
@@ -536,7 +537,7 @@ export class WebhooksService {
     let events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/updated', orderId } }];
 
     if (order.cancelled_at) {
-      // Vale Pass é independente; no-op sem vale ativo (mesmo passo de orders/cancelled).
+      // Vale Pass é independente; mesmo passo de orders/cancelled.
       events.push(...(await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled')));
     }
 
@@ -650,8 +651,8 @@ export class WebhooksService {
     const orderId = String(refund.order_id);
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'refunds/create', orderId } }];
 
-    // Valle Pass — independente do fluxo de reserva abaixo. Cancela
-    // qualquer vale ATIVO deste pedido; no-op se não houver nenhum.
+    // Valle Pass — independente do fluxo de reserva abaixo. Registra o
+    // reembolso do pedido e cancela os vales ATIVOS dele.
     const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'refunds/create');
     events.push(...valePassEvents);
     const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;

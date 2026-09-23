@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, ValePass } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
 import {
   extractCustomerEmail,
@@ -99,6 +99,11 @@ export class ValePassWebhookService {
     const already = await tx.valePass.findFirst({ where: { shopifyOrderId: orderId } });
     if (already) return [{ type: 'VALE_PASS_ALREADY_ISSUED', detail: { orderId } }];
 
+    // `orders/paid` reentregue DEPOIS do cancelamento/reembolso: o vale é
+    // emitido e cancelado na mesma transação — mesmo estado final da ordem
+    // normal (emitido, depois cancelado pela Shopify), nunca um crédito ativo.
+    const priorCancellation = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: orderId } });
+
     const orderGid = order.admin_graphql_api_id;
     const orderName = order.name ?? null;
     const customerName = extractCustomerName(order);
@@ -145,27 +150,60 @@ export class ValePassWebhookService {
           data: { valePassId: created.id, type: 'CREATED', detail: { orderId, campaignId: campaign.id } },
         });
         events.push({ type: 'VALE_PASS_CREATED', detail: { valePassId: created.id, code: created.code, campaignId: campaign.id, orderId } });
+
+        if (priorCancellation) {
+          const cancelled = await this.cancelByShopify(tx, created, orderId, priorCancellation.topic, 'pedido já confirmado como cancelado/reembolsado antes da emissão');
+          if (cancelled) events.push(cancelled);
+        }
       }
     }
 
     return events;
   }
 
-  /** Cancela (nunca apaga) qualquer vale ATIVO vinculado a este pedido
-   *  — chamado tanto de `orders/cancelled` quanto de `refunds/create`.
-   *  Vale já USADO nunca é revertido por aqui (o crédito já foi
-   *  consumido); vale já CANCELLED é idempotente (nada a fazer). */
-  async handleOrderCancelledOrRefunded(tx: Prisma.TransactionClient, orderId: string, reason: string): Promise<EventInput[]> {
-    const active = await tx.valePass.findMany({ where: { shopifyOrderId: orderId, status: 'ACTIVE' } });
-    if (active.length === 0) return [];
+  /**
+   * Chamado de `orders/cancelled`, `orders/updated` (com `cancelled_at`) e
+   * `refunds/create`, dentro da transação/lock do pedido do WebhooksService.
+   *
+   * 1. Registra o cancelamento/reembolso do PEDIDO, independente do status
+   *    dos vales — é isso que bloqueia restauração mesmo quando um admin já
+   *    tinha cancelado o vale antes do webhook chegar.
+   * 2. Vale ACTIVE → CANCELLED (origem Shopify, `cancelledBy` nulo).
+   * 3. Vale já CANCELLED/USED/EXPIRED: status e campos de cancelamento
+   *    intactos (o cancelamento manual continua sendo o que foi); só ganha
+   *    um evento SHOPIFY_ORDER_CANCELLED no histórico, uma vez por pedido.
+   *
+   * Idempotente: reentrega ou segundo tópico do mesmo pedido não duplica
+   * registro nem eventos.
+   */
+  async handleOrderCancelledOrRefunded(tx: Prisma.TransactionClient, orderId: string, topic: string): Promise<EventInput[]> {
+    const recorded = await tx.valePassOrderCancellation.createMany({ data: [{ shopifyOrderId: orderId, topic }], skipDuplicates: true });
+    const firstConfirmation = recorded.count === 1;
 
+    const passes = await tx.valePass.findMany({ where: { shopifyOrderId: orderId }, orderBy: { createdAt: 'asc' } });
     const events: EventInput[] = [];
-    for (const pass of active) {
-      await tx.valePass.update({ where: { id: pass.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: reason } });
-      await tx.valePassEvent.create({ data: { valePassId: pass.id, type: 'CANCELLED', detail: { orderId, reason } } });
-      events.push({ type: 'VALE_PASS_CANCELLED', detail: { valePassId: pass.id, code: pass.code, orderId, reason } });
+    for (const pass of passes) {
+      if (pass.status === 'ACTIVE') {
+        const cancelled = await this.cancelByShopify(tx, pass, orderId, topic);
+        if (cancelled) events.push(cancelled);
+      } else if (firstConfirmation) {
+        await tx.valePassEvent.create({
+          data: { valePassId: pass.id, type: 'SHOPIFY_ORDER_CANCELLED', detail: { orderId, topic, source: 'shopify', statusAtConfirmation: pass.status } },
+        });
+        events.push({ type: 'VALE_PASS_SHOPIFY_ORDER_CANCELLED', detail: { valePassId: pass.id, code: pass.code, orderId, topic, status: pass.status } });
+      }
     }
     return events;
+  }
+
+  private async cancelByShopify(tx: Prisma.TransactionClient, pass: ValePass, orderId: string, topic: string, note?: string): Promise<EventInput | null> {
+    const changed = await tx.valePass.updateMany({
+      where: { id: pass.id, status: 'ACTIVE' },
+      data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: null, cancelReason: topic },
+    });
+    if (changed.count !== 1) return null;
+    await tx.valePassEvent.create({ data: { valePassId: pass.id, type: 'CANCELLED', detail: { orderId, reason: topic, source: 'shopify', ...(note ? { note } : {}) } } });
+    return { type: 'VALE_PASS_CANCELLED', detail: { valePassId: pass.id, code: pass.code, orderId, reason: topic } };
   }
 
   private async generateUniqueCode(tx: Prisma.TransactionClient): Promise<string> {
