@@ -7,7 +7,7 @@
  * que o navegador mandou.
  */
 
-import { type CivilDate, addDays, civilDateInZone, diffDays, isBefore, isSunday } from './civil-date';
+import { type CivilDate, addDays, civilDateFromISO, civilDateInZone, diffDays, isBefore, isSunday } from './civil-date';
 import { DEFAULT_RENTAL_RULE_CONFIG, type RentalRuleConfig } from './rental-rule-config';
 
 export { isSunday };
@@ -115,18 +115,18 @@ export function calculateReturnDate(pickupDate: CivilDate, durationDays: number)
 }
 
 /**
- * Regra de TEMPORADA apenas — reserva online funciona até 31/mai, para
- * de 01/jun a 30/set, volta 01/out. Não inclui domingo nem antecedência
- * (são regras separadas; ver `calculateRentalPlan` pra composição).
+ * Início da operação apenas: retirada antes de `operationStartDate` não é
+ * aceita; sem data configurada, não há restrição. Data completa (com ano),
+ * então nada se repete de um ano pro outro. Períodos fechados são
+ * `operational_blocks`; domingo e antecedência são regras separadas (ver
+ * `calculateRentalPlan`).
  */
 export function isOnlineReservationAllowed(
   date: CivilDate,
   config: RentalRuleConfig = DEFAULT_RENTAL_RULE_CONFIG,
 ): boolean {
-  const md = `${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
-  const { blackoutStart: start, blackoutEnd: end } = config;
-  const inBlackout = start <= end ? md >= start && md <= end : md >= start || md <= end;
-  return !inBlackout;
+  if (config.operationStartDate === null) return true;
+  return !isBefore(date, civilDateFromISO(config.operationStartDate));
 }
 
 /**
@@ -171,7 +171,7 @@ export type PlanViolation =
   | 'no_reservable_items'
   | 'max_pieces_exceeded'
   | 'pickup_before_minimum_advance'
-  | 'pickup_outside_online_season'
+  | 'pickup_before_operation_start'
   | 'pickup_is_sunday';
 
 export interface RentalPlan {
@@ -218,7 +218,7 @@ export function calculateRentalPlan(
   todayDate: CivilDate = today(config),
 ): RentalPlanResult {
   const isPickupDaySunday = isSunday(input.pickupDate);
-  const isWithinOnlineSeason = isOnlineReservationAllowed(input.pickupDate, config);
+  const isOperationStarted = isOnlineReservationAllowed(input.pickupDate, config);
   const isMinimumAdvanceSatisfied = validateMinimumAdvance(input.pickupDate, todayDate, config);
   const hasNonReservableItem = input.items.some((item) => !item.reservableOnline);
   const { totalPieces, countedPieces } = countRentalPieces(input.items);
@@ -231,7 +231,7 @@ export function calculateRentalPlan(
   if (countedPieces === 0) violations.push('no_reservable_items');
   else if (!validateMaxPieces(countedPieces, config)) violations.push('max_pieces_exceeded');
   if (!isMinimumAdvanceSatisfied) violations.push('pickup_before_minimum_advance');
-  if (!isWithinOnlineSeason) violations.push('pickup_outside_online_season');
+  if (!isOperationStarted) violations.push('pickup_before_operation_start');
   if (isPickupDaySunday) violations.push('pickup_is_sunday');
 
   if (violations.length > 0) {

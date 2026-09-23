@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
 import { HoldsService } from './holds.service';
 import { hashHoldToken } from './hold-token';
-import { type CivilDate, addDays, civilDateFromISO, civilDateToISO, isSunday } from '../rental-rules/civil-date';
+import { type CivilDate, addDays, civilDateToISO, isSunday } from '../rental-rules/civil-date';
 import { calculateReturnDate, isOnlineReservationAllowed, today as engineToday } from '../rental-rules/rental-engine';
 import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
 import type { CreateHoldDto } from './dto/create-hold.dto';
@@ -268,16 +268,21 @@ describe('HoldsService — integração real (Neon)', () => {
     ).rejects.toMatchObject({ status: 422, response: { violations: ['pickup_is_sunday'] } });
   });
 
-  test('temporada bloqueada (15/07 do próximo ano) → 422 pickup_outside_online_season', async () => {
-    const t = engineToday(CFG);
-    const inBlackout = civilDateFromISO(`${t.year + 1}-07-15`);
-    await expect(
-      service.createHold({
-        items: [{ shopifyVariantId: VARIANT_SEASON, quantity: 1 }],
-        pickupDate: civilDateToISO(inBlackout),
-        termsAccepted: true,
-      }),
-    ).rejects.toMatchObject({ status: 422, response: { violations: ['pickup_outside_online_season'] } });
+  test('antes do início da operação → 422 pickup_before_operation_start; nenhum HOLD criado', async () => {
+    const start = futurePickup(120);
+    const before = addDays(start, -10);
+    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: new Date(civilDateToISO(start)) } });
+    try {
+      await expect(
+        service.createHold({
+          items: [{ shopifyVariantId: VARIANT_SEASON, quantity: 1 }],
+          pickupDate: civilDateToISO(isSunday(before) ? addDays(before, 1) : before),
+          termsAccepted: true,
+        }),
+      ).rejects.toMatchObject({ status: 422, response: { violations: ['pickup_before_operation_start'] } });
+    } finally {
+      await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: null } });
+    }
   });
 
   test('antecedência insuficiente (amanhã) → 422, violations inclui pickup_before_minimum_advance', async () => {
@@ -292,8 +297,8 @@ describe('HoldsService — integração real (Neon)', () => {
     } catch (err) {
       expect(err).toMatchObject({ status: 422 });
       const response = (err as { response: { violations: string[] } }).response;
-      // "Amanhã" pode cair dentro do bloqueio de temporada também — as
-      // duas violations são esperadas juntas, não só a de antecedência.
+      // "Amanhã" também pode ser domingo — outras violations podem vir
+      // junto, não só a de antecedência.
       expect(response.violations).toEqual(expect.arrayContaining(['pickup_before_minimum_advance']));
     }
   });

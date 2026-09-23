@@ -47,9 +47,9 @@ let nextWebhook = 0;
 function nextWebhookId(): string {
   return `${prefix}-webhook-${nextWebhook++}`;
 }
-const base = { ...DEFAULT_RENTAL_RULE_CONFIG, minAdvanceDays: 0, blackoutStart: '12-31', blackoutEnd: '12-31', maxPieces: 8, piecesToDaysTable: [{ upTo: 8, days: 2 }] };
+const base = { ...DEFAULT_RENTAL_RULE_CONFIG, minAdvanceDays: 0, operationStartDate: null, maxPieces: 8, piecesToDaysTable: [{ upTo: 8, days: 2 }] };
 let pickup = addDays(today(base), 45);
-while (isSunday(pickup) || isSunday(addDays(pickup, 2)) || civilDateToISO(pickup).endsWith('12-31')) pickup = addDays(pickup, 1);
+while (isSunday(pickup) || isSunday(addDays(pickup, 2))) pickup = addDays(pickup, 1);
 const pickupDate = civilDateToISO(pickup);
 const bindingSecret = process.env.RESERVATION_BINDING_SECRET;
 

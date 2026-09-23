@@ -13,20 +13,13 @@ import type { CreateManualReservationDto } from './dto/create-manual-reservation
  * / `pickupWithoutSundayReturn`) porque testa o MESMO motor de regras,
  * só chamado por um serviço diferente.
  *
- * Achado real ao escrever este arquivo (não suposto): a data "hoje" da
- * máquina que roda os testes cai DENTRO da janela de bloqueio de
- * temporada real (`blackoutStart`/`blackoutEnd` = 06-01/09-30), e o
- * antecedência mínima é 15 dias — ou seja, TODO pickup a menos de ~26
- * dias de hoje cai em bloqueio de temporada também, não só de
- * antecedência. holds.service.test.ts já documenta e contorna isso pro
- * teste de REJEIÇÃO (`arrayContaining`, tolera as duas violations
- * juntas). Para o teste de ACEITAÇÃO com override de antecedência (item
- * obrigatório desta fase), isso não basta — "aceitar com override"
- * exige isolar a antecedência da temporada de verdade, então o teste 3
- * abaixo desativa o bloqueio de temporada TEMPORARIAMENTE (restaurado em
- * `finally`), seguro porque a suíte roda sequencial
- * (`fileParallelism: false`, ver vitest.config.ts) — nada mais compete
- * pela mesma linha `rental_rule_config` enquanto isso.
+ * Para o teste de ACEITAÇÃO com override de antecedência (item
+ * obrigatório desta fase), "aceitar com override" exige isolar a
+ * antecedência de qualquer outra regra de data — o teste 3 abaixo garante
+ * `operationStartDate = null` TEMPORARIAMENTE (restaurado em `finally`),
+ * seguro porque a suíte roda sequencial (`fileParallelism: false`, ver
+ * vitest.config.ts) — nada mais compete pela mesma linha
+ * `rental_rule_config` enquanto isso.
  */
 const prisma = new PrismaService();
 const rentalRuleConfig = new RentalRuleConfigService(prisma);
@@ -50,7 +43,7 @@ function pickupWithoutSundayReturn(durationDays: number, daysFromToday: number):
   return d;
 }
 /** Só evita domingo (pickup e devolução) — usado exclusivamente no teste
- *  3, com o bloqueio de temporada desativado de propósito. */
+ *  3, com a data de início da operação desligada de propósito. */
 function pickupNearAvoidingSunday(durationDays: number, daysFromToday: number): CivilDate {
   let d = addDays(engineToday(CFG), daysFromToday);
   for (let i = 0; i < 30 && (isSunday(d) || isSunday(calculateReturnDate(d, durationDays))); i++) d = addDays(d, 1);
@@ -137,10 +130,10 @@ describe('AdminReservationsService — criação manual (integração real, Neon
   test('3) pickup <15 dias COM override minLeadTime + motivo → aceita', async () => {
     const unitId = await createUnit();
     const original = await prisma.rentalRuleConfig.findUniqueOrThrow({ where: { id: 'default' } });
-    // Isola a checagem de antecedência da checagem de temporada (ver
+    // Isola a checagem de antecedência da data de início da operação (ver
     // comentário no topo do arquivo) — restaurado sempre, mesmo se o
     // teste falhar no meio.
-    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { blackoutStart: '01-01', blackoutEnd: '01-01' } });
+    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: null } });
     try {
       const pickup = pickupNearAvoidingSunday(2, 3);
       const res = await service.createManual(
@@ -155,7 +148,7 @@ describe('AdminReservationsService — criação manual (integração real, Neon
       expect(res.status).toBe('confirmed');
       expect(res.overridesApplied).toContain('minLeadTime');
     } finally {
-      await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { blackoutStart: original.blackoutStart, blackoutEnd: original.blackoutEnd } });
+      await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: original.operationStartDate } });
     }
   });
 

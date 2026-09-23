@@ -1,10 +1,13 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import type { Prisma, RentalRuleConfig as RentalRuleConfigRow } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   DEFAULT_RENTAL_RULE_CONFIG,
+  type PiecesToDaysRule,
   type RentalRuleConfig,
 } from '../rental-rules/rental-rule-config';
 import { validateRentalConfig } from '../rental-rules/validate-rental-config';
+import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 
 /**
  * Ponte entre a tabela `rental_rule_config` (singleton, ver migration
@@ -16,6 +19,9 @@ import { validateRentalConfig } from '../rental-rules/validate-rental-config';
  * pelo painel, por exemplo) e mascararia o banco estar fora do ar. Lança
  * erro; quem chama decide como responder ao cliente (ver
  * AvailabilityService).
+ *
+ * Sem cache: toda chamada lê o banco, então uma alteração feita no painel vale
+ * na próxima consulta, sem reiniciar nada.
  */
 @Injectable()
 export class RentalRuleConfigService {
@@ -23,10 +29,12 @@ export class RentalRuleConfigService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async load(): Promise<RentalRuleConfig> {
+  /** `client` = transação de quem aloca (HOLD/reserva manual): lida depois do
+   *  lock de bloqueios, a regra usada é a mesma que estava valendo no commit. */
+  async load(client: Pick<PrismaService | Prisma.TransactionClient, 'rentalRuleConfig'> = this.prisma): Promise<RentalRuleConfig> {
     let row;
     try {
-      row = await this.prisma.rentalRuleConfig.findUnique({ where: { id: 'default' } });
+      row = await client.rentalRuleConfig.findUnique({ where: { id: 'default' } });
     } catch (err) {
       // Só o essencial no log — nunca o erro completo, que em alguns
       // drivers Postgres pode embutir a connection string na mensagem.
@@ -38,29 +46,34 @@ export class RentalRuleConfigService {
       // Configuração ausente é erro de operação (a migration insere a
       // linha 'default'; se sumiu, algo mexeu no banco por fora), não
       // um "usa o padrão e segue" — o padrão do código pode já estar
-      // desatualizado em relação ao que o painel administrativo (fase
-      // futura) gravou por último.
+      // desatualizado em relação ao que o painel administrativo gravou
+      // por último.
       this.logger.error('rental_rule_config sem a linha "default".');
       throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
     }
 
+    const config = toRentalRuleConfig(row);
     try {
-      validateRentalConfig(row);
+      validateRentalConfig(config);
     } catch {
       this.logger.error('rental_rule_config inválida.');
       throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
     }
-    return {
-      minAdvanceDays: row.minAdvanceDays,
-      prepDays: row.prepDays,
-      cleaningDays: row.cleaningDays,
-      blackoutStart: row.blackoutStart,
-      blackoutEnd: row.blackoutEnd,
-      maxPieces: row.maxPieces,
-      piecesToDaysTable: row.piecesToDaysTable,
-      timezone: row.timezone,
-    };
+    return config;
   }
+}
+
+/** Linha do banco → formato do motor (DATE vira YYYY-MM-DD; colunas legadas ficam de fora). */
+export function toRentalRuleConfig(row: Pick<RentalRuleConfigRow, 'minAdvanceDays' | 'prepDays' | 'cleaningDays' | 'operationStartDate' | 'maxPieces' | 'piecesToDaysTable' | 'timezone'>): RentalRuleConfig {
+  return {
+    minAdvanceDays: row.minAdvanceDays,
+    prepDays: row.prepDays,
+    cleaningDays: row.cleaningDays,
+    operationStartDate: row.operationStartDate ? civilDateToISO(civilDateFromPgDate(row.operationStartDate)) : null,
+    maxPieces: row.maxPieces,
+    piecesToDaysTable: row.piecesToDaysTable as unknown as PiecesToDaysRule[],
+    timezone: row.timezone,
+  };
 }
 
 function errorCode(err: unknown): string {

@@ -1,5 +1,6 @@
 import type { RentalRuleConfig } from './rental-rule-config';
 import { TECHNICAL_MAX_PIECES } from './rental-limits';
+import { civilDateFromISO, civilDateToISO } from './civil-date';
 
 /** Validates persisted and prospective rules without choosing commercial values. */
 export function validateRentalConfig(value: unknown): asserts value is RentalRuleConfig {
@@ -14,12 +15,9 @@ export function validateRentalConfig(value: unknown): asserts value is RentalRul
       throw new Error(`${field} inválido.`);
     }
   }
-  for (const field of ['blackoutStart', 'blackoutEnd']) {
-    const date = config[field];
-    if (typeof date !== 'string' || !/^\d{2}-\d{2}$/.test(date)) throw new Error(`${field} inválido.`);
-    const [month, day] = date.split('-').map(Number);
-    const parsed = new Date(Date.UTC(2000, month - 1, day));
-    if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) throw new Error(`${field} inválido.`);
+  const start = config.operationStartDate;
+  if (start !== null && (typeof start !== 'string' || !isStrictIsoDate(start))) {
+    throw new Error('operationStartDate inválido.');
   }
   if (typeof config.timezone !== 'string' || !config.timezone.trim()) throw new Error('Timezone inválido.');
   try { new Intl.DateTimeFormat('en', { timeZone: config.timezone }); }
@@ -34,4 +32,13 @@ export function validateRentalConfig(value: unknown): asserts value is RentalRul
     previous = row.upTo;
   }
   if (previous < Number(config.maxPieces)) throw new Error('A tabela de duração precisa cobrir maxPieces.');
+}
+
+/** YYYY-MM-DD que existe no calendário (recusa 2027-02-30 em vez de rolar pra março). */
+export function isStrictIsoDate(value: string): boolean {
+  try {
+    return civilDateToISO(civilDateFromISO(value)) === value;
+  } catch {
+    return false;
+  }
 }

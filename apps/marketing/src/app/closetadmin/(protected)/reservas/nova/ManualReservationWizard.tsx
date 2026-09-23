@@ -10,8 +10,7 @@ import { createManualReservationAction } from './actions';
 const VIOLATION_LABELS: Record<string, string> = {
   pickup_before_minimum_advance: 'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
   duration_mismatch_with_engine: 'A duração informada não corresponde ao cálculo automático do motor de regras.',
-  pickup_outside_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
-  pickup_outside_online_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
+  pickup_before_operation_start: 'A data de retirada é anterior ao início da operação configurado nas regras.',
   pickup_is_sunday: 'A retirada não pode ser num domingo.',
   max_pieces_exceeded: 'Quantidade de peças acima do máximo permitido.',
   no_reservable_items: 'Nenhuma peça válida selecionada.',
@@ -23,8 +22,8 @@ type OverrideKey = 'minLeadTime' | 'customDuration' | 'outsideOnlineSeason';
 const OVERRIDE_KEY_BY_VIOLATION: Record<string, OverrideKey> = {
   pickup_before_minimum_advance: 'minLeadTime',
   duration_mismatch_with_engine: 'customDuration',
-  pickup_outside_season: 'outsideOnlineSeason',
-  pickup_outside_online_season: 'outsideOnlineSeason',
+  // Chave do override mantida (nome já gravado no histórico de reservas).
+  pickup_before_operation_start: 'outsideOnlineSeason',
 };
 
 const inputClass =
@@ -142,7 +141,7 @@ export function ManualReservationWizard({
       return;
     }
     if (result.violations) {
-      // O backend pode descobrir overrides em etapas (ex.: temporada +
+      // O backend pode descobrir overrides em etapas (ex.: início da operação +
       // antecedência primeiro e duração customizada depois). Enquanto o
       // usuário não alterar datas/peças, as confirmações já dadas precisam
       // continuar ativas; apagá-las aqui fazia o wizard alternar entre os
@@ -295,7 +294,7 @@ export function ManualReservationWizard({
                 ))}
               </ul>
               {!canOverrideSeason && blocking.some((v) => OVERRIDE_KEY_BY_VIOLATION[v] === 'outsideOnlineSeason') ? (
-                <p className="mt-2 text-xs opacity-80">Exceção de temporada é exclusiva de usuário ADMIN.</p>
+                <p className="mt-2 text-xs opacity-80">Exceção de início da operação é exclusiva de usuário ADMIN.</p>
               ) : (
                 <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
               )}

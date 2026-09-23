@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
-import type { RentalRuleConfig } from '../rental-rules/rental-rule-config';
 import {
   type RentalCartItem,
   calculateBlockedRange,
@@ -68,8 +67,6 @@ export interface AttemptContext {
   readonly normalizedItems: readonly NormalizedItem[];
   readonly pickupDate: CivilDate;
   readonly sundayReturnOption: 'saturday' | 'mondayMorning' | null;
-  readonly config: RentalRuleConfig;
-  readonly today: CivilDate;
   readonly store: StoreConfig;
   readonly termsVersion: string;
   readonly idempotencyKey: string | undefined;
@@ -124,15 +121,6 @@ export class HoldsService {
       ? hashRequestPayload({ items: normalizedItems, pickupDate: dto.pickupDate, sundayReturnOption, termsAccepted: dto.termsAccepted })
       : null;
 
-    let config: RentalRuleConfig;
-    try {
-      config = await this.rentalRuleConfig.load();
-    } catch (err) {
-      if (err instanceof HttpException) throw err;
-      this.logger.error(`Falha inesperada ao carregar rental_rule_config: ${errorCode(err)}`);
-      throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
-    }
-
     // Sem aceite explícito, não existe HOLD — checado aqui (não só no
     // DTO) porque o formato "é um boolean" já passou no DTO; o que falta
     // validar é o VALOR.
@@ -142,7 +130,6 @@ export class HoldsService {
 
     const store = resolveStoreConfig();
     const termsVersion = currentTermsVersion();
-    const today = engineToday(config);
     const pickupDate = civilDateFromISO(dto.pickupDate);
     const holdToken = generateHoldToken();
     const holdTokenHash = hashHoldToken(holdToken);
@@ -151,8 +138,6 @@ export class HoldsService {
       normalizedItems,
       pickupDate,
       sundayReturnOption,
-      config,
-      today,
       store,
       termsVersion,
       idempotencyKey,
@@ -205,7 +190,11 @@ export class HoldsService {
 
   private async attemptCreateHold(tx: Prisma.TransactionClient, ctx: AttemptContext): Promise<HoldResponse> {
     await lockOperationalBlocks(tx);
-    const { normalizedItems, pickupDate, sundayReturnOption, config, today, store, termsVersion, idempotencyKey, requestHash, holdToken, holdTokenHash } = ctx;
+    // Regras lidas DEPOIS do lock: uma mudança de regra no painel (lock
+    // exclusivo) ou já commitou e vale aqui, ou espera este HOLD terminar.
+    const config = await this.rentalRuleConfig.load(tx);
+    const today = engineToday(config);
+    const { normalizedItems, pickupDate, sundayReturnOption, store, termsVersion, idempotencyKey, requestHash, holdToken, holdTokenHash } = ctx;
     const variantIds = normalizedItems.map((i) => i.shopifyVariantId);
 
     if (idempotencyKey) {

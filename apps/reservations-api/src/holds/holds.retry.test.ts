@@ -152,8 +152,6 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
       normalizedItems: [{ shopifyVariantId: variant, quantity: 2 }],
       pickupDate,
       sundayReturnOption: null,
-      config: DEFAULT_RENTAL_RULE_CONFIG,
-      today: engineToday(DEFAULT_RENTAL_RULE_CONFIG),
       store: { id: 'dev-store', shopifyDomain: 'dev-store.myshopify.com', currency: 'CLP' },
       termsVersion: 'v1',
       idempotencyKey: undefined,
