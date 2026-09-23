@@ -129,8 +129,6 @@ interface AttemptContext {
   readonly shopifyDomain: string;
   readonly currency: string;
   readonly pickupDate: CivilDate;
-  readonly today: CivilDate;
-  readonly config: RentalRuleConfig;
   readonly idempotencyKey: string | undefined;
   readonly requestHash: string | null;
 }
@@ -152,10 +150,11 @@ interface AttemptContext {
  * `validateMinimumAdvance`, `validateMaxPieces`, `isSunday` — nenhuma regra
  * reimplementada aqui). `returnDate`/`durationDays` explícitos só passam
  * batendo com o que o motor calcularia OU com `overrides.customDuration`
- * + `overrideReason`. A janela de temporada continua bloqueando por padrão;
- * `overrides.outsideOnlineSeason` abre uma exceção somente para esta reserva
- * manual, exige motivo e é autorizada exclusivamente para usuário ADMIN,
- * revalidado no banco no momento da ação. O canal público não é alterado.
+ * + `overrideReason`. Retirada antes do início da operação continua bloqueada
+ * por padrão; `overrides.outsideOnlineSeason` abre uma exceção somente para
+ * esta reserva manual, exige motivo e é autorizada exclusivamente para usuário
+ * ADMIN, revalidado no banco no momento da ação. O canal público não é
+ * alterado. Períodos fechados (bloqueios) nunca têm exceção.
  *
  * A única regra que o canal manual dispensa de verdade é `reservableOnline`
  * (item 8: "manual ≠ online" — esse flag é do canal público, irrelevante
@@ -201,21 +200,11 @@ export class AdminReservationsService {
       throw new BadRequestException('items não pode conter rentalUnitId duplicado.');
     }
 
-    let config: RentalRuleConfig;
-    try {
-      config = await this.rentalRuleConfig.load();
-    } catch (err) {
-      if (err instanceof HttpException) throw err;
-      this.logger.error(`Falha inesperada ao carregar rental_rule_config: ${errorCode(err)}`);
-      throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
-    }
-
     const store = resolveStoreConfig();
-    const today = engineToday(config);
     const pickupDate = civilDateFromISO(dto.pickupDate);
     const requestHash = idempotencyKey ? hashRequestPayload(dto) : null;
 
-    const ctx: AttemptContext = { dto, storeId: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency, pickupDate, today, config, idempotencyKey, requestHash };
+    const ctx: AttemptContext = { dto, storeId: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency, pickupDate, idempotencyKey, requestHash };
 
     for (let attempt = 1; attempt <= MAX_ALLOCATION_ATTEMPTS; attempt++) {
       try {
@@ -263,13 +252,13 @@ export class AdminReservationsService {
     throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
   }
 
-  /** A exceção de temporada é mais sensível que os outros overrides: o
+  /** A exceção de início da operação é mais sensível que os outros overrides: o
    *  frontend não decide a role. Reconsulta `admin_users` aqui e só permite
    *  ADMIN ativo. Falha de banco vira 503 (fail closed), nunca autorização
    *  presumida. */
   private async assertAdminCanOverrideSeason(adminUserId: string | undefined): Promise<void> {
     if (!adminUserId) {
-      throw new ForbiddenException('Exceção de temporada exige usuário ADMIN autenticado.');
+      throw new ForbiddenException('Exceção de início da operação exige usuário ADMIN autenticado.');
     }
 
     let adminUser: { active: boolean; role: AdminRole } | null;
@@ -279,20 +268,23 @@ export class AdminReservationsService {
         select: { active: true, role: true },
       });
     } catch (err) {
-      this.logger.error(`Falha ao validar role para override de temporada: ${errorCode(err)}`);
+      this.logger.error(`Falha ao validar role para override de início da operação: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível validar a autorização do override no momento.');
     }
 
     // SUPER_ADMIN satisfaz qualquer checagem de ADMIN por hierarquia
     // (ver satisfiesRole em admin-role.guard.ts) — mesmo padrão aqui.
     if (!adminUser || !adminUser.active || (adminUser.role !== 'ADMIN' && adminUser.role !== 'SUPER_ADMIN')) {
-      throw new ForbiddenException('Exceção de temporada é exclusiva de usuário ADMIN.');
+      throw new ForbiddenException('Exceção de início da operação é exclusiva de usuário ADMIN.');
     }
   }
 
   private async attemptCreateManual(tx: Prisma.TransactionClient, ctx: AttemptContext, unitIds: readonly string[]): Promise<ManualReservationResponse> {
     await lockOperationalBlocks(tx);
-    const { dto, storeId, shopifyDomain, currency, pickupDate, today, config, idempotencyKey, requestHash } = ctx;
+    // Regras lidas DEPOIS do lock (mesmo motivo do HOLD público).
+    const config = await this.rentalRuleConfig.load(tx);
+    const today = engineToday(config);
+    const { dto, storeId, shopifyDomain, currency, pickupDate, idempotencyKey, requestHash } = ctx;
     const overrides = dto.overrides ?? {};
 
     if (idempotencyKey) {
@@ -839,7 +831,7 @@ function resolveManualDuration(input: {
   const { dto, overrides, pickupDate, today, config, rows } = input;
 
   const isMinAdvanceOk = validateMinimumAdvance(pickupDate, today, config);
-  const isSeasonOk = isOnlineReservationAllowed(pickupDate, config);
+  const isOperationStarted = isOnlineReservationAllowed(pickupDate, config);
   const isPickupSunday = isSunday(pickupDate);
   // `reservableOnline: true` sintético — item 8: essa checagem é do canal
   // público, irrelevante pra reserva manual. `countsTowardRentalDuration`
@@ -854,11 +846,13 @@ function resolveManualDuration(input: {
   const unresolved: string[] = [];
   const overridesApplied: string[] = [];
   if (isPickupSunday) unresolved.push('pickup_is_sunday');
-  if (!isSeasonOk) {
+  if (!isOperationStarted) {
+    // Chave `outsideOnlineSeason` mantida: é o nome já gravado no histórico
+    // de reservas existentes (overridesApplied).
     if (overrides.outsideOnlineSeason === true) {
       overridesApplied.push('outsideOnlineSeason');
     } else {
-      unresolved.push('pickup_outside_season');
+      unresolved.push('pickup_before_operation_start');
     }
   }
   if (!isMaxPiecesOk) unresolved.push('max_pieces_exceeded');

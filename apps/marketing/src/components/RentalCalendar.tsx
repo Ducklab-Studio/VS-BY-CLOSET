@@ -44,6 +44,8 @@ interface AvailabilityResponse {
   shopifyVariantId: string;
   countedPieces: number;
   unitsTotal: number;
+  /** YYYY-MM-DD da primeira retirada online aceita (configurada no painel), ou null. */
+  operationStartDate?: string | null;
   days: AvailabilityDay[];
 }
 
@@ -132,7 +134,7 @@ export function RentalCalendar({
     [locale],
   );
 
-  const { days, freeCount, padCount, isBlackoutSeason, isMaxPiecesExceeded } = useMemo(() => {
+  const { days, freeCount, padCount, isBeforeOperationStart, isMaxPiecesExceeded } = useMemo(() => {
     const y = view.getFullYear();
     const m = view.getMonth();
     const pad = new Date(y, m, 1).getDay();
@@ -140,7 +142,7 @@ export function RentalCalendar({
     const out: { date: Date; info: AvailabilityDay | undefined }[] = [];
     let free = 0;
     let known = 0;
-    let blackout = 0;
+    let beforeStart = 0;
     let maxPiecesExceeded = 0;
 
     for (let i = 1; i <= total; i++) {
@@ -149,7 +151,7 @@ export function RentalCalendar({
       if (info?.bookable) free++;
       if (info) {
         known++;
-        if (info.reason === 'pickup_outside_online_season') blackout++;
+        if (info.reason === 'pickup_before_operation_start') beforeStart++;
         if (info.reason === 'max_pieces_exceeded') maxPiecesExceeded++;
       }
       out.push({ date, info });
@@ -159,7 +161,7 @@ export function RentalCalendar({
       days: out,
       freeCount: free,
       padCount: pad,
-      isBlackoutSeason: known > 0 && free === 0 && blackout > 0,
+      isBeforeOperationStart: known > 0 && free === 0 && beforeStart > 0,
       isMaxPiecesExceeded: known > 0 && free === 0 && maxPiecesExceeded > 0,
     };
   }, [view, dayMap]);
@@ -384,8 +386,10 @@ export function RentalCalendar({
           ? 'Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.'
           : isMaxPiecesExceeded
             ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
-            : isBlackoutSeason
-              ? 'Reservas online indisponíveis nesta temporada. De 1º de junho a 30 de setembro, o aluguel é feito diretamente na loja no Chile.'
+            : isBeforeOperationStart
+              ? data?.operationStartDate
+                ? `Reservas online disponíveis a partir de ${fromISO(data.operationStartDate).toLocaleDateString(locale, LONG_DATE)}.`
+                : 'Reservas online ainda não disponíveis para estas datas.'
               : freeCount === 0 && !loading
                 ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
                 : selected && selectedInfo?.bookable
@@ -414,7 +418,7 @@ export function RentalCalendar({
           rel="noopener"
           className="mt-3 flex w-full items-center justify-center rounded-xl border border-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5"
         >
-          {isBlackoutSeason ? 'Consultar em loja' : 'Falar com o atendimento'}
+          Falar com o atendimento
         </a>
       )}
     </section>

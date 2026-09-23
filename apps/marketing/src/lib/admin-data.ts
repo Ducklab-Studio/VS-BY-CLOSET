@@ -155,8 +155,8 @@ export interface RentalRuleConfig {
   readonly minAdvanceDays: number;
   readonly prepDays: number;
   readonly cleaningDays: number;
-  readonly blackoutStart: string;
-  readonly blackoutEnd: string;
+  /** YYYY-MM-DD — primeira retirada aceita; null = sem restrição. */
+  readonly operationStartDate: string | null;
   readonly maxPieces: number;
   readonly piecesToDaysTable: PiecesToDaysRule[];
   readonly timezone: string;
@@ -178,20 +178,31 @@ export interface BlockItem {
   readonly startDate: string;
   readonly endDate: string;
   readonly reason: string;
+  /** Desativado continua listado e pode ser reativado; removido some da lista. */
+  readonly active: boolean;
   readonly createdByAdminUserId: string;
   readonly createdAt: string;
+  readonly updatedAt: string | null;
   readonly removedAt: string | null;
 }
 
+export type BlockInput = { scope: 'STORE_WIDE' | 'UNIT'; rentalUnitId?: string; startDate: string; endDate: string; reason: string };
+
+/** `activeOnly` (nome da API) = esconder removidos; desativados continuam na lista. */
 export function listBlocks(adminUserId: string, activeOnly = true): Promise<BlockItem[]> {
   return adminGet(`/admin/blocks?activeOnly=${activeOnly}`, adminUserId);
 }
 
-export function createBlock(
-  input: { scope: 'STORE_WIDE' | 'UNIT'; rentalUnitId?: string; startDate: string; endDate: string; reason: string },
-  adminUserId: string,
-): Promise<BlockItem> {
+export function createBlock(input: BlockInput, adminUserId: string): Promise<BlockItem> {
   return adminPost('/admin/blocks', { ...input, adminUserId });
+}
+
+export function updateBlock(id: string, input: Partial<BlockInput>, adminUserId: string): Promise<BlockItem> {
+  return adminPatch(`/admin/blocks/${id}`, { ...input, adminUserId });
+}
+
+export function setBlockActive(id: string, active: boolean, adminUserId: string): Promise<BlockItem> {
+  return adminPost(`/admin/blocks/${id}/${active ? 'activate' : 'deactivate'}`, { adminUserId });
 }
 
 export function removeBlock(id: string, adminUserId: string): Promise<BlockItem> {

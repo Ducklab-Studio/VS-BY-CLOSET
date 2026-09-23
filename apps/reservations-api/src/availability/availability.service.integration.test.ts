@@ -5,7 +5,6 @@ import { AvailabilityService } from './availability.service';
 import {
   type CivilDate,
   addDays,
-  civilDateFromISO,
   civilDateToISO,
   isSunday,
 } from '../rental-rules/civil-date';
@@ -222,17 +221,23 @@ describe('AvailabilityService — integração real (Neon)', () => {
     expect(res.days[0].reason).toBe('pickup_is_sunday');
   });
 
-  test('temporada bloqueada (15/07 do próximo ano) → reason=pickup_outside_online_season', async () => {
-    const t = engineToday(CFG);
-    const inBlackout = civilDateFromISO(`${t.year + 1}-07-15`);
-    const res = await service.getAvailability({
-      shopifyVariantId: VARIANT_FREE,
-      countedPieces: 1,
-      from: civilDateToISO(inBlackout),
-      to: civilDateToISO(inBlackout),
-    });
-    expect(res.days[0].bookable).toBe(false);
-    expect(res.days[0].reason).toBe('pickup_outside_online_season');
+  test('antes do início da operação → reason=pickup_before_operation_start; no dia do início, disponível', async () => {
+    const start = futurePickup(120);
+    const before = addDays(start, -10);
+    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: new Date(civilDateToISO(start)) } });
+    try {
+      const res = await service.getAvailability({
+        shopifyVariantId: VARIANT_FREE,
+        countedPieces: 1,
+        from: civilDateToISO(before),
+        to: civilDateToISO(start),
+      });
+      expect(res.operationStartDate).toBe(civilDateToISO(start));
+      expect(res.days[0]).toMatchObject({ date: civilDateToISO(before), bookable: false, reason: 'pickup_before_operation_start' });
+      expect(res.days[res.days.length - 1]).toMatchObject({ date: civilDateToISO(start), bookable: true });
+    } finally {
+      await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: null } });
+    }
   });
 
   test('antecedência insuficiente (amanhã) → reason=pickup_before_minimum_advance', async () => {

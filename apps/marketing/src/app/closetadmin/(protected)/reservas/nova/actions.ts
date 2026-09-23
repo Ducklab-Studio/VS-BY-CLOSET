@@ -26,7 +26,7 @@ interface CreatedManualReservation {
 /**
  * Fluxo "Nova reserva". A validação de negócio definitiva continua no
  * reservations-api. Este action só faz uma barreira de UX adicional para
- * a exceção de temporada: STAFF nem envia esse override. O backend ainda
+ * a exceção de início da operação: STAFF nem envia esse override. O backend ainda
  * revalida a role contra `admin_users`, então esta checagem não é a camada
  * de segurança final.
  *
@@ -45,7 +45,7 @@ export async function createManualReservationAction(
   requireAdminModule(session, 'RESERVATIONS');
 
   if (input.overrides?.outsideOnlineSeason === true && !hasAdminRole(session, 'ADMIN')) {
-    return { ok: false, error: 'Exceção de temporada é exclusiva de usuário ADMIN.' };
+    return { ok: false, error: 'Exceção de início da operação é exclusiva de usuário ADMIN.' };
   }
 
   let created: CreatedManualReservation;

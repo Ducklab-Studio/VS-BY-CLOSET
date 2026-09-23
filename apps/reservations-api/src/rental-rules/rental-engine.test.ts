@@ -109,21 +109,36 @@ describe('validateMinimumAdvance — hoje=03, mínimo 15 dias', () => {
   });
 });
 
-describe('isOnlineReservationAllowed — temporada jun-set bloqueada', () => {
+describe('isOnlineReservationAllowed — data de início da operação', () => {
   type CivilDateTuple = [number, number, number];
+  const START = { ...CFG, operationStartDate: '2027-04-01' };
   const cases: [string, CivilDateTuple, boolean][] = [
-    ['31 de maio → permitido (fora da temporada bloqueada)', [2027, 5, 31], true],
-    ['01 de junho → bloqueado (início da temporada)', [2027, 6, 1], false],
-    ['15 de julho → bloqueado (meio da temporada)', [2027, 7, 15], false],
-    ['30 de setembro → bloqueado (fim da temporada)', [2027, 9, 30], false],
-    ['01 de outubro → permitido (volta a funcionar)', [2027, 10, 1], true],
+    ['31/03/2027 → bloqueado (véspera do início)', [2027, 3, 31], false],
+    ['01/04/2027 → permitido (primeiro dia)', [2027, 4, 1], true],
+    ['15/07/2027 → permitido (antiga temporada jun-set não existe mais)', [2027, 7, 15], true],
+    ['30/09/2027 → permitido', [2027, 9, 30], true],
+    ['31/12/2027 → permitido (virada de ano)', [2027, 12, 31], true],
+    ['01/01/2028 → permitido (ano seguinte, nada se repete)', [2028, 1, 1], true],
+    ['01/04/2026 → bloqueado (mesmo dia/mês, ano anterior)', [2026, 4, 1], false],
   ];
 
   for (const [label, [y, m, d], expected] of cases) {
     test(label, () => {
-      expect(isOnlineReservationAllowed(civilDate(y, m, d))).toBe(expected);
+      expect(isOnlineReservationAllowed(civilDate(y, m, d), START)).toBe(expected);
     });
   }
+
+  test('sem data configurada → qualquer data é permitida (loja aberta continuamente)', () => {
+    for (const [y, m, d] of [[2026, 6, 15], [2027, 8, 1], [2030, 2, 28]] as CivilDateTuple[]) {
+      expect(isOnlineReservationAllowed(civilDate(y, m, d), { ...CFG, operationStartDate: null })).toBe(true);
+    }
+  });
+
+  test('calculateRentalPlan reporta pickup_before_operation_start junto com as demais violações', () => {
+    // 28/03/2027 é domingo e é antes do início: as duas violações aparecem.
+    const result = calculateRentalPlan({ pickupDate: civilDate(2027, 3, 28), items: items(1) }, START, civilDate(2027, 1, 1));
+    expect(!result.ok && result.violations).toEqual(['pickup_before_operation_start', 'pickup_is_sunday']);
+  });
 });
 
 describe('calculateRentalPlan — FAIL CLOSED: resultado discriminado ok/violations', () => {

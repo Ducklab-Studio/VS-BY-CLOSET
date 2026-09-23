@@ -43,6 +43,9 @@ export interface AvailabilityResponse {
   readonly shopifyVariantId: string;
   readonly countedPieces: number;
   readonly unitsTotal: number;
+  /** YYYY-MM-DD da primeira retirada aceita (ou null) — só pra mensagem do
+   *  calendário; quem decide o dia continua sendo `days[].bookable`. */
+  readonly operationStartDate: string | null;
   readonly days: readonly AvailabilityDay[];
 }
 
@@ -126,6 +129,7 @@ export class AvailabilityService {
       shopifyVariantId: query.shopifyVariantId,
       countedPieces: query.countedPieces,
       unitsTotal: reservableUnits.length,
+      operationStartDate: config.operationStartDate,
       days,
     };
   }

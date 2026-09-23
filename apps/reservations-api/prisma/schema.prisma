@@ -235,6 +235,9 @@ model OperationalBlock {
   createdByAdminUserId String     @map("created_by_admin_user_id") @db.Uuid
   createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   removedAt            DateTime?  @map("removed_at") @db.Timestamptz(6)
+  /// Desativado continua listado e pode ser reativado; `removedAt` é a exclusão lógica.
+  active               Boolean    @default(true)
+  updatedAt            DateTime?  @map("updated_at") @db.Timestamptz(6)
 
   rentalUnit RentalUnit? @relation(fields: [rentalUnitId], references: [id])
   createdBy  AdminUser   @relation(fields: [createdByAdminUserId], references: [id])
@@ -530,8 +533,13 @@ model RentalRuleConfig {
   prepDays       Int @default(3) @map("prep_days")
   cleaningDays   Int @default(2) @map("cleaning_days")
 
-  blackoutStart String @default("06-01") @map("blackout_start")
-  blackoutEnd   String @default("09-30") @map("blackout_end")
+  /// Primeira data de retirada aceita. Nulo = sem restrição.
+  operationStartDate DateTime? @map("operation_start_date") @db.Date
+
+  /// Legado: temporada anual MM-DD, não aplicada mais pelo motor (substituída
+  /// por períodos fechados em operational_blocks). Mantida só por dado/rollback.
+  blackoutStart String? @map("blackout_start")
+  blackoutEnd   String? @map("blackout_end")
 
   maxPieces Int @default(6) @map("max_pieces")
 

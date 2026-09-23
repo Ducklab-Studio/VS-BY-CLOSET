@@ -16,8 +16,8 @@ function describeChanges(initial: RentalRuleConfig, form: RentalRuleConfig): str
   if (initial.prepDays !== form.prepDays) changes.push(`Preparação: ${initial.prepDays} → ${form.prepDays} dias`);
   if (initial.cleaningDays !== form.cleaningDays) changes.push(`Limpeza: ${initial.cleaningDays} → ${form.cleaningDays} dias`);
   if (initial.maxPieces !== form.maxPieces) changes.push(`Máximo de peças: ${initial.maxPieces} → ${form.maxPieces}`);
-  if (initial.blackoutStart !== form.blackoutStart || initial.blackoutEnd !== form.blackoutEnd) {
-    changes.push(`Temporada bloqueada: ${initial.blackoutStart} – ${initial.blackoutEnd} → ${form.blackoutStart} – ${form.blackoutEnd}`);
+  if (initial.operationStartDate !== form.operationStartDate) {
+    changes.push(`Início da operação: ${formatStart(initial.operationStartDate)} → ${formatStart(form.operationStartDate)}`);
   }
   form.piecesToDaysTable.forEach((tier, index) => {
     const before = initial.piecesToDaysTable[index];
@@ -50,8 +50,7 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
       minAdvanceDays: form.minAdvanceDays,
       prepDays: form.prepDays,
       cleaningDays: form.cleaningDays,
-      blackoutStart: form.blackoutStart,
-      blackoutEnd: form.blackoutEnd,
+      operationStartDate: form.operationStartDate,
       maxPieces: form.maxPieces,
       piecesToDaysTable: form.piecesToDaysTable,
     });
@@ -97,17 +96,30 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
         <div className="flex items-center gap-2">
           <CalendarClock size={17} className="text-marsala dark:text-gold" />
           <div>
-            <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Temporada bloqueada</h3>
-            <p className="text-xs text-ink/45 dark:text-dark-subtle">Intervalo anual em que reservas online não ficam disponíveis.</p>
+            <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Início da operação</h3>
+            <p className="text-xs text-ink/45 dark:text-dark-subtle">
+              Primeira data de retirada aceita. Antes dela o calendário fica indisponível; depois, a loja segue aberta. Para fechar períodos, use os períodos fechados abaixo.
+            </p>
           </div>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <Field label="Início (MM-DD)" hint="Ex.: 06-01">
-            <input value={form.blackoutStart} maxLength={5} onChange={(event) => setForm((prev) => ({ ...prev, blackoutStart: event.target.value }))} className={inputClass} />
+        <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,16rem)_auto] sm:items-end">
+          <Field label="Primeira retirada" hint={form.operationStartDate ? undefined : 'Sem data: a loja aceita reservas normalmente.'}>
+            <input
+              type="date"
+              value={form.operationStartDate ?? ''}
+              onChange={(event) => setForm((prev) => ({ ...prev, operationStartDate: event.target.value || null }))}
+              className={inputClass}
+            />
           </Field>
-          <Field label="Fim (MM-DD)" hint="Ex.: 09-30">
-            <input value={form.blackoutEnd} maxLength={5} onChange={(event) => setForm((prev) => ({ ...prev, blackoutEnd: event.target.value }))} className={inputClass} />
-          </Field>
+          {form.operationStartDate ? (
+            <button
+              type="button"
+              onClick={() => setForm((prev) => ({ ...prev, operationStartDate: null }))}
+              className="rounded-lg border border-ink/10 px-4 py-2.5 text-sm font-medium text-ink/60 transition hover:bg-ink/5 dark:border-white/10 dark:text-dark-muted dark:hover:bg-white/5"
+            >
+              Remover data (loja aberta)
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -193,6 +205,12 @@ export function RulesForm({ initial }: { initial: RentalRuleConfig }) {
       </div>
     </div>
   );
+}
+
+function formatStart(iso: string | null): string {
+  if (!iso) return 'sem data';
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
