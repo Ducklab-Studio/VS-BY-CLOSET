@@ -21,7 +21,12 @@ import { RentalAction } from './RentalAction';
  */
 
 const WEEKDAY_BASE = new Date(2024, 0, 7); // um domingo
+/** Janela de reserva: dias a partir da primeira retirada possível — hoje, ou
+ *  o início da operação configurado no ClosetAdmin, o que vier depois. */
 const RANGE_DAYS = 120;
+
+const monthIndex = (d: Date) => d.getFullYear() * 12 + d.getMonth();
+const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
 interface ReturnOption {
   type: 'saturday' | 'mondayMorning';
@@ -66,62 +71,86 @@ export function RentalCalendar({
   const [view, setView] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState<Date | null>(null);
   const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
-  const [data, setData] = useState<AvailabilityResponse | null>(null);
-  const [pieces, setPieces] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  /** Peças que a reserva terá (carrinho + esta); null enquanto o carrinho é lido. */
+  const [pieces, setPieces] = useState<number | null>(null);
+  /** Disponibilidade por mês (`YYYY-MM`), carregada quando o mês é exibido. */
+  const [months, setMonths] = useState<ReadonlyMap<string, AvailabilityDay[]>>(() => new Map());
+  const [failedMonths, setFailedMonths] = useState<ReadonlySet<string>>(() => new Set());
+  const [operationStartDate, setOperationStartDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  const rangeEnd = useMemo(() => addDays(today, RANGE_DAYS), [today]);
+  // O limite parte da primeira retirada possível, não só de hoje: com a
+  // operação começando meses à frente, uma janela fixa a partir de hoje
+  // terminava antes da abertura e travava a navegação.
+  const rangeEnd = useMemo(() => {
+    const start = operationStartDate ? fromISO(operationStartDate) : null;
+    return addDays(start && start > today ? start : today, RANGE_DAYS);
+  }, [today, operationStartDate]);
 
-  // ---- carga: peças no carrinho, depois disponibilidade real ----
+  const viewKey = monthKey(view);
+  const loadFailed = failedMonths.has(viewKey);
+  const loading = pieces === null || (!months.has(viewKey) && !loadFailed);
+
+  // ---- peças no carrinho (uma vez por variante) ----
   useEffect(() => {
     let cancelled = false;
+    setPieces(null);
+    setMonths(new Map());
+    setFailedMonths(new Set());
+    setSelected(null);
+    setSundayChoice(null);
+    setError(null);
 
-    async function load() {
-      setLoading(true);
-      setLoadFailed(false);
-      setData(null);
-      setError(null);
-
+    void (async () => {
       const cartPieces = isCartConfigured ? await countPiecesInCart().catch(() => 0) : 0;
-      if (cancelled) return;
-
       // Não limita artificialmente em 6 aqui. Se o cliente já estiver no
       // máximo, o backend precisa receber a quantidade prospectiva real e
       // responder `max_pieces_exceeded`; capar em 6 permitia uma 7ª peça
       // parecer disponível no calendário e só falhar muito depois.
-      const countedPieces = cartPieces + 1;
-
-      setPieces(countedPieces);
-      setSelected(null);
-      setSundayChoice(null);
-
-      const result = await fetchAvailability(variant.id, countedPieces, today, rangeEnd);
-      if (cancelled) return;
-
-      if (result) {
-        setData(result);
-        setLoadFailed(false);
-      } else {
-        setLoadFailed(true);
-      }
-      setLoading(false);
-    }
-
-    void load();
+      if (!cancelled) setPieces(cartPieces + 1);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [variant.id, today, rangeEnd]);
+  }, [variant.id]);
+
+  // ---- disponibilidade real do mês exibido ----
+  useEffect(() => {
+    if (pieces === null || months.has(viewKey)) return;
+    let cancelled = false;
+    const first = new Date(view.getFullYear(), view.getMonth(), 1);
+    const last = new Date(view.getFullYear(), view.getMonth() + 1, 0);
+    const from = first < today ? today : first;
+    const to = last > rangeEnd ? rangeEnd : last;
+
+    void (async () => {
+      // Mês inteiro fora da janela: nada a consultar, todos os dias ficam indisponíveis.
+      const result = from > to ? { days: [], operationStartDate } : await fetchAvailability(variant.id, pieces, from, to);
+      if (cancelled) return;
+      if (result) {
+        setMonths((prev) => new Map(prev).set(viewKey, result.days));
+        setOperationStartDate(result.operationStartDate ?? null);
+        setFailedMonths((prev) => {
+          const next = new Set(prev);
+          next.delete(viewKey);
+          return next;
+        });
+      } else {
+        setFailedMonths((prev) => new Set(prev).add(viewKey));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [variant.id, pieces, view, viewKey, months, today, rangeEnd, operationStartDate]);
 
   const dayMap = useMemo(() => {
     const map = new Map<string, AvailabilityDay>();
-    for (const d of data?.days ?? []) map.set(d.date, d);
+    for (const monthDays of months.values()) for (const d of monthDays) map.set(d.date, d);
     return map;
-  }, [data]);
+  }, [months]);
 
   const weekdays = useMemo(
     () =>
@@ -157,17 +186,21 @@ export function RentalCalendar({
       out.push({ date, info });
     }
 
+    // Mês inteiro antes da abertura também conta, mesmo que o motivo informado
+    // em cada dia seja outro (ex.: antecedência mínima, avaliada antes).
+    const monthBeforeOpening = !!operationStartDate && new Date(y, m, total) < fromISO(operationStartDate);
+
     return {
       days: out,
       freeCount: free,
       padCount: pad,
-      isBeforeOperationStart: known > 0 && free === 0 && beforeStart > 0,
+      isBeforeOperationStart: known > 0 && free === 0 && (beforeStart > 0 || monthBeforeOpening),
       isMaxPiecesExceeded: known > 0 && free === 0 && maxPiecesExceeded > 0,
     };
-  }, [view, dayMap]);
+  }, [view, dayMap, operationStartDate]);
 
-  const atFirstMonth = view.getFullYear() === today.getFullYear() && view.getMonth() === today.getMonth();
-  const atLastMonth = view.getFullYear() === rangeEnd.getFullYear() && view.getMonth() === rangeEnd.getMonth();
+  const atFirstMonth = monthIndex(view) <= monthIndex(today);
+  const atLastMonth = monthIndex(view) >= monthIndex(rangeEnd);
 
   const selectedInfo = selected ? dayMap.get(toISO(selected)) : undefined;
   const needsSundayChoice = !!selectedInfo?.hasSundayReturnException;
@@ -180,7 +213,8 @@ export function RentalCalendar({
 
   function moveFocus(iso: string, step: number) {
     const target = addDays(fromISO(iso), step);
-    if (target.getMonth() !== view.getMonth() || target.getFullYear() !== view.getFullYear()) {
+    if (monthIndex(target) < monthIndex(today) || monthIndex(target) > monthIndex(rangeEnd)) return;
+    if (monthIndex(target) !== monthIndex(view)) {
       setView(new Date(target.getFullYear(), target.getMonth(), 1));
     }
     requestAnimationFrame(() => {
@@ -387,8 +421,8 @@ export function RentalCalendar({
           : isMaxPiecesExceeded
             ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
             : isBeforeOperationStart
-              ? data?.operationStartDate
-                ? `Reservas online disponíveis a partir de ${fromISO(data.operationStartDate).toLocaleDateString(locale, LONG_DATE)}.`
+              ? operationStartDate
+                ? `Reservas online disponíveis a partir de ${fromISO(operationStartDate).toLocaleDateString(locale, LONG_DATE)}.`
                 : 'Reservas online ainda não disponíveis para estas datas.'
               : freeCount === 0 && !loading
                 ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
