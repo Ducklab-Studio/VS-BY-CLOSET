@@ -80,6 +80,11 @@ export interface StorefrontProduct {
   priceRange: {
     minVariantPrice: { amount: string; currencyCode: string };
   };
+  /** Id da primeira variante — só populado por `listProducts` (é o que o
+   *  catálogo precisa pra checar, em lote, se a peça tem disponibilidade
+   *  real; ver ProductCard/CatalogGrid). `undefined` nos outros métodos
+   *  desta lib, que não precisam disso. */
+  variantId?: string | null;
 }
 
 const PRODUCT_FIELDS = `
@@ -142,15 +147,21 @@ export async function listProducts(opts: { first?: number; category?: CategorySl
   // um dia alguém cadastrar um tipo com acento estranho ou apóstrofo.
   const query = type ? `product_type:'${type.replace(/'/g, "\\'")}'` : undefined;
 
-  const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
+  const data = await storefrontFetch<{
+    products: { nodes: (StorefrontProduct & { variants: { nodes: { id: string }[] } })[] };
+  }>(
     `query Catalog($first: Int!, $query: String) {
       products(first: $first, query: $query, sortKey: TITLE) {
-        nodes { ${PRODUCT_FIELDS} }
+        nodes { ${PRODUCT_FIELDS} variants(first: 1) { nodes { id } } }
       }
     }`,
     { first, query },
   );
-  return data.products.nodes;
+  // Achata a conexão de variante — mesmo tratamento de getProductDetail,
+  // pra nenhum componente precisar saber desse detalhe do GraphQL. Uma
+  // peça física = uma variante (ver comentário em pecas/[handle]/page.tsx);
+  // aqui só precisamos SABER QUAL é, pra checar disponibilidade em lote.
+  return data.products.nodes.map((node) => ({ ...node, variantId: node.variants?.nodes[0]?.id ?? null }));
 }
 
 export async function getProductByHandle(handle: string): Promise<StorefrontProduct | null> {
