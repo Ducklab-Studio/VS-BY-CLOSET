@@ -7,7 +7,7 @@ import { AdminCalendarService } from '../admin-panel/calendar.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { ReservationPdfService } from '../pdf/reservation-pdf.service';
 import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
-import { addDays, civilDateFromISO, civilDateToISO, isSunday } from '../rental-rules/civil-date';
+import { addDays, civilDateFromISO, civilDateToISO, isSunday, type CivilDate } from '../rental-rules/civil-date';
 import { isOnlineReservationAllowed, today as engineToday } from '../rental-rules/rental-engine';
 // pdf-parse does not publish TypeScript declarations.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -99,8 +99,11 @@ async function bookSameUnit(unitId: string): Promise<string> {
 localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
   beforeAll(async () => {
     if (!localDatabase) throw new Error('Banco local obrigatório');
+    const isValidPickup = (d: CivilDate) => isOnlineReservationAllowed(d, DEFAULT_RENTAL_RULE_CONFIG) && !isSunday(d);
     let date = addDays(engineToday(DEFAULT_RENTAL_RULE_CONFIG), 60);
-    while (!isOnlineReservationAllowed(date, DEFAULT_RENTAL_RULE_CONFIG) || isSunday(date) || isSunday(addDays(date, 2))) date = addDays(date, 1);
+    // O dia seguinte ao blocked_range (pickup+6) também é consultado como retirada: se cair
+    // num domingo ou na entressafra, a disponibilidade é 0 pelo calendário, não pela peça.
+    while (!isValidPickup(date) || isSunday(addDays(date, 2)) || !isValidPickup(addDays(date, 6))) date = addDays(date, 1);
     pickup = civilDateToISO(date);
     nextDay = civilDateToISO(addDays(date, 2));
     blockedFrom = civilDateToISO(addDays(date, -3));
