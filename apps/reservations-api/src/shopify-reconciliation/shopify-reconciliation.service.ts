@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { lockOperationalBlocks } from '../admin/operational-blocks';
 import { ShopifyAdminClient, type ShopifyOrderState } from '../admin-panel/shopify-admin.client';
 import { ShopifyOrderSyncService, type OrderSnapshot } from '../webhooks/shopify-order-sync.service';
+import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { ARCHIVABLE_TERMINAL_STATUSES, OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 
 export type DivergenceKind =
@@ -198,7 +199,7 @@ export class ShopifyReconciliationService {
       return await this.prisma.$transaction(
         async (tx) => {
           await lockOperationalBlocks(tx);
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'shopify-order:' + snapshot.orderId}))`;
+          await lockShopifyOrder(tx, snapshot.orderId);
           const reservation = await this.sync.findOnlineReservation(tx, snapshot.orderId);
           if (!reservation) return false;
           const events = await this.sync.applySnapshot(tx, reservation, snapshot, { origin: 'shopify_reconciliation', ...(actor ? { actor } : {}) });

@@ -701,6 +701,21 @@ model ValePass {
   @@map("vale_passes")
 }
 
+/// Pedido Shopify confirmado como cancelado/reembolsado (`orders/cancelled`,
+/// `orders/updated` com `cancelled_at`, `refunds/create`). É um fato do
+/// PEDIDO, gravado mesmo quando nenhum vale está ACTIVE (ex.: um admin já
+/// tinha cancelado manualmente) — é o que impede restaurar depois. Nunca
+/// apagado; a primeira confirmação vence (reentregas não sobrescrevem).
+/// Gravado para qualquer pedido cancelado/reembolsado, porque `orders/paid`
+/// pode chegar depois do cancelamento (reentrega fora de ordem).
+model ValePassOrderCancellation {
+  shopifyOrderId String   @id @map("shopify_order_id")
+  topic          String
+  confirmedAt    DateTime @default(now()) @map("confirmed_at") @db.Timestamptz(6)
+
+  @@map("vale_pass_order_cancellations")
+}
+
 /// Trilha de eventos por vale (criado, usado, cancelado, expirado) —
 /// mesmo espírito de ReservationEvent, mas num domínio totalmente
 /// separado (nunca mistura com auditoria/eventos de reserva).
