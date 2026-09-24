@@ -1,15 +1,14 @@
 import { ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 
-const EMPLOYEE_ROLES = ['ADMIN', 'STAFF'] as const;
+export const EMPLOYEE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'STAFF'] as const;
 // Espelha o enum AdminModule do schema.prisma — VALLE_PASS faltava aqui
 // e no update, então o módulo era impossível de conceder: a API recusava
 // com 400 e só SUPER_ADMIN (que ignora moduleAccess) enxergava a área.
-const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT', 'VALLE_PASS'] as const;
+export const MODULES = ['RESERVATIONS', 'CALENDAR', 'PIECES', 'RULES', 'REPORTS', 'AUDIT', 'VALLE_PASS'] as const;
 
-/** Nunca 'SUPER_ADMIN' aqui — o proprietário não se cria por este
- *  endpoint (ver seed-admin.ts, rodado uma vez por quem já tem acesso
- *  direto ao banco). Sistema de autorização de funcionários: só
- *  ADMIN/STAFF nascem daqui. */
+/** Só um SUPER_ADMIN chega aqui (controller). Criar outro SUPER_ADMIN exige
+ *  `superAdminConfirmation` = "SUPER_ADMIN" e ignora `moduleAccess` (acesso
+ *  total) — ver AdminEmployeesService.create. */
 export class CreateEmployeeDto {
   // `AdminRoleGuard` lê `adminUserId` do body pra validar a sessão (ver
   // admin-role.guard.ts) — precisa estar declarado aqui, senão o
@@ -41,4 +40,10 @@ export class CreateEmployeeDto {
   @ArrayUnique()
   @IsIn(MODULES, { each: true })
   moduleAccess!: (typeof MODULES)[number][];
+
+  /** Obrigatório (= "SUPER_ADMIN") só quando `role` é SUPER_ADMIN. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  superAdminConfirmation?: string;
 }
