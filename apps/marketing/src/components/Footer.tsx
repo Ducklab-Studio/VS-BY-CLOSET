@@ -32,7 +32,7 @@ export function Footer() {
         <div className="footer-navigation">
           <div className="footer-brand">
             <Link href="/" aria-label="VS by Closet — início"><Image src="/brand/logo-horizontal-cream.png" alt="VS by Closet" width={1200} height={320} className="footer-logo" /></Link>
-            <p>Peças para viver o inverno.<br />Reserve no Brasil, retire no Chile.</p>
+            <p>Peças para toda estação.<br />Reserve no Brasil, retire no Chile.</p>
             <span className="footer-location"><MapPin size={15} strokeWidth={1.5} /> Brasil → Chile</span>
             <a href={whatsapp ? `https://wa.me/${whatsapp}` : '/contato'} className="footer-contact"><MessageCircle size={17} strokeWidth={1.5} /><span>Vamos conversar</span><ArrowUpRight size={15} /></a>
           </div>

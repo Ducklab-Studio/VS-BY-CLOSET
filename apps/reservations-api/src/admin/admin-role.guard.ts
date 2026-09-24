@@ -36,14 +36,10 @@ export class AdminRoleGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithAdminUser>();
     const adminUserId = (request.query?.adminUserId as string | undefined) ?? (request.body?.adminUserId as string | undefined);
 
-    if (!adminUserId || typeof adminUserId !== 'string') {
-      throw new UnauthorizedException('adminUserId ausente.');
-    }
-
     const token = request.headers?.['x-admin-session'];
     if (typeof token !== 'string' || !token || token.length > 256) throw new UnauthorizedException('Sessão administrativa inválida.');
     const session = await this.prisma.adminSession.findUnique({ where: { tokenHash: hashSessionToken(token) }, include: { adminUser: true } });
-    if (!session || session.adminUserId !== adminUserId || session.revokedAt || session.expiresAt <= new Date()) {
+    if (!session || (adminUserId !== undefined && session.adminUserId !== adminUserId) || session.revokedAt || session.expiresAt <= new Date()) {
       throw new UnauthorizedException('Sessão administrativa inválida.');
     }
     const adminUser = session.adminUser;

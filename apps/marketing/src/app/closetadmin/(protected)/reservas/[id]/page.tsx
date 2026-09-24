@@ -5,13 +5,14 @@ import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/adm
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
-import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge } from '@/components/closetadmin/ui';
+import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, reservationStatusLabel } from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
+import { OperationalButton } from './OperationalButton';
 import { RestoreButton } from './RestoreButton';
 
 export const metadata: Metadata = { title: 'Detalhe da reserva' };
 
-const CANCELLABLE_STATUSES = new Set(['hold', 'pending_payment', 'confirmed']);
+const CANCELLABLE_STATUSES = new Set(['confirmed']);
 
 /**
  * Fase 9, item 7 — detalhe completo. Reservas ONLINE nunca mostram botão
@@ -38,7 +39,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
   {
     const orderUrl = shopifyOrderAdminUrl(reservation.shopifyOrderId);
     const isOnline = reservation.source === 'online';
-    const canCancel = reservation.source === 'manual_admin' && CANCELLABLE_STATUSES.has(reservation.status);
+    const canCancel = !reservation.archivedAt && reservation.source === 'manual_admin' && CANCELLABLE_STATUSES.has(reservation.status);
 
     return (
       <div>
@@ -46,7 +47,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
           title={reservation.customerName ?? 'Reserva'}
           description={`Criada em ${formatDateTimePt(reservation.createdAt)}`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <a
                 href={`/closetadmin/reservas/${reservation.id}/pdf`}
                 target="_blank"
@@ -75,14 +76,15 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               <Field label="E-mail" value={reservation.customerEmail ?? '—'} />
               <Field label="Nota interna" value={reservation.internalNote ?? '—'} />
               <Field label="Retirada" value={reservation.pickupDate ? formatDatePt(reservation.pickupDate) : '—'} />
-              <Field label="Devolução" value={reservation.returnDate ? formatDatePt(reservation.returnDate) : '—'} />
+              <Field label="Devolução prevista" value={reservation.returnDate ? formatDatePt(reservation.returnDate) : '—'} />
               <Field label="Confirmada em" value={reservation.confirmedAt ? formatDateTimePt(reservation.confirmedAt) : '—'} />
+              <Field label="Progresso das peças" value={progressLabel(reservation.items)} />
               <Field label="Atualizada em" value={formatDateTimePt(reservation.updatedAt)} />
               {reservation.archivedAt ? <Field label="Arquivada em" value={formatDateTimePt(reservation.archivedAt)} /> : null}
               {reservation.archiveReason ? <Field label="Motivo do arquivamento" value={reservation.archiveReason} /> : null}
             </dl>
 
-            {isOnline ? (
+            {isOnline && reservation.status === 'confirmed' ? (
               <div className="mt-4 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/40 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
                 Esta reserva está vinculada a um pedido Shopify. Cancelamentos devem considerar pedido/pagamento — use o Shopify Admin.
               </div>
@@ -98,14 +100,31 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
           <Card>
             <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Peças</h2>
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
-              {reservation.items.map((item) => (
-                <li key={item.rentalUnitId} className="py-2.5 text-sm">
-                  <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
-                  <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
-                    {formatDatePt(item.blockedFrom)} – {formatDatePt(item.blockedUntilExclusive)} · <span className="uppercase">{item.status}</span>
-                  </p>
+              {reservation.items.map((item) => {
+                const canReceive = !reservation.archivedAt && (item.status === 'confirmed' || item.status === 'picked_up');
+                const canStartCleaning = !reservation.archivedAt && item.status === 'returned';
+                const canCompleteCleaning = !reservation.archivedAt && item.status === 'cleaning';
+                return (
+                <li key={item.id} className="py-3 text-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
+                      <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
+                        {formatDatePt(item.blockedFrom)} – {formatDatePt(item.blockedUntilExclusive)} · {reservationStatusLabel(item.status)}
+                      </p>
+                      <p className="text-ink/50 dark:text-dark-muted text-xs mt-1">
+                        Recebida: {item.returnedAt ? formatDateTimePt(item.returnedAt) : '—'} · Higienização: {item.cleaningStartedAt ? formatDateTimePt(item.cleaningStartedAt) : '—'} · Concluída: {item.cleaningCompletedAt ? formatDateTimePt(item.cleaningCompletedAt) : '—'}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {canReceive ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="receive" /> : null}
+                      {canStartCleaning ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="start-cleaning" /> : null}
+                      {canCompleteCleaning ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="complete-cleaning" /> : null}
+                    </div>
+                  </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </Card>
         </div>
@@ -141,6 +160,11 @@ function Field({ label, value }: { label: string; value: string }) {
       <dd className="mt-0.5 font-medium text-ink dark:text-dark-text">{value}</dd>
     </div>
   );
+}
+
+function progressLabel(items: readonly { status: string }[]): string {
+  const completed = items.filter((item) => item.status === 'completed').length;
+  return `${completed}/${items.length} concluídas`;
 }
 
 function formatDatePt(iso: string): string {

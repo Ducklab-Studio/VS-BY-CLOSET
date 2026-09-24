@@ -148,16 +148,25 @@ describe('PDF administrativo — integração real (Neon)', () => {
     // pickupWithoutSundayReturn nunca cai perto o suficiente de "hoje" por
     // causa da antecedência mínima — usamos override, igual aos testes de
     // admin-reservations.service.test.ts, pra isolar o cenário de retirada
-    // HOJE sem precisar desativar a checagem de temporada também.
+    // HOJE; a data de início da operação fica desligada durante o teste.
     const original = await prisma.rentalRuleConfig.findUniqueOrThrow({ where: { id: 'default' } });
-    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { blackoutStart: '01-01', blackoutEnd: '01-01' } });
+    await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: null } });
     try {
-      const today = engineToday(CFG);
+      // "Hoje" aqui é a data de referência que o relatório recebe
+      // (`generate(referenceDateIso)`): o serviço só compara as retiradas
+      // com ela e nunca lê o relógio. Por isso o teste escolhe uma data de
+      // referência VÁLIDA em vez de depender do dia real da execução —
+      // achado real: rodando num domingo, "hoje" era uma retirada proibida
+      // (`pickup_is_sunday`) e o teste falhava sem nenhuma mudança de
+      // código. Só ADICIONA dias a partir de hoje (nunca cai no passado),
+      // pulando domingo. Nos dias comuns continua sendo o próprio dia real.
+      let today = engineToday(CFG);
+      for (let i = 0; i < 10 && isSunday(today); i++) today = addDays(today, 1);
       // Achado real (mesma classe do PR #23): a devolução calculada pode
-      // cair num domingo dependendo de que dia da semana "hoje" realmente
-      // é quando a suíte roda — nunca muda o pickup (o teste PRECISA ser
-      // retirada HOJE, é isso que ele verifica), só passa a opção de
-      // domingo quando o motor de fato exigir.
+      // cair num domingo dependendo de que dia da semana a referência
+      // realmente é — nunca muda o pickup (a retirada TEM de coincidir com
+      // a data de referência, é isso que o teste verifica), só passa a
+      // opção de domingo quando o motor de fato exigir.
       const engineDurationDays = durationForPieces(1, CFG);
       const needsSundayChoice = isSunday(calculateReturnDate(today, engineDurationDays));
       const res = await reservations.createManual({
@@ -180,7 +189,7 @@ describe('PDF administrativo — integração real (Neon)', () => {
     } finally {
       await prisma.rentalRuleConfig.update({
         where: { id: 'default' },
-        data: { blackoutStart: original.blackoutStart, blackoutEnd: original.blackoutEnd },
+        data: { operationStartDate: original.operationStartDate },
       });
     }
   }, 20_000);

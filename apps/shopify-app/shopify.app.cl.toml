@@ -1,50 +1,55 @@
-# RASCUNHO — NÃO DEPLOYADO. Config do app de PRODUÇÃO real "VS BY CLOSET
-# Integration" (client_id confirmado pelo usuário em 2026-09-04), loja
-# ar5sjt-7g.myshopify.com. Nome de arquivo segue a convenção já
-# documentada em shopify.app.toml (o app DEV): um arquivo por loja de
-# produção, "shopify.app.<pais>.toml" — este é o do Chile (CLP, moeda já
-# usada em apps/reservations-api/.env.example).
+# RASCUNHO SUPERADO — NÃO USE, NÃO DEPLOYE.
 #
-# ⚠️ application_url, redirect_urls e access_scopes ABAIXO SÃO
-# PLACEHOLDERS — este app já existe em produção e sua configuração real
-# (o que ele já faz, quais scopes já tem, se já tem outras webhook
-# subscriptions) NÃO foi lida daqui. Rode `shopify app config link` com
-# este client_id pra puxar a config real ANTES de considerar este arquivo
-# pronto pra deploy — nunca substitua os placeholders por suposição.
+# ⚠️ Este arquivo já apontou para o app de PRODUÇÃO real "VS BY CLOSET
+# Integration" carregando o `client_id` verdadeiro dele, enquanto
+# `access_scopes`, `application_url` e `redirect_urls` aqui eram todos
+# PLACEHOLDER. Nessa combinação, um `shopify app config use cl` seguido de
+# `shopify app deploy` publicaria os placeholders POR CIMA da configuração
+# real: os scopes do app de produção seriam zerados e a instalação da loja
+# quebraria junto com os webhooks de aluguel. Não é hipótese — o cabeçalho
+# de `shopify.app.toml` registra que os scopes já foram zerados uma vez por
+# um caminho parecido.
 #
-# ⚠️ [[webhooks.subscriptions]] abaixo (orders/paid, orders/cancelled,
-# refunds/create) é a única parte que este arquivo adiciona de fato —
-# pedida explicitamente para apontar pro endpoint /webhooks/shopify do
-# reservations-api. `uri` está com placeholder porque reservations-api
-# ainda não tem URL pública (nenhum deploy feito até agora).
+# Por isso o `client_id` real foi REMOVIDO daqui. Sem ele, o CLI não
+# consegue mais mirar o app de produção a partir deste arquivo.
+#
+# O conteúdo deste rascunho já foi todo absorvido por
+# `shopify.app.production.toml`, que é a ÚNICA configuração válida do app de
+# produção: mesmos 4 tópicos de webhook do fluxo de aluguel, com a URL
+# pública real do reservations-api (que não existia quando este rascunho foi
+# escrito) e com os scopes reais concedidos pela loja.
+#
+# Se algum dia for preciso uma configuração separada para a loja do Chile,
+# NÃO edite este arquivo com o client_id de produção. Crie o app novo no
+# Partner Dashboard e rode `shopify app config link` para puxar a config
+# real dele — nunca preencha por suposição.
+#
+# Há uma guarda automatizada em `scripts/checkout-flow.test.mjs` que falha a
+# CI se qualquer `shopify.app.*.toml` voltar a carregar o `client_id` de
+# produção junto com scopes PLACEHOLDER.
 
-client_id = "9dfc4bbaa95556bdb24ea9aaccc6be5a"
-application_url = "PLACEHOLDER — puxar do Partner Dashboard via `shopify app config link`, não inventar"
+client_id = "REMOVIDO — rascunho superado por shopify.app.production.toml; não aponte este arquivo para o app de produção"
+application_url = "PLACEHOLDER — nunca deployar a partir deste arquivo"
 embedded = true
-name = "VS BY CLOSET Integration"
+name = "VS BY CLOSET Integration (rascunho superado)"
 
 [access_scopes]
-# PLACEHOLDER — os scopes reais deste app (o que ele já tem instalado)
-# precisam vir do Partner Dashboard / `shopify app config link`, não
-# deste arquivo. read_orders é o mínimo que os webhooks de aluguel
-# precisam pra o `orders/paid`/`orders/cancelled` fazerem sentido; não
-# adicione write_orders a menos que o app real já tenha esse scope
-# concedido pela loja (mudar scopes exige reautorização da loja).
+# PLACEHOLDER — os scopes reais do app de produção estão em
+# `shopify.app.production.toml`. Publicar "PLACEHOLDER" como scope é
+# exatamente o acidente que este arquivo causava.
 scopes = "PLACEHOLDER"
 
 [webhooks]
 api_version = "2026-10"
 
-  # ── ADIÇÃO desta auditoria — os 3 tópicos do fluxo de aluguel ──
-  # `uri` precisa virar a URL pública real de reservations-api assim que
-  # existir deploy (ex.: "https://api.vsbycloset.com/webhooks/shopify").
-  # Por enquanto é só placeholder — NÃO É válido pra deploy.
+  # Mantido apenas como registro do que foi pedido na época. A versão que
+  # vale, com a URL pública real, está em `shopify.app.production.toml`.
   [[webhooks.subscriptions]]
-  uri = "PLACEHOLDER — URL pública real de reservations-api, ex.: https://<host-real>/webhooks/shopify"
+  uri = "PLACEHOLDER — a assinatura real vive em shopify.app.production.toml"
   topics = [ "orders/create", "orders/paid", "orders/cancelled", "refunds/create" ]
 
 [auth]
-redirect_urls = [ "PLACEHOLDER — puxar do Partner Dashboard via `shopify app config link`, não inventar" ]
+redirect_urls = [ "PLACEHOLDER — nunca deployar a partir deste arquivo" ]
 
 [build]
 automatically_update_urls_on_dev = true

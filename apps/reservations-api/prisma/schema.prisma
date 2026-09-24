@@ -18,9 +18,8 @@ datasource db {
 }
 
 enum ReservationStatus {
-  // `pending`/`completed` — de fato legado da Fase 1, sem uso desde a
-  // Fase 4. Mantidos só porque o Postgres não remove valor de enum de
-  // forma simples.
+  // `pending` permanece legado da Fase 1. `completed` agora marca a
+  // higienização concluída e a liberação operacional da unidade.
   pending
   completed
 
@@ -236,6 +235,9 @@ model OperationalBlock {
   createdByAdminUserId String     @map("created_by_admin_user_id") @db.Uuid
   createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   removedAt            DateTime?  @map("removed_at") @db.Timestamptz(6)
+  /// Desativado continua listado e pode ser reativado; `removedAt` é a exclusão lógica.
+  active               Boolean    @default(true)
+  updatedAt            DateTime?  @map("updated_at") @db.Timestamptz(6)
 
   rentalUnit RentalUnit? @relation(fields: [rentalUnitId], references: [id])
   createdBy  AdminUser   @relation(fields: [createdByAdminUserId], references: [id])
@@ -298,6 +300,18 @@ model RentalUnit {
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// Quando a sincronização de catálogo (ShopifyCatalogSyncService) detectou
+  /// que `shopifyVariantId` não existe mais na Shopify. NÃO apaga/esvazia
+  /// `shopifyVariantId` — perder o valor impediria casar a MESMA variante se
+  /// ela voltar a existir (reativação segura, sem duplicar peça). Este campo
+  /// é quem "invalida" o vínculo pra fins de negócio; `active=false` é quem
+  /// efetivamente bloqueia reserva/disponibilidade — mesmos checks que já
+  /// existiam (AvailabilityService, HoldsService, AdminReservationsService).
+  /// Só a própria sincronização escreve aqui; uma reativação MANUAL pelo
+  /// painel (PATCH /admin/pieces/:id com active=true) limpa este campo, pra
+  /// nunca haver duas fontes de verdade competindo pelo mesmo estado.
+  shopifyVariantMissingAt DateTime? @map("shopify_variant_missing_at") @db.Timestamptz(6)
+
   reservationItems  ReservationItem[]
   operationalBlocks OperationalBlock[]
 
@@ -306,10 +320,28 @@ model RentalUnit {
   @@map("rental_units")
 }
 
+/// Singleton (mesmo padrão de RentalRuleConfig) — só a última execução da
+/// sincronização de catálogo Shopify → peças físicas. Sem linha = nunca
+/// sincronizado (estado válido, não erro; ao contrário de RentalRuleConfig,
+/// que É seedada na migration porque a ausência dela SIGNIFICA erro).
+model CatalogSyncState {
+  id String @id @default("default")
+
+  lastSyncedAt     DateTime @map("last_synced_at") @db.Timestamptz(6)
+  lastSyncedBy     String?  @map("last_synced_by") @db.Uuid
+  lastSyncedByName String?  @map("last_synced_by_name")
+
+  checkedVariants  Int @default(0) @map("checked_variants")
+  deactivatedCount Int @default(0) @map("deactivated_count")
+  reactivatedCount Int @default(0) @map("reactivated_count")
+
+  @@map("catalog_sync_state")
+}
+
 /// A reserva. `pickupDate`/`returnDate` são datas civis (sem hora) — ver
-/// o motor de regras em src/rental-rules. `status` é a fonte da verdade;
-/// `ReservationItem.status` é espelho garantido por trigger (nunca
-/// escrito direto pela aplicação).
+/// o motor de regras em src/rental-rules. O status da reserva representa
+/// o agregado operacional; cada `ReservationItem` carrega sua própria
+/// etapa de devolução/higienização.
 model Reservation {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
@@ -385,7 +417,6 @@ model Reservation {
   /// — nunca por redirect do cliente, nunca pelo frontend. Ver
   /// WebhooksService.
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
-
   // Legado (Fase 1) — não usado por reserva nova. Mantido até uma
   // migration de limpeza futura, depois que nada mais ler/escrever aqui.
   sku       String?                    @map("sku")
@@ -404,6 +435,10 @@ model Reservation {
   archivedAt     DateTime? @map("archived_at") @db.Timestamptz(6)
   archivedBy     String?   @map("archived_by") @db.Uuid
   archiveReason  String?   @map("archive_reason")
+
+  /// `updated_at` do último estado de pedido Shopify aplicado (webhook ou
+  /// reconciliação). Ignora entrega atrasada que desfaria um estado mais novo.
+  shopifyOrderUpdatedAt DateTime? @map("shopify_order_updated_at") @db.Timestamptz(6)
 
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
@@ -467,6 +502,16 @@ model ReservationItem {
   /// calculada e gravada na criação, não derivada depois.
   blockedRange Unsupported("daterange") @map("blocked_range")
 
+  /// Recebimento e higienização são por peça física. `completed` libera
+  /// esta unidade; `returned` e `cleaning` continuam bloqueando mesmo
+  /// depois da janela planejada em `blocked_range`.
+  returnedAt DateTime? @map("returned_at") @db.Timestamptz(6)
+  returnedBy String? @map("returned_by") @db.Uuid
+  cleaningStartedAt DateTime? @map("cleaning_started_at") @db.Timestamptz(6)
+  cleaningStartedBy String? @map("cleaning_started_by") @db.Uuid
+  cleaningCompletedAt DateTime? @map("cleaning_completed_at") @db.Timestamptz(6)
+  cleaningCompletedBy String? @map("cleaning_completed_by") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   reservation Reservation @relation(fields: [reservationId], references: [id])
@@ -488,8 +533,13 @@ model RentalRuleConfig {
   prepDays       Int @default(3) @map("prep_days")
   cleaningDays   Int @default(2) @map("cleaning_days")
 
-  blackoutStart String @default("06-01") @map("blackout_start")
-  blackoutEnd   String @default("09-30") @map("blackout_end")
+  /// Primeira data de retirada aceita. Nulo = sem restrição.
+  operationStartDate DateTime? @map("operation_start_date") @db.Date
+
+  /// Legado: temporada anual MM-DD, não aplicada mais pelo motor (substituída
+  /// por períodos fechados em operational_blocks). Mantida só por dado/rollback.
+  blackoutStart String? @map("blackout_start")
+  blackoutEnd   String? @map("blackout_end")
 
   maxPieces Int @default(6) @map("max_pieces")
 
@@ -657,6 +707,21 @@ model ValePass {
   @@index([status])
   @@index([shopifyOrderId])
   @@map("vale_passes")
+}
+
+/// Pedido Shopify confirmado como cancelado/reembolsado (`orders/cancelled`,
+/// `orders/updated` com `cancelled_at`, `refunds/create`). É um fato do
+/// PEDIDO, gravado mesmo quando nenhum vale está ACTIVE (ex.: um admin já
+/// tinha cancelado manualmente) — é o que impede restaurar depois. Nunca
+/// apagado; a primeira confirmação vence (reentregas não sobrescrevem).
+/// Gravado para qualquer pedido cancelado/reembolsado, porque `orders/paid`
+/// pode chegar depois do cancelamento (reentrega fora de ordem).
+model ValePassOrderCancellation {
+  shopifyOrderId String   @id @map("shopify_order_id")
+  topic          String
+  confirmedAt    DateTime @default(now()) @map("confirmed_at") @db.Timestamptz(6)
+
+  @@map("vale_pass_order_cancellations")
 }
 
 /// Trilha de eventos por vale (criado, usado, cancelado, expirado) —

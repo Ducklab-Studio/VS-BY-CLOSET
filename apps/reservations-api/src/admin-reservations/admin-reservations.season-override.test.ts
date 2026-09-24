@@ -16,13 +16,18 @@ let staffId: string;
 let blockedPickup: CivilDate;
 
 beforeAll(async () => {
-  const config = await rentalRuleConfig.load();
-  blockedPickup = findBlockedPickup(config);
+  // Início da operação no futuro, definido por este teste (a linha de base da
+  // suíte é "sem data"); restaurado no afterAll.
+  const base = await rentalRuleConfig.load();
+  let start = addDays(engineToday(base), base.minAdvanceDays + 60);
+  while (isSunday(start)) start = addDays(start, 1);
+  await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: new Date(civilDateToISO(start)) } });
+  blockedPickup = findBlockedPickup(await rentalRuleConfig.load());
 
   const unit = await prisma.rentalUnit.create({
     data: {
       code: `${PREFIX}-UNIT`,
-      name: 'Peça teste override temporada',
+      name: 'Peça teste override início da operação',
       shopifyVariantId: `${PREFIX}-VARIANT`,
       active: true,
       reservableOnline: true,
@@ -55,6 +60,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { operationStartDate: null } });
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT DISTINCT ri.reservation_id AS id
     FROM reservation_items ri
@@ -73,8 +79,8 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe('AdminReservationsService — override manual de temporada', () => {
-  test('sem override continua bloqueado pela temporada', async () => {
+describe('AdminReservationsService — exceção manual antes do início da operação', () => {
+  test('sem override continua bloqueado antes do início da operação', async () => {
     await expect(
       service.createManual({
         adminUserId: adminId,
@@ -86,7 +92,7 @@ describe('AdminReservationsService — override manual de temporada', () => {
       }),
     ).rejects.toMatchObject({
       status: 422,
-      response: { violations: expect.arrayContaining(['pickup_outside_season']) },
+      response: { violations: expect.arrayContaining(['pickup_before_operation_start']) },
     });
   });
 
@@ -105,7 +111,7 @@ describe('AdminReservationsService — override manual de temporada', () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  test('ADMIN ativo pode criar reserva manual na temporada com motivo obrigatório', async () => {
+  test('ADMIN ativo pode criar reserva manual antes do início com motivo obrigatório', async () => {
     const result = await service.createManual({
       adminUserId: adminId,
       adminUserName: `${PREFIX}-ADMIN`,
@@ -141,5 +147,5 @@ function findBlockedPickup(config: Awaited<ReturnType<RentalRuleConfigService['l
     }
     candidate = addDays(candidate, 1);
   }
-  throw new Error('Não foi encontrada uma data de temporada bloqueada adequada para o teste.');
+  throw new Error('Não foi encontrada uma data anterior ao início da operação adequada para o teste.');
 }

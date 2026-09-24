@@ -48,16 +48,16 @@ const ALLOWED_TRANSITIONS: Partial<Record<ReservationStatusValue, ReadonlySet<Re
 
   // Cancelamento depois de confirmado, ou uma inconsistência (ex.:
   // refund inesperado) que precisa de revisão humana.
-  confirmed: new Set(['cancelled', 'problem']),
+  confirmed: new Set(['cancelled', 'returned', 'problem']),
 
   // Item 11: cancelamento chegando depois da retirada NUNCA vira
   // `cancelled` automaticamente — o único destino permitido daqui é
   // `problem`, pra revisão manual.
   preparing: new Set(['problem']),
   ready_for_pickup: new Set(['problem']),
-  picked_up: new Set(['problem']),
-  returned: new Set(['problem']),
-  cleaning: new Set(['problem']),
+  picked_up: new Set(['returned', 'problem']),
+  returned: new Set(['cleaning', 'problem']),
+  cleaning: new Set(['completed', 'problem']),
 
   // Terminais nesta fase — resolução de `problem`/`cancelled`/
   // `late_payment_conflict` é trabalho humano fora deste sistema

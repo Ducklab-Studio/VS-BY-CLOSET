@@ -4,13 +4,13 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PieceListItem } from '@/lib/admin-data';
 import { PhoneInput } from '@/components/closetadmin/PhoneInput';
+import { formatIsoDatePt } from '@/lib/closetadmin-dates';
 import { createManualReservationAction } from './actions';
 
 const VIOLATION_LABELS: Record<string, string> = {
   pickup_before_minimum_advance: 'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
   duration_mismatch_with_engine: 'A duração informada não corresponde ao cálculo automático do motor de regras.',
-  pickup_outside_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
-  pickup_outside_online_season: 'A data de retirada está dentro do período em que as reservas online ficam bloqueadas.',
+  pickup_before_operation_start: 'A data de retirada é anterior ao início da operação configurado nas regras.',
   pickup_is_sunday: 'A retirada não pode ser num domingo.',
   max_pieces_exceeded: 'Quantidade de peças acima do máximo permitido.',
   no_reservable_items: 'Nenhuma peça válida selecionada.',
@@ -22,8 +22,8 @@ type OverrideKey = 'minLeadTime' | 'customDuration' | 'outsideOnlineSeason';
 const OVERRIDE_KEY_BY_VIOLATION: Record<string, OverrideKey> = {
   pickup_before_minimum_advance: 'minLeadTime',
   duration_mismatch_with_engine: 'customDuration',
-  pickup_outside_season: 'outsideOnlineSeason',
-  pickup_outside_online_season: 'outsideOnlineSeason',
+  // Chave do override mantida (nome já gravado no histórico de reservas).
+  pickup_before_operation_start: 'outsideOnlineSeason',
 };
 
 const inputClass =
@@ -57,6 +57,10 @@ export function ManualReservationWizard({
   const [overrideReason, setOverrideReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Só preenchido quando o navegador bloqueou a nova aba do WhatsApp: a
+  // reserva JÁ foi criada, então em vez de voltar ao passo 4 (onde um novo
+  // clique em "Confirmar" tentaria criar de novo) mostramos o link.
+  const [created, setCreated] = useState<{ reservationId: string; whatsappUrl: string } | null>(null);
 
   const overridable = useMemo(
     () =>
@@ -118,11 +122,26 @@ export function ManualReservationWizard({
 
     setPending(false);
     if (result.ok && result.reservationId) {
-      router.push(`/closetadmin/reservas/${result.reservationId}`);
+      const detailPath = `/closetadmin/reservas/${result.reservationId}`;
+      if (!result.whatsappUrl) {
+        router.push(detailPath);
+        return;
+      }
+      // Sem 'noopener' na string de features de propósito: com ele o
+      // window.open devolve sempre null e não dá para saber se o
+      // navegador bloqueou. O opener é zerado logo em seguida para a
+      // página do WhatsApp nunca alcançar o painel via window.opener.
+      const whatsappTab = window.open(result.whatsappUrl, '_blank');
+      if (whatsappTab) {
+        whatsappTab.opener = null;
+        router.push(detailPath);
+        return;
+      }
+      setCreated({ reservationId: result.reservationId, whatsappUrl: result.whatsappUrl });
       return;
     }
     if (result.violations) {
-      // O backend pode descobrir overrides em etapas (ex.: temporada +
+      // O backend pode descobrir overrides em etapas (ex.: início da operação +
       // antecedência primeiro e duração customizada depois). Enquanto o
       // usuário não alterar datas/peças, as confirmações já dadas precisam
       // continuar ativas; apagá-las aqui fazia o wizard alternar entre os
@@ -133,6 +152,34 @@ export function ManualReservationWizard({
       return;
     }
     setError(result.error ?? 'Não foi possível criar a reserva.');
+  }
+
+  if (created) {
+    return (
+      <div className="max-w-2xl">
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900 shadow-sm dark:border-emerald-800/40 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <p className="font-semibold">Reserva criada com sucesso.</p>
+          <p className="mt-1">O navegador bloqueou a abertura automática do WhatsApp. Use o botão abaixo para enviar a confirmação ao cliente.</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a
+              href={created.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-marsala dark:bg-marsala-light px-5 py-2.5 text-sm font-medium text-cream dark:text-sand hover:bg-marsala/90 dark:hover:bg-marsala-glow transition shadow-sm"
+            >
+              Abrir WhatsApp do cliente
+            </a>
+            <button
+              type="button"
+              onClick={() => router.push(`/closetadmin/reservas/${created.reservationId}`)}
+              className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/70 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition"
+            >
+              Ver reserva
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -229,7 +276,7 @@ export function ManualReservationWizard({
               <strong className="text-marsala dark:text-gold font-semibold">{customerName}</strong> · {customerPhone}
             </p>
             <p className="mt-1 text-ink/60 dark:text-dark-muted">
-              Retirada: {pickupDate || '—'} {returnDate ? `· Devolução: ${returnDate}` : ''}
+              Retirada: {pickupDate ? formatIsoDatePt(pickupDate) : '—'} {returnDate ? `· Devolução: ${formatIsoDatePt(returnDate)}` : ''}
             </p>
             <p className="mt-1 text-ink/60 dark:text-dark-muted">{selectedUnitIds.length} peça(s) selecionada(s)</p>
           </div>
@@ -247,7 +294,7 @@ export function ManualReservationWizard({
                 ))}
               </ul>
               {!canOverrideSeason && blocking.some((v) => OVERRIDE_KEY_BY_VIOLATION[v] === 'outsideOnlineSeason') ? (
-                <p className="mt-2 text-xs opacity-80">Exceção de temporada é exclusiva de usuário ADMIN.</p>
+                <p className="mt-2 text-xs opacity-80">Exceção de início da operação é exclusiva de usuário ADMIN.</p>
               ) : (
                 <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
               )}

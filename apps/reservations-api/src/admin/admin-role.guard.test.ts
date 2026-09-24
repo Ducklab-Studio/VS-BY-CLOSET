@@ -50,6 +50,7 @@ function contextWith(input: {
   requiredRoleOnClass?: boolean;
   requiredModule?: AdminModule;
   requiredModuleOnClass?: boolean;
+  sessionForId?: string;
 }): ExecutionContext {
   const handler = () => undefined;
   class FakeController {}
@@ -60,7 +61,7 @@ function contextWith(input: {
     Reflect.defineMetadata(REQUIRE_MODULE_KEY, input.requiredModule, input.requiredModuleOnClass ? FakeController : handler);
   }
   const request = {
-    headers: { 'x-admin-session': tokens.get(String(input.query?.adminUserId ?? input.body?.adminUserId)) },
+    headers: { 'x-admin-session': tokens.get(String(input.sessionForId ?? input.query?.adminUserId ?? input.body?.adminUserId)) },
     query: input.query ?? {},
     body: input.body,
   };
@@ -218,5 +219,23 @@ describe('AdminRoleGuard — hierarquia SUPER_ADMIN e @RequireModule (integraç�
     await expect(
       guard.canActivate(contextWith({ query: { adminUserId: withoutModule.id }, requiredRole: 'ADMIN', requiredModule: 'RESERVATIONS' })),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  test.each(['STAFF', 'ADMIN', 'SUPER_ADMIN'] as const)('ação operacional aceita %s com sessão válida', async (role) => {
+    const user = await createUser(role, true, role === 'SUPER_ADMIN' ? [] : ['RESERVATIONS']);
+    const ctx = contextWith({ sessionForId: user.id, body: {}, requiredModule: 'RESERVATIONS' });
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(ctx.switchToHttp().getRequest<{ adminUser: { id: string } }>().adminUser.id).toBe(user.id);
+  });
+
+  test.each(['STAFF', 'ADMIN'] as const)('ação operacional recusa %s sem RESERVATIONS', async (role) => {
+    const user = await createUser(role, true, []);
+    await expect(guard.canActivate(contextWith({ sessionForId: user.id, body: {}, requiredModule: 'RESERVATIONS' }))).rejects.toThrow(ForbiddenException);
+  });
+
+  test('identidade vem da sessão; adminUserId forjado no body é recusado', async () => {
+    const user = await createUser('ADMIN', true, ['RESERVATIONS']);
+    const other = await createUser('ADMIN', true, ['RESERVATIONS']);
+    await expect(guard.canActivate(contextWith({ sessionForId: user.id, body: { adminUserId: other.id }, requiredModule: 'RESERVATIONS' }))).rejects.toThrow(UnauthorizedException);
   });
 });

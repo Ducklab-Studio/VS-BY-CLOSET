@@ -70,7 +70,17 @@ export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'
   readonly updatedAt: string;
   readonly archivedBy: string | null;
   readonly archiveReason: string | null;
-  readonly items: readonly { rentalUnitId: string; code: string; status: string; blockedFrom: string; blockedUntilExclusive: string }[];
+  readonly items: readonly {
+    id: string;
+    rentalUnitId: string;
+    code: string;
+    status: string;
+    blockedFrom: string;
+    blockedUntilExclusive: string;
+    returnedAt: string | null;
+    cleaningStartedAt: string | null;
+    cleaningCompletedAt: string | null;
+  }[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
 
@@ -98,8 +108,12 @@ export function createManualReservation(input: CreateManualReservationInput) {
   return adminPost('/admin/reservations/manual', input);
 }
 
-export function cancelManualReservation(id: string, adminUserId: string, adminUserName: string, reason?: string) {
-  return adminPost(`/admin/reservations/${id}/cancel`, { adminUserId, adminUserName, reason });
+export function cancelManualReservation(id: string, reason?: string) {
+  return adminPost(`/admin/reservations/${id}/cancel`, { reason });
+}
+
+export function advanceReservationItem(id: string, itemId: string, action: 'receive' | 'start-cleaning' | 'complete-cleaning', note?: string) {
+  return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string }>(`/admin/reservations/${id}/items/${itemId}/${action}`, { note });
 }
 
 export interface PieceListItem {
@@ -114,6 +128,9 @@ export interface PieceListItem {
   readonly countsTowardRentalDuration: boolean;
   readonly currentlyOccupied: boolean;
   readonly upcomingReservations: number;
+  /// Presente = a sincronização de catálogo desativou esta peça porque a
+  /// variante vinculada não existe mais na Shopify (ver docs/shopify-catalog-sync.md).
+  readonly shopifyVariantMissingAt: string | null;
 }
 
 export function listPieces(adminUserId: string): Promise<PieceListItem[]> {
@@ -138,8 +155,8 @@ export interface RentalRuleConfig {
   readonly minAdvanceDays: number;
   readonly prepDays: number;
   readonly cleaningDays: number;
-  readonly blackoutStart: string;
-  readonly blackoutEnd: string;
+  /** YYYY-MM-DD — primeira retirada aceita; null = sem restrição. */
+  readonly operationStartDate: string | null;
   readonly maxPieces: number;
   readonly piecesToDaysTable: PiecesToDaysRule[];
   readonly timezone: string;
@@ -161,20 +178,31 @@ export interface BlockItem {
   readonly startDate: string;
   readonly endDate: string;
   readonly reason: string;
+  /** Desativado continua listado e pode ser reativado; removido some da lista. */
+  readonly active: boolean;
   readonly createdByAdminUserId: string;
   readonly createdAt: string;
+  readonly updatedAt: string | null;
   readonly removedAt: string | null;
 }
 
+export type BlockInput = { scope: 'STORE_WIDE' | 'UNIT'; rentalUnitId?: string; startDate: string; endDate: string; reason: string };
+
+/** `activeOnly` (nome da API) = esconder removidos; desativados continuam na lista. */
 export function listBlocks(adminUserId: string, activeOnly = true): Promise<BlockItem[]> {
   return adminGet(`/admin/blocks?activeOnly=${activeOnly}`, adminUserId);
 }
 
-export function createBlock(
-  input: { scope: 'STORE_WIDE' | 'UNIT'; rentalUnitId?: string; startDate: string; endDate: string; reason: string },
-  adminUserId: string,
-): Promise<BlockItem> {
+export function createBlock(input: BlockInput, adminUserId: string): Promise<BlockItem> {
   return adminPost('/admin/blocks', { ...input, adminUserId });
+}
+
+export function updateBlock(id: string, input: Partial<BlockInput>, adminUserId: string): Promise<BlockItem> {
+  return adminPatch(`/admin/blocks/${id}`, { ...input, adminUserId });
+}
+
+export function setBlockActive(id: string, active: boolean, adminUserId: string): Promise<BlockItem> {
+  return adminPost(`/admin/blocks/${id}/${active ? 'activate' : 'deactivate'}`, { adminUserId });
 }
 
 export function removeBlock(id: string, adminUserId: string): Promise<BlockItem> {
@@ -206,10 +234,10 @@ export function clearAudit(adminUserId: string, adminUserName: string): Promise<
 /** "Limpar históricos" — arquivamento (soft delete) de reservas em
  *  estado terminal. Ver apps/reservations-api/src/reservation-archive. */
 export interface ArchiveFilters {
-  status?: 'cancelled' | 'expired' | 'returned' | 'completed';
+  status?: 'cancelled' | 'expired' | 'completed';
   /** "Limpar lista" — conjunto explícito de status numa única chamada
    *  (ex.: ['expired', 'cancelled']). Prioridade sobre os demais campos. */
-  statuses?: ('cancelled' | 'expired' | 'returned' | 'completed')[];
+  statuses?: ('cancelled' | 'expired' | 'completed')[];
   source?: string;
   closedBefore?: string;
   minSafetyDays?: number;
@@ -386,6 +414,11 @@ export interface ValePassVoucher {
   readonly usedAt: string | null;
   readonly cancelledAt: string | null;
   readonly cancelReason: string | null;
+  /** Só tem sentido quando `status === 'CANCELLED'`. O backend já checa
+   *  utilização, validade, origem do cancelamento (admin × Shopify) e
+   *  conflito com o pedido — a tela só mostra o resultado, nunca decide. */
+  readonly canBeRestored: boolean;
+  readonly restoreBlockedReason: string | null;
 }
 
 export interface ValePassVoucherFilters {
@@ -413,6 +446,13 @@ export function markValePassVoucherUsed(code: string, adminUserId: string): Prom
 
 export function cancelValePassVoucher(code: string, reason: string, adminUserId: string): Promise<ValePassVoucher> {
   return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/cancel`, { reason, adminUserId });
+}
+
+/** Sem `adminUserId` no corpo — RestoreValePassDto não aceita esse campo;
+ *  identidade só vem da sessão validada (mesmo padrão mais novo já usado
+ *  em outras ações administrativas deste projeto). */
+export function restoreValePassVoucher(code: string, reason: string): Promise<ValePassVoucher> {
+  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/restore`, { reason });
 }
 
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {

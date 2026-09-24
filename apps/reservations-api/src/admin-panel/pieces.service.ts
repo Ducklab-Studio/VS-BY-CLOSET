@@ -15,6 +15,10 @@ export interface PieceListItem {
   readonly countsTowardRentalDuration: boolean;
   readonly currentlyOccupied: boolean;
   readonly upcomingReservations: number;
+  /// Presente = esta peça foi desativada pela sincronização de catálogo
+  /// (ShopifyCatalogSyncService), não por uma decisão manual — a variante
+  /// vinculada não existe mais na Shopify no momento da última checagem.
+  readonly shopifyVariantMissingAt: string | null;
 }
 
 export interface UpdatePieceInput {
@@ -43,11 +47,15 @@ export class AdminPiecesService {
           ru.id, ru.code, ru.name, ru.shopify_product_id AS "shopifyProductId",
           ru.shopify_variant_id AS "shopifyVariantId", ru.shopify_sku AS "shopifySku",
           ru.active, ru.reservable_online AS "reservableOnline", ru.counts_toward_rental_duration AS "countsTowardRentalDuration",
+          ru.shopify_variant_missing_at AS "shopifyVariantMissingAt",
           EXISTS (
             SELECT 1 FROM reservation_items ri
             WHERE ri.rental_unit_id = ru.id
               AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-              AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+              AND (
+                ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+                OR ri.status IN ('returned', 'cleaning')
+              )
           ) AS "currentlyOccupied",
           (
             SELECT count(*)::int FROM reservation_items ri
@@ -74,7 +82,19 @@ export class AdminPiecesService {
         await tx.$queryRaw`SELECT id FROM rental_units WHERE id = ${id}::uuid FOR UPDATE`;
         const before = await tx.rentalUnit.findUnique({ where: { id } });
         if (!before) throw new NotFoundException('Peça não encontrada.');
-        const after = await tx.rentalUnit.update({ where: { id }, data: input });
+        const after = await tx.rentalUnit.update({
+          where: { id },
+          data: {
+            ...input,
+            // Reativação MANUAL: o humano está tomando a responsabilidade
+            // agora, então o marcador da sincronização (que só faz sentido
+            // enquanto NINGUÉM decidiu nada) deixa de valer. Se a variante
+            // ainda estiver mesmo ausente na Shopify, a próxima sincronização
+            // detecta de novo e desativa de novo — autocorretivo, sem
+            // precisar bloquear o PATCH aqui.
+            ...(input.active === true ? { shopifyVariantMissingAt: null } : {}),
+          },
+        });
         await writeAdminAuditEvent(tx, {
           adminUserId, adminUserName,
           action: after.active !== before.active ? (after.active ? 'UNIT_ACTIVATED' : 'UNIT_DEACTIVATED') : 'UNIT_UPDATED',
@@ -94,11 +114,15 @@ export class AdminPiecesService {
         ru.id, ru.code, ru.name, ru.shopify_product_id AS "shopifyProductId",
         ru.shopify_variant_id AS "shopifyVariantId", ru.shopify_sku AS "shopifySku",
         ru.active, ru.reservable_online AS "reservableOnline", ru.counts_toward_rental_duration AS "countsTowardRentalDuration",
+        ru.shopify_variant_missing_at AS "shopifyVariantMissingAt",
         EXISTS (
           SELECT 1 FROM reservation_items ri
           WHERE ri.rental_unit_id = ru.id
             AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+            AND (
+              ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
+              OR ri.status IN ('returned', 'cleaning')
+            )
         ) AS "currentlyOccupied",
         (
           SELECT count(*)::int FROM reservation_items ri

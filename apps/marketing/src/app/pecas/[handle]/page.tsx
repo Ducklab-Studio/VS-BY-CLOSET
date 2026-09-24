@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
+import { ProductGallery } from '@/components/ProductGallery';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { RentalCalendar } from '@/components/RentalCalendar';
@@ -12,6 +12,7 @@ import {
 } from '@/lib/shopify';
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { isValePassProduct } from '@/lib/vale-pass-product';
+import { sanitizeProductDescription } from '@/lib/product-description';
 
 /**
  * Página da peça — onde o cliente escolhe a data e aluga.
@@ -91,6 +92,13 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   // não existe.
   const variant = product.variants[0];
   const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
+  // Shopify rich text can contain spacer-only paragraphs. Keep all written
+  // content, but avoid a large blank gap between the price and the calendar.
+  // A limpeza é cosmética; quem torna este HTML seguro de renderizar é
+  // sanitizeProductDescription, que roda por último (ver lib/product-description.ts).
+  const descriptionHtml = sanitizeProductDescription(
+    product.descriptionHtml.replace(/<p(?:\s[^>]*)?>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, ''),
+  );
 
   // Valle Pass é vale-presente/crédito de compra — produto Shopify
   // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
@@ -98,45 +106,22 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   const isValePass = isValePassProduct({ productId: product.id, variantId: variant?.id });
 
   return (
-    <div className="product-detail mx-auto max-w-6xl px-6 py-12 sm:py-16">
-      <nav className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/65">
+    <div className="product-detail catalog-container">
+      <nav aria-label="Navegação da peça" className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/65">
         <Link href="/" className="transition-colors hover:text-marsala">
           Início
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-ink/70">{product.title}</span>
+        <Link href="/pecas" className="hover:text-marsala">Peças</Link>
+        <span className="mx-2" aria-hidden="true">/</span>
+        <span className="text-ink/70" aria-current="page">{product.title}</span>
       </nav>
 
-      <div className="grid gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-14">
-        {/* galeria */}
-        <div className="space-y-3">
-          {gallery.length > 0 ? (
-            gallery.map((img, i) => (
-              <div
-                key={img.url}
-                className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-ink/[0.04]"
-              >
-                <Image
-                  src={img.url}
-                  alt={img.altText ?? product.title}
-                  fill
-                  sizes="(min-width: 1024px) 55vw, 100vw"
-                  className="object-cover"
-                  // Só a primeira imagem é prioritária: é a única acima da
-                  // dobra. Marcar todas atrasaria justamente essa.
-                  priority={i === 0}
-                />
-              </div>
-            ))
-          ) : (
-            <div className="grid aspect-[3/4] place-items-center rounded-2xl bg-ink/[0.04] text-sm text-ink/65">
-              Sem foto cadastrada
-            </div>
-          )}
-        </div>
+      <div className="product-detail-grid">
+        <ProductGallery key={product.id} images={gallery} title={product.title} />
 
         {/* informação + calendário */}
-        <div className="product-detail-info lg:sticky lg:top-32 lg:self-start">
+        <div className="product-detail-info">
           {!isShopifyConfigured && isDemoCatalogEnabled && (
             <p className="mb-3 inline-block rounded-full bg-marsala/10 px-3 py-1 text-[0.7rem] font-medium text-marsala">
               Modo demonstração — peça fictícia, sem loja conectada
@@ -150,10 +135,12 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             </p>
           )}
 
-          {product.descriptionHtml && (
+          {variant?.sku && !isValePass && <a className="product-period-link" href="#rental-calendar">Escolha seu período <span aria-hidden="true">↓</span></a>}
+
+          {descriptionHtml && (
             <div
-              className="prose-sm mt-5 text-[0.9rem] leading-relaxed text-ink/70 [&_p]:mb-3"
-              dangerouslySetInnerHTML={{ __html: product.descriptionHtml }}
+              className="product-description prose-sm mt-5 text-[0.9rem] leading-relaxed text-ink/70 [&_p]:mb-3"
+              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
             />
           )}
 
@@ -166,6 +153,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
               <ValePassPresentation variant={variant} productTitle={product.title} />
             ) : (
               <RentalCalendar
+                key={variant.id}
                 variant={variant}
                 productTitle={product.title}
                 whatsapp={process.env.NEXT_PUBLIC_WHATSAPP}

@@ -43,6 +43,9 @@ export interface AvailabilityResponse {
   readonly shopifyVariantId: string;
   readonly countedPieces: number;
   readonly unitsTotal: number;
+  /** YYYY-MM-DD da primeira retirada aceita (ou null) — só pra mensagem do
+   *  calendário; quem decide o dia continua sendo `days[].bookable`. */
+  readonly operationStartDate: string | null;
   readonly days: readonly AvailabilityDay[];
 }
 
@@ -126,6 +129,7 @@ export class AvailabilityService {
       shopifyVariantId: query.shopifyVariantId,
       countedPieces: query.countedPieces,
       unitsTotal: reservableUnits.length,
+      operationStartDate: config.operationStartDate,
       days,
     };
   }
@@ -210,12 +214,15 @@ export class AvailabilityService {
       rows = await this.prisma.$queryRaw<Row[]>`
         SELECT
           rental_unit_id AS "rentalUnitId",
-          lower(blocked_range) AS "lo",
-          upper(blocked_range) AS "hi"
+          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchFrom)}::date ELSE lower(blocked_range) END AS "lo",
+          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchTo)}::date ELSE upper(blocked_range) END AS "hi"
         FROM reservation_items
         WHERE rental_unit_id = ANY(${unitIds}::uuid[])
           AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND blocked_range && daterange(${civilDateToISO(searchFrom)}::date, ${civilDateToISO(searchTo)}::date, '[)')
+          AND (
+            blocked_range && daterange(${civilDateToISO(searchFrom)}::date, ${civilDateToISO(searchTo)}::date, '[)')
+            OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(searchTo)}::date)
+          )
       `;
     } catch (err) {
       this.logger.error(`Falha ao consultar reservation_items: ${errorCode(err)}`);

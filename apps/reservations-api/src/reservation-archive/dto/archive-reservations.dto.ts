@@ -42,6 +42,7 @@ export class ArchiveFilterDto {
 
   @IsOptional()
   @IsBoolean()
+  /** Compatibilidade: seleciona completed, nunca returned ainda ocupado. */
   onlyReturned?: boolean;
 }
 

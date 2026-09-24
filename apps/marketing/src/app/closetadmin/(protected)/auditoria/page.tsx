@@ -7,20 +7,49 @@ import { ClearAuditButton } from './ClearAuditButton';
 
 export const metadata: Metadata = { title: 'Auditoria' };
 
+/**
+ * Cobre TODA ação que o backend grava — a lista de referência é
+ * CRITICAL_ACTIONS em admin-audit.ts mais as de reserva/lembrete.
+ * Faltavam 14 (funcionários inteiros, Valle Pass inteiro, arquivamento,
+ * AUDIT_CLEARED, ADMIN_SEED_APPLIED): o fallback imprimia o
+ * identificador cru em maiúsculas justamente na tela de conferência.
+ * Visto de verdade no painel: "ADMIN_SEED_APPLIED" no meio de "Login" e
+ * "Reserva manual criada".
+ */
 const ACTION_LABELS: Record<string, string> = {
   LOGIN: 'Login',
   LOGIN_FAILED: 'Tentativa de login falhou',
   LOGOUT: 'Logout',
   MANUAL_RESERVATION_CREATED: 'Reserva manual criada',
   MANUAL_RESERVATION_CANCELLED: 'Reserva manual cancelada',
+  RESERVATION_MANUAL_STATUS_CORRECTION: 'Status da reserva corrigido manualmente',
+  RESERVATIONS_ARCHIVED: 'Reservas arquivadas',
+  RESERVATION_RESTORED: 'Reserva restaurada',
   SHOPIFY_UNITS_IMPORTED: 'Peças importadas da Shopify',
   UNIT_ACTIVATED: 'Peça ativada',
   UNIT_DEACTIVATED: 'Peça desativada',
   UNIT_UPDATED: 'Peça atualizada',
   RULE_MODIFIED: 'Regra modificada',
   BLOCK_CREATED: 'Bloqueio criado',
+  BLOCK_UPDATED: 'Bloqueio editado',
+  BLOCK_ACTIVATED: 'Bloqueio ativado',
+  BLOCK_DEACTIVATED: 'Bloqueio desativado',
   BLOCK_REMOVED: 'Bloqueio removido',
   PICKUP_REMINDER_48H_SENT: 'Lembrete de retirada enviado',
+  AUDIT_CLEARED: 'Logs de auditoria limpos',
+  ADMIN_SEED_APPLIED: 'Usuário administrativo criado por script',
+  EMPLOYEE_CREATED: 'Funcionário criado',
+  EMPLOYEE_BLOCKED: 'Funcionário bloqueado',
+  EMPLOYEE_REACTIVATED: 'Funcionário reativado',
+  EMPLOYEE_REMOVED: 'Funcionário removido',
+  EMPLOYEE_RESTORED: 'Funcionário restaurado',
+  EMPLOYEE_PURGED: 'Funcionário excluído permanentemente',
+  EMPLOYEE_PERMISSIONS_CHANGED: 'Permissões de funcionário alteradas',
+  VALE_PASS_CAMPAIGN_CREATED: 'Campanha Valle Pass criada',
+  VALE_PASS_CAMPAIGN_ACTIVATED: 'Campanha Valle Pass ativada',
+  VALE_PASS_CAMPAIGN_DEACTIVATED: 'Campanha Valle Pass desativada',
+  VALE_PASS_MARKED_USED: 'Valle Pass marcado como utilizado',
+  VALE_PASS_CANCELLED_BY_ADMIN: 'Valle Pass cancelado',
 };
 
 export default async function ClosetAdminAuditPage() {

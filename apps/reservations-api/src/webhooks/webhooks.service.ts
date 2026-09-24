@@ -8,6 +8,8 @@ import { canonicalItemsFingerprint, verifyReservationSignature } from '../reserv
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { civilDateFromPgDate, civilDateToISO } from '../rental-rules/civil-date';
 import { canTransition, type ReservationStatusValue } from './reservation-state-machine';
+import { ShopifyOrderSyncService } from './shopify-order-sync.service';
+import { lockShopifyOrder } from './shopify-order-lock';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import {
@@ -45,6 +47,7 @@ export class WebhooksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly valePass: ValePassWebhookService,
+    private readonly sync: ShopifyOrderSyncService,
   ) {}
 
   async handleIncoming(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
@@ -68,7 +71,7 @@ export class WebhooksService {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.shopifyWebhookId}))`;
         const payload = input.payload as { id?: unknown; order_id?: unknown } | null;
         const orderKey = String(input.topic === 'refunds/create' ? payload?.order_id : payload?.id);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'shopify-order:' + orderKey}))`;
+        await lockShopifyOrder(tx, orderKey);
 
         await ensureStoreConfig(tx, store);
 
@@ -152,6 +155,10 @@ export class WebhooksService {
       }
       case 'orders/cancelled':
         return this.handleOrderCancelled(tx, payload as ShopifyOrderPayload);
+      case 'orders/updated':
+        return this.handleOrderUpdated(tx, payload as ShopifyOrderPayload);
+      case 'orders/delete':
+        return this.handleOrderDeleted(tx, payload as { id: number | string });
       case 'refunds/create':
         return this.handleRefundCreated(tx, payload as ShopifyRefundPayload);
       default:
@@ -192,6 +199,12 @@ export class WebhooksService {
       // quebraria a constraint. O id continua no `detail` (sanitizado,
       // é só um UUID) pra quem for auditar depois.
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'reservation não encontrada', requestedReservationId: reservationId, orderId } });
+      return { status: 'ignored', orderId, events };
+    }
+    // Reserva manual nunca nasce de um pedido: um reservation_id apontando para
+    // ela (erro ou tentativa de forjar vínculo) não pode alterar nada.
+    if (reservation.source === 'manual_admin') {
+      events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'reserva manual não é vinculável a pedido', orderId } });
       return { status: 'ignored', orderId, events };
     }
 
@@ -415,7 +428,10 @@ export class WebhooksService {
         WHERE rental_unit_id = ${item.rentalUnitId}::uuid
           AND reservation_id != ${reservationId}::uuid
           AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND blocked_range && daterange(${from}::date, ${until}::date, '[)')
+          AND (
+            blocked_range && daterange(${from}::date, ${until}::date, '[)')
+            OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${until}::date)
+          )
         LIMIT 1
       `;
       if (conflict.length > 0) {
@@ -459,16 +475,16 @@ export class WebhooksService {
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/cancelled', orderId } }];
 
     // Valle Pass — independente do fluxo de reserva abaixo (produto
-    // totalmente separado). Cancela qualquer vale ATIVO deste pedido;
-    // no-op se não houver nenhum.
+    // totalmente separado). Registra o cancelamento do pedido e cancela
+    // os vales ATIVOS dele (ver handleOrderCancelledOrRefunded).
     const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled');
     events.push(...valePassEvents);
     const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
 
-    let reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+    let reservation = await this.sync.findOnlineReservation(tx, orderId);
     if (!reservation && extractReservationId(order)) {
       const linked = await this.handleOrderPaidOrCreated(tx, order, 'orders/cancelled');
-      reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+      reservation = await this.sync.findOnlineReservation(tx, orderId);
       if (!reservation) return { ...linked, status: valePassStatus ?? linked.status, events: [...linked.events, ...valePassEvents] };
       events.push(...linked.events);
     }
@@ -502,26 +518,131 @@ export class WebhooksService {
     // mesmo pedido. Idempotente aqui: reserva que já não ocupa mais
     // nada não precisa de transição nenhuma — o cancelamento só está
     // confirmando o que já aconteceu.
-    if (!OCCUPYING_RESERVATION_STATUSES.includes(from as (typeof OCCUPYING_RESERVATION_STATUSES)[number])) {
-      return { status: 'processed', orderId, reservationId: reservation.id, events };
+    // A regra acima (reserva já fora do fluxo ativo → nada a fazer) e o item 11
+    // (peça já no ciclo físico → `problem`, nunca `cancelled`) vivem em
+    // ShopifyOrderSyncService.cancelForOrder, compartilhada com orders/updated,
+    // orders/delete e a reconciliação.
+    await this.sync.cancelForOrder(tx, reservation, events, {}, { origin: 'shopify_webhook', topic: 'orders/cancelled', orderId });
+    return { status: 'processed', orderId, reservationId: reservation.id, events };
+  }
+
+  // ── orders/updated ───────────────────────────────────────────────
+  //
+  // Fonte comercial é a Shopify; datas e peças são NOSSAS (vêm do HOLD
+  // assinado). Aqui sincronizamos estado (pago/cancelado/falho/arquivado) e
+  // dados do cliente; mudança de linhas do pedido é apenas SINALIZADA
+  // (`problem`), nunca aplicada. Localiza sempre por shopifyOrderId.
+  private async handleOrderUpdated(tx: Prisma.TransactionClient, order: ShopifyOrderPayload): Promise<DispatchResult> {
+    const orderId = String(order.id);
+    let events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/updated', orderId } }];
+
+    if (order.cancelled_at) {
+      // Vale Pass é independente; mesmo passo de orders/cancelled.
+      events.push(...(await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled')));
     }
 
-    // Item 11: só vira `cancelled` de verdade se ainda não foi retirada.
-    // picked_up/returned/cleaning → `problem` (revisão manual), nunca
-    // cancelled automático.
-    const to: ReservationStatusValue = canTransition(from, 'cancelled') ? 'cancelled' : canTransition(from, 'problem') ? 'problem' : from;
+    let reservation = await this.sync.findOnlineReservation(tx, orderId);
+    if (!reservation) {
+      if (!extractReservationId(order)) {
+        events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
+        return { status: 'ignored', orderId, events };
+      }
+      // Ainda não vinculado: mesma correlação assinada de create/paid.
+      const linked = await this.handleOrderPaidOrCreated(tx, order, order.cancelled_at ? 'orders/cancelled' : 'orders/updated');
+      events = [...events, ...linked.events.slice(1)];
+      reservation = await this.sync.findOnlineReservation(tx, orderId);
+      if (!reservation) return { ...linked, events };
+    } else if (isStaleOrderUpdate(reservation.shopifyOrderUpdatedAt, order.updated_at)) {
+      // Entrega atrasada/fora de ordem: nada que já foi aplicado é desfeito.
+      events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { origin: 'shopify_webhook', topic: 'orders/updated', orderId, reason: 'estado do pedido mais antigo que o já aplicado' } });
+      return { status: 'processed', orderId, reservationId: reservation.id, events };
+    } else if (!order.cancelled_at && order.financial_status === 'paid' && (reservation.status === 'pending_payment' || reservation.status === 'expired')) {
+      const confirmed = await this.confirmPayment(tx, reservation, orderId, events);
+      events = confirmed.events;
+    }
 
-    if (to !== from) {
-      const updated = await tx.reservation.updateMany({ where: { id: reservation.id, status: from }, data: { status: to } });
-      if (updated.count === 1) {
-        events.push({
-          type: 'RESERVATION_STATUS_CHANGED',
-          reservationId: reservation.id,
-          detail: to === 'problem' ? { from, to, note: 'cancelamento chegou após a retirada — revisão manual' } : { from, to },
-        });
+    const current = await tx.reservation.findUniqueOrThrow({ where: { id: reservation.id }, include: { items: { include: { rentalUnit: true } } } });
+    if (!order.cancelled_at) events.push(...(await this.syncOrderDetails(tx, current, order)));
+
+    const updatedAt = order.updated_at ? new Date(order.updated_at) : null;
+    events.push(
+      ...(await this.sync.applySnapshot(
+        tx,
+        current,
+        {
+          orderId,
+          updatedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : null,
+          cancelledAt: order.cancelled_at ?? null,
+          closedAt: order.closed_at ?? null,
+          financialStatus: order.financial_status?.toLowerCase() ?? null,
+        },
+        { origin: 'shopify_webhook', topic: 'orders/updated' },
+      )),
+    );
+    return { status: 'processed', orderId, reservationId: current.id, events };
+  }
+
+  /** Cliente e linhas do pedido. Cliente: a Shopify é a fonte, então valor
+   *  novo e não vazio substitui. Linhas divergentes: só sinaliza. */
+  private async syncOrderDetails(
+    tx: Prisma.TransactionClient,
+    reservation: { id: string; status: string; customerEmail: string | null; customerName: string | null; customerPhone: string | null; items: { rentalUnit: { shopifyVariantId: string | null } }[] },
+    order: ShopifyOrderPayload,
+  ): Promise<EventInput[]> {
+    const events: EventInput[] = [];
+    const patch: Prisma.ReservationUpdateInput = {};
+    const changed: string[] = [];
+    for (const [field, value, current] of [
+      ['customerEmail', extractCustomerEmail(order), reservation.customerEmail],
+      ['customerName', extractCustomerName(order), reservation.customerName],
+      ['customerPhone', extractCustomerPhone(order), reservation.customerPhone],
+    ] as const) {
+      if (value && value !== current) {
+        patch[field] = value;
+        changed.push(field);
       }
     }
+    if (changed.length > 0) {
+      await tx.reservation.update({ where: { id: reservation.id }, data: patch });
+      events.push({ type: 'ORDER_CUSTOMER_SYNCED', reservationId: reservation.id, detail: { origin: 'shopify_webhook', topic: 'orders/updated', fields: changed } });
+    }
 
+    const from = reservation.status as ReservationStatusValue;
+    if (order.line_items && (from === 'pending_payment' || from === 'confirmed')) {
+      const reservationFingerprint = canonicalItemsFingerprint(reservation.items.map((item) => ({ variantId: item.rentalUnit.shopifyVariantId ?? '', quantity: 1 })));
+      if (canonicalItemsFingerprint(extractOrderLineVariants(order)) !== reservationFingerprint && canTransition(from, 'problem')) {
+        const updated = await tx.reservation.updateMany({ where: { id: reservation.id, status: from }, data: { status: 'problem' } });
+        if (updated.count === 1) {
+          const detail = { origin: 'shopify_webhook', topic: 'orders/updated', from, to: 'problem', note: 'linhas do pedido divergem das peças da reserva — revisão manual' };
+          events.push({ type: 'ORDER_ITEMS_DIVERGED', reservationId: reservation.id, detail });
+          events.push({ type: 'RESERVATION_STATUS_CHANGED', reservationId: reservation.id, detail });
+        }
+      }
+    }
+    return events;
+  }
+
+  // ── orders/delete ────────────────────────────────────────────────
+  //
+  // Nunca há hard delete: a reserva é cancelada (se ainda não recebida) e
+  // ARQUIVADA, preservando itens, eventos e o vínculo com o pedido.
+  private async handleOrderDeleted(tx: Prisma.TransactionClient, order: { id: number | string }): Promise<DispatchResult> {
+    const orderId = String(order.id);
+    const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'orders/delete', orderId } }];
+
+    const reservation = await this.sync.findOnlineReservation(tx, orderId);
+    if (!reservation) {
+      events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
+      return { status: 'ignored', orderId, events };
+    }
+    events.push(
+      ...(await this.sync.applySnapshot(
+        tx,
+        reservation,
+        { orderId, updatedAt: null, cancelledAt: null, closedAt: null, financialStatus: null, deleted: true },
+        { origin: 'shopify_webhook', topic: 'orders/delete' },
+      )),
+    );
     return { status: 'processed', orderId, reservationId: reservation.id, events };
   }
 
@@ -530,13 +651,13 @@ export class WebhooksService {
     const orderId = String(refund.order_id);
     const events: EventInput[] = [{ type: 'WEBHOOK_RECEIVED', detail: { topic: 'refunds/create', orderId } }];
 
-    // Valle Pass — independente do fluxo de reserva abaixo. Cancela
-    // qualquer vale ATIVO deste pedido; no-op se não houver nenhum.
+    // Valle Pass — independente do fluxo de reserva abaixo. Registra o
+    // reembolso do pedido e cancela os vales ATIVOS dele.
     const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'refunds/create');
     events.push(...valePassEvents);
     const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
 
-    const reservation = await tx.reservation.findFirst({ where: { shopifyOrderId: orderId } });
+    const reservation = await this.sync.findOnlineReservation(tx, orderId);
     if (!reservation) {
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'nenhuma reservation vinculada a este orderId', orderId } });
       return { status: valePassStatus ?? 'ignored', orderId, events };
@@ -604,6 +725,12 @@ interface DispatchResult {
   readonly reservationId?: string;
   readonly orderId?: string;
   readonly events: EventInput[];
+}
+
+function isStaleOrderUpdate(applied: Date | null, incoming: string | null | undefined): boolean {
+  if (!applied || !incoming) return false;
+  const at = new Date(incoming);
+  return !Number.isNaN(at.getTime()) && at < applied;
 }
 
 function errorCode(err: unknown): string {

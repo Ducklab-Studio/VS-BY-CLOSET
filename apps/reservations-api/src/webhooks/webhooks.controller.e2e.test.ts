@@ -1,3 +1,4 @@
+import { ShopifyOrderSyncService } from './shopify-order-sync.service';
 import { createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -36,7 +37,7 @@ const originalDomain = process.env.SHOPIFY_STORE_DOMAIN;
 const originalCurrency = process.env.SHOPIFY_STORE_CURRENCY;
 
 const prisma = new PrismaService();
-const controller = new WebhooksController(new WebhooksService(prisma, new ValePassWebhookService()));
+const controller = new WebhooksController(new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService()));
 
 let server: Server;
 let baseUrl: string;

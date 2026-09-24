@@ -5,6 +5,7 @@ import { RequireRole } from '../admin/require-role.decorator';
 import { AdminEmployeesService, type EmployeeListItem } from './admin-employees.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeePermissionsDto } from './dto/update-employee-permissions.dto';
+import { UpdateEmployeeRoleDto } from './dto/update-employee-role.dto';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string };
@@ -63,5 +64,16 @@ export class AdminEmployeesController {
   @Put(':id/permissions')
   updatePermissions(@Param('id') id: string, @Body() dto: UpdateEmployeePermissionsDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.updatePermissions(id, dto.moduleAccess, req.adminUser!.id, req.adminUser!.name);
+  }
+
+  /** Promover/rebaixar (inclusive a SUPER_ADMIN). Ator sempre da sessão. */
+  @Put(':id/role')
+  updateRole(@Param('id') id: string, @Body() dto: UpdateEmployeeRoleDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+    return this.employees.updateRole(
+      id,
+      { role: dto.role, moduleAccess: dto.moduleAccess, superAdminConfirmation: dto.superAdminConfirmation },
+      req.adminUser!.id,
+      req.adminUser!.name,
+    );
   }
 }

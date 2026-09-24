@@ -40,6 +40,7 @@ export async function loadActiveStoreWideBlocks(
     FROM operational_blocks
     WHERE scope = 'STORE_WIDE'
       AND removed_at IS NULL
+      AND active
       AND daterange(start_date, end_date, '[]') && daterange(${civilDateToISO(from)}::date, ${civilDateToISO(to)}::date, '[)')
   `;
   return rows.map((r) => ({ blockedFrom: civilDateFromPgDate(r.lo), blockedUntilExclusive: addDays(civilDateFromPgDate(r.hi), 1), reason: r.reason }));
@@ -58,6 +59,7 @@ export async function loadActiveUnitBlocks(
     FROM operational_blocks
     WHERE scope = 'UNIT'
       AND removed_at IS NULL
+      AND active
       AND rental_unit_id = ANY(${unitIds}::uuid[])
   `;
   return rows.map((r) => ({

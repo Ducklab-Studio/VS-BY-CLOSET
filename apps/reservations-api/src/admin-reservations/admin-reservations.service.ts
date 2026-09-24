@@ -97,7 +97,17 @@ export interface ReservationDetailResponse extends Omit<ReservationListItem, 'it
   readonly updatedAt: string;
   readonly archivedBy: string | null;
   readonly archiveReason: string | null;
-  readonly items: readonly { rentalUnitId: string; code: string; status: string; blockedFrom: string; blockedUntilExclusive: string }[];
+  readonly items: readonly {
+    id: string;
+    rentalUnitId: string;
+    code: string;
+    status: string;
+    blockedFrom: string;
+    blockedUntilExclusive: string;
+    returnedAt: string | null;
+    cleaningStartedAt: string | null;
+    cleaningCompletedAt: string | null;
+  }[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
 
@@ -106,14 +116,19 @@ export interface ManualReservationCancelResponse {
   readonly status: string;
 }
 
+export interface OperationalReservationResponse {
+  readonly reservationId: string;
+  readonly reservationItemId: string;
+  readonly reservationStatus: string;
+  readonly itemStatus: 'returned' | 'cleaning' | 'completed';
+}
+
 interface AttemptContext {
   readonly dto: CreateManualReservationDto;
   readonly storeId: string;
   readonly shopifyDomain: string;
   readonly currency: string;
   readonly pickupDate: CivilDate;
-  readonly today: CivilDate;
-  readonly config: RentalRuleConfig;
   readonly idempotencyKey: string | undefined;
   readonly requestHash: string | null;
 }
@@ -135,10 +150,11 @@ interface AttemptContext {
  * `validateMinimumAdvance`, `validateMaxPieces`, `isSunday` — nenhuma regra
  * reimplementada aqui). `returnDate`/`durationDays` explícitos só passam
  * batendo com o que o motor calcularia OU com `overrides.customDuration`
- * + `overrideReason`. A janela de temporada continua bloqueando por padrão;
- * `overrides.outsideOnlineSeason` abre uma exceção somente para esta reserva
- * manual, exige motivo e é autorizada exclusivamente para usuário ADMIN,
- * revalidado no banco no momento da ação. O canal público não é alterado.
+ * + `overrideReason`. Retirada antes do início da operação continua bloqueada
+ * por padrão; `overrides.outsideOnlineSeason` abre uma exceção somente para
+ * esta reserva manual, exige motivo e é autorizada exclusivamente para usuário
+ * ADMIN, revalidado no banco no momento da ação. O canal público não é
+ * alterado. Períodos fechados (bloqueios) nunca têm exceção.
  *
  * A única regra que o canal manual dispensa de verdade é `reservableOnline`
  * (item 8: "manual ≠ online" — esse flag é do canal público, irrelevante
@@ -184,21 +200,11 @@ export class AdminReservationsService {
       throw new BadRequestException('items não pode conter rentalUnitId duplicado.');
     }
 
-    let config: RentalRuleConfig;
-    try {
-      config = await this.rentalRuleConfig.load();
-    } catch (err) {
-      if (err instanceof HttpException) throw err;
-      this.logger.error(`Falha inesperada ao carregar rental_rule_config: ${errorCode(err)}`);
-      throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
-    }
-
     const store = resolveStoreConfig();
-    const today = engineToday(config);
     const pickupDate = civilDateFromISO(dto.pickupDate);
     const requestHash = idempotencyKey ? hashRequestPayload(dto) : null;
 
-    const ctx: AttemptContext = { dto, storeId: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency, pickupDate, today, config, idempotencyKey, requestHash };
+    const ctx: AttemptContext = { dto, storeId: store.id, shopifyDomain: store.shopifyDomain, currency: store.currency, pickupDate, idempotencyKey, requestHash };
 
     for (let attempt = 1; attempt <= MAX_ALLOCATION_ATTEMPTS; attempt++) {
       try {
@@ -246,13 +252,13 @@ export class AdminReservationsService {
     throw new ServiceUnavailableException('Não foi possível criar a reserva no momento.');
   }
 
-  /** A exceção de temporada é mais sensível que os outros overrides: o
+  /** A exceção de início da operação é mais sensível que os outros overrides: o
    *  frontend não decide a role. Reconsulta `admin_users` aqui e só permite
    *  ADMIN ativo. Falha de banco vira 503 (fail closed), nunca autorização
    *  presumida. */
   private async assertAdminCanOverrideSeason(adminUserId: string | undefined): Promise<void> {
     if (!adminUserId) {
-      throw new ForbiddenException('Exceção de temporada exige usuário ADMIN autenticado.');
+      throw new ForbiddenException('Exceção de início da operação exige usuário ADMIN autenticado.');
     }
 
     let adminUser: { active: boolean; role: AdminRole } | null;
@@ -262,20 +268,23 @@ export class AdminReservationsService {
         select: { active: true, role: true },
       });
     } catch (err) {
-      this.logger.error(`Falha ao validar role para override de temporada: ${errorCode(err)}`);
+      this.logger.error(`Falha ao validar role para override de início da operação: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível validar a autorização do override no momento.');
     }
 
     // SUPER_ADMIN satisfaz qualquer checagem de ADMIN por hierarquia
     // (ver satisfiesRole em admin-role.guard.ts) — mesmo padrão aqui.
     if (!adminUser || !adminUser.active || (adminUser.role !== 'ADMIN' && adminUser.role !== 'SUPER_ADMIN')) {
-      throw new ForbiddenException('Exceção de temporada é exclusiva de usuário ADMIN.');
+      throw new ForbiddenException('Exceção de início da operação é exclusiva de usuário ADMIN.');
     }
   }
 
   private async attemptCreateManual(tx: Prisma.TransactionClient, ctx: AttemptContext, unitIds: readonly string[]): Promise<ManualReservationResponse> {
     await lockOperationalBlocks(tx);
-    const { dto, storeId, shopifyDomain, currency, pickupDate, today, config, idempotencyKey, requestHash } = ctx;
+    // Regras lidas DEPOIS do lock (mesmo motivo do HOLD público).
+    const config = await this.rentalRuleConfig.load(tx);
+    const today = engineToday(config);
+    const { dto, storeId, shopifyDomain, currency, pickupDate, idempotencyKey, requestHash } = ctx;
     const overrides = dto.overrides ?? {};
 
     if (idempotencyKey) {
@@ -349,7 +358,10 @@ export class AdminReservationsService {
       FROM reservation_items
       WHERE rental_unit_id = ANY(${sortedUnitIds}::uuid[])
         AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-        AND blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
+        AND (
+          blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
+          OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date)
+        )
     `;
     if (occupiedRows.length > 0) {
       // Nunca contornável por override (item 6) — a EXCLUDE constraint
@@ -418,7 +430,7 @@ export class AdminReservationsService {
     };
   }
 
-  async cancelManual(reservationId: string, dto: CancelManualReservationDto): Promise<ManualReservationCancelResponse> {
+  async cancelManual(reservationId: string, dto: CancelManualReservationDto & { adminUserId?: string; adminUserName?: string }): Promise<ManualReservationCancelResponse> {
     if (!UUID_RE.test(reservationId)) {
       throw new BadRequestException('reservationId inválido.');
     }
@@ -444,10 +456,19 @@ export class AdminReservationsService {
         }
 
         const from = reservation.status as ReservationStatusValue;
-        if (!canTransition(from, 'cancelled')) {
+        if (reservation.archivedAt || from !== 'confirmed' || !canTransition(from, 'cancelled')) {
           // Mesma máquina de estados centralizada dos webhooks (Fase 7) —
           // nunca reimplementada aqui.
-          throw new ConflictException(`Reserva em status "${from}" não pode ser cancelada por este endpoint.`);
+          throw new ConflictException('Esta reserva não está em uma etapa que permita cancelamento administrativo.');
+        }
+
+        // Devolução é por peça: com uma peça já recebida a reserva ainda pode
+        // constar como confirmed, e cancelar liberaria uma peça que está em mãos.
+        const itemRows = await tx.$queryRaw<{ status: string }[]>`
+          SELECT status FROM reservation_items WHERE reservation_id = ${reservationId}::uuid FOR UPDATE
+        `;
+        if (itemRows.some((row) => row.status !== 'confirmed')) {
+          throw new ConflictException('Esta reserva não está em uma etapa que permita cancelamento administrativo.');
         }
 
         const updated = await tx.reservation.updateMany({ where: { id: reservationId, status: from }, data: { status: 'cancelled' } });
@@ -476,6 +497,96 @@ export class AdminReservationsService {
       if (err instanceof HttpException) throw err;
       this.logger.error(`Falha ao cancelar reserva manual ${reservationId}: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível cancelar a reserva no momento.');
+    }
+  }
+
+  /** A physical receipt, cleaning start, and release are per-item actions.
+   * The reservation status is only the aggregate progress for listing/archive. */
+  async advanceOperational(
+    reservationId: string,
+    reservationItemId: string,
+    action: 'receive' | 'start-cleaning' | 'complete-cleaning',
+    actor: { id: string; name: string },
+    note?: string,
+  ): Promise<OperationalReservationResponse> {
+    if (!UUID_RE.test(reservationId)) throw new BadRequestException('reservationId inválido.');
+    if (!UUID_RE.test(reservationItemId)) throw new BadRequestException('reservationItemId inválido.');
+
+    const steps = {
+      receive: { from: ['confirmed', 'picked_up'], to: 'returned', event: 'RESERVATION_ITEM_RETURNED' },
+      'start-cleaning': { from: ['returned'], to: 'cleaning', event: 'RESERVATION_ITEM_CLEANING_STARTED' },
+      'complete-cleaning': { from: ['cleaning'], to: 'completed', event: 'RESERVATION_ITEM_CLEANING_COMPLETED' },
+    } as const;
+    const step = steps[action];
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const reservation = await tx.reservation.findUnique({ where: { id: reservationId } });
+        if (!reservation) throw new NotFoundException('Reserva não encontrada.');
+        if (reservation.archivedAt) {
+          throw new ConflictException('Esta reserva está arquivada e não permite operação.');
+        }
+
+        const [item] = await tx.$queryRaw<
+          { id: string; rentalUnitId: string; code: string; status: ReservationStatusValue }[]
+        >`
+          SELECT ri.id, ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status
+          FROM reservation_items ri
+          JOIN rental_units ru ON ru.id = ri.rental_unit_id
+          WHERE ri.id = ${reservationItemId}::uuid AND ri.reservation_id = ${reservationId}::uuid
+          FOR UPDATE OF ri
+        `;
+        if (!item) throw new NotFoundException('Peça da reserva não encontrada.');
+
+        const from = item.status;
+        if (!(step.from as readonly string[]).includes(from) || !canTransition(from, step.to)) {
+          throw new ConflictException('Esta reserva não está em uma etapa que permita esta operação.');
+        }
+
+        const at = new Date();
+        const data = action === 'receive'
+          ? { status: step.to, returnedAt: at, returnedBy: actor.id }
+          : action === 'start-cleaning'
+            ? { status: step.to, cleaningStartedAt: at, cleaningStartedBy: actor.id }
+            : { status: step.to, cleaningCompletedAt: at, cleaningCompletedBy: actor.id };
+        const updated = await tx.reservationItem.updateMany({
+          where: { id: reservationItemId, reservationId, status: from }, data,
+        });
+        if (updated.count !== 1) throw new ConflictException('O status da reserva mudou durante a operação. Atualize a tela e tente novamente.');
+
+        const itemStatuses = await tx.reservationItem.findMany({
+          where: { reservationId },
+          select: { status: true },
+        });
+        const reservationStatus = aggregateReservationStatus(itemStatuses.map((row) => row.status as ReservationStatusValue), reservation.status as ReservationStatusValue);
+        if (reservationStatus !== reservation.status) {
+          await tx.reservation.updateMany({
+            where: { id: reservationId, archivedAt: null },
+            data: { status: reservationStatus },
+          });
+        }
+
+        await tx.reservationEvent.create({ data: {
+          reservationId,
+          type: step.event,
+          detail: {
+            adminUserId: actor.id,
+            adminUserName: actor.name,
+            reservationItemId,
+            rentalUnitId: item.rentalUnitId,
+            rentalUnitCode: item.code,
+            from,
+            to: step.to,
+            at: at.toISOString(),
+            note: note ?? null,
+          } as Prisma.InputJsonValue,
+        } });
+        return { reservationId, reservationItemId, reservationStatus, itemStatus: step.to };
+      }, { timeout: 10_000, maxWait: 5_000 });
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error(`Falha na operação de reserva ${reservationId}: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível atualizar a reserva no momento.');
     }
   }
 
@@ -594,10 +705,23 @@ export class AdminReservationsService {
     }
 
     const items = await this.prisma.$queryRaw<
-      { rentalUnitId: string; code: string; status: string; blockedFrom: Date; blockedUntil: Date }[]
+      {
+        id: string;
+        rentalUnitId: string;
+        code: string;
+        status: string;
+        blockedFrom: Date;
+        blockedUntil: Date;
+        returnedAt: Date | null;
+        cleaningStartedAt: Date | null;
+        cleaningCompletedAt: Date | null;
+      }[]
     >`
-      SELECT ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status,
-             lower(ri.blocked_range) AS "blockedFrom", upper(ri.blocked_range) AS "blockedUntil"
+      SELECT ri.id, ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status,
+             lower(ri.blocked_range) AS "blockedFrom", upper(ri.blocked_range) AS "blockedUntil",
+             ri.returned_at AS "returnedAt",
+             ri.cleaning_started_at AS "cleaningStartedAt",
+             ri.cleaning_completed_at AS "cleaningCompletedAt"
       FROM reservation_items ri
       JOIN rental_units ru ON ru.id = ri.rental_unit_id
       WHERE ri.reservation_id = ${id}::uuid
@@ -630,11 +754,15 @@ export class AdminReservationsService {
       archivedBy: reservation.archivedBy,
       archiveReason: reservation.archiveReason,
       items: items.map((i) => ({
+        id: i.id,
         rentalUnitId: i.rentalUnitId,
         code: i.code,
         status: i.status,
         blockedFrom: civilDateToISO(civilDateFromPgDate(i.blockedFrom)),
         blockedUntilExclusive: civilDateToISO(civilDateFromPgDate(i.blockedUntil)),
+        returnedAt: i.returnedAt?.toISOString() ?? null,
+        cleaningStartedAt: i.cleaningStartedAt?.toISOString() ?? null,
+        cleaningCompletedAt: i.cleaningCompletedAt?.toISOString() ?? null,
       })),
       events: events.map((e) => ({ type: e.type, detail: e.detail, createdAt: e.createdAt.toISOString() })),
     };
@@ -703,7 +831,7 @@ function resolveManualDuration(input: {
   const { dto, overrides, pickupDate, today, config, rows } = input;
 
   const isMinAdvanceOk = validateMinimumAdvance(pickupDate, today, config);
-  const isSeasonOk = isOnlineReservationAllowed(pickupDate, config);
+  const isOperationStarted = isOnlineReservationAllowed(pickupDate, config);
   const isPickupSunday = isSunday(pickupDate);
   // `reservableOnline: true` sintético — item 8: essa checagem é do canal
   // público, irrelevante pra reserva manual. `countsTowardRentalDuration`
@@ -718,11 +846,13 @@ function resolveManualDuration(input: {
   const unresolved: string[] = [];
   const overridesApplied: string[] = [];
   if (isPickupSunday) unresolved.push('pickup_is_sunday');
-  if (!isSeasonOk) {
+  if (!isOperationStarted) {
+    // Chave `outsideOnlineSeason` mantida: é o nome já gravado no histórico
+    // de reservas existentes (overridesApplied).
     if (overrides.outsideOnlineSeason === true) {
       overridesApplied.push('outsideOnlineSeason');
     } else {
-      unresolved.push('pickup_outside_season');
+      unresolved.push('pickup_before_operation_start');
     }
   }
   if (!isMaxPiecesOk) unresolved.push('max_pieces_exceeded');
@@ -833,6 +963,14 @@ function isExcludeViolation(err: unknown): boolean {
 
 function isIdempotencyKeyConflict(err: unknown): boolean {
   return err instanceof Error && err.message.includes('manual_reservation_idempotency_keys_pkey');
+}
+
+function aggregateReservationStatus(itemStatuses: readonly ReservationStatusValue[], current: ReservationStatusValue): ReservationStatusValue {
+  if (itemStatuses.length === 0) return current;
+  if (itemStatuses.every((status) => status === 'completed')) return 'completed';
+  if (itemStatuses.every((status) => status === 'cleaning' || status === 'completed')) return 'cleaning';
+  if (itemStatuses.every((status) => status === 'returned' || status === 'cleaning' || status === 'completed')) return 'returned';
+  return current;
 }
 
 function errorCode(err: unknown): string {

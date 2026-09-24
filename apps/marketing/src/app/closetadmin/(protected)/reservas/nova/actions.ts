@@ -1,16 +1,19 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { createManualReservation, type CreateManualReservationInput } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
+import { formatIsoDatePt } from '@/lib/closetadmin-dates';
 
 export interface CreateManualResult {
   readonly ok: boolean;
   readonly error?: string;
   readonly violations?: string[];
   readonly reservationId?: string;
+  /** Link wa.me com a mensagem de confirmação já preenchida. Ausente
+   *  quando o telefone é curto demais para formar um número válido. */
+  readonly whatsappUrl?: string;
 }
 
 interface CreatedManualReservation {
@@ -23,12 +26,15 @@ interface CreatedManualReservation {
 /**
  * Fluxo "Nova reserva". A validação de negócio definitiva continua no
  * reservations-api. Este action só faz uma barreira de UX adicional para
- * a exceção de temporada: STAFF nem envia esse override. O backend ainda
+ * a exceção de início da operação: STAFF nem envia esse override. O backend ainda
  * revalida a role contra `admin_users`, então esta checagem não é a camada
  * de segurança final.
  *
- * Quando a reserva é criada com sucesso, o administrador é levado direto
- * ao WhatsApp do cliente com uma mensagem já preenchida. A mensagem usa
+ * Quando a reserva é criada com sucesso, devolve também o link do WhatsApp
+ * do cliente com a mensagem já preenchida. Esta action NÃO redireciona: o
+ * `redirect()` daqui trocava a aba do painel pelo WhatsApp e o operador
+ * nunca via a reserva criada; quem abre o WhatsApp (em nova aba) e leva o
+ * painel ao detalhe é o wizard, no cliente. A mensagem usa
  * retirada/devolução e códigos devolvidos pelo backend — não recalcula
  * nenhuma regra de aluguel no frontend.
  */
@@ -39,7 +45,7 @@ export async function createManualReservationAction(
   requireAdminModule(session, 'RESERVATIONS');
 
   if (input.overrides?.outsideOnlineSeason === true && !hasAdminRole(session, 'ADMIN')) {
-    return { ok: false, error: 'Exceção de temporada é exclusiva de usuário ADMIN.' };
+    return { ok: false, error: 'Exceção de início da operação é exclusiva de usuário ADMIN.' };
   }
 
   let created: CreatedManualReservation;
@@ -72,11 +78,7 @@ export async function createManualReservationAction(
     itemCodes: created.items.map((item) => item.code),
   });
 
-  if (!whatsappUrl) {
-    redirect(`/closetadmin/reservas/${created.reservationId}`);
-  }
-
-  redirect(whatsappUrl);
+  return { ok: true, reservationId: created.reservationId, whatsappUrl: whatsappUrl ?? undefined };
 }
 
 function buildWhatsAppConfirmationUrl(input: {
@@ -95,8 +97,8 @@ function buildWhatsAppConfirmationUrl(input: {
     `Olá, ${input.customerName}! 👋`,
     '',
     'Sua reserva na VS by Closet foi confirmada ✅',
-    `Retirada: ${formatDatePt(input.pickupDate)}`,
-    `Devolução: ${formatDatePt(input.returnDate)}`,
+    `Retirada: ${formatIsoDatePt(input.pickupDate)}`,
+    `Devolução: ${formatIsoDatePt(input.returnDate)}`,
     `${pieceLabel}: ${pieces}`,
     '',
     'A retirada e a devolução são presenciais na loja, no Chile.',
@@ -104,10 +106,4 @@ function buildWhatsAppConfirmationUrl(input: {
   ].join('\n');
 
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-}
-
-function formatDatePt(iso: string): string {
-  const [year, month, day] = iso.split('-');
-  if (!year || !month || !day) return iso;
-  return `${day}/${month}/${year}`;
 }

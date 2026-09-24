@@ -33,17 +33,45 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 dark:border dark:border-neutral-700/50',
   expired: 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 dark:border dark:border-neutral-700/50',
   problem: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 dark:border dark:border-red-700/40',
+  preparing: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 dark:border dark:border-amber-700/40',
+  ready_for_pickup: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border dark:border-emerald-700/40',
+  cleaning: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300 dark:border dark:border-sky-700/40',
+  returned: 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 dark:border dark:border-neutral-700/50',
+  completed: 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 dark:border dark:border-neutral-700/50',
+  pending: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 dark:border dark:border-amber-700/40',
 };
 
+/**
+ * Cobre os 13 valores de `ReservationStatus` (schema.prisma), não só os
+ * do caminho feliz: faltavam os quatro operacionais de
+ * OCCUPYING_RESERVATION_STATUSES (preparing/ready_for_pickup/returned/
+ * cleaning) e os dois legados, e o fallback `?? status` imprimia o
+ * identificador cru em inglês no painel. Visto de verdade na lista de
+ * reservas: uma reserva devolvida aparecia como "returned" no meio de
+ * "Confirmada"/"Cancelada".
+ */
 const STATUS_LABELS: Record<string, string> = {
   hold: 'Em espera',
   pending_payment: 'Aguardando pagamento',
   confirmed: 'Confirmada',
+  preparing: 'Em preparação',
+  ready_for_pickup: 'Pronta para retirada',
   picked_up: 'Retirada',
+  returned: 'Devolvida · aguardando higienização',
+  cleaning: 'Em higienização',
   cancelled: 'Cancelada',
   expired: 'Expirada',
   problem: 'Requer atenção',
+  completed: 'Concluída',
+  pending: 'Pendente',
 };
+
+/** Mesma tradução do StatusBadge, para onde o status aparece como texto
+ *  corrido (ex.: a faixa bloqueada de cada peça no detalhe da reserva) —
+ *  nunca reimprimir o identificador do enum na tela. */
+export function reservationStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
 
 export function StatusBadge({ status }: { status: string }) {
   return (

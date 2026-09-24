@@ -1,3 +1,4 @@
+import { ShopifyOrderSyncService } from './webhooks/shopify-order-sync.service';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { plainToInstance } from 'class-transformer';
@@ -46,9 +47,9 @@ let nextWebhook = 0;
 function nextWebhookId(): string {
   return `${prefix}-webhook-${nextWebhook++}`;
 }
-const base = { ...DEFAULT_RENTAL_RULE_CONFIG, minAdvanceDays: 0, blackoutStart: '12-31', blackoutEnd: '12-31', maxPieces: 8, piecesToDaysTable: [{ upTo: 8, days: 2 }] };
+const base = { ...DEFAULT_RENTAL_RULE_CONFIG, minAdvanceDays: 0, operationStartDate: null, maxPieces: 8, piecesToDaysTable: [{ upTo: 8, days: 2 }] };
 let pickup = addDays(today(base), 45);
-while (isSunday(pickup) || isSunday(addDays(pickup, 2)) || civilDateToISO(pickup).endsWith('12-31')) pickup = addDays(pickup, 1);
+while (isSunday(pickup) || isSunday(addDays(pickup, 2))) pickup = addDays(pickup, 1);
 const pickupDate = civilDateToISO(pickup);
 const bindingSecret = process.env.RESERVATION_BINDING_SECRET;
 
@@ -160,7 +161,7 @@ describe('Final backend audit: real PostgreSQL', () => {
     const [unit] = await units();
     const hold = await holds.createHold(holdDto(unit.shopifyVariantId!));
     const webhookId = nextWebhookId();
-    const service = new WebhooksService(prisma, new ValePassWebhookService());
+    const service = new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService());
     const input = { topic: 'orders/paid', shopifyWebhookId: webhookId, payload: {
       id: Date.now(), financial_status: 'paid', note_attributes: [],
       line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1, properties: [
@@ -321,7 +322,7 @@ describe('Final backend audit: real PostgreSQL', () => {
     if (reason === 'inactive') await prisma.rentalUnit.update({ where: { id: unit.id }, data: { active: false } });
     else await blocks.create({ scope: 'UNIT', rentalUnitId: unit.id, startDate: pickupDate, endDate: pickupDate, reason: 'Audit block', adminUserId }, adminUserId, 'Audit admin');
     const orderId = Date.now();
-    await new WebhooksService(prisma, new ValePassWebhookService()).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: {
+    await new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService()).handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: {
       id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, financial_status: 'paid',
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })),
       line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
@@ -338,7 +339,7 @@ describe('Final backend audit: real PostgreSQL', () => {
       id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, financial_status: 'paid',
       note_attributes: attributes.map(({ key, value }) => ({ name: key, value })), line_items: [{ variant_id: unit.shopifyVariantId, quantity: 1 }],
     };
-    const service = new WebhooksService(prisma, new ValePassWebhookService());
+    const service = new WebhooksService(prisma, new ValePassWebhookService(), new ShopifyOrderSyncService());
     const firstId = nextWebhookId();
     try {
       await service.handleIncoming({ topic, shopifyWebhookId: firstId, payload: topic === 'refunds/create' ? { id: orderId + 1, order_id: orderId, transactions: [] } : payload });

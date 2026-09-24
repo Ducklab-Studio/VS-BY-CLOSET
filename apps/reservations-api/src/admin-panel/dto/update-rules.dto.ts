@@ -35,15 +35,11 @@ export class UpdateRulesDto {
   @Max(30)
   cleaningDays?: number;
 
+  /** YYYY-MM-DD; `null` remove a restrição. Validação de data real no service. */
   @IsOptional()
   @IsString()
-  @Matches(/^\d{2}-\d{2}$/)
-  blackoutStart?: string;
-
-  @IsOptional()
-  @IsString()
-  @Matches(/^\d{2}-\d{2}$/)
-  blackoutEnd?: string;
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  operationStartDate?: string | null;
 
   @IsOptional()
   @IsInt()

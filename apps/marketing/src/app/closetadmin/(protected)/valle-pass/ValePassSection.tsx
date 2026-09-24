@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, Search, Ticket, XCircle } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, RotateCcw, Search, ShieldAlert, Ticket, XCircle } from 'lucide-react';
 import type { ValePassCampaign, ValePassStatus, ValePassVoucher } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { EmptyState } from '@/components/closetadmin/ui';
@@ -10,6 +10,7 @@ import {
   createValePassCampaignAction,
   listValePassVouchersAction,
   markValePassVoucherUsedAction,
+  restoreValePassVoucherAction,
   toggleValePassCampaignAction,
 } from './actions';
 
@@ -44,7 +45,16 @@ export function ValePassSection({
   const [vouchers, setVouchers] = useState(initialVouchers);
   const [statusFilter, setStatusFilter] = useState<ValePassStatus | ''>('');
   const [search, setSearch] = useState('');
+  // Item novo — "Restauráveis": recorte client-side sobre CANCELLED (o
+  // backend já manda `canBeRestored` calculado; não é um ValePassStatus
+  // novo, então não vira um parâmetro de /admin/vale-pass/vouchers).
+  const [restorableOnly, setRestorableOnly] = useState(false);
   const [vouchersError, setVouchersError] = useState<string | null>(null);
+
+  const visibleVouchers = useMemo(
+    () => (restorableOnly ? vouchers.filter((v) => v.status === 'CANCELLED' && v.canBeRestored) : vouchers),
+    [vouchers, restorableOnly],
+  );
 
   async function refreshVouchers(nextStatus: ValePassStatus | '' = statusFilter, nextSearch: string = search) {
     const { vouchers: fresh, error } = await listValePassVouchersAction({ status: nextStatus || undefined, search: nextSearch || undefined });
@@ -117,14 +127,54 @@ export function ValePassSection({
           </select>
         </div>
 
+        {/* Filtros rápidos (item novo: "Cancelados" e "Restauráveis") —
+            somam ao select acima, não o substituem. "Restauráveis" também
+            fixa o status em CANCELLED: só faz sentido dentro dele. */}
+        <div className="flex flex-wrap gap-2">
+          <FilterPill
+            active={statusFilter === ''}
+            onClick={() => {
+              setStatusFilter('');
+              setRestorableOnly(false);
+              refreshVouchers('', search);
+            }}
+          >
+            Todos
+          </FilterPill>
+          <FilterPill
+            active={statusFilter === 'CANCELLED' && !restorableOnly}
+            onClick={() => {
+              setStatusFilter('CANCELLED');
+              setRestorableOnly(false);
+              refreshVouchers('CANCELLED', search);
+            }}
+          >
+            Cancelados
+          </FilterPill>
+          <FilterPill
+            active={restorableOnly}
+            icon={<RotateCcw size={12} />}
+            onClick={() => {
+              setStatusFilter('CANCELLED');
+              setRestorableOnly(true);
+              refreshVouchers('CANCELLED', search);
+            }}
+          >
+            Restauráveis
+          </FilterPill>
+        </div>
+
         {vouchersError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{vouchersError}</p> : null}
 
-        {vouchers.length === 0 ? (
-          <EmptyState title="Nenhum vale encontrado" />
+        {visibleVouchers.length === 0 ? (
+          <EmptyState
+            title={restorableOnly ? 'Nenhum vale cancelado restaurável agora' : 'Nenhum vale encontrado'}
+            description={restorableOnly ? 'Vales já utilizados, expirados, cancelados pela Shopify ou com o pedido cancelado não aparecem aqui.' : undefined}
+          />
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
-            {vouchers.map((voucher) => (
-              <VoucherCard key={voucher.id} voucher={voucher} canCancel={canManageCampaigns} onChanged={() => refreshVouchers()} />
+            {visibleVouchers.map((voucher) => (
+              <VoucherCard key={voucher.id} voucher={voucher} canManage={canManageCampaigns} onChanged={() => refreshVouchers()} />
             ))}
           </div>
         )}
@@ -311,7 +361,7 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
   );
 }
 
-function VoucherCard({ voucher, canCancel, onChanged }: { voucher: ValePassVoucher; canCancel: boolean; onChanged: () => void }) {
+function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVoucher; canManage: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   async function handleMarkUsed() {
@@ -334,25 +384,40 @@ function VoucherCard({ voucher, canCancel, onChanged }: { voucher: ValePassVouch
     onChanged();
   }
 
+  async function handleRestore(reason?: string) {
+    setError(null);
+    const { error: restoreError } = await restoreValePassVoucherAction(voucher.code, reason ?? '');
+    if (restoreError) {
+      setError(restoreError);
+      throw new Error(restoreError);
+    }
+    onChanged();
+  }
+
   return (
-    <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
+    <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">{voucher.code}</p>
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{voucher.campaignName} · {formatCurrency(voucher.amountCents)}</p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[voucher.status]}`}>{STATUS_LABELS[voucher.status]}</span>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[voucher.status]}`}>
+          {voucher.status === 'CANCELLED' && voucher.canBeRestored ? <RotateCcw size={11} aria-hidden /> : null}
+          {STATUS_LABELS[voucher.status]}
+        </span>
       </div>
 
-      <div className="mt-3 space-y-1 text-xs text-ink/60 dark:text-dark-muted">
+      <div className="mt-3.5 space-y-1 border-t border-ink/5 pt-3 text-xs text-ink/60 dark:border-white/5 dark:text-dark-muted">
         <p>{voucher.customerName ?? 'Cliente não informado'} {voucher.customerPhone ? `· ${voucher.customerPhone}` : ''}</p>
         {voucher.customerEmail ? <p>{voucher.customerEmail}</p> : null}
         <p>Pedido Shopify: {voucher.shopifyOrderName ?? voucher.shopifyOrderId ?? '—'}</p>
         <p>Comprado em {formatDatePt(voucher.purchasedAt)} · Válido até {formatDatePt(voucher.expiresAt)}</p>
-        {voucher.cancelReason ? <p className="text-red-500 dark:text-red-400">Motivo do cancelamento: {voucher.cancelReason}</p> : null}
+        {voucher.status === 'CANCELLED' && voucher.cancelReason ? (
+          <p className="text-red-500 dark:text-red-400">Motivo do cancelamento: {voucher.cancelReason}</p>
+        ) : null}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ink/5 pt-3.5 dark:border-white/5">
         {voucher.status === 'ACTIVE' ? (
           <>
             <ConfirmDialog
@@ -366,7 +431,7 @@ function VoucherCard({ voucher, canCancel, onChanged }: { voucher: ValePassVouch
               confirmLabel="Marcar como utilizado"
               onConfirm={handleMarkUsed}
             />
-            {canCancel ? (
+            {canManage ? (
               <ConfirmDialog
                 trigger={
                   <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/10">
@@ -382,6 +447,30 @@ function VoucherCard({ voucher, canCancel, onChanged }: { voucher: ValePassVouch
               />
             ) : null}
           </>
+        ) : voucher.status === 'CANCELLED' && canManage && voucher.canBeRestored ? (
+          <ConfirmDialog
+            trigger={
+              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/15 dark:text-emerald-300">
+                <RotateCcw size={13} /> Restaurar vale
+              </button>
+            }
+            title="Restaurar este Valle Pass?"
+            description={
+              <>
+                O vale volta a ficar <strong>ativo e disponível</strong> para uso — status atual: cancelado
+                {voucher.cancelReason ? <> (motivo: “{voucher.cancelReason}”)</> : null}. Nada do histórico de
+                cancelamento é apagado.
+              </>
+            }
+            confirmLabel="Restaurar"
+            requireReason
+            onConfirm={(reason) => handleRestore(reason)}
+          />
+        ) : voucher.status === 'CANCELLED' && !voucher.canBeRestored ? (
+          <span className="inline-flex items-start gap-1.5 text-xs text-ink/40 dark:text-dark-subtle">
+            <ShieldAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
+            Não pode ser restaurado{voucher.restoreBlockedReason ? ` — ${voucher.restoreBlockedReason}` : ''}
+          </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-xs text-ink/40 dark:text-dark-subtle">
             {voucher.status === 'USED' ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
@@ -392,5 +481,23 @@ function VoucherCard({ voucher, canCancel, onChanged }: { voucher: ValePassVouch
 
       {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
     </article>
+  );
+}
+
+function FilterPill({ active, icon, onClick, children }: { active: boolean; icon?: React.ReactNode; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+        active
+          ? 'border-marsala bg-marsala text-cream dark:border-gold dark:bg-gold dark:text-neutral-950'
+          : 'border-ink/15 text-ink/60 hover:border-marsala/40 hover:text-marsala dark:border-white/15 dark:text-dark-muted dark:hover:border-gold/40 dark:hover:text-gold'
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }

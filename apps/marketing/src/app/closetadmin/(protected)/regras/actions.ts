@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
-import { createBlock, removeBlock, updateRules, type RentalRuleConfig } from '@/lib/admin-data';
+import { createBlock, removeBlock, setBlockActive, updateBlock, updateRules, type BlockInput, type RentalRuleConfig } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /** Item 12 — "Somente ADMIN pode alterar regras." `RentalPlanEngine`
@@ -17,8 +17,7 @@ export async function updateRulesAction(input: Partial<Omit<RentalRuleConfig, 'i
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar as regras.' };
   }
-  revalidatePath('/closetadmin/regras');
-  revalidatePath('/closetadmin/auditoria');
+  revalidateOperationalViews();
   return { error: null };
 }
 
@@ -38,6 +37,32 @@ export async function createBlockAction(input: {
     await createBlock(input, session.id);
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível criar o bloqueio.' };
+  }
+  revalidateOperationalViews();
+  return { error: null };
+}
+
+export async function updateBlockAction(id: string, input: Partial<BlockInput>): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'ADMIN');
+
+  try {
+    await updateBlock(id, input, session.id);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível editar o período.' };
+  }
+  revalidateOperationalViews();
+  return { error: null };
+}
+
+export async function setBlockActiveAction(id: string, active: boolean): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'ADMIN');
+
+  try {
+    await setBlockActive(id, active, session.id);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o período.' };
   }
   revalidateOperationalViews();
   return { error: null };
