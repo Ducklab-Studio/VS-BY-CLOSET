@@ -2,10 +2,9 @@ import type { Metadata } from 'next';
 import { ProductCard } from '@/components/ProductCard';
 import Link from 'next/link';
 import {
-  RENTAL_CATEGORIES,
-  type CategorySlug,
+  categoriesFromProducts,
   isShopifyConfigured,
-  listProducts,
+  listCatalog,
 } from '@/lib/shopify';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { CategorySelect } from '@/components/CategorySelect';
@@ -15,18 +14,14 @@ export const metadata: Metadata = {
   description: 'Jaquetas, sobretudos, tricôs e botas para alugar. Retire ao chegar no Chile.',
 };
 
-export const revalidate = 60;
+export const revalidate = 0;
 
 /**
  * Catálogo, com filtro por nicho (jaquetas de couro, sobretudo de lã...).
  * Substitui o link que ia para /collections/all no tema Shopify.
  *
- * Cada peça é uma unidade física com código próprio — o cliente decidiu
- * assim para conseguir rastrear qual roupa vive voltando com problema.
- * Isso significa que peças iguais aparecem como itens separados aqui.
- * Quando houver repetição de verdade no catálogo, vale agrupar por modelo
- * e deixar o sistema escolher a unidade livre; hoje seria complexidade
- * para um caso que ainda não existe.
+ * A resposta é deduplicada por ID/handle antes de renderizar para que uma
+ * peça que apareça repetida na origem nunca ocupe dois cards.
  */
 export default async function PecasPage({
   searchParams,
@@ -34,10 +29,6 @@ export default async function PecasPage({
   searchParams: Promise<{ categoria?: string }>;
 }) {
   const { categoria } = await searchParams;
-  const activeCategory = RENTAL_CATEGORIES.find((c) => c.slug === categoria)?.slug as
-    | CategorySlug
-    | undefined;
-
   if (!isShopifyConfigured && !isDemoCatalogEnabled) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
@@ -49,23 +40,33 @@ export default async function PecasPage({
     );
   }
 
-  let products: Awaited<ReturnType<typeof listProducts>> = [];
+  let products: Awaited<ReturnType<typeof listCatalog>>['products'] = [];
+  let categories: Awaited<ReturnType<typeof listCatalog>>['categories'] = [];
+  let catalogError = false;
   if (isShopifyConfigured) {
     try {
-      products = await listProducts({ first: 100, category: activeCategory });
+      const catalog = await listCatalog();
+      products = catalog.products;
+      categories = catalog.categories;
     } catch {
-      // Loja fora do ar não pode virar tela de erro: mostra o estado vazio
-      // com o contato, que é o que resolve pro cliente final.
-      products = [];
+      catalogError = true;
     }
   } else {
     // Demo local — ver lib/demo-catalog.ts. Nunca acontece em produção
     // porque exige a flag explícita além da API não configurada.
-    products = activeCategory
-      ? DEMO_PRODUCTS.filter(
-          (p) => p.productType === RENTAL_CATEGORIES.find((c) => c.slug === activeCategory)?.productType,
-        )
-      : DEMO_PRODUCTS;
+    products = DEMO_PRODUCTS;
+    categories = categoriesFromProducts(DEMO_PRODUCTS);
+  }
+
+  const activeCategory = categories.find((category) => category.slug === categoria);
+  if (categoria && activeCategory) {
+    products = products.filter(
+      (product) => activeCategory.productIds
+        ? activeCategory.productIds.includes(product.id)
+        : product.productType.trim().toLocaleLowerCase() === activeCategory.productType?.toLocaleLowerCase(),
+    );
+  } else if (categoria) {
+    products = [];
   }
 
   return (
@@ -83,7 +84,7 @@ export default async function PecasPage({
       {/* Filtro por nicho. Rota própria (não estado de cliente) de propósito:
           um link compartilhável direto pra "botas premium" é útil, e o
           catálogo pré-carrega sem esperar JS no navegador do cliente. */}
-      <CategorySelect activeCategory={activeCategory} categories={RENTAL_CATEGORIES} />
+      <CategorySelect activeCategory={activeCategory?.slug} categories={categories} />
       <nav
         aria-label="Filtrar por tipo de peça"
         className="catalog-desktop-categories mb-10 flex-wrap gap-2"
@@ -91,20 +92,24 @@ export default async function PecasPage({
         <CategoryPill href="/pecas" active={!activeCategory}>
           Todas
         </CategoryPill>
-        {RENTAL_CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <CategoryPill
             key={cat.slug}
             href={`/pecas?categoria=${cat.slug}`}
-            active={activeCategory === cat.slug}
+            active={activeCategory?.slug === cat.slug}
           >
             {cat.label}
           </CategoryPill>
         ))}
       </nav>
 
-      {products.length === 0 ? (
+      {catalogError ? (
+        <p role="alert" className="py-16 text-center text-ink/60">
+          Não foi possível carregar as peças agora. Tente novamente em instantes.
+        </p>
+      ) : products.length === 0 ? (
         <p className="py-16 text-center text-ink/50">
-          {activeCategory
+          {categoria
             ? 'Nenhuma peça cadastrada neste tipo ainda.'
             : 'Nenhuma peça cadastrada ainda.'}
         </p>
