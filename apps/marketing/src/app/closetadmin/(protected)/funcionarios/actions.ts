@@ -4,17 +4,28 @@ import { revalidatePath } from 'next/cache';
 import { requireAdminRole, requireAdminSession, type AdminModuleName } from '@/lib/admin-session';
 import {
   blockEmployee,
-  createEmployee,
   listEmployees,
   purgeEmployee,
   reactivateEmployee,
   removeEmployee,
   restoreEmployee,
   updateEmployeePermissions,
-  type CreateEmployeeInput,
   type EmployeeListItem,
 } from '@/lib/admin-data';
-import { AdminApiError } from '@/lib/admin-api';
+import { AdminApiError, adminPost, adminPut } from '@/lib/admin-api';
+
+export type EmployeeRole = EmployeeListItem['role'];
+
+/** `superAdminConfirmation` só vale pra SUPER_ADMIN: o backend exige o texto
+ *  exato digitado e ignora `moduleAccess` (acesso total sempre). */
+export interface CreateEmployeeActionInput {
+  name: string;
+  phone: string;
+  pin: string;
+  role: EmployeeRole;
+  moduleAccess: AdminModuleName[];
+  superAdminConfirmation?: string;
+}
 
 /**
  * Sistema de autorização de funcionários — "Ele [Anderson] poderá criar,
@@ -29,12 +40,14 @@ function revalidateEmployeesPath() {
   revalidatePath('/closetadmin/funcionarios');
 }
 
-export async function createEmployeeAction(input: CreateEmployeeInput): Promise<{ employee: EmployeeListItem | null; error: string | null }> {
+export async function createEmployeeAction(input: CreateEmployeeActionInput): Promise<{ employee: EmployeeListItem | null; error: string | null }> {
   const session = await requireAdminSession();
   requireAdminRole(session, 'SUPER_ADMIN');
 
   try {
-    const employee = await createEmployee(input, session.id);
+    // Campos explícitos: nada além do que o formulário manda chega à API.
+    const { name, phone, pin, role, moduleAccess, superAdminConfirmation } = input;
+    const employee = await adminPost<EmployeeListItem>('/admin/employees', { name, phone, pin, role, moduleAccess, superAdminConfirmation, adminUserId: session.id });
     revalidateEmployeesPath();
     return { employee, error: null };
   } catch (err) {
@@ -133,6 +146,25 @@ export async function updateEmployeePermissionsAction(id: string, moduleAccess: 
     await updateEmployeePermissions(id, moduleAccess, session.id);
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar as permissões.' };
+  }
+  revalidateEmployeesPath();
+  return { error: null };
+}
+
+/** Promover/rebaixar — inclusive a SUPER_ADMIN. O backend confere de novo o
+ *  papel do ator, a confirmação, a própria conta e o último SUPER_ADMIN. */
+export async function updateEmployeeRoleAction(
+  id: string,
+  input: { role: EmployeeRole; moduleAccess?: AdminModuleName[]; superAdminConfirmation?: string },
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+
+  try {
+    const { role, moduleAccess, superAdminConfirmation } = input;
+    await adminPut(`/admin/employees/${encodeURIComponent(id)}/role`, { role, moduleAccess, superAdminConfirmation, adminUserId: session.id });
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o papel.' };
   }
   revalidateEmployeesPath();
   return { error: null };

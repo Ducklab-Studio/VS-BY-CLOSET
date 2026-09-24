@@ -12,7 +12,8 @@ import { AdminEmployeesService } from './admin-employees.service';
  * funcionários — cobre a lista pedida: "Anderson deve ser o
  * proprietário/superadmin. Ele poderá criar, autorizar, bloquear,
  * reativar e remover funcionários" + "nunca credenciais compartilhadas"
- * + proteção do proprietário contra ser alvo deste service.
+ * + proteção da própria conta e do último SUPER_ADMIN (o fluxo de
+ * SUPER_ADMIN em si está em admin-employees.super-admin.test.ts).
  *
  * `AdminAuthService` real (não mockado) prova ponta a ponta que
  * block()/remove() realmente impedem login — não só que uma flag mudou
@@ -171,28 +172,27 @@ describe('AdminEmployeesService — CRUD de funcionários (integração real, Ne
     expect([...(inList?.moduleAccess ?? [])].sort()).toEqual(['AUDIT', 'RESERVATIONS']);
   }, 15_000);
 
-  test('7) list() nunca inclui o próprio SUPER_ADMIN (só ADMIN/STAFF são "funcionários")', async () => {
+  test('7) list() inclui SUPER_ADMINs (primeiro), pra poderem ser rebaixados ou removidos pela tela', async () => {
     const owner = await createSuperAdmin();
-    await employees.create({ name: 'Listado', phone: freshPhone(), pin: '1234', role: 'STAFF', moduleAccess: [] }, owner.id, owner.name);
+    const staff = await employees.create({ name: 'Listado', phone: freshPhone(), pin: '1234', role: 'STAFF', moduleAccess: [] }, owner.id, owner.name);
     const list = await employees.list();
-    expect(list.some((e) => e.id === owner.id)).toBe(false);
-    expect(list.every((e) => e.role !== 'SUPER_ADMIN')).toBe(true);
+    const ownerIndex = list.findIndex((e) => e.id === owner.id);
+    expect(ownerIndex).toBeGreaterThanOrEqual(0);
+    expect(ownerIndex).toBeLessThan(list.findIndex((e) => e.id === staff.id));
   });
 
-  test('8) SUPER_ADMIN nunca pode ser alvo de block/reactivate/remove/restore/purge/updatePermissions por este service — nem sendo o último, nem sendo "Anderson" (qualquer SUPER_ADMIN, sempre)', async () => {
+  test('8) SUPER_ADMIN como alvo: permissões nunca editáveis; bloquear/remover só com outro SUPER_ADMIN ativo; nunca a própria conta', async () => {
     const owner = await createSuperAdmin();
     const otherOwner = await createSuperAdmin();
-    await expect(employees.block(otherOwner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
-    await expect(employees.reactivate(otherOwner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
-    await expect(employees.remove(otherOwner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
-    await expect(employees.restore(otherOwner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
-    await expect(employees.purge(otherOwner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
-    await expect(employees.updatePermissions(otherOwner.id, ['AUDIT'], owner.id, owner.name)).rejects.toThrow(ForbiddenException);
+    await expect(employees.updatePermissions(otherOwner.id, ['AUDIT'], owner.id, owner.name)).rejects.toThrow(BadRequestException);
 
-    // O mesmo vale mirando o PRÓPRIO ator (ninguém remove a si mesmo por
-    // aqui) e quando esse é o ÚNICO SUPER_ADMIN do banco no momento —
-    // a proteção nunca depende de contagem, é categórica por role.
+    // Com o ator (outro SUPER_ADMIN ativo) sobrando, a ação é permitida.
+    await expect(employees.block(otherOwner.id, owner.id, owner.name)).resolves.toMatchObject({ active: false, role: 'SUPER_ADMIN' });
+    await expect(employees.reactivate(otherOwner.id, owner.id, owner.name)).resolves.toMatchObject({ active: true });
+
+    // A própria conta nunca: nem remover, nem bloquear.
     await expect(employees.remove(owner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
+    await expect(employees.block(owner.id, owner.id, owner.name)).rejects.toThrow(ForbiddenException);
   });
 
   test('9) id inexistente → NotFoundException', async () => {
