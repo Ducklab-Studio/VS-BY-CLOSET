@@ -29,6 +29,11 @@ const API_VERSION = '2026-07';
  */
 const STORE_URL = (process.env.NEXT_PUBLIC_SHOPIFY_STORE_URL ?? '').replace(/\/$/, '');
 
+type StorefrontFetchOptions = {
+  cache?: RequestCache;
+  revalidate?: number;
+};
+
 export const isShopifyConfigured = STORE_DOMAIN.length > 0 && STOREFRONT_TOKEN.length > 0;
 
 interface StorefrontResponse<T> {
@@ -36,7 +41,11 @@ interface StorefrontResponse<T> {
   errors?: { message: string }[];
 }
 
-async function storefrontFetch<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+async function storefrontFetch<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+  options: StorefrontFetchOptions = {},
+): Promise<T> {
   if (!isShopifyConfigured) {
     throw new Error(
       'Storefront API não configurada. Defina NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN e NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN.',
@@ -50,8 +59,9 @@ async function storefrontFetch<T>(query: string, variables?: Record<string, unkn
       'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
     },
     body: JSON.stringify({ query, variables }),
-    // Catálogo muda pouco minuto a minuto; revalida a cada 60s (ISR-friendly).
-    next: { revalidate: 60 },
+    ...(options.cache === 'no-store'
+      ? { cache: 'no-store' as const }
+      : { next: { revalidate: options.revalidate ?? 60 } }),
   });
 
   if (!res.ok) {
@@ -73,7 +83,7 @@ export interface StorefrontProduct {
   handle: string;
   title: string;
   description: string;
-  /** Campo "Tipo de produto" da Shopify — é o nicho (ver RENTAL_CATEGORIES). */
+  /** Campo nativo da Shopify, preservado para exibição quando preenchido. */
   productType: string;
   images?: { nodes: { url: string; altText: string | null }[] };
   featuredImage: { url: string; altText: string | null } | null;
@@ -101,56 +111,132 @@ export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct
     }`,
     { first },
   );
-  return data.products.nodes;
+  return dedupeProducts(data.products.nodes);
 }
 
-/**
- * Nichos de aluguel, exatamente como o cliente descreveu — cada um com
- * preço próprio, definido depois por ele direto na Shopify. O valor de
- * `productType` precisa bater com o campo "Tipo de produto" que ele
- * preenche ao cadastrar cada peça: é assim que a Shopify associa uma
- * peça a um nicho sem a gente inventar taxonomia própria.
+export interface CatalogCategory {
+  slug: string;
+  label: string;
+  productType?: string;
+  productIds?: string[];
+}
+
+export interface Catalog {
+  products: StorefrontProduct[];
+  categories: CatalogCategory[];
+}
+
+function categorySlug(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function dedupeProducts(products: StorefrontProduct[]): StorefrontProduct[] {
+  return [...new Map(products.map((product) => [product.id || product.handle, product])).values()];
+}
+
+export function categoriesFromProducts(products: StorefrontProduct[]): CatalogCategory[] {
+  const byType = new Map<string, CatalogCategory>();
+  for (const product of products) {
+    const productType = product.productType?.trim();
+    if (!productType) continue;
+    const key = productType.toLocaleLowerCase();
+    if (!byType.has(key)) {
+      byType.set(key, { slug: categorySlug(productType), label: productType, productType });
+    }
+  }
+  return [...byType.values()].sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+export function categoriesFromCollections(
+  collections: { handle: string; title: string; productIds: string[] }[],
+): CatalogCategory[] {
+  return collections
+    .filter((collection) => collection.handle !== 'frontpage')
+    .map((collection) => ({
+      slug: collection.handle,
+      label: collection.title,
+      productIds: collection.productIds,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+}
+
+/** Busca a fonte de categorias e produtos diretamente da Shopify.
+ *
+ * A vitrine usa as Collections, que são a classificação real cadastrada na
+ * Shopify. Handles/títulos e os IDs associados são descobertos da resposta,
+ * nunca de uma lista mantida no frontend. Sem cache aqui, alterações no Admin
+ * aparecem na próxima requisição da vitrine.
  */
-export const RENTAL_CATEGORIES = [
-  { slug: 'jaquetas-couro', label: 'Jaquetas de couro', productType: 'Jaquetas de couro' },
-  { slug: 'sobretudo-couro', label: 'Sobretudo de couro', productType: 'Sobretudo de couro' },
-  { slug: 'jaquetas-la', label: 'Jaquetas de lã', productType: 'Jaquetas de lã' },
-  { slug: 'sobretudo-medio-la', label: 'Sobretudo médio de lã', productType: 'Sobretudo médio de lã' },
-  { slug: 'sobretudo-grande-la', label: 'Sobretudo grande de lã', productType: 'Sobretudo grande de lã' },
-  { slug: 'conjuntos-tricot', label: 'Conjuntos de tricô', productType: 'Conjuntos de tricô' },
-  { slug: 'sobretudo-tricot', label: 'Sobretudo de tricô', productType: 'Sobretudo de tricô' },
-  { slug: 'capas-tricot', label: 'Capas de tricô', productType: 'Capas de tricô' },
-  { slug: 'botas-couro', label: 'Botas de couro', productType: 'Botas de couro' },
-  { slug: 'botas-premium', label: 'Botas premium', productType: 'Botas premium' },
-] as const;
+export async function listCatalog(first = 250): Promise<Catalog> {
+  const products: StorefrontProduct[] = [];
+  let collections: { handle: string; title: string; products: { nodes: { id: string }[] } }[] = [];
+  let after: string | null = null;
+  let hasNextPage = true;
 
-export type CategorySlug = (typeof RENTAL_CATEGORIES)[number]['slug'];
+  while (hasNextPage) {
+    const data: {
+      products: {
+        nodes: StorefrontProduct[];
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+      collections: {
+        nodes: { handle: string; title: string; products: { nodes: { id: string }[] } }[];
+      };
+    } = await storefrontFetch<{
+      products: {
+        nodes: StorefrontProduct[];
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+      collections: {
+        nodes: { handle: string; title: string; products: { nodes: { id: string }[] } }[];
+      };
+    }>(
+      `query Catalog($first: Int!, $after: String) {
+        products(first: $first, after: $after, sortKey: TITLE) {
+          nodes { ${PRODUCT_FIELDS} }
+          pageInfo { hasNextPage endCursor }
+        }
+        collections(first: 250) {
+          nodes {
+            handle
+            title
+            products(first: 250) { nodes { id } }
+          }
+        }
+      }`,
+      { first: Math.min(first, 250), after },
+      { cache: 'no-store' },
+    );
+    products.push(...data.products.nodes);
+    collections = data.collections.nodes;
+    hasNextPage = data.products.pageInfo.hasNextPage;
+    after = data.products.pageInfo.endCursor;
+  }
 
-/**
- * Catálogo com filtro opcional por nicho. Usa a sintaxe de busca da própria
- * Storefront API (`product_type:'...'`) em vez de buscar tudo e filtrar no
- * servidor — evita paginar centenas de peças só pra descartar a maioria.
- */
-export async function listProducts(opts: { first?: number; category?: CategorySlug } = {}): Promise<
-  StorefrontProduct[]
-> {
-  const { first = 100, category } = opts;
-  const type = category ? RENTAL_CATEGORIES.find((c) => c.slug === category)?.productType : undefined;
-
-  // Aspas simples escapadas: a sintaxe de busca da Shopify quebra se o
-  // tipo tiver aspas — nenhum dos nichos tem, mas evita ficar frágil se
-  // um dia alguém cadastrar um tipo com acento estranho ou apóstrofo.
-  const query = type ? `product_type:'${type.replace(/'/g, "\\'")}'` : undefined;
-
-  const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
-    `query Catalog($first: Int!, $query: String) {
-      products(first: $first, query: $query, sortKey: TITLE) {
-        nodes { ${PRODUCT_FIELDS} }
-      }
-    }`,
-    { first, query },
+  const uniqueProducts = dedupeProducts(products);
+  const categories = categoriesFromCollections(
+    collections.map((collection) => ({
+      handle: collection.handle,
+      title: collection.title,
+      productIds: collection.products.nodes.map((product) => product.id),
+    })),
   );
-  return data.products.nodes;
+  return { products: uniqueProducts, categories };
+}
+
+export type CategorySlug = string;
+
+export async function listProducts(opts: { first?: number; category?: CategorySlug } = {}): Promise<StorefrontProduct[]> {
+  const catalog = await listCatalog(opts.first ?? 250);
+  if (!opts.category) return catalog.products;
+  const category = catalog.categories.find((item) => item.slug === opts.category);
+  return category ? catalog.products.filter((product) => category.productIds?.includes(product.id)) : [];
 }
 
 export async function getProductByHandle(handle: string): Promise<StorefrontProduct | null> {
