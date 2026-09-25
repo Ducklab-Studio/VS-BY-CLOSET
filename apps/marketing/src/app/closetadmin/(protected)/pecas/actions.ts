@@ -11,7 +11,7 @@ import { AdminApiError } from '@/lib/admin-api';
  *  o `AdminRoleGuard` do reservations-api recusa de qualquer forma. */
 export async function updatePieceAction(
   id: string,
-  input: { active?: boolean; reservableOnline?: boolean; countsTowardRentalDuration?: boolean },
+  input: { active?: boolean; reservableOnline?: boolean; countsTowardRentalDuration?: boolean; reason?: string },
 ): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
   requireAdminRole(session, 'ADMIN');

@@ -5,8 +5,7 @@ import { updatePieceAction } from './actions';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 
 /**
- * Campo "Ativa" é especial: desativar continua instantâneo (mesmo
- * comportamento de sempre), mas REATIVAR exige confirmação explícita —
+ * Campo "Ativa" é especial: desativar e REATIVAR exigem confirmação explícita —
  * inclusive pra peça que a sincronização Shopify tirou de circulação, onde
  * reativar manualmente sem a variante ter voltado é uma decisão consciente
  * (ver pieces.service.ts: reativar manualmente limpa o marcador da
@@ -28,16 +27,10 @@ export function PieceActiveToggle({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function deactivate() {
+  async function deactivate(reason?: string) {
+    const result = await updatePieceAction(pieceId, { active: false, reason });
+    if (result.error) throw new Error(result.error);
     setValue(false);
-    setError(null);
-    startTransition(async () => {
-      const result = await updatePieceAction(pieceId, { active: false });
-      if (result.error) {
-        setValue(true);
-        setError(result.error);
-      }
-    });
   }
 
   async function reactivate() {
@@ -52,9 +45,15 @@ export function PieceActiveToggle({
   if (value) {
     return (
       <div>
-        <button type="button" onClick={deactivate} disabled={pending} aria-pressed={value} className={switchClassName}>
-          <span className={knobClassName} />
-        </button>
+        <ConfirmDialog
+          trigger={<button type="button" disabled={pending} aria-pressed={value} className={switchClassName}><span className={knobClassName} /></button>}
+          title="Arquivar peça?"
+          description={<><strong>{pieceName}</strong> ficará fora do catálogo e de novas reservas. O histórico e reservas existentes serão preservados.</>}
+          confirmLabel="Arquivar"
+          requireReason
+          danger
+          onConfirm={(reason) => startTransition(() => deactivate(reason))}
+        />
         {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
       </div>
     );

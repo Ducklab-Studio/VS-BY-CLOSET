@@ -182,6 +182,20 @@ describe('ShopifyCatalogSyncService (PostgreSQL isolado, Shopify simulada)', () 
     expect(await auditEvents(active.id, 'CATALOG_UNIT_DEACTIVATED')).toHaveLength(0);
   });
 
+  test.each(['ARCHIVED', 'DRAFT'])('produto Shopify %s desativa a peça, sem apagar o vínculo', async (status) => {
+    const piece = await createUnit();
+    ids = [piece.id];
+    fake.variants = [variant(piece.shopifyVariantId as string, { product: { ...variant(piece.shopifyVariantId as string).product, status } })];
+
+    const report = await reconcile({ apply: true, actor: ACTOR });
+
+    expect((await unit(piece.id)).active).toBe(false);
+    expect((await unit(piece.id)).shopifyVariantId).toBe(piece.shopifyVariantId);
+    expect(report.divergences.find((d) => d.rentalUnitId === piece.id)).toMatchObject({ kind: 'product_inactive', action: 'deactivate', applied: true });
+    const [audit] = await auditEvents(piece.id, 'CATALOG_UNIT_DEACTIVATED');
+    expect(audit.detail).toMatchObject({ origin: 'shopify_catalog_sync', reason: 'shopify_product_inactive' });
+  });
+
   test('execução repetida é idempotente: uma única desativação e um único evento', async () => {
     const piece = await createUnit();
     ids = [piece.id];

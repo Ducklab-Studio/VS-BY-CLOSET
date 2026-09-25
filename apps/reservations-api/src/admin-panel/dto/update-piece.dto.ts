@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class UpdatePieceDto {
   @IsOptional()
@@ -12,6 +12,11 @@ export class UpdatePieceDto {
   @IsOptional()
   @IsBoolean()
   countsTowardRentalDuration?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 
   /** Consumido pelo `AdminRoleGuard`, não pelo service diretamente. */
   @IsUUID()
