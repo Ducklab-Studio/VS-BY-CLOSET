@@ -13,11 +13,33 @@ import { PrismaClient } from '@prisma/client';
  */
 const LOCAL_TEST_DATABASE = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i;
 
+function isApprovedTestDatabase(raw: string): boolean {
+  if (LOCAL_TEST_DATABASE.test(raw)) return true;
+  try {
+    const databaseName = decodeURIComponent(new URL(raw).pathname.replace(/^\//, ''));
+    return databaseName.toUpperCase() === 'TESTE';
+  } catch {
+    return false;
+  }
+}
+
 export default async function setup(): Promise<void> {
-  if (!LOCAL_TEST_DATABASE.test(process.env.DATABASE_URL ?? '')) return;
+  if (!isApprovedTestDatabase(process.env.DATABASE_URL ?? '')) return;
   const prisma = new PrismaClient();
   try {
-    await prisma.$executeRaw`UPDATE rental_rule_config SET operation_start_date = NULL WHERE id = 'default'`;
+    await prisma.$executeRaw`
+      UPDATE rental_rule_config
+      SET min_advance_days = 15,
+          prep_days = 3,
+          cleaning_days = 2,
+          operation_start_date = NULL,
+          max_pieces = 6,
+          pieces_to_days_table = '[{"upTo":2,"days":2},{"upTo":4,"days":3},{"upTo":6,"days":4}]'::jsonb,
+          timezone = 'America/Santiago',
+          blackout_start = NULL,
+          blackout_end = NULL
+      WHERE id = 'default'
+    `;
   } finally {
     await prisma.$disconnect();
   }

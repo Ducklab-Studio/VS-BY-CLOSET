@@ -102,7 +102,14 @@ afterAll(async () => {
   try {
     // Restore the singleton even if cleanup of a related fixture fails.
     await step('restore rental_rule_config', () =>
-      prisma.rentalRuleConfig.update({ where: { id: 'default' }, data: { ...original, piecesToDaysTable: original.piecesToDaysTable as object[] } }),
+      prisma.rentalRuleConfig.update({
+        where: { id: 'default' },
+        data: {
+          ...original,
+          operationStartDate: original.operationStartDate ? new Date(original.operationStartDate) : null,
+          piecesToDaysTable: original.piecesToDaysTable as object[],
+        },
+      }),
     );
     const reserved = await prisma.reservation.findMany({ where: { items: { some: { rentalUnit: { code: { startsWith: prefix } } } } }, select: { id: true } });
     const ids = reserved.map(({ id }) => id);

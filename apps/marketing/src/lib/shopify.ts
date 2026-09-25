@@ -90,6 +90,7 @@ export interface StorefrontProduct {
   priceRange: {
     minVariantPrice: { amount: string; currencyCode: string };
   };
+  variants?: { nodes: { id: string }[] };
 }
 
 const PRODUCT_FIELDS = `
@@ -101,6 +102,8 @@ const PRODUCT_FIELDS = `
   featuredImage { url altText }
   priceRange { minVariantPrice { amount currencyCode } }
 `;
+
+const CATALOG_VARIANT_IDS_FIELD = 'variants(first: 250) { nodes { id } }';
 
 export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct[]> {
   const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
@@ -199,7 +202,7 @@ export async function listCatalog(first = 250): Promise<Catalog> {
     }>(
       `query Catalog($first: Int!, $after: String) {
         products(first: $first, after: $after, sortKey: TITLE) {
-          nodes { ${PRODUCT_FIELDS} }
+          nodes { ${PRODUCT_FIELDS} ${CATALOG_VARIANT_IDS_FIELD} }
           pageInfo { hasNextPage endCursor }
         }
         collections(first: 250) {
@@ -219,7 +222,7 @@ export async function listCatalog(first = 250): Promise<Catalog> {
     after = data.products.pageInfo.endCursor;
   }
 
-  const uniqueProducts = dedupeProducts(products);
+  const uniqueProducts = await filterPublicCatalogProducts(dedupeProducts(products));
   const categories = categoriesFromCollections(
     collections.map((collection) => ({
       handle: collection.handle,
@@ -228,6 +231,41 @@ export async function listCatalog(first = 250): Promise<Catalog> {
     })),
   );
   return { products: uniqueProducts, categories };
+}
+
+/**
+ * O catálogo comercial vem da Storefront API, mas produtos de aluguel só
+ * podem aparecer quando ainda existe uma peça ativa e reservável no sistema
+ * de reservas. Em caso de indisponibilidade do endpoint auxiliar, mantém-se
+ * a resposta da Shopify para não transformar uma falha transitória em
+ * catálogo vazio. O Valle Pass é sempre preservado por ser compra direta.
+ */
+async function filterPublicCatalogProducts(products: StorefrontProduct[]): Promise<StorefrontProduct[]> {
+  const base =
+    process.env.RESERVATIONS_API_URL ??
+    process.env.RESERVATIONS_API_ADMIN_URL ??
+    process.env.NEXT_PUBLIC_RESERVATIONS_API_URL;
+  if (!base) return products;
+
+  try {
+    const response = await fetch(`${base.replace(/\/+$/, '')}/availability/catalog-variants`, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) return products;
+    const payload = (await response.json()) as { variantIds?: unknown };
+    if (!Array.isArray(payload.variantIds)) return products;
+    const allowed = new Set(payload.variantIds.filter((id): id is string => typeof id === 'string'));
+    return products.filter((product) => isDirectPurchaseProduct(product) || product.variants?.nodes.some((variant) => allowed.has(variant.id)));
+  } catch {
+    return products;
+  }
+}
+
+function isDirectPurchaseProduct(product: StorefrontProduct): boolean {
+  const configuredId = process.env.NEXT_PUBLIC_VALE_PASS_PRODUCT_ID?.trim() || '8723909804132';
+  const numericId = product.id.match(/(\d+)\s*$/)?.[1] ?? product.id;
+  return numericId === (configuredId.match(/(\d+)\s*$/)?.[1] ?? configuredId);
 }
 
 export type CategorySlug = string;
@@ -268,7 +306,7 @@ export interface StorefrontVariant {
   price: { amount: string; currencyCode: string };
 }
 
-export interface StorefrontProductDetail extends Omit<StorefrontProduct, 'images'> {
+export interface StorefrontProductDetail extends Omit<StorefrontProduct, 'images' | 'variants'> {
   descriptionHtml: string;
   images: { url: string; altText: string | null }[];
   variants: StorefrontVariant[];

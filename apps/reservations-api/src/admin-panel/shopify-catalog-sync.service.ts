@@ -4,7 +4,7 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { ShopifyAdminClient } from './shopify-admin.client';
 
-export type CatalogDivergenceKind = 'variant_missing' | 'variant_restored';
+export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored';
 export type CatalogDivergenceAction = 'deactivate' | 'reactivate';
 
 export interface CatalogDivergence {
@@ -38,6 +38,10 @@ interface LinkedUnit {
   readonly shopifyVariantMissingAt: Date | null;
 }
 
+function isLiveShopifyVariant(variant: { id: string; product: { status: string } }): boolean {
+  return variant.product.status.trim().toUpperCase() === 'ACTIVE';
+}
+
 /**
  * Sincroniza o catálogo Shopify (fonte de verdade de produto/variante) com
  * as peças físicas (RentalUnit). Nunca cria pedido/pagamento/reserva/HOLD;
@@ -61,14 +65,21 @@ export class ShopifyCatalogSyncService {
     private readonly shopify: ShopifyAdminClient,
   ) {}
 
-  async reconcile(options: { apply: boolean; actor?: { id: string; name: string }; rentalUnitIds?: readonly string[] }): Promise<CatalogSyncReport> {
+  async reconcile(options: { apply: boolean; actor?: { id: string; name: string }; rentalUnitIds?: readonly string[]; shopifyProductId?: string }): Promise<CatalogSyncReport> {
     const variants = await this.shopify.listVariants();
+    const productIds = options.shopifyProductId
+      ? [options.shopifyProductId, `gid://shopify/Product/${options.shopifyProductId.replace(/\D/g, '')}`]
+      : undefined;
     const units = await this.prisma.rentalUnit.findMany({
       // `rentalUnitIds` existe só para os testes de integração escoparem a
       // varredura às peças da própria fixture (mesmo motivo de `orderIds`
       // em ShopifyReconciliationService) — o painel/produção sempre chama
       // sem isso, e sincroniza a tabela inteira.
-      where: { shopifyVariantId: { not: null }, ...(options.rentalUnitIds ? { id: { in: [...options.rentalUnitIds] } } : {}) },
+      where: {
+        shopifyVariantId: { not: null },
+        ...(options.rentalUnitIds ? { id: { in: [...options.rentalUnitIds] } } : {}),
+        ...(productIds ? { shopifyProductId: { in: productIds } } : {}),
+      },
       select: { id: true, code: true, name: true, active: true, shopifyVariantId: true, shopifyVariantMissingAt: true },
       orderBy: { code: 'asc' },
     });
@@ -78,19 +89,24 @@ export class ShopifyCatalogSyncService {
     // variantes sumiram" — isso desativaria o catálogo físico inteiro por
     // uma falha transitória. Um catálogo genuinamente vazio na Shopify com
     // peças já cadastradas aqui é, na prática, o mesmo sinal de alerta.
-    if (variants.length === 0 && units.length > 0) {
+    if (variants.length === 0 && units.length > 0 && !options.shopifyProductId) {
       this.logger.error('Shopify retornou 0 variantes com peças físicas vinculadas — sincronização abortada por segurança.');
       throw new ServiceUnavailableException('A Shopify não retornou nenhuma variante; sincronização abortada por segurança.');
     }
 
-    const liveVariantIds = new Set(variants.map((v) => v.id));
+    const liveVariantIds = new Set(variants.filter(isLiveShopifyVariant).map((v) => v.id));
+    const inactiveVariantIds = new Set(variants.filter((v) => !isLiveShopifyVariant(v)).map((v) => v.id));
     const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction }[] = [];
     for (const unit of units as LinkedUnit[]) {
       const variantId = unit.shopifyVariantId;
       if (!variantId) continue;
       const live = liveVariantIds.has(variantId);
       if (!live && unit.active) {
-        divergent.push({ unit, kind: 'variant_missing', action: 'deactivate' });
+        divergent.push({
+          unit,
+          kind: inactiveVariantIds.has(variantId) ? 'product_inactive' : 'variant_missing',
+          action: 'deactivate',
+        });
       } else if (live && !unit.active && unit.shopifyVariantMissingAt) {
         // Só reativa o que a PRÓPRIA sincronização desativou (marcador
         // presente). Peça inativa por decisão manual (marcador ausente)
@@ -101,7 +117,7 @@ export class ShopifyCatalogSyncService {
       }
     }
 
-    const missingIds = divergent.filter((d) => d.kind === 'variant_missing').map((d) => d.unit.id);
+    const missingIds = divergent.filter((d) => d.action === 'deactivate').map((d) => d.unit.id);
     const upcomingByUnit = missingIds.length > 0 ? await this.upcomingReservationCounts(missingIds) : new Map<string, number>();
 
     const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action }) => ({
@@ -112,10 +128,12 @@ export class ShopifyCatalogSyncService {
       shopifyVariantId: unit.shopifyVariantId as string,
       action,
       applied: false,
-      upcomingReservations: kind === 'variant_missing' ? (upcomingByUnit.get(unit.id) ?? 0) : 0,
+      upcomingReservations: action === 'deactivate' ? (upcomingByUnit.get(unit.id) ?? 0) : 0,
       note:
         kind === 'variant_missing'
           ? 'Variante removida da Shopify — peça desativada, indisponível para novas reservas e para disponibilidade online até reativação.'
+          : kind === 'product_inactive'
+            ? 'Produto arquivado ou inativo na Shopify — peça desativada, indisponível para novas reservas e para disponibilidade online até reativação.'
           : 'Variante voltou a existir na Shopify — peça pode ser reativada com segurança, sem duplicar cadastro.',
     }));
 
@@ -202,7 +220,12 @@ export class ShopifyCatalogSyncService {
             entityId: d.rentalUnitId,
             before: { active: true },
             after: { active: false },
-            detail: { origin: 'shopify_catalog_sync', reason: 'shopify_variant_missing', code: d.code, shopifyVariantId: d.shopifyVariantId },
+            detail: {
+              origin: 'shopify_catalog_sync',
+              reason: d.kind === 'product_inactive' ? 'shopify_product_inactive' : 'shopify_variant_missing',
+              code: d.code,
+              shopifyVariantId: d.shopifyVariantId,
+            },
           });
 
           // Item 6: reserva futura com esta peça vira alerta, sem apagar

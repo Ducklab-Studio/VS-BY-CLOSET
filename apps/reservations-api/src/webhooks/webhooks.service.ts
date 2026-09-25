@@ -1,4 +1,4 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
@@ -12,6 +12,7 @@ import { ShopifyOrderSyncService } from './shopify-order-sync.service';
 import { lockShopifyOrder } from './shopify-order-lock';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
+import { ShopifyCatalogSyncService } from '../admin-panel/shopify-catalog-sync.service';
 import {
   extractCustomerEmail,
   extractCustomerName,
@@ -48,6 +49,7 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     private readonly valePass: ValePassWebhookService,
     private readonly sync: ShopifyOrderSyncService,
+    @Optional() private readonly catalogSync?: ShopifyCatalogSyncService,
   ) {}
 
   async handleIncoming(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
@@ -161,6 +163,24 @@ export class WebhooksService {
         return this.handleOrderDeleted(tx, payload as { id: number | string });
       case 'refunds/create':
         return this.handleRefundCreated(tx, payload as ShopifyRefundPayload);
+      case 'products/update':
+      case 'products/delete':
+        if (!this.catalogSync) {
+          return { status: 'ignored', events: [{ type: 'WEBHOOK_RECEIVED', detail: { topic, note: 'Sincronização de catálogo não configurada neste contexto.' } }] };
+        }
+        // A reconciliação é deliberadamente global e idempotente: o payload
+        // de produto pode não conter todas as variantes e o delete já não
+        // permite consultá-las diretamente. A proteção contra resposta
+        // Shopify vazia continua no serviço de reconciliação.
+        const productId = (payload as { id?: unknown } | null)?.id;
+        await this.catalogSync.reconcile({ apply: true, shopifyProductId: productId == null ? undefined : String(productId) });
+        return {
+          status: 'processed',
+          events: [{
+            type: 'WEBHOOK_RECEIVED',
+            detail: { topic, origin: 'shopify_catalog_sync', note: 'Catálogo reconciliado após evento de produto.' },
+          }],
+        };
       default:
         return { status: 'ignored', events: [{ type: 'WEBHOOK_RECEIVED', detail: { topic, note: 'tópico não tratado por esta fase' } }] };
     }

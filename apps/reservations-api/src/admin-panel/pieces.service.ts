@@ -25,6 +25,7 @@ export interface UpdatePieceInput {
   readonly active?: boolean;
   readonly reservableOnline?: boolean;
   readonly countsTowardRentalDuration?: boolean;
+  readonly reason?: string;
 }
 
 /**
@@ -85,7 +86,9 @@ export class AdminPiecesService {
         const after = await tx.rentalUnit.update({
           where: { id },
           data: {
-            ...input,
+            active: input.active,
+            reservableOnline: input.reservableOnline,
+            countsTowardRentalDuration: input.countsTowardRentalDuration,
             // Reativação MANUAL: o humano está tomando a responsabilidade
             // agora, então o marcador da sincronização (que só faz sentido
             // enquanto NINGUÉM decidiu nada) deixa de valer. Se a variante
@@ -101,6 +104,7 @@ export class AdminPiecesService {
           entityType: 'RentalUnit', entityId: id,
           before: { active: before.active, reservableOnline: before.reservableOnline, countsTowardRentalDuration: before.countsTowardRentalDuration },
           after: { active: after.active, reservableOnline: after.reservableOnline, countsTowardRentalDuration: after.countsTowardRentalDuration },
+          detail: input.active === false && input.reason ? { origin: 'closetadmin', reason: input.reason } : undefined,
         });
       });
     } catch (err) {

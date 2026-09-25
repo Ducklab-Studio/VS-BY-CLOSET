@@ -29,7 +29,7 @@ export class AdminPiecesController {
   @Patch(':id')
   @RequireRole('ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdatePieceDto, @Req() req: RequestWithAdminUser): Promise<PieceListItem> {
-    const input: UpdatePieceInput = { active: dto.active, reservableOnline: dto.reservableOnline, countsTowardRentalDuration: dto.countsTowardRentalDuration };
+    const input: UpdatePieceInput = { active: dto.active, reservableOnline: dto.reservableOnline, countsTowardRentalDuration: dto.countsTowardRentalDuration, reason: dto.reason };
     return this.pieces.update(id, input, req.adminUser!.id, req.adminUser!.name);
   }
 }

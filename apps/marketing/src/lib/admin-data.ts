@@ -139,7 +139,7 @@ export function listPieces(adminUserId: string): Promise<PieceListItem[]> {
 
 export function updatePiece(
   id: string,
-  input: { active?: boolean; reservableOnline?: boolean; countsTowardRentalDuration?: boolean },
+  input: { active?: boolean; reservableOnline?: boolean; countsTowardRentalDuration?: boolean; reason?: string },
   adminUserId: string,
 ): Promise<PieceListItem> {
   return adminPatch(`/admin/pieces/${id}`, { ...input, adminUserId });

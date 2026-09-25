@@ -39,6 +39,6 @@ import { ShopifyCatalogSyncService } from './shopify-catalog-sync.service';
     ShopifyCatalogService,
     ShopifyCatalogSyncService,
   ],
-  exports: [AdminCalendarService],
+  exports: [AdminCalendarService, ShopifyCatalogSyncService],
 })
 export class AdminPanelModule {}
