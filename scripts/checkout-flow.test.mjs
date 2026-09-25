@@ -161,7 +161,20 @@ test('Railway uses the package start command and preserves migrations and health
 });
 test('Shopify production config audits order creation before payment and syncs updates/deletes', () => {
   const config = read('apps/shopify-app/shopify.app.production.toml');
-  assert.match(config, /topics\s*=\s*\[\s*"orders\/create",\s*"orders\/paid",\s*"orders\/cancelled",\s*"orders\/updated",\s*"orders\/delete",\s*"refunds\/create"\s*\]/);
+  const topicsText = config.match(/topics\s*=\s*\[([^\]]+)\]/)?.[1] ?? '';
+  const topics = [...topicsText.matchAll(/"([^"]+)"/g)].map(([, topic]) => topic);
+  for (const topic of [
+    'orders/create',
+    'orders/paid',
+    'orders/cancelled',
+    'orders/updated',
+    'orders/delete',
+    'refunds/create',
+    'products/update',
+    'products/delete',
+  ]) {
+    assert.ok(topics.includes(topic), `produção precisa assinar o tópico ${topic}`);
+  }
 });
 test('no draft config can target the production app, and production scopes are never placeholders', () => {
   // `shopify app config use <nome>` + `deploy` publica o arquivo escolhido
