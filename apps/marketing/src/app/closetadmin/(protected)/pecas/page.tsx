@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ExternalLink } from 'lucide-react';
+import { Archive, ExternalLink } from 'lucide-react';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listPieces } from '@/lib/admin-data';
 import { listShopifyCatalog, getCatalogReconciliation } from '@/lib/shopify-admin-data';
@@ -36,6 +36,15 @@ export default async function ClosetAdminPiecesPage() {
     return <ErrorState message={piecesError ?? 'Erro inesperado.'} />;
   }
 
+  // Peças arquivadas pela sincronização Shopify ficam fora da lista principal,
+  // numa consulta separada. Falha aqui não derruba o resto da página.
+  let archivedPieces: PieceListItem[] | null = null;
+  try {
+    archivedPieces = await listPieces(session.id, { archived: true });
+  } catch {
+    archivedPieces = null;
+  }
+
   let catalog: Awaited<ReturnType<typeof listShopifyCatalog>> | null = null;
   let catalogError: string | null = null;
   try {
@@ -56,7 +65,10 @@ export default async function ClosetAdminPiecesPage() {
 
   return (
     <div>
-      <PageHeader title="Peças" description={`${pieces.length} peça(s) física(s) cadastrada(s)`} />
+      <PageHeader
+        title="Peças"
+        description={`${pieces.length} peça(s) física(s) no catálogo${archivedPieces?.length ? ` · ${archivedPieces.length} arquivada(s)` : ''}`}
+      />
 
       {syncReport ? <CatalogSyncPanel initialReport={syncReport} isAdmin={isAdmin} /> : null}
 
@@ -238,8 +250,120 @@ export default async function ClosetAdminPiecesPage() {
           </>
         )}
       </section>
+
+      <ArchivedPieces pieces={archivedPieces} />
     </div>
   );
+}
+
+/**
+ * Peças arquivadas automaticamente pela sincronização Shopify (variante
+ * removida, produto DRAFT/ARCHIVED ou sem variante). Só consulta: não entram
+ * em disponibilidade, catálogo público nem reservas novas, e voltam sozinhas
+ * para a lista principal se a mesma variante voltar a ficar ativa na Shopify.
+ * Reservas, bloqueios e auditoria continuam preservados.
+ */
+function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
+  return (
+    <details className="group mt-8 rounded-xl border border-ink/10 bg-white shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-semibold text-ink dark:text-dark-text">
+          <Archive size={15} className="text-ink/50 dark:text-dark-subtle" />
+          Peças arquivadas {pieces ? `(${pieces.length})` : ''}
+        </span>
+        <span className="text-xs text-ink/50 group-open:hidden dark:text-dark-subtle">Mostrar</span>
+        <span className="hidden text-xs text-ink/50 group-open:inline dark:text-dark-subtle">Ocultar</span>
+      </summary>
+
+      <div className="border-t border-ink/5 px-4 pb-4 pt-3 dark:border-white/5">
+        <p className="text-xs text-ink/60 dark:text-dark-muted">
+          Removidas, em rascunho ou arquivadas na Shopify. Não aparecem no site, na disponibilidade nem em reservas novas; o histórico
+          continua guardado. Voltam sozinhas para a lista principal quando a variante volta a ficar ativa na Shopify.
+        </p>
+
+        {!pieces ? (
+          <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Não foi possível carregar as peças arquivadas agora.</p>
+        ) : pieces.length === 0 ? (
+          <p className="mt-3 text-sm text-ink/55 dark:text-dark-muted">Nenhuma peça arquivada.</p>
+        ) : (
+          <>
+            {/* Arquivada = desvinculada: o SKU gravado (se sobrou de um arquivamento
+                antigo) nunca é mostrado nem enviado ao navegador. */}
+            <div className="mt-3 space-y-2 md:hidden">
+              {pieces.map((piece) => (
+                <div key={piece.id} className="rounded-lg border border-ink/10 p-3 dark:border-white/10">
+                  <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
+                  <p className="mt-0.5 text-sm text-ink/80 dark:text-dark-text">{piece.name}</p>
+                  <p className="mt-0.5 font-mono text-xs">
+                    <SkuUnlinkedLabel />
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink/60 dark:text-dark-muted">
+                    <span>Arquivada em {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}</span>
+                    <ArchivedUpcoming count={piece.upcomingReservations} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 hidden overflow-x-auto md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/65 dark:border-white/10 dark:text-dark-subtle">
+                    <th className="py-2 pr-4 font-medium">Código</th>
+                    <th className="py-2 pr-4 font-medium">Nome</th>
+                    <th className="py-2 pr-4 font-medium">SKU</th>
+                    <th className="py-2 pr-4 font-medium">Arquivada em</th>
+                    <th className="py-2 pr-4 font-medium">Próximas reservas</th>
+                    <th className="py-2 font-medium" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink/5 dark:divide-white/5">
+                  {pieces.map((piece) => {
+                    const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
+                    return (
+                      <tr key={piece.id}>
+                        <td className="py-2.5 pr-4 font-mono text-xs text-ink/70 dark:text-dark-muted">{piece.code}</td>
+                        <td className="py-2.5 pr-4 text-ink/80 dark:text-dark-text">{piece.name}</td>
+                        <td className="py-2.5 pr-4 font-mono text-xs">
+                          <SkuUnlinkedLabel />
+                        </td>
+                        <td className="py-2.5 pr-4 text-xs text-ink/60 dark:text-dark-muted">
+                          {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}
+                        </td>
+                        <td className="py-2.5 pr-4 text-xs">
+                          <ArchivedUpcoming count={piece.upcomingReservations} />
+                        </td>
+                        <td className="py-2.5">
+                          {productUrl ? (
+                            <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
+                              Shopify <ExternalLink size={12} />
+                            </a>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** Reserva futura de peça arquivada não é cancelada: fica em destaque para revisão. */
+function ArchivedUpcoming({ count }: { count: number }) {
+  return count > 0 ? (
+    <span className="font-medium text-amber-700 dark:text-amber-300">{count} próxima(s) reserva(s) — revisar</span>
+  ) : (
+    <span className="text-ink/60 dark:text-dark-muted">0</span>
+  );
+}
+
+function formatArchivedAt(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Santiago' });
 }
 
 function ReadOnlyDot({ value }: { value: boolean }) {

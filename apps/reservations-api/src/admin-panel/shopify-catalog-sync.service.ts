@@ -2,7 +2,7 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
-import { ShopifyAdminClient } from './shopify-admin.client';
+import { ShopifyAdminClient, type ShopifyCatalogVariant } from './shopify-admin.client';
 
 export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored';
 export type CatalogDivergenceAction = 'deactivate' | 'reactivate';
@@ -17,6 +17,9 @@ export interface CatalogDivergence {
   readonly applied: boolean;
   readonly upcomingReservations: number;
   readonly note: string;
+  /** Status do produto na Shopify quando a variante ainda existe (DRAFT,
+   *  ARCHIVED…); `null` quando a variante sumiu de vez. */
+  readonly shopifyProductStatus: string | null;
 }
 
 export interface CatalogSyncReport {
@@ -45,7 +48,7 @@ function isLiveShopifyVariant(variant: { id: string; product: { status: string }
 /**
  * Sincroniza o catálogo Shopify (fonte de verdade de produto/variante) com
  * as peças físicas (RentalUnit). Nunca cria pedido/pagamento/reserva/HOLD;
- * só lê a Admin API e escreve `active`/`shopifyVariantMissingAt` da peça,
+ * só lê a Admin API e escreve `active`/`shopifyVariantMissingAt`/SKU da peça,
  * sempre por transição condicional (nunca reescreve algo que já mudou por
  * fora, nunca sobrepõe uma decisão manual — ver applyDeactivate/applyReactivate).
  *
@@ -55,6 +58,14 @@ function isLiveShopifyVariant(variant: { id: string; product: { status: string }
  * ShopifyReconciliationService.applyOne — uma falha isolada não derruba as
  * demais). Idempotente: rodar de novo sem nada ter mudado não gera evento
  * nem toca nenhuma linha (todo UPDATE é condicional no estado atual).
+ *
+ * Arquivamento lógico: variante removida, produto DRAFT/ARCHIVED (qualquer
+ * status diferente de ACTIVE) ou produto sem variante → a peça fica
+ * `active=false`, com `shopifyVariantMissingAt` preenchido (o marcador de
+ * "arquivada pela sincronização" — sai da lista principal de Peças físicas)
+ * e SKU desvinculado. Nunca DELETE: reservas, bloqueios e auditoria
+ * continuam apontando para a mesma linha, e a mesma variante voltando
+ * ACTIVE reativa a MESMA peça, com SKU e produto relidos da Shopify.
  */
 @Injectable()
 export class ShopifyCatalogSyncService {
@@ -89,11 +100,15 @@ export class ShopifyCatalogSyncService {
     // variantes sumiram" — isso desativaria o catálogo físico inteiro por
     // uma falha transitória. Um catálogo genuinamente vazio na Shopify com
     // peças já cadastradas aqui é, na prática, o mesmo sinal de alerta.
-    if (variants.length === 0 && units.length > 0 && !options.shopifyProductId) {
+    // Vale também para o webhook (escopo de um produto): antes, com
+    // `shopifyProductId`, uma resposta vazia desativava as peças daquele
+    // produto — agora conta qualquer peça ativa vinculada no banco.
+    if (variants.length === 0 && (units.length > 0 || (await this.hasActiveLinkedUnits()))) {
       this.logger.error('Shopify retornou 0 variantes com peças físicas vinculadas — sincronização abortada por segurança.');
       throw new ServiceUnavailableException('A Shopify não retornou nenhuma variante; sincronização abortada por segurança.');
     }
 
+    const variantById = new Map(variants.map((v) => [v.id, v]));
     const liveVariantIds = new Set(variants.filter(isLiveShopifyVariant).map((v) => v.id));
     const inactiveVariantIds = new Set(variants.filter((v) => !isLiveShopifyVariant(v)).map((v) => v.id));
     const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction }[] = [];
@@ -129,6 +144,7 @@ export class ShopifyCatalogSyncService {
       action,
       applied: false,
       upcomingReservations: action === 'deactivate' ? (upcomingByUnit.get(unit.id) ?? 0) : 0,
+      shopifyProductStatus: variantById.get(unit.shopifyVariantId as string)?.product.status ?? null,
       note:
         kind === 'variant_missing'
           ? 'Variante removida da Shopify — peça desativada, indisponível para novas reservas e para disponibilidade online até reativação.'
@@ -144,7 +160,10 @@ export class ShopifyCatalogSyncService {
       let reactivated = 0;
       for (let i = 0; i < divergences.length; i++) {
         const d = divergences[i];
-        const applied = d.action === 'deactivate' ? await this.applyDeactivate(d, options.actor) : await this.applyReactivate(d, options.actor);
+        const applied =
+          d.action === 'deactivate'
+            ? await this.applyDeactivate(d, options.actor)
+            : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
         if (applied) {
           divergences[i] = { ...d, applied: true };
           if (d.action === 'deactivate') deactivated++;
@@ -184,6 +203,10 @@ export class ShopifyCatalogSyncService {
     };
   }
 
+  private async hasActiveLinkedUnits(): Promise<boolean> {
+    return (await this.prisma.rentalUnit.count({ where: { active: true, shopifyVariantId: { not: null } } })) > 0;
+  }
+
   private async upcomingReservationCounts(unitIds: readonly string[]): Promise<Map<string, number>> {
     const rows = await this.prisma.$queryRaw<{ unitId: string; n: number }[]>`
       SELECT rental_unit_id AS "unitId", count(DISTINCT reservation_id)::int AS "n"
@@ -206,9 +229,13 @@ export class ShopifyCatalogSyncService {
       return await this.prisma.$transaction(
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
+          const current = await tx.rentalUnit.findUnique({ where: { id: d.rentalUnitId }, select: { shopifySku: true } });
+          // SKU desvinculado: a variante não vale mais. O id da variante fica
+          // (é por ele que a mesma peça é reencontrada se a variante voltar) e
+          // o SKU anterior fica no `before` da auditoria.
           const updated = await tx.rentalUnit.updateMany({
             where: { id: d.rentalUnitId, active: true, shopifyVariantId: d.shopifyVariantId },
-            data: { active: false, shopifyVariantMissingAt: new Date() },
+            data: { active: false, shopifyVariantMissingAt: new Date(), shopifySku: null },
           });
           if (updated.count !== 1) return false;
 
@@ -218,13 +245,14 @@ export class ShopifyCatalogSyncService {
             action: 'CATALOG_UNIT_DEACTIVATED',
             entityType: 'RentalUnit',
             entityId: d.rentalUnitId,
-            before: { active: true },
-            after: { active: false },
+            before: { active: true, shopifySku: current?.shopifySku ?? null },
+            after: { active: false, shopifySku: null, archived: true },
             detail: {
               origin: 'shopify_catalog_sync',
               reason: d.kind === 'product_inactive' ? 'shopify_product_inactive' : 'shopify_variant_missing',
               code: d.code,
               shopifyVariantId: d.shopifyVariantId,
+              shopifyProductStatus: d.shopifyProductStatus,
             },
           });
 
@@ -273,15 +301,22 @@ export class ShopifyCatalogSyncService {
   /** Só reativa o que a PRÓPRIA sincronização desativou (`shopifyVariantMissingAt`
    *  presente) e cujo `shopifyVariantId` ainda é o mesmo. Se um humano já
    *  reativou manualmente (PATCH limpa o marcador) ou desativou por outro
-   *  motivo depois, este UPDATE simplesmente não encontra a linha — no-op. */
-  private async applyReactivate(d: CatalogDivergence, actor?: { id: string; name: string }): Promise<boolean> {
+   *  motivo depois, este UPDATE simplesmente não encontra a linha — no-op.
+   *  SKU e produto são relidos da variante na Shopify (o dado atual, não o
+   *  que estava gravado antes do arquivamento). */
+  private async applyReactivate(
+    d: CatalogDivergence,
+    variant: ShopifyCatalogVariant | undefined,
+    actor?: { id: string; name: string },
+  ): Promise<boolean> {
+    if (!variant) return false;
     try {
       return await this.prisma.$transaction(
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
           const updated = await tx.rentalUnit.updateMany({
             where: { id: d.rentalUnitId, active: false, shopifyVariantMissingAt: { not: null }, shopifyVariantId: d.shopifyVariantId },
-            data: { active: true, shopifyVariantMissingAt: null },
+            data: { active: true, shopifyVariantMissingAt: null, shopifySku: variant.sku, shopifyProductId: variant.product.id },
           });
           if (updated.count !== 1) return false;
 
@@ -291,8 +326,8 @@ export class ShopifyCatalogSyncService {
             action: 'CATALOG_UNIT_REACTIVATED',
             entityType: 'RentalUnit',
             entityId: d.rentalUnitId,
-            before: { active: false },
-            after: { active: true },
+            before: { active: false, shopifySku: null },
+            after: { active: true, shopifySku: variant.sku },
             detail: { origin: 'shopify_catalog_sync', reason: 'shopify_variant_restored', code: d.code, shopifyVariantId: d.shopifyVariantId },
           });
           return true;

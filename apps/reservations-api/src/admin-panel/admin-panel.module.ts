@@ -16,6 +16,7 @@ import { ShopifyCatalogController } from './shopify-catalog.controller';
 import { ShopifyCatalogService } from './shopify-catalog.service';
 import { ShopifyCatalogSyncController } from './shopify-catalog-sync.controller';
 import { ShopifyCatalogSyncService } from './shopify-catalog-sync.service';
+import { CatalogSyncSchedulerService } from './catalog-sync-scheduler.service';
 
 @Module({
   imports: [PrismaModule],
@@ -38,6 +39,7 @@ import { ShopifyCatalogSyncService } from './shopify-catalog-sync.service';
     ShopifyAdminClient,
     ShopifyCatalogService,
     ShopifyCatalogSyncService,
+    CatalogSyncSchedulerService,
   ],
   exports: [AdminCalendarService, ShopifyCatalogSyncService],
 })
