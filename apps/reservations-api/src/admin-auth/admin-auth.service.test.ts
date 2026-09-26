@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../admin/admin-pin';
 import { normalizePhone } from '../admin/admin-phone';
+import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminAuthService } from './admin-auth.service';
 
 /**
@@ -165,5 +166,108 @@ describe('AdminAuthService — sessão (integração real, Neon)', () => {
 
   test('13) logout com token nunca emitido → não lança erro (não revela nada)', async () => {
     await expect(service.logout('token-nunca-emitido-0000000000000000000')).resolves.toBeUndefined();
+  });
+});
+
+/** "+5691234..." → "+56 (91) 23456-7..." — mesmo número com pontuação de verdade. */
+function formatted(phone: string): string {
+  const d = phone.replace(/\D/g, '');
+  return `+${d.slice(0, 2)} (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+}
+
+async function lastLoginFailure(adminUserId: string) {
+  return prisma.adminAuditEvent.findFirst({ where: { adminUserId, action: 'LOGIN_FAILED' }, orderBy: { createdAt: 'desc' } });
+}
+
+describe('AdminAuthService — telefone e nome como a pessoa digita (integração real)', () => {
+  test('14) telefone formatado (espaços, parênteses, hífen) entra normalmente', async () => {
+    const { user, pin } = await createUser({ name: 'Formatado Teste' });
+    const result = await service.login({ name: user.name, phone: formatted(user.phone), pin });
+    expect(result.adminUser.id).toBe(user.id);
+  });
+
+  test('15) cadastro antigo gravado sem "+" entra com o número digitado com "+DDI" (e o contrário)', async () => {
+    const legacy = await createUser({ name: 'Legado Sem Mais', phone: `56${PHONE_TAG}${userCounter++}` });
+    expect(legacy.user.phone.startsWith('+')).toBe(false);
+    const viaTela = await service.login({ name: legacy.user.name, phone: formatted(`+${legacy.user.phone}`), pin: legacy.pin });
+    expect(viaTela.adminUser.id).toBe(legacy.user.id);
+
+    const modern = await createUser({ name: 'Moderno Com Mais' });
+    const semMais = await service.login({ name: modern.user.name, phone: modern.user.phone.slice(1), pin: modern.pin });
+    expect(semMais.adminUser.id).toBe(modern.user.id);
+  });
+
+  test('16) nome ignora maiúsculas, acentos e espaços repetidos — mas nunca letras diferentes', async () => {
+    const { user, pin } = await createUser({ name: 'José  Conceição' });
+    await expect(service.login({ name: '  jose conceicao ', phone: user.phone, pin })).resolves.toMatchObject({ adminUser: { id: user.id } });
+    await expect(service.login({ name: 'Jose Conceicoes', phone: user.phone, pin })).rejects.toThrow('Credenciais inválidas.');
+    expect(await lastLoginFailure(user.id)).toMatchObject({ detail: { reason: 'name_mismatch' } });
+  });
+
+  test('17) PIN inválido → 401 genérico, auditado como wrong_pin, nenhuma sessão', async () => {
+    const { user } = await createUser({ name: 'Pin Errado Teste', pin: '4321' });
+    await expect(service.login({ name: user.name, phone: formatted(user.phone), pin: '1234' })).rejects.toThrow('Credenciais inválidas.');
+    expect(await lastLoginFailure(user.id)).toMatchObject({ detail: { reason: 'wrong_pin' } });
+    expect(await prisma.adminSession.count({ where: { adminUserId: user.id } })).toBe(0);
+  });
+
+  test('18) bloqueado ou removido continua sem entrar, mesmo com PIN certo (auditado como inactive)', async () => {
+    const blocked = await createUser({ name: 'Bloqueado Teste', active: false });
+    await expect(service.login({ name: blocked.user.name, phone: formatted(blocked.user.phone), pin: blocked.pin })).rejects.toThrow('Credenciais inválidas.');
+    expect(await lastLoginFailure(blocked.user.id)).toMatchObject({ detail: { reason: 'inactive' } });
+
+    const removed = await createUser({ name: 'Removido Teste' });
+    await prisma.adminUser.update({ where: { id: removed.user.id }, data: { removedAt: new Date() } });
+    await expect(service.login({ name: removed.user.name, phone: removed.user.phone, pin: removed.pin })).rejects.toThrow('Credenciais inválidas.');
+    expect(await prisma.adminSession.count({ where: { adminUserId: { in: [blocked.user.id, removed.user.id] } } })).toBe(0);
+  });
+
+  test('19) auditoria de falha nunca guarda PIN nem telefone', async () => {
+    const { user } = await createUser({ name: 'Auditoria Limpa', pin: '8642' });
+    await expect(service.login({ name: user.name, phone: user.phone, pin: '1357' })).rejects.toThrow();
+    const event = await lastLoginFailure(user.id);
+    const payload = JSON.stringify(event);
+    for (const secret of ['1357', '8642', user.phone, user.phone.slice(1), user.pinHash]) expect(payload).not.toContain(secret);
+  });
+
+  test('20) login → sessão válida → logout → sessão recusada (ciclo completo com telefone formatado)', async () => {
+    const { user, pin } = await createUser({ name: 'Ciclo Completo', role: 'ADMIN' });
+    const { token } = await service.login({ name: 'ciclo  completo', phone: formatted(user.phone), pin });
+    await expect(service.validateSession(token)).resolves.toMatchObject({ id: user.id, role: 'ADMIN' });
+    await service.logout(token);
+    await expect(service.validateSession(token)).rejects.toThrow('Sessão inválida ou expirada.');
+  });
+});
+
+/**
+ * O site (apps/marketing) separa "credenciais erradas" de "o site não está
+ * autorizado a falar com a API" pela mensagem do 401 — só `Credenciais
+ * inválidas.` vira erro de login pra pessoa. Este teste trava as duas
+ * mensagens: se o guard passasse a responder igual ao login, um
+ * ADMIN_API_TOKEN divergente voltaria a se disfarçar de senha errada.
+ */
+describe('AdminAuthGuard × login — 401 de configuração é distinguível', () => {
+  const previous = process.env.ADMIN_API_TOKEN;
+  afterAll(() => {
+    if (previous === undefined) delete process.env.ADMIN_API_TOKEN;
+    else process.env.ADMIN_API_TOKEN = previous;
+  });
+
+  const contextWith = (authorization?: string) =>
+    ({ switchToHttp: () => ({ getRequest: () => ({ headers: authorization ? { authorization } : {} }) }) }) as unknown as ExecutionContext;
+
+  test('21) token do site divergente → 401 com mensagem própria, antes de qualquer checagem de usuário', () => {
+    process.env.ADMIN_API_TOKEN = 'token-configurado-no-servidor-de-teste';
+    const guard = new AdminAuthGuard();
+    let message = '';
+    try {
+      guard.canActivate(contextWith('Bearer token-diferente-do-site'));
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      message = (err as Error).message;
+    }
+    expect(message).toBe('Credencial administrativa inválida ou ausente.');
+    expect(message).not.toBe('Credenciais inválidas.');
+    expect(guard.canActivate(contextWith('Bearer token-configurado-no-servidor-de-teste'))).toBe(true);
   });
 });

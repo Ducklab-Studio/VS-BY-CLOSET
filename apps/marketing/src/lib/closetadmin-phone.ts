@@ -46,6 +46,43 @@ export function formatNationalNumber(raw: string, country: PhoneCountry): string
   return out;
 }
 
+function nationalLength(country: PhoneCountry): number {
+  return country.groups.reduce((a, b) => a + b, 0);
+}
+
+/**
+ * O que a pessoa digitou/colou no campo nacional → país + parte nacional
+ * formatada. Antes, dígitos além do tamanho do país selecionado eram
+ * cortados em silêncio: com Chile (padrão, 9 dígitos) selecionado, um
+ * celular brasileiro virava outro número e o login falhava sem pista.
+ *  - "+55 82 98765-4321" colado → Brasil, DDI tirado da parte nacional;
+ *  - "5582987654321" (DDI sem "+") → idem, se o resto tiver o tamanho do país;
+ *  - número maior que o país atual → troca pro país em que ele cabe.
+ */
+export function resolvePhoneInput(raw: string, currentCode: string): { code: string; national: string } {
+  const current = findPhoneCountry(currentCode);
+  const digits = raw.replace(/\D/g, '');
+  const as = (country: PhoneCountry, national: string) => ({ code: country.code, national: formatNationalNumber(national, country) });
+
+  if (raw.trim().startsWith('+')) {
+    const byDdi = PHONE_COUNTRIES.find((c) => digits.startsWith(c.code));
+    if (byDdi) return as(byDdi, digits.slice(byDdi.code.length));
+  }
+  if (digits.length > nationalLength(current)) {
+    const withDdi = PHONE_COUNTRIES.find((c) => digits.startsWith(c.code) && digits.length - c.code.length === nationalLength(c));
+    if (withDdi) return as(withDdi, digits.slice(withDdi.code.length));
+    const fits = PHONE_COUNTRIES.find((c) => c.code !== current.code && digits.length <= nationalLength(c));
+    if (fits) return as(fits, digits);
+  }
+  return as(current, digits);
+}
+
+/** DDI de um valor já composto ("+55 11 98765-4321" → "55"), se for um país conhecido. */
+export function countryCodeOf(value: string): string | null {
+  const match = /^\+(\d+)/.exec(value.trim());
+  return match && PHONE_COUNTRIES.some((c) => c.code === match[1]) ? match[1] : null;
+}
+
 /** Monta o valor final ("+56 9 1234 5678") a partir do DDI + parte nacional já formatada. */
 export function composePhone(countryCode: string, nationalFormatted: string): string {
   return nationalFormatted ? `+${countryCode} ${nationalFormatted}` : `+${countryCode}`;
