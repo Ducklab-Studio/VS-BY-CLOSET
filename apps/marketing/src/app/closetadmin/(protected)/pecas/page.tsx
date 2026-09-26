@@ -24,44 +24,34 @@ export default async function ClosetAdminPiecesPage() {
   requireAdminModule(session, 'PIECES');
   const isAdmin = hasAdminRole(session, 'ADMIN');
 
-  let pieces: Awaited<ReturnType<typeof listPieces>> | null = null;
-  let piecesError: string | null = null;
-  try {
-    pieces = await listPieces(session.id);
-  } catch (err) {
-    piecesError = err instanceof AdminApiError ? err.message : 'Erro inesperado.';
-  }
+  // As 4 consultas são independentes: rodam em paralelo (antes eram
+  // sequenciais, ~4 idas ao servidor em fila). Cada uma mantém o próprio
+  // tratamento de falha; só a lista principal derruba a página.
+  const [piecesResult, archivedResult, catalogResult, syncReportResult] = await Promise.allSettled([
+    listPieces(session.id),
+    // Peças arquivadas pela sincronização Shopify ficam fora da lista
+    // principal, numa consulta separada. Falha aqui não derruba o resto.
+    listPieces(session.id, { archived: true }),
+    listShopifyCatalog(session.id),
+    // Item 11/12 — relatório somente-leitura de divergências peça × variante
+    // Shopify, e "última sincronização". Indisponível não impede o resto.
+    getCatalogReconciliation(session.id),
+  ]);
 
-  if (!pieces) {
-    return <ErrorState message={piecesError ?? 'Erro inesperado.'} />;
+  if (piecesResult.status === 'rejected') {
+    const err = piecesResult.reason;
+    return <ErrorState message={err instanceof AdminApiError ? err.message : 'Erro inesperado.'} />;
   }
-
-  // Peças arquivadas pela sincronização Shopify ficam fora da lista principal,
-  // numa consulta separada. Falha aqui não derruba o resto da página.
-  let archivedPieces: PieceListItem[] | null = null;
-  try {
-    archivedPieces = await listPieces(session.id, { archived: true });
-  } catch {
-    archivedPieces = null;
-  }
-
-  let catalog: Awaited<ReturnType<typeof listShopifyCatalog>> | null = null;
-  let catalogError: string | null = null;
-  try {
-    catalog = await listShopifyCatalog(session.id);
-  } catch (err) {
-    catalogError = err instanceof AdminApiError ? err.message : 'Não foi possível consultar a Shopify.';
-  }
-
-  // Item 11/12 — relatório somente-leitura de divergências peça × variante
-  // Shopify, e "última sincronização". Indisponível não impede o resto da
-  // página (mesmo tratamento de erro do catálogo acima).
-  let syncReport: Awaited<ReturnType<typeof getCatalogReconciliation>> | null = null;
-  try {
-    syncReport = await getCatalogReconciliation(session.id);
-  } catch {
-    syncReport = null;
-  }
+  const pieces = piecesResult.value;
+  const archivedPieces: PieceListItem[] | null = archivedResult.status === 'fulfilled' ? archivedResult.value : null;
+  const catalog = catalogResult.status === 'fulfilled' ? catalogResult.value : null;
+  const catalogError =
+    catalogResult.status === 'rejected'
+      ? catalogResult.reason instanceof AdminApiError
+        ? catalogResult.reason.message
+        : 'Não foi possível consultar a Shopify.'
+      : null;
+  const syncReport = syncReportResult.status === 'fulfilled' ? syncReportResult.value : null;
 
   return (
     <div>
