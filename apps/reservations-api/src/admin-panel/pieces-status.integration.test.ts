@@ -68,8 +68,10 @@ async function createUnit() {
   });
 }
 
+// Procura nas duas listas: a principal e a das arquivadas pela sincronização
+// (quem está em qual é verificado explicitamente no teste 2).
 async function pieceItem(id: string) {
-  const all = await pieces.list();
+  const all = [...(await pieces.list()), ...(await pieces.list({ archived: true }))];
   const item = all.find((p) => p.id === id);
   if (!item) throw new Error('peça não encontrada em AdminPiecesService.list()');
   return item;
@@ -122,6 +124,9 @@ describe('Situação da peça em /closetadmin/pecas — Livre/Ocupada/Desativada
     const item = await pieceItem(unit.id);
     expect(item.active).toBe(false);
     expect(item.shopifyVariantMissingAt).not.toBeNull();
+    // Arquivada: sai da lista principal de Peças físicas e fica só na consulta separada.
+    expect((await pieces.list()).some((p) => p.id === unit.id)).toBe(false);
+    expect((await pieces.list({ archived: true })).some((p) => p.id === unit.id)).toBe(true);
   });
 
   test('3) peça inativa nunca aparece na disponibilidade (mesmo cálculo do site/calendário — não só o campo `active`)', async () => {

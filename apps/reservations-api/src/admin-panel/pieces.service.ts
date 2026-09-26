@@ -41,7 +41,15 @@ export class AdminPiecesService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(): Promise<PieceListItem[]> {
+  /**
+   * Peças arquivadas pela sincronização Shopify (`shopify_variant_missing_at`
+   * preenchido: variante removida, produto DRAFT/ARCHIVED ou sem variante)
+   * saem da lista principal e só aparecem com `archived: true`. Peça
+   * desativada à mão continua na lista principal — é uma decisão de
+   * operação, reversível ali mesmo. Nada é apagado.
+   */
+  async list(options: { archived?: boolean } = {}): Promise<PieceListItem[]> {
+    const archived = options.archived === true;
     try {
       return await this.prisma.$queryRaw<PieceListItem[]>`
         SELECT
@@ -65,6 +73,7 @@ export class AdminPiecesService {
               AND lower(ri.blocked_range) > (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
           ) AS "upcomingReservations"
         FROM rental_units ru
+        WHERE (ru.shopify_variant_missing_at IS NOT NULL) = ${archived}
         ORDER BY ru.code
       `;
     } catch (err) {

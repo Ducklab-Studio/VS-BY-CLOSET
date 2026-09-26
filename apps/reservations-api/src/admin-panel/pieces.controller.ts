@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -19,9 +19,11 @@ interface RequestWithAdminUser {
 export class AdminPiecesController {
   constructor(private readonly pieces: AdminPiecesService) {}
 
+  /** Lista principal: sem as peças arquivadas pela sincronização Shopify.
+   *  `?archived=true` devolve só as arquivadas (consulta separada). */
   @Get()
-  list(): Promise<PieceListItem[]> {
-    return this.pieces.list();
+  list(@Query('archived') archived?: string): Promise<PieceListItem[]> {
+    return this.pieces.list({ archived: archived === 'true' });
   }
 
   // Só ADMIN — item 15: "gestão operacional de RentalUnits" é exclusiva

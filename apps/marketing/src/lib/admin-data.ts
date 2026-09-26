@@ -128,13 +128,14 @@ export interface PieceListItem {
   readonly countsTowardRentalDuration: boolean;
   readonly currentlyOccupied: boolean;
   readonly upcomingReservations: number;
-  /// Presente = a sincronização de catálogo desativou esta peça porque a
-  /// variante vinculada não existe mais na Shopify (ver docs/shopify-catalog-sync.md).
+  /// Presente = a sincronização de catálogo arquivou esta peça (variante
+  /// removida, produto DRAFT/ARCHIVED ou sem variante — ver docs/shopify-catalog-sync.md).
   readonly shopifyVariantMissingAt: string | null;
 }
 
-export function listPieces(adminUserId: string): Promise<PieceListItem[]> {
-  return adminGet('/admin/pieces', adminUserId);
+/** Lista principal (sem arquivadas); `archived: true` = só as arquivadas pela sincronização. */
+export function listPieces(adminUserId: string, options: { archived?: boolean } = {}): Promise<PieceListItem[]> {
+  return adminGet(`/admin/pieces${options.archived ? '?archived=true' : ''}`, adminUserId);
 }
 
 export function updatePiece(

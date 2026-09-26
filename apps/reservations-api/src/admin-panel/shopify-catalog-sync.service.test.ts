@@ -7,6 +7,7 @@ import { today } from '../rental-rules/rental-engine';
 import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
 import type { ShopifyAdminClient, ShopifyCatalogVariant } from './shopify-admin.client';
 import { ShopifyCatalogSyncService } from './shopify-catalog-sync.service';
+import { AdminPiecesService } from './pieces.service';
 
 /**
  * Sincronização catálogo Shopify ↔ peça física — cenário do pedido (Blazer
@@ -347,5 +348,153 @@ describe('ShopifyCatalogSyncService (PostgreSQL isolado, Shopify simulada)', () 
     expect(Reflect.getMetadata(REQUIRE_MODULE_KEY, ShopifyCatalogSyncController)).toBe('PIECES');
     expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ShopifyCatalogSyncController.prototype.sync)).toBe('ADMIN');
     expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ShopifyCatalogSyncController.prototype.reconciliation)).toBeUndefined();
+  });
+  // ── Arquivamento lógico (peça sai da lista principal) e reativação ──
+
+  const pieces = new AdminPiecesService(prisma);
+  const inMainList = async (id: string) => (await pieces.list()).some((p) => p.id === id);
+  const inArchivedList = async (id: string) => (await pieces.list({ archived: true })).some((p) => p.id === id);
+  // Mesmo filtro de GET /availability/catalog-variants (catálogo público).
+  const inPublicCatalog = async (variantId: string) =>
+    (await prisma.rentalUnit.count({ where: { active: true, reservableOnline: true, shopifyVariantId: variantId } })) > 0;
+  // Mesma seleção de candidatos de HoldsService (novo HOLD / reserva online).
+  const holdCandidates = async (variantId: string) =>
+    prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM rental_units WHERE shopify_variant_id = ANY(${[variantId]}::text[]) AND active = true AND reservable_online = true
+    `;
+
+  test('produto DRAFT ou ARCHIVED na Shopify arquiva a peça: fora da lista principal, do catálogo público e de novos HOLDs; SKU desvinculado', async () => {
+    for (const status of ['DRAFT', 'ARCHIVED']) {
+      const piece = await createUnit();
+      ids = [piece.id];
+      const variantId = piece.shopifyVariantId as string;
+      fake.variants = [variant(variantId, { sku: 'SKU-NA-SHOPIFY', product: { id: piece.shopifyProductId as string, title: 'Blazer Kensington', handle: 'blazer', productType: '', status } }), variant(DECOY_VARIANT)];
+
+      const report = await reconcile({ apply: true, actor: ACTOR });
+      expect(report.divergences).toMatchObject([{ rentalUnitId: piece.id, kind: 'product_inactive', applied: true, shopifyProductStatus: status }]);
+
+      const row = await unit(piece.id);
+      expect(row).toMatchObject({ active: false, shopifySku: null, shopifyVariantId: variantId });
+      expect(row.shopifyVariantMissingAt).not.toBeNull();
+      expect(await inMainList(piece.id)).toBe(false);
+      expect(await inArchivedList(piece.id)).toBe(true);
+      expect(await inPublicCatalog(variantId)).toBe(false);
+      expect(await holdCandidates(variantId)).toHaveLength(0);
+
+      const [event] = await auditEvents(piece.id, 'CATALOG_UNIT_DEACTIVATED');
+      expect(event.before).toMatchObject({ active: true, shopifySku: piece.shopifySku });
+      expect(event.after).toMatchObject({ active: false, shopifySku: null, archived: true });
+      expect(event.detail).toMatchObject({ reason: 'shopify_product_inactive', shopifyProductStatus: status });
+    }
+  });
+
+  test('variante removida (produto ainda ACTIVE) e produto sem nenhuma variante: todas as peças daquele produto são arquivadas', async () => {
+    const a = await createUnit();
+    const b = await createUnit();
+    ids = [a.id, b.id];
+    // Nenhuma das duas variantes existe mais; a loja segue com outras variantes.
+    fake.variants = [variant(DECOY_VARIANT)];
+
+    const report = await reconcile({ apply: true });
+    expect(report.divergences.map((d) => d.kind).sort()).toEqual(['variant_missing', 'variant_missing']);
+    for (const piece of [a, b]) {
+      expect(await unit(piece.id)).toMatchObject({ active: false, shopifySku: null });
+      expect(await inMainList(piece.id)).toBe(false);
+      expect(await inArchivedList(piece.id)).toBe(true);
+    }
+    // O arquivamento só olha peças vinculadas: variante sem peça (ex.: Valle Pass) nunca vira divergência.
+    expect(report.divergences.every((d) => ids.includes(d.rentalUnitId))).toBe(true);
+  });
+
+  test('reativação: a mesma peça volta à lista principal com SKU e produto relidos da Shopify — só quando ACTIVE', async () => {
+    const piece = await createUnit();
+    ids = [piece.id];
+    const variantId = piece.shopifyVariantId as string;
+    fake.variants = [variant(DECOY_VARIANT)];
+    await reconcile({ apply: true });
+    expect(await inArchivedList(piece.id)).toBe(true);
+
+    // Variante de volta, mas o produto ainda é DRAFT → continua arquivada.
+    fake.variants = [variant(variantId, { sku: 'SKU-NOVO', product: { id: 'gid://shopify/Product/novo', title: 'Blazer', handle: 'blazer', productType: '', status: 'DRAFT' } })];
+    await reconcile({ apply: true });
+    expect(await unit(piece.id)).toMatchObject({ active: false, shopifySku: null });
+
+    // Produto ACTIVE → reativada, sem duplicar, com os dados atuais da Shopify.
+    fake.variants = [variant(variantId, { sku: 'SKU-NOVO', product: { id: 'gid://shopify/Product/novo', title: 'Blazer', handle: 'blazer', productType: '', status: 'ACTIVE' } })];
+    const report = await reconcile({ apply: true, actor: ACTOR });
+    expect(report.divergences).toMatchObject([{ kind: 'variant_restored', applied: true }]);
+    const row = await unit(piece.id);
+    expect(row).toMatchObject({ active: true, shopifySku: 'SKU-NOVO', shopifyProductId: 'gid://shopify/Product/novo', shopifyVariantMissingAt: null, reservableOnline: true });
+    expect(await inMainList(piece.id)).toBe(true);
+    expect(await inArchivedList(piece.id)).toBe(false);
+    expect(await inPublicCatalog(variantId)).toBe(true);
+    expect(await holdCandidates(variantId)).toHaveLength(1);
+    expect(await prisma.rentalUnit.count({ where: { shopifyVariantId: variantId } })).toBe(1);
+    expect(await auditEvents(piece.id, 'CATALOG_UNIT_REACTIVATED')).toHaveLength(1);
+  });
+
+  test('webhook (escopo de um produto) repetido é idempotente: um arquivamento, um evento, nenhum erro', async () => {
+    const piece = await createUnit();
+    ids = [piece.id];
+    fake.variants = [variant(DECOY_VARIANT)];
+    for (let i = 0; i < 3; i++) {
+      await service.reconcile({ apply: true, shopifyProductId: piece.shopifyProductId as string, rentalUnitIds: ids });
+    }
+    expect(await auditEvents(piece.id, 'CATALOG_UNIT_DEACTIVATED')).toHaveLength(1);
+    expect(await unit(piece.id)).toMatchObject({ active: false, shopifySku: null });
+    expect(await prisma.rentalUnit.count({ where: { code: piece.code } })).toBe(1);
+  });
+
+  test('resposta vazia da Shopify no caminho do webhook aborta — nenhuma peça ativa some por falha', async () => {
+    const piece = await createUnit();
+    ids = [piece.id];
+    fake.variants = [];
+
+    await expect(service.reconcile({ apply: true, shopifyProductId: piece.shopifyProductId as string, rentalUnitIds: ids })).rejects.toThrow(ServiceUnavailableException);
+    // Produto sem peça no escopo, mas há peça ativa vinculada no banco: também aborta.
+    await expect(service.reconcile({ apply: true, shopifyProductId: '999999999', rentalUnitIds: [] })).rejects.toThrow(ServiceUnavailableException);
+
+    expect(await unit(piece.id)).toMatchObject({ active: true, shopifySku: piece.shopifySku, shopifyVariantMissingAt: null });
+    expect(await inMainList(piece.id)).toBe(true);
+    expect(await auditEvents(piece.id, 'CATALOG_UNIT_DEACTIVATED')).toHaveLength(0);
+  });
+
+  test('histórico preservado: reserva, itens, eventos, bloqueio e auditoria continuam; a peça nunca é apagada', async () => {
+    const piece = await createUnit();
+    ids = [piece.id];
+    const reservationId = await createFutureReservation(piece.id);
+    const block = await prisma.operationalBlock.create({
+      data: { scope: 'UNIT', rentalUnitId: piece.id, startDate: new Date('2031-01-10'), endDate: new Date('2031-01-12'), reason: 'fixture', createdByAdminUserId: ACTOR.id },
+    });
+    await prisma.adminAuditEvent.create({ data: { action: 'UNIT_UPDATED', entityType: 'RentalUnit', entityId: piece.id, adminUserId: ACTOR.id, adminUserName: ACTOR.name } });
+    const before = {
+      items: await prisma.reservationItem.count({ where: { rentalUnitId: piece.id } }),
+      reservation: await prisma.reservation.findUniqueOrThrow({ where: { id: reservationId } }),
+    };
+
+    fake.variants = [variant(DECOY_VARIANT)];
+    await reconcile({ apply: true });
+    await reconcile({ apply: true });
+
+    expect(await prisma.rentalUnit.count({ where: { id: piece.id } })).toBe(1);
+    expect(await prisma.reservationItem.count({ where: { rentalUnitId: piece.id } })).toBe(before.items);
+    expect(await prisma.reservation.findUniqueOrThrow({ where: { id: reservationId } })).toMatchObject({ status: before.reservation.status, pickupDate: before.reservation.pickupDate });
+    expect(await prisma.operationalBlock.findUniqueOrThrow({ where: { id: block.id } })).toMatchObject({ rentalUnitId: piece.id, active: true });
+    expect(await auditEvents(piece.id, 'UNIT_UPDATED')).toHaveLength(1);
+    expect(await reservationEvents(reservationId, 'SHOPIFY_CATALOG_UNIT_MISSING_RESERVATION_ALERT')).toHaveLength(1);
+    // A reserva futura continua visível para a operação na lista de arquivadas.
+    expect((await pieces.list({ archived: true })).find((p) => p.id === piece.id)).toMatchObject({ upcomingReservations: 1 });
+
+    await prisma.operationalBlock.delete({ where: { id: block.id } });
+  });
+
+  test('peça desativada à mão (sem marcador) continua na lista principal — só a sincronização arquiva', async () => {
+    const manual = await createUnit({ active: false });
+    ids = [manual.id];
+    fake.variants = [variant(DECOY_VARIANT)];
+    await reconcile({ apply: true });
+    expect(await inMainList(manual.id)).toBe(true);
+    expect(await inArchivedList(manual.id)).toBe(false);
+    expect((await unit(manual.id)).shopifySku).toBe(manual.shopifySku);
   });
 });
