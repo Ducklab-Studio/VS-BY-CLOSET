@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { requireAdminSession } from '@/lib/admin-session';
 import { AdminShell } from '@/components/closetadmin/AdminShell';
+import { PresenceHeartbeat } from '@/components/closetadmin/PresenceHeartbeat';
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
@@ -15,5 +16,11 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
  */
 export default async function ClosetAdminProtectedLayout({ children }: { children: React.ReactNode }) {
   const session = await requireAdminSession();
-  return <AdminShell session={session}>{children}</AdminShell>;
+  // PresenceHeartbeat: mantém este funcionário Online enquanto o painel está aberto.
+  return (
+    <AdminShell session={session}>
+      <PresenceHeartbeat />
+      {children}
+    </AdminShell>
+  );
 }

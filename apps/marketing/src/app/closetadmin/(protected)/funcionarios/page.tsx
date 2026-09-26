@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import { listEmployees } from '@/lib/admin-data';
-import { AdminApiError } from '@/lib/admin-api';
+import { AdminApiError, adminGet } from '@/lib/admin-api';
+import type { EmployeePresence } from '@/lib/closetadmin-presence';
 import { ErrorState, PageHeader } from '@/components/closetadmin/ui';
 import { EmployeesSection } from './EmployeesSection';
 
@@ -29,13 +30,26 @@ export default async function ClosetAdminEmployeesPage() {
     return <ErrorState message={errorMessage ?? 'Erro inesperado.'} />;
   }
 
+  // Online/offline — falha aqui não impede a lista (a tela tenta de novo sozinha).
+  let presence: EmployeePresence[] | null = null;
+  try {
+    presence = await adminGet<EmployeePresence[]>('/admin/presence', session.id);
+  } catch {
+    presence = null;
+  }
+
   return (
     <div>
       <PageHeader
         title="Funcionários"
         description="Cada funcionário tem login próprio (telefone + PIN), nunca credenciais compartilhadas. Acesso por módulo: reservas, calendário, peças, regras, relatórios e auditoria."
       />
-      <EmployeesSection employees={employees} currentUserId={session.id} canGrantSuperAdmin={session.role === 'SUPER_ADMIN'} />
+      <EmployeesSection
+        employees={employees}
+        initialPresence={presence}
+        currentUserId={session.id}
+        canGrantSuperAdmin={session.role === 'SUPER_ADMIN'}
+      />
     </div>
   );
 }
