@@ -12,7 +12,8 @@ import {
   updateEmployeePermissions,
   type EmployeeListItem,
 } from '@/lib/admin-data';
-import { AdminApiError, adminPost, adminPut } from '@/lib/admin-api';
+import { AdminApiError, adminGet, adminPost, adminPut } from '@/lib/admin-api';
+import type { EmployeePresence } from '@/lib/closetadmin-presence';
 
 export type EmployeeRole = EmployeeListItem['role'];
 
@@ -168,4 +169,17 @@ export async function updateEmployeeRoleAction(
   }
   revalidateEmployeesPath();
   return { error: null };
+}
+
+/** Online/offline dos funcionários (só status e horário). Chamado a cada 15 s
+ *  pela tela, com a aba visível; falha vira `null` e a tela mantém o último estado. */
+export async function listPresenceAction(): Promise<{ presence: EmployeePresence[] | null }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+
+  try {
+    return { presence: await adminGet<EmployeePresence[]>('/admin/presence', session.id) };
+  } catch {
+    return { presence: null };
+  }
 }

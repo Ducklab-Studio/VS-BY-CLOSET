@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, Crown, Eye, Flame, Plus, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus, Wrench } from 'lucide-react';
 import type { AdminModuleName } from '@/lib/admin-permissions';
 import type { EmployeeListItem } from '@/lib/admin-data';
+import { PRESENCE_POLL_MS, formatLastSeen, type EmployeePresence } from '@/lib/closetadmin-presence';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { PhoneInput } from '@/components/closetadmin/PhoneInput';
 import { EmptyState } from '@/components/closetadmin/ui';
@@ -11,6 +12,7 @@ import {
   blockEmployeeAction,
   createEmployeeAction,
   listEmployeesAction,
+  listPresenceAction,
   purgeEmployeeAction,
   reactivateEmployeeAction,
   removeEmployeeAction,
@@ -61,10 +63,12 @@ function roleOptions(canGrantSuperAdmin: boolean): { value: EmployeeRole; label:
  */
 export function EmployeesSection({
   employees: initialEmployees,
+  initialPresence,
   currentUserId,
   canGrantSuperAdmin,
 }: {
   employees: EmployeeListItem[];
+  initialPresence: EmployeePresence[] | null;
   currentUserId: string;
   /** Só quem já é SUPER_ADMIN vê a opção — o backend recusa de qualquer forma. */
   canGrantSuperAdmin: boolean;
@@ -72,6 +76,38 @@ export function EmployeesSection({
   const [employees, setEmployees] = useState(initialEmployees);
   const [showRemoved, setShowRemoved] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [presence, setPresence] = useState(() => presenceById(initialPresence));
+  // `null` até montar no navegador: o "visto há X min" depende do relógio local.
+  const [now, setNow] = useState<number | null>(null);
+
+  // Online/offline dos outros sem recarregar: a cada 15 s, só com a aba visível
+  // (e na hora em que ela volta a ficar visível) — nenhuma consulta em segundo plano.
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshPresence() {
+      if (document.visibilityState !== 'visible') return;
+      const { presence: fresh } = await listPresenceAction();
+      if (cancelled) return;
+      if (fresh) setPresence(presenceById(fresh));
+      setNow(Date.now());
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refreshPresence();
+    };
+    const first = setTimeout(() => setNow(Date.now()), 0);
+    // A lista inicial vem do servidor antes do 1º heartbeat desta aba: uma
+    // atualização logo depois de abrir já traz o estado real.
+    const early = setTimeout(() => void refreshPresence(), 3_000);
+    const timer = setInterval(() => void refreshPresence(), PRESENCE_POLL_MS);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      clearTimeout(first);
+      clearTimeout(early);
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   async function refresh(includeRemoved: boolean) {
     const { employees: fresh, error } = await listEmployeesAction(includeRemoved);
@@ -116,6 +152,8 @@ export function EmployeesSection({
               employee={employee}
               currentUserId={currentUserId}
               canGrantSuperAdmin={canGrantSuperAdmin}
+              presence={presence.get(employee.id)}
+              now={now}
               onChanged={() => refresh(showRemoved)}
             />
           ))}
@@ -266,11 +304,15 @@ function EmployeeCard({
   employee,
   currentUserId,
   canGrantSuperAdmin,
+  presence,
+  now,
   onChanged,
 }: {
   employee: EmployeeListItem;
   currentUserId: string;
   canGrantSuperAdmin: boolean;
+  presence: EmployeePresence | undefined;
+  now: number | null;
   onChanged: () => void;
 }) {
   const [moduleAccess, setModuleAccess] = useState<AdminModuleName[]>([...employee.moduleAccess]);
@@ -360,6 +402,11 @@ function EmployeeCard({
             ) : null}
           </div>
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{employee.phone}</p>
+          {/* Presença é separada de "Ativo": bloqueado/removido não tem presença, só o status da conta. */}
+          {!removed && employee.active ? (
+            // Quem está vendo esta tela está, por definição, no painel agora.
+            <PresenceIndicator presence={isSelf ? { adminUserId: employee.id, online: true, lastSeenAt: null } : presence} now={now} />
+          ) : null}
         </div>
 
         <StatusPill employee={employee} />
@@ -601,6 +648,25 @@ function SuperAdminRisk({
         />
       </label>
     </div>
+  );
+}
+
+function presenceById(list: EmployeePresence[] | null): Map<string, EmployeePresence> {
+  return new Map((list ?? []).map((p) => [p.adminUserId, p]));
+}
+
+/** Bolinha verde + "Online" ou cinza + "Offline" (com "visto por último" quando houver). */
+function PresenceIndicator({ presence, now }: { presence: EmployeePresence | undefined; now: number | null }) {
+  if (!presence) return null;
+  const lastSeen = !presence.online && now !== null ? formatLastSeen(presence.lastSeenAt, now) : null;
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs" data-presence={presence.online ? 'online' : 'offline'}>
+      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${presence.online ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-white/30'}`} aria-hidden />
+      <span className={presence.online ? 'font-medium text-emerald-700 dark:text-emerald-300' : 'text-ink/60 dark:text-dark-muted'}>
+        {presence.online ? 'Online' : 'Offline'}
+      </span>
+      {lastSeen ? <span className="text-ink/45 dark:text-dark-subtle">· {lastSeen}</span> : null}
+    </p>
   );
 }
 

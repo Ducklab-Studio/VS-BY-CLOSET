@@ -163,9 +163,31 @@ model AdminSession {
   revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
 
   adminUser AdminUser @relation(fields: [adminUserId], references: [id])
+  presences AdminPresence[]
 
   @@index([adminUserId])
   @@map("admin_sessions")
+}
+
+/// Presença online/offline do ClosetAdmin — uma linha por aba/página aberta
+/// (`clientId` aleatório gerado no navegador a cada carregamento), dentro de
+/// uma sessão. Online = alguma linha sem `endedAt`, com heartbeat dentro do
+/// TTL, numa sessão válida (não revogada, não expirada) de um usuário ativo.
+/// Dado técnico e efêmero: nunca decide acesso (isso continua sendo
+/// AdminSession + AdminUser.active) e some junto com a sessão.
+model AdminPresence {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId  String    @map("session_id") @db.Uuid
+  clientId   String    @map("client_id")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  endedAt    DateTime? @map("ended_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session AdminSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, clientId])
+  @@index([lastSeenAt])
+  @@map("admin_presence")
 }
 
 /// Fase 9 — auditoria de ações do painel que NÃO pertencem naturalmente

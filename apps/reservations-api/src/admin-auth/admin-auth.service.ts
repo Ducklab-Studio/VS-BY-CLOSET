@@ -127,8 +127,17 @@ export class AdminAuthService {
     let session;
     try {
       session = await this.prisma.adminSession.findUnique({ where: { tokenHash } });
-      if (session && !session.revokedAt) {
-        await this.prisma.adminSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+      if (session) {
+        const sessionId = session.id;
+        // Revoga e encerra a presença (online/offline) desta sessão juntos,
+        // sob o mesmo lock de linha do heartbeat (AdminPresenceService): um
+        // heartbeat concorrente ou termina antes e é encerrado aqui, ou espera
+        // e encontra a sessão revogada — o funcionário sai offline na hora.
+        await this.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM admin_sessions WHERE id = ${sessionId}::uuid FOR UPDATE`;
+          await tx.adminSession.updateMany({ where: { id: sessionId, revokedAt: null }, data: { revokedAt: new Date() } });
+          await tx.adminPresence.updateMany({ where: { sessionId, endedAt: null }, data: { endedAt: new Date() } });
+        });
       }
     } catch (err) {
       this.logger.error(`Falha ao revogar admin_session: ${errorCode(err)}`);
