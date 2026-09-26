@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { assertSafeTestDatabase, readProductionUrlFromEnvFile, type SafeDatabaseInput } from './safe-database';
 
 /**
  * Linha de base da suíte: loja aberta (sem data de início da operação).
@@ -8,23 +8,17 @@ import { PrismaClient } from '@prisma/client';
  * regra — com a data gravada, falhariam pelo motivo errado. Os testes da
  * regra definem a própria data e restauram `null` ao terminar.
  *
- * Só mexe em banco LOCAL de teste (mesma checagem das suítes de integração);
- * em qualquer outro banco não faz nada.
+ * Ordem obrigatória: 1) `assertSafeTestDatabase` (aborta a suíte se o banco
+ * não for explicitamente de teste — host local, host em
+ * `TEST_DATABASE_ALLOWED_HOSTS` ou banco `TESTE`, nunca o host/banco do `.env`
+ * de produção); 2) só então o baseline é aplicado. Por isso o baseline nunca
+ * roda em produção: quem não passa na trava nem chega aqui.
  */
-const LOCAL_TEST_DATABASE = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i;
-
-function isApprovedTestDatabase(raw: string): boolean {
-  if (LOCAL_TEST_DATABASE.test(raw)) return true;
-  try {
-    const databaseName = decodeURIComponent(new URL(raw).pathname.replace(/^\//, ''));
-    return databaseName.toUpperCase() === 'TESTE';
-  } catch {
-    return false;
-  }
-}
-
-export default async function setup(): Promise<void> {
-  if (!isApprovedTestDatabase(process.env.DATABASE_URL ?? '')) return;
+export async function applyRuleBaseline(): Promise<void> {
+  // Import dinâmico e SÓ depois da trava: importar '@prisma/client' carrega o
+  // `.env` em process.env, o que faria a checagem "definida explicitamente"
+  // enxergar a URL de produção como se tivesse sido passada de propósito.
+  const { PrismaClient } = await import('@prisma/client');
   const prisma = new PrismaClient();
   try {
     await prisma.$executeRaw`
@@ -43,4 +37,21 @@ export default async function setup(): Promise<void> {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+/** Separado do `default` para poder ser testado sem banco (baseline injetado). */
+export async function setupWith(input: SafeDatabaseInput, baseline: () => Promise<void>): Promise<void> {
+  assertSafeTestDatabase(input);
+  await baseline();
+}
+
+export default async function setup(): Promise<void> {
+  await setupWith(
+    {
+      databaseUrl: process.env.DATABASE_URL,
+      allowedHosts: process.env.TEST_DATABASE_ALLOWED_HOSTS,
+      productionUrls: readProductionUrlFromEnvFile(),
+    },
+    applyRuleBaseline,
+  );
 }
