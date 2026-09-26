@@ -96,7 +96,8 @@ export function EmployeesSection({
     };
     const first = setTimeout(() => setNow(Date.now()), 0);
     // A lista inicial vem do servidor antes do 1º heartbeat desta aba: uma
-    // atualização logo depois de abrir já traz o estado real.
+    // atualização logo depois de abrir já traz o estado real (inclusive o
+    // do próprio usuário — nada é forçado como Online aqui).
     const early = setTimeout(() => void refreshPresence(), 3_000);
     const timer = setInterval(() => void refreshPresence(), PRESENCE_POLL_MS);
     document.addEventListener('visibilitychange', onVisibility);
@@ -403,10 +404,7 @@ function EmployeeCard({
           </div>
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{employee.phone}</p>
           {/* Presença é separada de "Ativo": bloqueado/removido não tem presença, só o status da conta. */}
-          {!removed && employee.active ? (
-            // Quem está vendo esta tela está, por definição, no painel agora.
-            <PresenceIndicator presence={isSelf ? { adminUserId: employee.id, online: true, lastSeenAt: null } : presence} now={now} />
-          ) : null}
+          {!removed && employee.active ? <PresenceIndicator presence={presence} now={now} /> : null}
         </div>
 
         <StatusPill employee={employee} />

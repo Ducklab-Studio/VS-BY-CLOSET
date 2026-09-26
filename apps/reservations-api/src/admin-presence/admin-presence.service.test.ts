@@ -117,6 +117,26 @@ localDescribe('Presença online/offline do ClosetAdmin (Postgres local)', () => 
     expect(await statusOf(staff.id)).toMatchObject({ online: false });
   });
 
+  test('painel aberto mais de 10 min sem interação: heartbeats a cada 25 s mantêm Online o tempo todo', async () => {
+    const staff = await user();
+    const token = await login(staff);
+    const client = tab();
+    await presence.heartbeat(token, client);
+    // 11 minutos, um heartbeat a cada 25 s (a API não sabe nem quer saber de mouse/teclado).
+    for (let i = 0; i < Math.ceil((11 * 60) / 25); i++) {
+      await age(staff.id, 25);
+      expect(await statusOf(staff.id)).toMatchObject({ online: true });
+      await presence.heartbeat(token, client);
+    }
+    expect(await statusOf(staff.id)).toMatchObject({ online: true });
+    expect(await rowsOf(staff.id)).toBe(1);
+    // Parou de mandar (aba fechada sem aviso): Offline só depois do TTL.
+    await age(staff.id, PRESENCE_TTL_SECONDS - 5);
+    expect(await statusOf(staff.id)).toMatchObject({ online: true });
+    await age(staff.id, 6);
+    expect(await statusOf(staff.id)).toMatchObject({ online: false });
+  });
+
   test('volta ao painel → Online de novo (mesma aba ou aba nova)', async () => {
     const staff = await user();
     const token = await login(staff);

@@ -28,7 +28,102 @@ test('heartbeat bem dentro do TTL da API (90 s): cabe mais de um heartbeat perdi
   assert.equal(presence.PRESENCE_HEARTBEAT_MS, 25_000);
   assert.ok(presence.PRESENCE_HEARTBEAT_MS * 3 < 90_000);
   assert.ok(presence.PRESENCE_POLL_MS >= 10_000 && presence.PRESENCE_POLL_MS <= 15_000);
-  assert.equal(presence.PRESENCE_IDLE_MS, 10 * 60_000);
+  // Não existe mais tempo de inatividade: presença não depende de mouse/teclado.
+  assert.equal(presence.PRESENCE_IDLE_MS, undefined);
+});
+
+/** Aba simulada com relógio próprio: `tick()` = passar 25 s. */
+function fakeTab({ status = 204, beaconOk = true } = {}) {
+  const sent = [];
+  let intervalFn = null;
+  let intervalMs = null;
+  let cleared = false;
+  const state = { status };
+  const heartbeat = presence.startPresenceHeartbeat({
+    clientId: UUID,
+    post: async (body, keepalive) => {
+      sent.push({ ...JSON.parse(body), keepalive });
+      return state.status;
+    },
+    beacon: (body) => {
+      if (beaconOk) sent.push({ ...JSON.parse(body), beacon: true });
+      return beaconOk;
+    },
+    setInterval: (fn, ms) => {
+      intervalFn = fn;
+      intervalMs = ms;
+      return 'timer';
+    },
+    clearInterval: () => {
+      cleared = true;
+    },
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  return {
+    heartbeat,
+    sent,
+    state,
+    intervalMs: () => intervalMs,
+    cleared: () => cleared,
+    async tick(times = 1) {
+      for (let i = 0; i < times; i++) {
+        if (!cleared) intervalFn();
+        await flush();
+      }
+    },
+    flush,
+  };
+}
+
+test('painel aberto mais de 10 min SEM nenhuma interação continua mandando heartbeat e nunca avisa saída', async () => {
+  const tab = fakeTab();
+  await tab.flush();
+  assert.equal(tab.intervalMs(), 25_000);
+  const ticks = Math.ceil((11 * 60_000) / 25_000); // 11 minutos parado
+  await tab.tick(ticks);
+  const actions = tab.sent.map((s) => s.action);
+  assert.equal(actions.filter((a) => a === 'heartbeat').length, 1 + ticks); // o da abertura + um por intervalo
+  assert.equal(actions.includes('leave'), false);
+  assert.equal(tab.heartbeat.isStopped(), false);
+  // Continua depois disso também (ex.: 1 h aberto, minimizado).
+  await tab.tick(120);
+  assert.equal(tab.sent.filter((s) => s.action === 'heartbeat').length, 1 + ticks + 120);
+});
+
+test('sem conexão por um tempo: continua tentando e volta sozinho (o TTL da API cuida do status nesse meio-tempo)', async () => {
+  const tab = fakeTab();
+  await tab.flush();
+  tab.state.status = null; // rede caiu
+  await tab.tick(5);
+  tab.state.status = 204; // voltou
+  await tab.tick(1);
+  assert.equal(tab.heartbeat.isStopped(), false);
+  assert.equal(tab.sent.filter((s) => s.action === 'heartbeat').length, 7);
+});
+
+test('sessão inválida (401: logout em outra aba, bloqueio, expiração) para o heartbeat de vez, sem aviso de saída', async () => {
+  const tab = fakeTab({ status: 401 });
+  await tab.flush();
+  await tab.tick(10);
+  assert.equal(tab.heartbeat.isStopped(), true);
+  assert.equal(tab.sent.length, 1);
+  tab.heartbeat.stop();
+  assert.equal(tab.sent.some((s) => s.action === 'leave'), false);
+});
+
+test('fechar a aba avisa saída uma vez por beacon; sem beacon, cai para POST keepalive', async () => {
+  const withBeacon = fakeTab();
+  await withBeacon.flush();
+  withBeacon.heartbeat.stop();
+  withBeacon.heartbeat.stop();
+  assert.deepEqual(withBeacon.sent.filter((s) => s.action === 'leave'), [{ action: 'leave', clientId: UUID, beacon: true }]);
+  assert.equal(withBeacon.cleared(), true);
+
+  const noBeacon = fakeTab({ beaconOk: false });
+  await noBeacon.flush();
+  noBeacon.heartbeat.leave();
+  await noBeacon.flush();
+  assert.deepEqual(noBeacon.sent.filter((s) => s.action === 'leave'), [{ action: 'leave', clientId: UUID, keepalive: true }]);
 });
 
 test('"visto por último" em minutos, horas e dias; nada quando nunca apareceu', () => {
@@ -72,17 +167,21 @@ test('só a mesma origem do painel pode chamar a rota', () => {
   assert.equal(presence.isSameOriginRequest(headers({ 'sec-fetch-site': 'cross-site', host: 'vsbycloset.vercel.app' })), false);
 });
 
-test('o heartbeat do painel mantém as travas: saída por beacon, inatividade, 401 para, sem segredo no corpo', () => {
+test('o componente só liga eventos do navegador: nada de mouse/teclado, nada de segundo plano como saída', () => {
   const source = read('apps/marketing/src/components/closetadmin/PresenceHeartbeat.tsx');
+  assert.match(source, /startPresenceHeartbeat\(/);
   assert.match(source, /navigator\.sendBeacon\(ENDPOINT/);
-  assert.match(source, /keepalive: true/); // fallback se o beacon não sair
-  assert.match(source, /window\.addEventListener\('pagehide', leave\)/);
-  assert.match(source, /PRESENCE_IDLE_MS/);
-  assert.match(source, /res\.status === 401\) stopped = true/);
-  // Aba em segundo plano NÃO é saída: visibilitychange só conta como atividade ao voltar.
+  assert.match(source, /window\.addEventListener\('pagehide', onPageHide\)/);
+  // Presença não depende de interação: nenhum listener de mouse/teclado/toque/rolagem.
+  assert.doesNotMatch(source, /pointerdown|pointermove|mousemove|keydown|touchstart|wheel|'scroll'|IDLE|idle/i);
+  // Aba minimizada/em segundo plano NÃO é saída.
   assert.doesNotMatch(source, /visibilityState === 'hidden'/);
   // O corpo só leva ação e id da aba — nunca token, sessão ou id de funcionário.
-  assert.match(source, /JSON\.stringify\(\{ action, clientId \}\)/);
+  const lib = read('apps/marketing/src/lib/closetadmin-presence.ts');
+  assert.match(lib, /JSON\.stringify\(\{ action, clientId: deps\.clientId \}\)/);
+  // O heartbeat não olha relógio nem inatividade: nenhuma regra de "parado há X min".
+  const heartbeatFn = lib.slice(lib.indexOf('export function startPresenceHeartbeat'));
+  assert.doesNotMatch(heartbeatFn, /Date\.now|performance\.now|idle|IDLE|lastInteraction/);
   assert.doesNotMatch(source, /adminUserId|token|cookie/i);
 
   const route = read('apps/marketing/src/app/closetadmin/presence/route.ts');
