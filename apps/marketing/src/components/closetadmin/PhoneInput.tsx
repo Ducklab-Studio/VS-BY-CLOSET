@@ -3,10 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { CountryFlag } from './CountryFlag';
-import { DEFAULT_PHONE_COUNTRY, PHONE_COUNTRIES, composePhone, findPhoneCountry, formatNationalNumber } from '@/lib/closetadmin-phone';
+import {
+  DEFAULT_PHONE_COUNTRY,
+  PHONE_COUNTRIES,
+  composePhone,
+  countryCodeOf,
+  findPhoneCountry,
+  formatNationalNumber,
+  resolvePhoneInput,
+} from '@/lib/closetadmin-phone';
 
 const inputClass =
-  'w-full rounded-r-lg border border-ink/15 dark:border-white/15 bg-white dark:bg-dark-surface px-3.5 py-2.5 text-ink dark:text-dark-text outline-none transition focus:border-marsala dark:focus:border-gold focus:ring-2 focus:ring-marsala/20 dark:focus:ring-gold/20 placeholder:text-ink/40 dark:placeholder:text-dark-subtle disabled:opacity-60';
+  'w-full rounded-r-lg border border-ink/15 dark:border-white/15 bg-white dark:bg-dark-surface px-3.5 py-2.5 text-base sm:text-sm text-ink dark:text-dark-text outline-none transition focus:border-marsala dark:focus:border-gold focus:ring-2 focus:ring-marsala/20 dark:focus:ring-gold/20 placeholder:text-ink/40 dark:placeholder:text-dark-subtle disabled:opacity-60';
 
 /**
  * Campo de telefone com seletor de país (DDI) mostrando a bandeira real
@@ -14,6 +22,10 @@ const inputClass =
  * dropdown próprio. `value`/`onChange` trafegam a string completa já
  * composta ("+56 9 1234 5678"), mesmo formato que os DTOs do
  * reservations-api já esperavam — nenhuma mudança de contrato.
+ *
+ * Número colado com DDI ("+55 11 98765-4321") ou maior que o país
+ * selecionado troca o país sozinho (`resolvePhoneInput`) em vez de cortar
+ * dígitos em silêncio.
  */
 export function PhoneInput({
   name,
@@ -28,7 +40,7 @@ export function PhoneInput({
   disabled?: boolean;
   required?: boolean;
 }) {
-  const [countryCode, setCountryCode] = useState(DEFAULT_PHONE_COUNTRY.code);
+  const [countryCode, setCountryCode] = useState(() => countryCodeOf(value) ?? DEFAULT_PHONE_COUNTRY.code);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const country = findPhoneCountry(countryCode);
@@ -50,7 +62,9 @@ export function PhoneInput({
   }
 
   function handleNumberChange(raw: string) {
-    onChange(composePhone(countryCode, formatNationalNumber(raw, country)));
+    const next = resolvePhoneInput(raw, countryCode);
+    if (next.code !== countryCode) setCountryCode(next.code);
+    onChange(composePhone(next.code, next.national));
   }
 
   return (

@@ -11,11 +11,11 @@ export default async function ClosetAdminLoginPage() {
   if (session) redirect('/closetadmin');
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-sand/40 dark:bg-dark-bg px-4 transition-colors duration-200">
+    <div className="relative flex min-h-dvh items-center justify-center bg-sand/40 dark:bg-dark-bg px-4 py-16 transition-colors duration-200">
       <div className="absolute top-4 right-4 z-10">
         <AdminThemeToggle />
       </div>
-      <div className="w-full max-w-sm rounded-2xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card p-8 shadow-xl transition-colors">
+      <div className="w-full max-w-sm rounded-2xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card p-6 sm:p-8 shadow-xl transition-colors">
         <h1 className="font-heading text-2xl font-bold text-marsala dark:text-gold tracking-wide">ClosetAdmin</h1>
         <p className="mt-1 text-sm text-ink/60 dark:text-dark-muted">Painel operacional de aluguel — VS by Closet</p>
         <div className="mt-6">

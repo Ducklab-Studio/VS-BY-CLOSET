@@ -1,6 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { normalizePhone } from '../admin/admin-phone';
+import { normalizePhone, phoneLookupCandidates } from '../admin/admin-phone';
 import { verifyPin } from '../admin/admin-pin';
 import { generateSessionToken, hashSessionToken } from '../admin/admin-session-token';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
@@ -42,7 +42,10 @@ export class AdminAuthService {
 
     let user;
     try {
-      user = await this.prisma.adminUser.findUnique({ where: { phone } });
+      // Com e sem "+": um cadastro antigo pode ter sido gravado sem ele. Se
+      // existirem os dois, vale o que bate exatamente com o digitado.
+      const matches = await this.prisma.adminUser.findMany({ where: { phone: { in: phoneLookupCandidates(phone) } } });
+      user = matches.find((u) => u.phone === phone) ?? matches[0] ?? null;
     } catch (err) {
       this.logger.error(`Falha ao consultar admin_users: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível autenticar no momento.');
@@ -56,11 +59,11 @@ export class AdminAuthService {
     // parte da identificação: se não bate, é tratado com a MESMA
     // resposta genérica de PIN errado, nunca um erro diferente que
     // revelaria "o telefone existe, só o nome está errado".
-    if (user.name.trim().toLowerCase() !== dto.name.trim().toLowerCase()) {
+    if (!sameName(user.name, dto.name)) {
       await this.auditLoginFailure(user.id, dto.name, 'name_mismatch');
       throw genericError();
     }
-    if (!user.active) {
+    if (!user.active || user.removedAt) {
       await this.auditLoginFailure(user.id, dto.name, 'inactive');
       throw genericError();
     }
@@ -152,6 +155,13 @@ export class AdminAuthService {
       this.logger.error(`Falha ao registrar auditoria de login: ${errorCode(err)}`);
     }
   }
+}
+
+/** Nome só identifica, não protege: ignora maiúsculas, acentos e espaços
+ *  repetidos ("  José  Silva " = "jose silva"), nunca letras diferentes. */
+function sameName(stored: string, typed: string): boolean {
+  const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return fold(stored) === fold(typed);
 }
 
 function errorCode(err: unknown): string {

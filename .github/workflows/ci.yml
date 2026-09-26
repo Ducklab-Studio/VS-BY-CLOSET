@@ -38,7 +38,7 @@ jobs:
         run: pnpm lint
 
       - name: Checkout flow and legacy guards
-        run: node --test scripts/checkout-flow.test.mjs
+        run: node --test scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs
 
   reservations-api:
     name: API — typecheck, testes e build
