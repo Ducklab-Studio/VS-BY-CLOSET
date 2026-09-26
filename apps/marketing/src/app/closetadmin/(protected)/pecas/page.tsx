@@ -81,7 +81,9 @@ export default async function ClosetAdminPiecesPage() {
             </p>
           </div>
           {catalog ? (
-            <span className="text-xs text-ink/45 dark:text-dark-subtle">{catalog.length} variante(s)</span>
+            <span className="rounded-full bg-ink/5 px-2.5 py-1 text-xs font-medium text-ink/55 dark:bg-white/5 dark:text-dark-subtle">
+              {catalog.length} variante(s)
+            </span>
           ) : null}
         </div>
 
