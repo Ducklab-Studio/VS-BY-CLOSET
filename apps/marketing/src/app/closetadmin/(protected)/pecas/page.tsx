@@ -286,48 +286,79 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
         ) : pieces.length === 0 ? (
           <p className="mt-3 text-sm text-ink/55 dark:text-dark-muted">Nenhuma peça arquivada.</p>
         ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
-              <thead>
-                <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/65 dark:border-white/10 dark:text-dark-subtle">
-                  <th className="py-2 pr-4 font-medium">Código</th>
-                  <th className="py-2 pr-4 font-medium">Nome</th>
-                  <th className="py-2 pr-4 font-medium">SKU</th>
-                  <th className="py-2 pr-4 font-medium">Arquivada em</th>
-                  <th className="py-2 pr-4 font-medium">Próximas reservas</th>
-                  <th className="py-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink/5 dark:divide-white/5">
-                {pieces.map((piece) => {
-                  const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
-                  return (
-                    <tr key={piece.id}>
-                      <td className="py-2.5 pr-4 font-mono text-xs text-ink/70 dark:text-dark-muted">{piece.code}</td>
-                      <td className="py-2.5 pr-4 text-ink/80 dark:text-dark-text">{piece.name}</td>
-                      <td className="py-2.5 pr-4 font-mono text-xs">{piece.shopifySku ?? <SkuUnlinkedLabel />}</td>
-                      <td className="py-2.5 pr-4 text-xs text-ink/60 dark:text-dark-muted">
-                        {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}
-                      </td>
-                      <td className={`py-2.5 pr-4 text-xs ${piece.upcomingReservations > 0 ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-ink/60 dark:text-dark-muted'}`}>
-                        {piece.upcomingReservations > 0 ? `${piece.upcomingReservations} — revisar` : '0'}
-                      </td>
-                      <td className="py-2.5">
-                        {productUrl ? (
-                          <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
-                            Shopify <ExternalLink size={12} />
-                          </a>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* Arquivada = desvinculada: o SKU gravado (se sobrou de um arquivamento
+                antigo) nunca é mostrado nem enviado ao navegador. */}
+            <div className="mt-3 space-y-2 md:hidden">
+              {pieces.map((piece) => (
+                <div key={piece.id} className="rounded-lg border border-ink/10 p-3 dark:border-white/10">
+                  <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
+                  <p className="mt-0.5 text-sm text-ink/80 dark:text-dark-text">{piece.name}</p>
+                  <p className="mt-0.5 font-mono text-xs">
+                    <SkuUnlinkedLabel />
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink/60 dark:text-dark-muted">
+                    <span>Arquivada em {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}</span>
+                    <ArchivedUpcoming count={piece.upcomingReservations} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-3 hidden overflow-x-auto md:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wide text-ink/65 dark:border-white/10 dark:text-dark-subtle">
+                    <th className="py-2 pr-4 font-medium">Código</th>
+                    <th className="py-2 pr-4 font-medium">Nome</th>
+                    <th className="py-2 pr-4 font-medium">SKU</th>
+                    <th className="py-2 pr-4 font-medium">Arquivada em</th>
+                    <th className="py-2 pr-4 font-medium">Próximas reservas</th>
+                    <th className="py-2 font-medium" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink/5 dark:divide-white/5">
+                  {pieces.map((piece) => {
+                    const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
+                    return (
+                      <tr key={piece.id}>
+                        <td className="py-2.5 pr-4 font-mono text-xs text-ink/70 dark:text-dark-muted">{piece.code}</td>
+                        <td className="py-2.5 pr-4 text-ink/80 dark:text-dark-text">{piece.name}</td>
+                        <td className="py-2.5 pr-4 font-mono text-xs">
+                          <SkuUnlinkedLabel />
+                        </td>
+                        <td className="py-2.5 pr-4 text-xs text-ink/60 dark:text-dark-muted">
+                          {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}
+                        </td>
+                        <td className="py-2.5 pr-4 text-xs">
+                          <ArchivedUpcoming count={piece.upcomingReservations} />
+                        </td>
+                        <td className="py-2.5">
+                          {productUrl ? (
+                            <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
+                              Shopify <ExternalLink size={12} />
+                            </a>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </details>
+  );
+}
+
+/** Reserva futura de peça arquivada não é cancelada: fica em destaque para revisão. */
+function ArchivedUpcoming({ count }: { count: number }) {
+  return count > 0 ? (
+    <span className="font-medium text-amber-700 dark:text-amber-300">{count} próxima(s) reserva(s) — revisar</span>
+  ) : (
+    <span className="text-ink/60 dark:text-dark-muted">0</span>
   );
 }
 
