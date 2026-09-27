@@ -53,7 +53,7 @@ export function importShopifyUnits(
   return adminPost(path, input);
 }
 
-export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed';
+export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed' | 'variant_deleted_inactive';
 
 export interface CatalogDivergence {
   readonly kind: CatalogDivergenceKind;
@@ -61,7 +61,7 @@ export interface CatalogDivergence {
   readonly code: string;
   readonly name: string;
   readonly shopifyVariantId: string;
-  readonly action: 'deactivate' | 'reactivate' | 'sync_sku';
+  readonly action: 'deactivate' | 'reactivate' | 'sync_sku' | 'archive';
   readonly applied: boolean;
   readonly upcomingReservations: number;
   readonly note: string;
