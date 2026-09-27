@@ -279,8 +279,9 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
 
       <div className="border-t border-ink/5 px-4 pb-4 pt-3 dark:border-white/5">
         <p className="text-xs text-ink/60 dark:text-dark-muted">
-          Removidas, em rascunho ou arquivadas na Shopify. Não aparecem no site, na disponibilidade nem em reservas novas; o histórico
-          continua guardado. Voltam sozinhas para a lista principal quando a variante volta a ficar ativa na Shopify.
+          Excluídas, em rascunho ou arquivadas na Shopify. Não aparecem no site, na disponibilidade nem em reservas novas, e nunca são
+          apagadas: reservas, histórico e auditoria continuam guardados. Voltam sozinhas para a lista principal quando a variante volta a
+          ficar ativa na Shopify.
         </p>
 
         {!pieces ? (
