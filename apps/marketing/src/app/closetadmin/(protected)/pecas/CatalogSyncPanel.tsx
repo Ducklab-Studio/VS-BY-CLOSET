@@ -29,7 +29,7 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
     });
   }
 
-  const missing = report.divergences.filter((d) => d.kind === 'variant_missing' || d.kind === 'product_inactive');
+  const missing = report.divergences.filter((d) => d.kind === 'variant_missing' || d.kind === 'product_inactive' || d.kind === 'variant_deleted_inactive');
   const restored = report.divergences.filter((d) => d.kind === 'variant_restored');
   const skuChanged = report.divergences.filter((d) => d.kind === 'sku_changed');
 
@@ -66,7 +66,7 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300" />
               <div className="min-w-0">
                 <p className="font-medium text-amber-900 dark:text-amber-200">
-                  {d.code} — {d.name} {d.applied ? '(desativada)' : '(será desativada)'}
+                  {d.code} — {d.name} {d.kind === 'variant_deleted_inactive' ? (d.applied ? '(arquivada)' : '(será arquivada)') : d.applied ? '(desativada)' : '(será desativada)'}
                 </p>
                 <p className="mt-0.5 text-amber-800/80 dark:text-amber-300/80">{d.note}</p>
                 {d.upcomingReservations > 0 ? (

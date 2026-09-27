@@ -4,8 +4,8 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { ShopifyAdminClient, type ShopifyCatalogVariant } from './shopify-admin.client';
 
-export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed';
-export type CatalogDivergenceAction = 'deactivate' | 'reactivate' | 'sync_sku';
+export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed' | 'variant_deleted_inactive';
+export type CatalogDivergenceAction = 'deactivate' | 'reactivate' | 'sync_sku' | 'archive';
 
 export interface CatalogDivergence {
   readonly kind: CatalogDivergenceKind;
@@ -140,6 +140,12 @@ export class ShopifyCatalogSyncService {
         // nem cancele automaticamente" se estende ao mesmo espírito para
         // decisões humanas sobre a peça.
         divergent.push({ unit, kind: 'variant_restored', action: 'reactivate' });
+      } else if (!unit.active && !unit.shopifyVariantMissingAt && !variantById.has(variantId)) {
+        // Peça desativada à mão cuja variante sumiu da Shopify. Só é arquivada
+        // se a Shopify CONFIRMAR a exclusão (ver applyArchiveInactive): id de
+        // variante excluída nunca volta, então o marcador nunca leva a uma
+        // reativação automática que atropele a decisão humana.
+        divergent.push({ unit, kind: 'variant_deleted_inactive', action: 'archive' });
       } else if (!unit.shopifyVariantMissingAt) {
         // SKU: a Shopify é a fonte e o vínculo é SEMPRE o `shopifyVariantId`
         // (o SKU vem da variante lida na Admin API, nunca de payload de
@@ -158,6 +164,20 @@ export class ShopifyCatalogSyncService {
     const upcomingByUnit = missingIds.length > 0 ? await this.upcomingReservationCounts(missingIds) : new Map<string, number>();
 
     const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action }) => {
+      if (kind === 'variant_deleted_inactive') {
+        return {
+          kind,
+          rentalUnitId: unit.id,
+          code: unit.code,
+          name: unit.name,
+          shopifyVariantId: unit.shopifyVariantId as string,
+          action,
+          applied: false,
+          upcomingReservations: 0,
+          shopifyProductStatus: null,
+          note: 'Peça já desativada e produto/variante excluído da Shopify — vai para Peças arquivadas (nada é apagado).',
+        };
+      }
       if (kind === 'sku_changed') {
         const previousSku = normalizeSku(unit.shopifySku);
         const shopifySku = variantById.get(unit.shopifyVariantId as string)?.sku ?? null;
@@ -211,7 +231,9 @@ export class ShopifyCatalogSyncService {
             ? await this.applyDeactivate(d, options.actor)
             : d.action === 'sync_sku'
               ? await this.applySkuSync(d, divergent[i].unit.shopifySku, options.actor)
-              : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
+              : d.action === 'archive'
+                ? await this.applyArchiveInactive(d, options.actor)
+                : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
         if (applied) {
           divergences[i] = { ...d, applied: true };
           if (d.action === 'deactivate') deactivated++;
@@ -342,6 +364,50 @@ export class ShopifyCatalogSyncService {
       );
     } catch (err) {
       this.logger.error(`Falha ao desativar peça ${d.rentalUnitId} na sincronização de catálogo: ${errorCode(err)}`);
+      return false;
+    }
+  }
+
+  /** Peça desativada à mão (sem marcador) cuja variante foi EXCLUÍDA da
+   *  Shopify → arquivada: marcador + SKU desvinculado, `active` continua false.
+   *  Só com a Shopify confirmando, na própria variante, que ela não existe
+   *  (`getVariant` → null); lista incompleta ou erro na consulta = não mexe.
+   *  Nunca apaga nada; reservas, bloqueios e histórico ficam como estão. */
+  private async applyArchiveInactive(d: CatalogDivergence, actor?: { id: string; name: string }): Promise<boolean> {
+    try {
+      if ((await this.shopify.getVariant(d.shopifyVariantId)) !== null) return false;
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
+          const current = await tx.rentalUnit.findUnique({ where: { id: d.rentalUnitId }, select: { shopifySku: true } });
+          const updated = await tx.rentalUnit.updateMany({
+            where: { id: d.rentalUnitId, active: false, shopifyVariantMissingAt: null, shopifyVariantId: d.shopifyVariantId },
+            data: { shopifyVariantMissingAt: new Date(), shopifySku: null },
+          });
+          if (updated.count !== 1) return false;
+
+          await writeAdminAuditEvent(tx, {
+            adminUserId: actor?.id ?? null,
+            adminUserName: actor?.name ?? 'Sistema (sincronização de catálogo)',
+            action: 'CATALOG_UNIT_DEACTIVATED',
+            entityType: 'RentalUnit',
+            entityId: d.rentalUnitId,
+            before: { active: false, shopifySku: current?.shopifySku ?? null },
+            after: { active: false, shopifySku: null, archived: true },
+            detail: {
+              origin: 'shopify_catalog_sync',
+              reason: 'shopify_variant_deleted_confirmed',
+              note: 'peça já estava desativada manualmente',
+              code: d.code,
+              shopifyVariantId: d.shopifyVariantId,
+            },
+          });
+          return true;
+        },
+        { timeout: 15_000, maxWait: 5_000 },
+      );
+    } catch (err) {
+      this.logger.error(`Arquivamento da peça ${d.rentalUnitId} não concluído: ${errorCode(err)}`);
       return false;
     }
   }

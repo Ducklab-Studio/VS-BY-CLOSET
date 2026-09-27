@@ -37,13 +37,19 @@ const PHONE_TAG = `7${RUN}`;
 const SECRET = 'del-sync-test-webhook-secret';
 const originalSecret = process.env.SHOPIFY_CLIENT_SECRET;
 
+/** `getVariant` = consulta da própria variante. Por padrão falha (sem
+ *  confirmação); `confirmDeletions` faz a Shopify responder como a real:
+ *  a variante existe se estiver no catálogo (ou em `hiddenFromList`). */
 class FakeShopifyAdminClient {
   variants: ShopifyCatalogVariant[] = [];
+  hiddenFromList: ShopifyCatalogVariant[] = [];
+  confirmDeletions = false;
   async listVariants(): Promise<ShopifyCatalogVariant[]> {
     return this.variants;
   }
-  async getVariant(): Promise<ShopifyCatalogVariant | null> {
-    throw new Error('não usado nesta suíte');
+  async getVariant(id: string): Promise<ShopifyCatalogVariant | null> {
+    if (!this.confirmDeletions) throw new ServiceUnavailableException('Shopify indisponível (simulado).');
+    return [...this.variants, ...this.hiddenFromList].find((v) => v.id === id) ?? null;
   }
 }
 
@@ -169,6 +175,8 @@ beforeAll(async () => {
 });
 afterEach(() => {
   fake.variants = [];
+  fake.hiddenFromList = [];
+  fake.confirmDeletions = false;
 });
 afterAll(async () => {
   await cleanup();
@@ -383,6 +391,72 @@ describe('Produto/variante excluído da Shopify → arquivado no ClosetAdmin, nu
     expect(await unit(manual.id)).toMatchObject({ active: false, shopifyVariantMissingAt: null, shopifySku: manual.shopifySku });
     expect(await unit(live.id)).toMatchObject({ active: true });
     expect(await prisma.rentalUnit.count({ where: { shopifyVariantId: newVariant.id } })).toBe(0);
+  });
+});
+
+describe('Peça desativada à mão + produto excluído da Shopify (caso do Sobretudo)', () => {
+  async function manuallyInactive(name: string) {
+    const created = await product([name]);
+    const [u] = created.units;
+    await prisma.rentalUnit.update({ where: { id: u.id }, data: { active: false } }); // decisão humana, sem marcador
+    return { ...created, unit: u };
+  }
+
+  test('Shopify confirma a exclusão → vai para Peças arquivadas, continua inativa, nada é apagado', async () => {
+    const { number, unit: piece } = await manuallyInactive('Sobretudo');
+    const reservationId = await reservationFor(piece.id, 'returned', 5);
+    const before = await snapshotReservation(reservationId);
+    fake.variants = UNRELATED();
+    fake.confirmDeletions = true;
+
+    await deleteWebhook(number);
+
+    await expectArchived(piece);
+    expect((await pieces.list()).map((p) => p.id)).not.toContain(piece.id);
+    expect((await pieces.list({ archived: true })).map((p) => p.id)).toContain(piece.id);
+    const [archive] = await audits(piece.id, 'CATALOG_UNIT_DEACTIVATED');
+    expect(archive).toMatchObject({ before: { active: false, shopifySku: piece.shopifySku }, after: { active: false, shopifySku: null, archived: true } });
+    expect(archive.detail).toMatchObject({ reason: 'shopify_variant_deleted_confirmed', shopifyVariantId: piece.shopifyVariantId });
+    expect(await snapshotReservation(reservationId)).toEqual(before);
+  });
+
+  test('repetido é idempotente: um arquivamento, um evento', async () => {
+    const { number, unit: piece } = await manuallyInactive('Sobretudo');
+    fake.variants = UNRELATED();
+    fake.confirmDeletions = true;
+
+    await deleteWebhook(number);
+    await deleteWebhook(number);
+    const rerun = await reconcile([piece.id]);
+
+    expect(rerun.divergences).toHaveLength(0);
+    expect(await audits(piece.id, 'CATALOG_UNIT_DEACTIVATED')).toHaveLength(1);
+    await expectArchived(piece);
+  });
+
+  test('sem confirmação da Shopify (erro, ou a variante ainda existe fora da lista) → não mexe', async () => {
+    const { unit: piece } = await manuallyInactive('Sobretudo');
+    fake.variants = UNRELATED();
+
+    await reconcile([piece.id]); // getVariant falha
+    fake.confirmDeletions = true;
+    fake.hiddenFromList = liveVariants([piece]); // lista incompleta: a variante existe
+    const report = await reconcile([piece.id]);
+
+    expect(report.divergences.map((d) => [d.kind, d.applied])).toEqual([['variant_deleted_inactive', false]]);
+    expect(await unit(piece.id)).toMatchObject({ active: false, shopifyVariantMissingAt: null, shopifySku: piece.shopifySku });
+    expect(await audits(piece.id, 'CATALOG_UNIT_DEACTIVATED')).toHaveLength(0);
+  });
+
+  test('produto só em RASCUNHO/ARQUIVADO na Shopify (pode voltar) → decisão manual respeitada, não mexe', async () => {
+    const { unit: piece } = await manuallyInactive('Sobretudo');
+    fake.variants = liveVariants([piece], 'DRAFT');
+    fake.confirmDeletions = true;
+
+    const report = await reconcile([piece.id]);
+
+    expect(report.divergences).toHaveLength(0);
+    expect(await unit(piece.id)).toMatchObject({ active: false, shopifyVariantMissingAt: null });
   });
 });
 
