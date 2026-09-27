@@ -11,10 +11,14 @@ export interface ShopifyMappedUnit {
   readonly countsTowardRentalDuration: boolean;
 }
 
+/** Ver `SkuSyncStatus` na API (shopify-catalog.service.ts). */
+export type SkuSyncStatus = 'synced' | 'missing' | 'pending';
+
 export interface ShopifyCatalogItem {
   readonly id: string;
   readonly title: string;
   readonly sku: string | null;
+  readonly skuStatus: SkuSyncStatus;
   readonly inventoryQuantity: number | null;
   readonly imageUrl: string | null;
   readonly imageAlt: string | null;
@@ -49,7 +53,7 @@ export function importShopifyUnits(
   return adminPost(path, input);
 }
 
-export type CatalogDivergenceKind = 'variant_missing' | 'variant_restored';
+export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed';
 
 export interface CatalogDivergence {
   readonly kind: CatalogDivergenceKind;
@@ -57,10 +61,12 @@ export interface CatalogDivergence {
   readonly code: string;
   readonly name: string;
   readonly shopifyVariantId: string;
-  readonly action: 'deactivate' | 'reactivate';
+  readonly action: 'deactivate' | 'reactivate' | 'sync_sku';
   readonly applied: boolean;
   readonly upcomingReservations: number;
   readonly note: string;
+  readonly previousSku?: string | null;
+  readonly shopifySku?: string | null;
 }
 
 export interface CatalogSyncReport {

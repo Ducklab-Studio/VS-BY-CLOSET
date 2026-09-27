@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { CheckCircle2, Loader2, PackagePlus, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Loader2, PackagePlus, RefreshCw } from 'lucide-react';
 import { importShopifyUnitsAction } from './actions';
 
 interface CatalogItem {
   readonly id: string;
   readonly title: string;
   readonly sku: string | null;
+  readonly skuStatus: 'synced' | 'missing' | 'pending';
   readonly inventoryQuantity: number | null;
   readonly selectedOptions: readonly { name: string; value: string }[];
   readonly product: {
@@ -76,7 +77,7 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
             </span>
           </div>
           {variantLabel ? <p className="mt-0.5 text-sm text-ink/70 dark:text-dark-muted">{variantLabel}</p> : null}
-          <p className="mt-1 font-mono text-xs text-ink/50 dark:text-dark-subtle">SKU {item.sku ?? '—'}</p>
+          <SkuLine sku={item.sku} status={item.skuStatus} />
           {item.product.productType ? <p className="mt-1 text-xs text-ink/50 dark:text-dark-subtle">{item.product.productType}</p> : null}
         </div>
 
@@ -154,7 +155,7 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
           ) : null}
 
           <p className="mt-2 text-[11px] text-ink/45 dark:text-dark-subtle">
-            Separe vários códigos por vírgula. O estoque Shopify é apenas referência e não cria peças automaticamente.
+            Separe vários códigos por vírgula. O SKU e o estoque vêm da Shopify e são só referência: nenhum dos dois cria peças físicas automaticamente.
           </p>
           {message ? (
             <p className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
@@ -165,6 +166,29 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
         </div>
       ) : null}
     </article>
+  );
+}
+
+/** SKU atual da variante (lido da Shopify agora) + situação do vínculo com as
+ *  peças físicas. O SKU é sincronizado sozinho pela variante — nunca é digitado aqui. */
+function SkuLine({ sku, status }: { sku: string | null; status: CatalogItem['skuStatus'] }) {
+  const badge =
+    status === 'synced'
+      ? { icon: <CheckCircle2 size={11} />, text: 'SKU sincronizado', className: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' }
+      : status === 'missing'
+        ? { icon: <AlertTriangle size={11} />, text: 'SKU ausente', className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' }
+        : { icon: <Clock size={11} />, text: 'Sincronizando SKU', className: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300' };
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <p className="font-mono text-xs text-ink/50 dark:text-dark-subtle">SKU {sku ?? '—'}</p>
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
+        title={status === 'pending' ? 'Alguma peça física ainda guarda o SKU anterior; a próxima sincronização corrige sozinha.' : 'O SKU vem da Shopify e é atualizado automaticamente pela variante.'}
+      >
+        {badge.icon}
+        {badge.text}
+      </span>
+    </div>
   );
 }
 

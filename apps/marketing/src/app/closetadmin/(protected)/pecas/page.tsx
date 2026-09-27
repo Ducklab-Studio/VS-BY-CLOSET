@@ -10,6 +10,7 @@ import { PieceToggle } from './PieceToggle';
 import { PieceActiveToggle } from './PieceActiveToggle';
 import { ShopifyCatalog } from './ShopifyCatalog';
 import { CatalogSyncPanel } from './CatalogSyncPanel';
+import { RefreshOnFocus } from './RefreshOnFocus';
 import type { PieceListItem } from '@/lib/admin-data';
 
 export const metadata: Metadata = { title: 'Peças' };
@@ -70,6 +71,7 @@ export default async function ClosetAdminPiecesPage() {
         description={`${pieces.length} peça(s) física(s) no catálogo${archivedPieces?.length ? ` · ${archivedPieces.length} arquivada(s)` : ''}`}
       />
 
+      <RefreshOnFocus />
       {syncReport ? <CatalogSyncPanel initialReport={syncReport} isAdmin={isAdmin} /> : null}
 
       <section className="mb-8">
@@ -116,7 +118,7 @@ export default async function ClosetAdminPiecesPage() {
                         <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
                         <p className="mt-0.5 font-medium text-ink dark:text-dark-text">{piece.name}</p>
                         <p className="mt-0.5 font-mono text-xs text-ink/60 dark:text-dark-muted">
-                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : <>SKU {piece.shopifySku ?? '—'}</>}
+                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : piece.shopifySku ? <>SKU {piece.shopifySku}</> : <SkuMissingLabel />}
                         </p>
                       </div>
                       <StatusBadge piece={piece} />
@@ -201,7 +203,7 @@ export default async function ClosetAdminPiecesPage() {
                           {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">
-                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : (piece.shopifySku ?? '—')}
+                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : (piece.shopifySku ?? <SkuMissingLabel />)}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge piece={piece} />
@@ -384,6 +386,11 @@ function isSkuUnlinked(piece: PieceListItem): boolean {
 
 function SkuUnlinkedLabel() {
   return <span className="italic text-ink/40 dark:text-dark-subtle">SKU desvinculado</span>;
+}
+
+/** Peça vinculada, mas a variante está sem SKU na Shopify (nunca cadastrado ou removido). */
+function SkuMissingLabel() {
+  return <span className="italic text-amber-700 dark:text-amber-300">SKU ausente</span>;
 }
 
 /**

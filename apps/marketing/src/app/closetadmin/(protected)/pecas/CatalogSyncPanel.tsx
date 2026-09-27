@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Tag } from 'lucide-react';
 import { syncCatalogAction } from './actions';
 import type { CatalogSyncReport } from '@/lib/shopify-admin-data';
 
@@ -29,8 +29,9 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
     });
   }
 
-  const missing = report.divergences.filter((d) => d.kind === 'variant_missing');
+  const missing = report.divergences.filter((d) => d.kind === 'variant_missing' || d.kind === 'product_inactive');
   const restored = report.divergences.filter((d) => d.kind === 'variant_restored');
+  const skuChanged = report.divergences.filter((d) => d.kind === 'sku_changed');
 
   return (
     <div className="mb-8 rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
@@ -84,6 +85,17 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
                   {d.code} — {d.name} {d.applied ? '(reativada)' : '(pode ser reativada)'}
                 </p>
                 <p className="mt-0.5 text-emerald-800/80 dark:text-emerald-300/80">{d.note}</p>
+              </div>
+            </li>
+          ))}
+          {skuChanged.map((d) => (
+            <li key={d.rentalUnitId} className="flex flex-wrap items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-800/50 dark:bg-sky-950/30">
+              <Tag size={16} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-300" />
+              <div className="min-w-0">
+                <p className="font-medium text-sky-900 dark:text-sky-200">
+                  {d.code} — {d.name} {d.applied ? '(SKU atualizado)' : '(SKU será atualizado)'}
+                </p>
+                <p className="mt-0.5 text-sky-800/80 dark:text-sky-300/80">{d.note}</p>
               </div>
             </li>
           ))}
