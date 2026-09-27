@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Expand, Minus, Plus, X } from 'lucide-react'
 import { ProductImage } from './ProductImage';
 
 export function ProductGallery({ images, title }: {
-  images: { url: string; altText: string | null }[];
+  images: { url: string; altText: string | null; width?: number | null }[];
   title: string;
 }) {
   const [selected, setSelected] = useState(0);
@@ -31,13 +31,13 @@ export function ProductGallery({ images, title }: {
 
   return <section className="product-gallery" aria-label={`Fotos de ${title}`}>
     <button ref={trigger} type="button" className="gallery-main" aria-label={`Ampliar foto de ${title}`} onClick={() => { dialog.current?.showModal(); setOpen(true); }}>
-      <ProductImage src={photo.url} alt={photo.altText || title} fill sizes="(min-width: 1440px) 720px, (min-width: 768px) 50vw, 100vw" priority />
+      <ProductImage src={photo.url} originalWidth={photo.width} alt={photo.altText || title} fill sizes="(min-width: 1440px) 720px, (min-width: 768px) 50vw, 100vw" preload />
       <span className="gallery-expand" aria-hidden="true"><Expand size={18} /></span>
     </button>
     <div className="gallery-caption"><span>{title}</span><span aria-live="polite">{selected + 1} / {images.length}</span></div>
     {images.length > 1 && <div className="gallery-thumbnails" aria-label="Escolher foto">
       {images.map((img, index) => <button key={`${img.url}-${index}`} type="button" aria-label={`Ver foto ${index + 1} de ${title}`} aria-pressed={selected === index} onClick={() => setSelected(index)}>
-        <ProductImage src={img.url} alt={img.altText || `${title}, foto ${index + 1}`} fill sizes="80px" />
+        <ProductImage src={img.url} originalWidth={img.width} alt={img.altText || `${title}, foto ${index + 1}`} fill sizes="(min-width: 1024px) 76px, 64px" loading="lazy" />
       </button>)}
     </div>}
     <dialog ref={dialog} className="gallery-lightbox" aria-label={`Galeria ampliada de ${title}`} onClose={() => { setOpen(false); setZoomed(false); trigger.current?.focus(); }} onKeyDown={event => {
@@ -52,7 +52,7 @@ export function ProductGallery({ images, title }: {
         </div>
         <div className="lightbox-scroll" tabIndex={zoomed ? 0 : -1} role="region" aria-label="Foto ampliada">
           <div className={`lightbox-photo ${zoomed ? 'is-zoomed' : ''}`}>
-            <ProductImage src={photo.url} alt={photo.altText || title} fill sizes={zoomed ? '200vw' : '100vw'} />
+            <ProductImage src={photo.url} originalWidth={photo.width} alt={photo.altText || title} fill sizes={zoomed ? '200vw' : '100vw'} />
           </div>
         </div>
         {images.length > 1 && <div className="lightbox-navigation">

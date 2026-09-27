@@ -66,7 +66,8 @@ const csp = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "frame-src 'none'",
+  // Único iframe permitido: o mapa do rodapé ("Onde estamos no Chile").
+  "frame-src https://www.openstreetmap.org",
   "form-action 'self'",
   // `'unsafe-eval'` só no dev: o Fast Refresh do Next depende dele.
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,

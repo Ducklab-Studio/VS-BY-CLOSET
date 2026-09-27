@@ -85,8 +85,8 @@ export interface StorefrontProduct {
   description: string;
   /** Campo nativo da Shopify, preservado para exibição quando preenchido. */
   productType: string;
-  images?: { nodes: { url: string; altText: string | null }[] };
-  featuredImage: { url: string; altText: string | null } | null;
+  images?: { nodes: { url: string; altText: string | null; width?: number | null; height?: number | null }[] };
+  featuredImage: { url: string; altText: string | null; width?: number | null; height?: number | null } | null;
   priceRange: {
     minVariantPrice: { amount: string; currencyCode: string };
   };
@@ -99,7 +99,7 @@ const PRODUCT_FIELDS = `
   title
   description
   productType
-  featuredImage { url altText }
+  featuredImage { url altText width height }
   priceRange { minVariantPrice { amount currencyCode } }
 `;
 
@@ -109,7 +109,7 @@ export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct
   const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
     `query FeaturedProducts($first: Int!) {
       products(first: $first, sortKey: BEST_SELLING) {
-        nodes { ${PRODUCT_FIELDS} images(first: 2) { nodes { url altText } } }
+        nodes { ${PRODUCT_FIELDS} images(first: 2) { nodes { url altText width height } } }
       }
     }`,
     { first },
@@ -308,7 +308,7 @@ export interface StorefrontVariant {
 
 export interface StorefrontProductDetail extends Omit<StorefrontProduct, 'images' | 'variants'> {
   descriptionHtml: string;
-  images: { url: string; altText: string | null }[];
+  images: { url: string; altText: string | null; width?: number | null; height?: number | null }[];
   variants: StorefrontVariant[];
 }
 
@@ -318,7 +318,7 @@ export async function getProductDetail(handle: string): Promise<StorefrontProduc
       product(handle: $handle) {
         ${PRODUCT_FIELDS}
         descriptionHtml
-        images(first: 8) { nodes { url altText } }
+        images(first: 8) { nodes { url altText width height } }
         variants(first: 20) {
           nodes {
             id
@@ -338,7 +338,7 @@ export async function getProductDetail(handle: string): Promise<StorefrontProduc
   // A Storefront API devolve conexões (`{ nodes: [...] }`); achatamos aqui pra
   // que nenhum componente precise saber desse detalhe do GraphQL.
   const raw = data.product as unknown as {
-    images: { nodes: { url: string; altText: string | null }[] };
+    images: { nodes: { url: string; altText: string | null; width?: number | null; height?: number | null }[] };
     variants: { nodes: StorefrontVariant[] };
   };
 

@@ -116,7 +116,7 @@ export default async function PecasPage({
       ) : (
         <div className="catalog-grid">
           {products.map((product, index) => (
-            <ProductCard key={product.id} product={product} catalog priority={index < 2} />
+            <ProductCard key={product.id} product={product} catalog priority={index < 2} imageSizes={catalogImageSizes(products.length)} />
           ))}
         </div>
       )}
@@ -147,4 +147,11 @@ function CategoryPill({
       {children}
     </Link>
   );
+}
+
+/** A grade muda com a quantidade (catalog.css): 1 peça → 520px, 2 → 2 colunas de até 560px, mais → 3/4 colunas. */
+function catalogImageSizes(count: number): string | undefined {
+  if (count === 1) return '(min-width: 768px) 520px, 50vw';
+  if (count === 2) return '(min-width: 1120px) 560px, 50vw';
+  return undefined;
 }

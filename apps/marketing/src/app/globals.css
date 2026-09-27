@@ -43,7 +43,9 @@ body {
 .story-copy h2, .collection-heading h2 { font-size: clamp(40px, 4.6vw, 70px); margin: 24px 0; color: theme('colors.marsala.DEFAULT'); }
 .story-copy > p:not(.eyebrow) { max-width: 380px; line-height: 1.8; color: #6a615a; margin-bottom: 28px; }
 .editorial-link { display: inline-flex; align-items: center; gap: 24px; border-bottom: 1px solid #53131e66; padding-bottom: 10px; font-size: 14px; color: theme('colors.marsala.DEFAULT'); }
-.story-mark { position: relative; text-align: center; }
+.story-mark { position: relative; text-align: center; padding: 44px 0 8px; }
+/* Monograma oficial em 2D (vetor) — no lugar da antiga peça 3D. */
+.story-mark-logo { position: relative; display: block; width: auto; height: clamp(220px, 25vw, 340px); margin: 0 auto 34px; }
 .mark-orbit { position: absolute; inset: 5%; border: 1px solid #53131e22; border-radius: 50%; transform: rotate(-25deg) scaleX(.85); }
 .mark-caption { display: block; font-size: 12px; letter-spacing: .15em; color: #74655d; }
 .collection-section { padding: 75px max(24px, calc((100vw - 1280px)/2)) 100px; background: #f3eee6; scroll-margin-top: 110px; }
@@ -67,8 +69,7 @@ body {
  .hero-photo { min-height: 430px; }
  .photo-caption { flex-direction: column; gap: 8px; left: 24px; }
  .photo-credit { left: 24px; }
- .editorial-strip { flex-wrap: wrap; font-size: 12px; gap: 14px; }
- .editorial-strip span:last-child { display: none; }
+ .editorial-strip { flex-wrap: wrap; justify-content: center; font-size: 12px; gap: 10px 22px; padding: 22px 20px; }
  .brand-story { padding: 65px 24px; grid-template-columns: 1fr; gap: 25px; }
  .collection-section { padding: 55px 24px; }
  .collection-heading { display: block; }
@@ -123,7 +124,8 @@ body {
 
 /* Editorial footer in the original brand colors. */
 .closet-footer { background: #400f19; color: theme('colors.cream'); border-top: 1px solid #71434a; }
-.footer-inner { max-width: 1360px; margin-inline: auto; padding: 0 40px; }
+/* Rodapé de ponta a ponta: sem teto de largura, margens laterais proporcionais à tela. */
+.footer-inner { max-width: none; margin-inline: auto; padding: 0 clamp(40px, 5vw, 96px); }
 .footer-opening { display: flex; justify-content: space-between; align-items: center; gap: 40px; padding: 62px 0 52px; border-bottom: 1px solid #ffffff24; }
 .footer-eyebrow { color: #dfc4ac; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; margin-bottom: 21px; }
 .footer-opening h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(40px, 4.2vw, 64px); font-weight: 400; line-height: 1.07; letter-spacing: -.045em; }
@@ -131,18 +133,71 @@ body {
 .footer-explore { display: inline-flex; align-items: center; gap: 28px; font-size: 15px; padding: 12px 0; }
 .footer-arrow { display: grid; place-items: center; width: 62px; height: 62px; border: 1px solid #d8b89788; border-radius: 50%; color: #e7cdb2; transition: background .25s, color .25s, transform .25s; }
 .footer-explore:hover .footer-arrow { color: #400f19; background: #e7cdb2; transform: rotate(45deg); }
+/* Mapa "Onde estamos no Chile": texto curto à esquerda, mapa tingido no tom do rodapé. */
+.footer-map { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 42px; align-items: center; padding: 0 0 48px; }
+.footer-map-place { margin-top: 4px; font-family: Georgia, 'Times New Roman', serif; font-size: 24px; line-height: 1.25; color: #f6ecec; }
+.footer-map-city { margin-top: 6px; font-size: 14px; color: #ddc7c8; }
+.footer-map-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; font-size: 13px; color: #e7cdb2; text-decoration: underline; text-decoration-color: #e7cdb255; text-underline-offset: 6px; transition: color .25s, text-decoration-color .25s; }
+.footer-map-link:hover { color: #fff; text-decoration-color: #e7cdb2; }
+.footer-map-frame { position: relative; display: block; height: 240px; overflow: hidden; border: 1px solid #ffffff24; border-radius: 3px 18px 3px 3px; background: #2b0a11; transition: border-color .25s; }
+.footer-map-frame:hover { border-color: #dfc4ac88; }
+.footer-map-frame:focus-visible { outline: 2px solid #e7cdb2; outline-offset: 3px; }
+/* Iframe maior que a moldura, por igual nos lados: o centro (o ponto) não muda e os controles/rodapé do OSM ficam de fora. */
+.footer-map-frame iframe { position: absolute; left: -60px; top: -80px; width: calc(100% + 120px); height: calc(100% + 160px); border: 0; pointer-events: none; filter: grayscale(1) invert(.92) sepia(.55) hue-rotate(305deg) saturate(1.5) brightness(.82) contrast(1.05); }
+.footer-map-frame::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, #400f1999); }
+.footer-map-credit { position: absolute; right: 8px; bottom: 6px; z-index: 1; font-size: 10px; letter-spacing: .02em; color: #ddc7c8aa; }
+.footer-map-pin { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; border-radius: 50% 50% 50% 0; background: #e7cdb2; border: 2px solid #400f19; transform: translate(-50%, -100%) rotate(-45deg); box-shadow: 0 4px 10px #0008; z-index: 1; }
 .footer-navigation { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 42px; padding: 50px 0 48px; }
 .footer-logo { width: 158px; height: auto; }
 .footer-brand > p { color: #ddc7c8; font-size: 14px; line-height: 1.8; margin-top: 20px; }
 .footer-location { display: flex; align-items: center; gap: 8px; color: #dfc4ac; font-size: 12px; letter-spacing: .07em; margin-top: 19px; }
 .footer-contact { display: inline-flex; align-items: center; gap: 10px; margin-top: 24px; padding: 11px 14px; border: 1px solid #ffffff33; border-radius: 3px; font-size: 13px; transition: background .25s, border-color .25s; }
 .footer-contact:hover { background: #ffffff0d; border-color: #dfc4ac; }
+/* Instagram ao lado de "Vamos conversar": mesma borda e altura do botão. */
+.footer-instagram { display: inline-grid; place-items: center; width: 44px; height: 44px; margin: 24px 0 0 10px; vertical-align: top; border: 1px solid #ffffff33; border-radius: 3px; color: #f0dfe0; transition: background .25s, border-color .25s, color .25s; }
+.footer-instagram:hover { background: #ffffff0d; border-color: #dfc4ac; color: #fff; }
+.footer-instagram:focus-visible { outline: 2px solid #e7cdb2; outline-offset: 3px; }
 .footer-column h3 { color: #dfc4ac; font-size: 12px; font-weight: 400; letter-spacing: .12em; text-transform: uppercase; margin: 8px 0 25px; }
 .footer-column ul { display: flex; flex-direction: column; gap: 17px; }
 .footer-column a { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; line-height: 1.6; color: #f0dfe0; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 6px; transition: color .25s, text-decoration-color .25s; }
 .footer-column a:hover { color: #fff; text-decoration-color: #dfc4ac; }
-.footer-bottom { border-top: 1px solid #ffffff24; padding: 25px 0; display: flex; justify-content: space-between; align-items: center; gap: 20px; color: #ccb1b5; font-size: 12px; line-height: 1.7; }
-.footer-bottom > span { font-family: Georgia, serif; font-size: 15px; font-style: italic; color: #dfc4ac; }
+.footer-bottom { border-top: 1px solid #ffffff24; padding: 25px 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 20px; color: #ccb1b5; font-size: 12px; line-height: 1.7; }
+.footer-bottom > p { justify-self: start; }
+.footer-bottom > span { justify-self: end; font-family: Georgia, serif; font-size: 15px; font-style: italic; color: #dfc4ac; }
+/* Crédito "Desenvolvido por: Overframe" (mesmo selo usado nos outros projetos da Overframe). */
+.footer-credit {
+  --credit-ease: cubic-bezier(.22, .61, .36, 1);
+  position: relative; display: inline-flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 7px 13px; border: 1px solid transparent; border-radius: 14px; -webkit-tap-highlight-color: transparent;
+  transition: transform .35s var(--credit-ease), background-color .35s var(--credit-ease), border-color .35s var(--credit-ease), box-shadow .35s var(--credit-ease), opacity .7s var(--credit-ease);
+}
+.footer-credit-label { font-size: 11px; line-height: 1; color: #ccb1b5b3; transition: color .35s var(--credit-ease); }
+.footer-credit-mark { position: relative; display: block; line-height: 0; }
+.footer-credit-logo { width: auto; height: 34px; opacity: .92; transition: opacity .35s var(--credit-ease), filter .35s var(--credit-ease); }
+/* Reflexo que atravessa a logo, recortado no formato dela (máscara com o próprio PNG). */
+.footer-credit-mark::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(110deg, transparent 38%, #fff6 50%, transparent 62%) 130% 0 / 260% 100% no-repeat;
+  -webkit-mask: url('/overframe/logo-horizontal.png') center / contain no-repeat; mask: url('/overframe/logo-horizontal.png') center / contain no-repeat;
+  opacity: 0; transition: background-position 0s, opacity .2s;
+}
+/* Entrada ao aparecer na tela (uma vez) — FooterCredit controla data-reveal. */
+.footer-credit[data-reveal="pending"] { opacity: 0; transform: translateY(8px); }
+.footer-credit[data-reveal="shown"] { opacity: 1; transform: none; }
+@media (hover: hover) and (pointer: fine) {
+  .footer-credit:hover { transform: translateY(-2px); background-color: #ffffff08; border-color: #e7cdb238; box-shadow: 0 12px 26px -16px #000c, 0 0 18px -8px #e7cdb259; }
+  .footer-credit:hover .footer-credit-label { color: #e7cdb2; }
+  .footer-credit:hover .footer-credit-logo { opacity: 1; filter: brightness(1.08); }
+  .footer-credit:hover .footer-credit-mark::after { opacity: 1; background-position: -30% 0; transition: background-position .9s var(--credit-ease), opacity .2s; }
+}
+.footer-credit:focus-visible { outline: 2px solid #e7cdb2; outline-offset: 4px; border-color: #e7cdb238; background-color: #ffffff08; }
+.footer-credit:focus-visible .footer-credit-logo { opacity: 1; }
+/* Toque/clique: pressionamento curto, igual no celular (sem depender de hover). */
+.footer-credit:active { transform: translateY(0) scale(.98); background-color: #ffffff0d; border-color: #e7cdb22e; transition-duration: .12s; }
+@media (prefers-reduced-motion: reduce) {
+  .footer-credit, .footer-credit:hover, .footer-credit:active, .footer-credit[data-reveal] { transform: none !important; opacity: 1 !important; }
+  .footer-credit-mark::after { display: none; }
+}
 .storefront .closet-footer :focus-visible { outline-color: #e7cdb2; }
 @media(max-width: 950px) { .footer-navigation { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; } }
 @media(max-width: 580px) {
@@ -154,7 +209,12 @@ body {
  .footer-brand { grid-column: 1 / -1; padding-bottom: 28px; border-bottom: 1px solid #ffffff24; }
  .footer-column h3 { letter-spacing: .07em; margin-bottom: 18px; }
  .footer-column ul { gap: 14px; }
- .footer-bottom { flex-direction: column; align-items: start; gap: 9px; }
+ .footer-bottom { grid-template-columns: 1fr; justify-items: start; gap: 9px; }
+ .footer-bottom > span { justify-self: start; }
+ .footer-credit { justify-self: center; margin-block: 10px; }
+ .footer-map { grid-template-columns: 1fr; gap: 20px; }
+ .footer-map-frame { height: 200px; }
+ .footer-credit-logo { height: 30px; }
 }
 
 /* Privacy: clear reading hierarchy with a compact, anchored index. */
@@ -289,9 +349,16 @@ body {
 .contact-secondary .contact-channel { color: #816255; }
 .contact-secondary h2 { font-family: Georgia, serif; font-size: 34px; font-weight: 400; line-height: 1.13; letter-spacing: -.03em; margin: 28px 0 17px; }
 .contact-secondary > p { font-size: 15px; line-height: 1.8; color: #756158; }
-.contact-email { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 0 25px; font-size: 15px; overflow-wrap: anywhere; }
+.contact-gmail { display: flex; align-items: center; gap: 12px; margin-top: 22px; padding: 15px 18px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); border-radius: 3px 14px 3px 3px; font-size: 14px; transition: background .25s, transform .25s, box-shadow .25s; }
+.contact-gmail span { flex: 1; }
+.contact-gmail:hover { background: #6a1a28; transform: translateY(-2px); box-shadow: 0 10px 22px #53131e26; }
+.contact-gmail:active, .contact-primary:active { transform: translateY(0) scale(.985); transition-duration: .1s; }
+.contact-gmail:focus-visible, .contact-primary:focus-visible, .contact-email:focus-visible { outline: 2px solid #a77538; outline-offset: 4px; }
+.contact-email { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0 25px; font-size: 13px; color: #796256; overflow-wrap: anywhere; }
+.contact-email strong { display: block; margin-top: 4px; font-weight: 400; font-size: 15px; color: theme('colors.marsala.DEFAULT'); }
 .contact-email svg, .contact-faq svg { flex-shrink: 0; }
-.contact-email:hover { text-decoration: underline; text-underline-offset: 5px; }
+.contact-email:hover strong { text-decoration: underline; text-underline-offset: 5px; }
+@media (prefers-reduced-motion: reduce) { .contact-primary:hover, .contact-primary:active, .contact-gmail:hover, .contact-gmail:active { transform: none; } }
 .contact-faq { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #53131e22; padding-top: 21px; margin-top: auto; font-size: 13px; color: #796256; }
 .contact-faq strong { display: block; font-weight: 400; color: theme('colors.marsala.DEFAULT'); margin-top: 6px; font-size: 14px; }
 .contact-chile { display: flex; justify-content: space-between; align-items: center; gap: 30px; padding: 44px 5px 0; margin-top: 32px; border-top: 1px solid #53131e22; }

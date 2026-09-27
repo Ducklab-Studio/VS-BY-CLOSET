@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Menu, X, User, ArrowUpRight } from 'lucide-react';
 import { CartDrawer } from '@/components/CartDrawer';
-import { isStoreUrlConfigured, storeUrl } from '@/lib/shopify';
 
 const navLinks = [
   { href: '/pecas', label: 'Peças' },
@@ -49,14 +48,14 @@ export function Header() {
           {navLinks.map(link => <Link key={link.href} href={link.href} aria-current={pathname === link.href ? 'page' : undefined}>{link.label}</Link>)}
         </nav>
         <div className="boutique-actions">
-          {isStoreUrlConfigured && <a href={storeUrl('/account')} aria-label="Minha conta" className="boutique-account"><User size={20} strokeWidth={1.5} /></a>}
+          <Link href="/minhas-reservas" aria-label="Minhas reservas" className="boutique-account"><User size={20} strokeWidth={1.5} /></Link>
           <CartDrawer />
         </div>
       </div>
       {mobileOpen && <nav id="mobile-navigation" className="boutique-mobile-nav" aria-label="Menu mobile">
         <p className="boutique-menu-eyebrow">Seu closet em todas as estações</p>
         {navLinks.map((link, index) => <Link key={link.href} href={link.href} aria-current={pathname === link.href ? 'page' : undefined} onClick={() => setMobileOpen(false)}><span className="boutique-menu-number">0{index + 1}</span><span>{link.label}</span><ArrowUpRight size={19} strokeWidth={1.3} /></Link>)}
-        {isStoreUrlConfigured && <a href={storeUrl('/account')} className="boutique-mobile-account"><User size={18} strokeWidth={1.5} /><span>Minha conta e reservas</span><ArrowUpRight size={17} /></a>}
+        <Link href="/minhas-reservas" className="boutique-mobile-account" onClick={() => setMobileOpen(false)}><User size={18} strokeWidth={1.5} /><span>Minhas reservas</span></Link>
       </nav>}
     </header>
   );
