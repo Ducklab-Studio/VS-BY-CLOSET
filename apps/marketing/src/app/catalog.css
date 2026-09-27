@@ -108,6 +108,7 @@ button.gallery-main { cursor: zoom-in; }
   .storefront .cart-drawer { padding-inline: 28px; }
 }
 @media (max-width: 767px) {
+  .storefront .cart-drawer { width: 70vw; } /* carrinho cobre só 70% da tela no mobile */
   .product-gallery .gallery-main { max-height: 480px; }
   .product-detail-info > .mt-8 { margin-top: 24px; }
   .product-detail-info > p:last-child { color: #65594f; }
