@@ -43,7 +43,9 @@ body {
 .story-copy h2, .collection-heading h2 { font-size: clamp(40px, 4.6vw, 70px); margin: 24px 0; color: theme('colors.marsala.DEFAULT'); }
 .story-copy > p:not(.eyebrow) { max-width: 380px; line-height: 1.8; color: #6a615a; margin-bottom: 28px; }
 .editorial-link { display: inline-flex; align-items: center; gap: 24px; border-bottom: 1px solid #53131e66; padding-bottom: 10px; font-size: 14px; color: theme('colors.marsala.DEFAULT'); }
-.story-mark { position: relative; text-align: center; }
+.story-mark { position: relative; text-align: center; padding: 44px 0 8px; }
+/* Monograma oficial em 2D (vetor) — no lugar da antiga peça 3D. */
+.story-mark-logo { position: relative; display: block; width: auto; height: clamp(220px, 25vw, 340px); margin: 0 auto 34px; }
 .mark-orbit { position: absolute; inset: 5%; border: 1px solid #53131e22; border-radius: 50%; transform: rotate(-25deg) scaleX(.85); }
 .mark-caption { display: block; font-size: 12px; letter-spacing: .15em; color: #74655d; }
 .collection-section { padding: 75px max(24px, calc((100vw - 1280px)/2)) 100px; background: #f3eee6; scroll-margin-top: 110px; }
@@ -67,8 +69,7 @@ body {
  .hero-photo { min-height: 430px; }
  .photo-caption { flex-direction: column; gap: 8px; left: 24px; }
  .photo-credit { left: 24px; }
- .editorial-strip { flex-wrap: wrap; font-size: 12px; gap: 14px; }
- .editorial-strip span:last-child { display: none; }
+ .editorial-strip { flex-wrap: wrap; justify-content: center; font-size: 12px; gap: 10px 22px; padding: 22px 20px; }
  .brand-story { padding: 65px 24px; grid-template-columns: 1fr; gap: 25px; }
  .collection-section { padding: 55px 24px; }
  .collection-heading { display: block; }

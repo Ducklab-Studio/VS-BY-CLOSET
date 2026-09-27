@@ -3,7 +3,6 @@ import Image from 'next/image';
 import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { EditorialMotion } from '@/components/EditorialMotion';
-import { Hero3D } from '@/components/Hero3D';
 
 export default function HomePage() {
   return (
@@ -33,10 +32,10 @@ export default function HomePage() {
         </div>
         <a className="scroll-cue" href="#colecao"><ArrowDown size={16} /> Descubra o closet de toda estação</a>
       </section>
-      <div className="editorial-strip"><span>Menos bagagem.</span><span aria-hidden="true">✳</span><span>Mais histórias.</span><span aria-hidden="true">✳</span><span>Seu closet no Chile.</span></div>
+      <div className="editorial-strip"><span>Menos bagagem.</span><span>Mais histórias.</span><span>Seu closet no Chile.</span></div>
       <section className="brand-story" aria-labelledby="story-title">
         <div className="story-copy"><p className="eyebrow">Feito para viver lá fora</p><h2 id="story-title">Leve a viagem.<br /><em>Deixe o closet<br />com a gente.</em></h2><p>De dia quente a noite fria — Santiago muda em poucas horas, em qualquer época do ano. Encontre as peças que combinam com você e reserve para as datas da sua viagem.</p><Link href="/como-funciona" className="editorial-link">Descubra como funciona <ArrowUpRight size={18} /></Link></div>
-        <div className="story-mark"><span className="mark-orbit" aria-hidden="true" /><Hero3D /><span className="mark-caption">VS BY CLOSET / SEU CLOSET EM TODAS AS ESTAÇÕES</span></div>
+        <div className="story-mark"><span className="mark-orbit" aria-hidden="true" /><Image src="/brand/logo-mark.svg" alt="VS by Closet" width={335} height={380} unoptimized className="story-mark-logo" /><span className="mark-caption">VS BY CLOSET / SEU CLOSET EM TODAS AS ESTAÇÕES</span></div>
       </section>
       <section id="colecao" className="collection-section">
         <div className="collection-heading" data-reveal><div><p className="eyebrow">A seleção do closet</p><h2>Prontas para a sua<br /><em>próxima história.</em></h2></div><Link href="/pecas" className="editorial-link">Ver todas as peças <ArrowUpRight size={18} /></Link></div>
