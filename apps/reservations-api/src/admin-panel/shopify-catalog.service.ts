@@ -13,7 +13,18 @@ export interface ShopifyMappedUnit {
   readonly countsTowardRentalDuration: boolean;
 }
 
+/**
+ * SKU da variante no painel. A Shopify é a fonte; as peças guardam uma cópia
+ * vinculada pelo `shopifyVariantId`, atualizada pela sincronização de catálogo
+ * (webhook de produto + reconciliação periódica).
+ *  - `synced`: a variante tem SKU e toda peça vinculada (não arquivada) já tem o mesmo;
+ *  - `missing`: a variante está sem SKU na Shopify;
+ *  - `pending`: alguma peça ainda guarda outro SKU — a próxima sincronização corrige.
+ */
+export type SkuSyncStatus = 'synced' | 'missing' | 'pending';
+
 export interface ShopifyCatalogItem extends ShopifyCatalogVariant {
+  readonly skuStatus: SkuSyncStatus;
   readonly mappedUnits: readonly ShopifyMappedUnit[];
   readonly physicalUnitsTotal: number;
   readonly physicalUnitsActive: number;
@@ -58,6 +69,8 @@ export class ShopifyCatalogService {
           reservableOnline: true,
           countsTowardRentalDuration: true,
           shopifyVariantId: true,
+          shopifySku: true,
+          shopifyVariantMissingAt: true,
         },
         orderBy: { code: 'asc' },
       });
@@ -67,17 +80,26 @@ export class ShopifyCatalogService {
     }
 
     const byVariant = new Map<string, ShopifyMappedUnit[]>();
+    // SKUs gravados nas peças não arquivadas de cada variante.
+    const storedSkus = new Map<string, Set<string | null>>();
     for (const unit of units) {
       if (!unit.shopifyVariantId) continue;
       const list = byVariant.get(unit.shopifyVariantId) ?? [];
       list.push(stripVariantId(unit));
       byVariant.set(unit.shopifyVariantId, list);
+      if (!unit.shopifyVariantMissingAt) {
+        const skus = storedSkus.get(unit.shopifyVariantId) ?? new Set<string | null>();
+        skus.add(unit.shopifySku?.trim() || null);
+        storedSkus.set(unit.shopifyVariantId, skus);
+      }
     }
 
     return variants.map((variant) => {
       const mappedUnits = byVariant.get(variant.id) ?? [];
+      const pending = [...(storedSkus.get(variant.id) ?? [])].some((sku) => sku !== variant.sku);
       return {
         ...variant,
+        skuStatus: !variant.sku ? 'missing' : pending ? 'pending' : 'synced',
         mappedUnits,
         physicalUnitsTotal: mappedUnits.length,
         physicalUnitsActive: mappedUnits.filter((unit) => unit.active).length,
@@ -176,7 +198,11 @@ export class ShopifyCatalogService {
   }
 }
 
-type ShopifyMappedUnitWithVariant = ShopifyMappedUnit & { readonly shopifyVariantId: string | null };
+type ShopifyMappedUnitWithVariant = ShopifyMappedUnit & {
+  readonly shopifyVariantId: string | null;
+  readonly shopifySku: string | null;
+  readonly shopifyVariantMissingAt: Date | null;
+};
 
 function stripVariantId(unit: ShopifyMappedUnitWithVariant): ShopifyMappedUnit {
   return {
