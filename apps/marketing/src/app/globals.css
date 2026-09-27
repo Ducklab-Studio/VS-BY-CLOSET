@@ -290,9 +290,16 @@ body {
 .contact-secondary .contact-channel { color: #816255; }
 .contact-secondary h2 { font-family: Georgia, serif; font-size: 34px; font-weight: 400; line-height: 1.13; letter-spacing: -.03em; margin: 28px 0 17px; }
 .contact-secondary > p { font-size: 15px; line-height: 1.8; color: #756158; }
-.contact-email { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 18px 0 25px; font-size: 15px; overflow-wrap: anywhere; }
+.contact-gmail { display: flex; align-items: center; gap: 12px; margin-top: 22px; padding: 15px 18px; background: theme('colors.marsala.DEFAULT'); color: theme('colors.cream'); border-radius: 3px 14px 3px 3px; font-size: 14px; transition: background .25s, transform .25s, box-shadow .25s; }
+.contact-gmail span { flex: 1; }
+.contact-gmail:hover { background: #6a1a28; transform: translateY(-2px); box-shadow: 0 10px 22px #53131e26; }
+.contact-gmail:active, .contact-primary:active { transform: translateY(0) scale(.985); transition-duration: .1s; }
+.contact-gmail:focus-visible, .contact-primary:focus-visible, .contact-email:focus-visible { outline: 2px solid #a77538; outline-offset: 4px; }
+.contact-email { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0 25px; font-size: 13px; color: #796256; overflow-wrap: anywhere; }
+.contact-email strong { display: block; margin-top: 4px; font-weight: 400; font-size: 15px; color: theme('colors.marsala.DEFAULT'); }
 .contact-email svg, .contact-faq svg { flex-shrink: 0; }
-.contact-email:hover { text-decoration: underline; text-underline-offset: 5px; }
+.contact-email:hover strong { text-decoration: underline; text-underline-offset: 5px; }
+@media (prefers-reduced-motion: reduce) { .contact-primary:hover, .contact-primary:active, .contact-gmail:hover, .contact-gmail:active { transform: none; } }
 .contact-faq { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #53131e22; padding-top: 21px; margin-top: auto; font-size: 13px; color: #796256; }
 .contact-faq strong { display: block; font-weight: 400; color: theme('colors.marsala.DEFAULT'); margin-top: 6px; font-size: 14px; }
 .contact-chile { display: flex; justify-content: space-between; align-items: center; gap: 30px; padding: 44px 5px 0; margin-top: 32px; border-top: 1px solid #53131e22; }

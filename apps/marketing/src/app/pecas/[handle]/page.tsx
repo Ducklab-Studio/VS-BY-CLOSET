@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { OFFICIAL_WHATSAPP } from '@/lib/contact';
 import { ProductGallery } from '@/components/ProductGallery';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -156,7 +157,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
                 key={variant.id}
                 variant={variant}
                 productTitle={product.title}
-                whatsapp={process.env.NEXT_PUBLIC_WHATSAPP}
+                whatsapp={OFFICIAL_WHATSAPP}
               />
             )}
           </div>

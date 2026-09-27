@@ -1,17 +1,34 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowUpRight, ArrowLeft, MessageCircle, Mail, MapPin, MoveUpRight } from 'lucide-react';
+import { ArrowUpRight, ArrowLeft, Mail, MapPin, MoveUpRight } from 'lucide-react';
+import { OFFICIAL_WHATSAPP } from '@/lib/contact';
 
 export const metadata: Metadata = {
   title: 'Contato',
   description: 'Tire suas dúvidas sobre peças, tamanhos e reservas com a VS by Closet.',
 };
 
+const WHATSAPP_MESSAGE = 'Olá, gostaria de tirar uma dúvida sobre uma peça ou reserva.';
+const CONTACT_EMAIL = 'contato@vsbycloset.com';
+const EMAIL_SUBJECT = 'Contato — VS by Closet';
+const EMAIL_BODY = 'Olá, gostaria de falar sobre uma peça ou reserva.';
+
+/** Ícone simples do WhatsApp (traço, no mesmo estilo dos ícones lucide do site). */
+function WhatsAppIcon({ size = 26 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3.5 20.5l1.3-4.1A8.5 8.5 0 1 1 8 19.5z" />
+      <path d="M9.2 8.6c.2-.5.5-.6.8-.6h.5c.2 0 .4.1.5.4l.6 1.5c.1.2 0 .5-.1.6l-.5.6c.6 1.2 1.6 2.2 2.8 2.8l.6-.5c.2-.2.4-.2.6-.1l1.5.6c.3.1.4.3.4.5v.5c0 .3-.1.6-.6.8-.6.3-1.5.4-2.6-.1a9 9 0 0 1-4.5-4.4c-.4-1.1-.3-2 .0-2.6z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export default function ContactPage() {
-  const phone = process.env.NEXT_PUBLIC_WHATSAPP?.replace(/\D/g, '');
-  const whatsapp = phone && phone !== '56900000000' ? `https://wa.me/${phone}` : null;
-  const email = 'mailto:contato@vsbycloset.com';
+  const phone = OFFICIAL_WHATSAPP?.replace(/\D/g, '');
+  const whatsapp = phone && phone !== '56900000000' ? `https://wa.me/${phone}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}` : null;
+  const email = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(EMAIL_SUBJECT)}&body=${encodeURIComponent(EMAIL_BODY)}`;
+  const gmail = `https://mail.google.com/mail/?view=cm&fs=1&to=${CONTACT_EMAIL}&su=${encodeURIComponent(EMAIL_SUBJECT)}&body=${encodeURIComponent(EMAIL_BODY)}`;
   return (
     <div className="contact-editorial">
       <div className="contact-container">
@@ -22,16 +39,17 @@ export default function ContactPage() {
         </header>
         <div className="contact-cards">
           <a href={whatsapp ?? email} target={whatsapp ? '_blank' : undefined} rel={whatsapp ? 'noopener noreferrer' : undefined} className="contact-primary">
-            <div className="contact-card-top"><span className="contact-icon">{whatsapp ? <MessageCircle size={26} strokeWidth={1.4} /> : <Mail size={26} strokeWidth={1.4} />}</span><span className="contact-channel">{whatsapp ? 'Pelo WhatsApp' : 'Por e-mail'}</span></div>
+            <div className="contact-card-top"><span className="contact-icon">{whatsapp ? <WhatsAppIcon /> : <Mail size={26} strokeWidth={1.4} />}</span><span className="contact-channel">{whatsapp ? 'Pelo WhatsApp' : 'Por e-mail'}</span></div>
             <h2>Vamos encontrar<br /><em>o seu próximo look?</em></h2>
             <p>Tire suas dúvidas sobre tamanhos, disponibilidade e os detalhes da sua reserva.</p>
-            <div className="contact-card-action"><span>{whatsapp ? 'Conversar no WhatsApp' : 'Falar com nosso time'}</span><span className="contact-action-arrow"><ArrowUpRight size={24} strokeWidth={1.5} /></span></div>
+            <div className="contact-card-action"><span>{whatsapp ? 'Falar pelo WhatsApp' : 'Falar com nosso time'}</span><span className="contact-action-arrow"><ArrowUpRight size={24} strokeWidth={1.5} /></span></div>
           </a>
           <div className="contact-secondary">
             <div className="contact-card-top"><span className="contact-icon"><Mail size={23} strokeWidth={1.4} /></span><span className="contact-channel">Cada detalhe importa</span></div>
             <h2>Prefere escrever<br />com calma?</h2>
             <p>Envie sua mensagem e conte como podemos ajudar com a sua viagem.</p>
-            <a href={email} className="contact-email">contato@vsbycloset.com <ArrowUpRight size={18} /></a>
+            <a href={gmail} target="_blank" rel="noopener noreferrer" className="contact-gmail" aria-label="Enviar pelo Gmail (abre em nova aba)"><Mail size={18} strokeWidth={1.5} /><span>Enviar pelo Gmail</span><ArrowUpRight size={17} /></a>
+            <a href={email} className="contact-email"><span>ou pelo seu app de e-mail<strong>{CONTACT_EMAIL}</strong></span><ArrowUpRight size={18} /></a>
             <Link href="/faq" className="contact-faq"><span>Dúvidas rápidas?<strong>Veja as perguntas frequentes</strong></span><ArrowUpRight size={20} strokeWidth={1.5} /></Link>
           </div>
         </div>
