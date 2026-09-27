@@ -163,6 +163,7 @@ export class WebhooksService {
         return this.handleOrderDeleted(tx, payload as { id: number | string });
       case 'refunds/create':
         return this.handleRefundCreated(tx, payload as ShopifyRefundPayload);
+      case 'products/create':
       case 'products/update':
       case 'products/delete':
         if (!this.catalogSync) {
@@ -172,6 +173,9 @@ export class WebhooksService {
         // de produto pode não conter todas as variantes e o delete já não
         // permite consultá-las diretamente. A proteção contra resposta
         // Shopify vazia continua no serviço de reconciliação.
+        // SKU (criado/alterado/removido) também entra por aqui: o payload só
+        // diz QUAL produto mudou; o SKU aplicado é sempre o lido na Admin API
+        // pela própria variante (`shopifyVariantId`), nunca o do corpo.
         const productId = (payload as { id?: unknown } | null)?.id;
         await this.catalogSync.reconcile({ apply: true, shopifyProductId: productId == null ? undefined : String(productId) });
         return {

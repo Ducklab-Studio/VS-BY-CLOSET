@@ -6,8 +6,9 @@ const MIN_INTERVAL_MINUTES = 5;
 
 /**
  * Reconciliação automática do catálogo Shopify ↔ peças físicas. É a rede de
- * segurança do webhook `products/update`/`products/delete`: se um webhook se
- * perder, a peça ainda é arquivada (ou reativada) na próxima rodada.
+ * segurança do webhook `products/create`/`products/update`/`products/delete`:
+ * se um webhook se perder, a peça ainda é arquivada (ou reativada) e o SKU
+ * corrigido na próxima rodada.
  *
  * Mesma lógica e mesmas travas da reconciliação manual do painel (lock por
  * peça, UPDATE condicional, idempotente, aborta se a Shopify responder vazio).

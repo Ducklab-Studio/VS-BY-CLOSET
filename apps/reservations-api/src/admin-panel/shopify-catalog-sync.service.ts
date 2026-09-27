@@ -4,8 +4,8 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
 import { ShopifyAdminClient, type ShopifyCatalogVariant } from './shopify-admin.client';
 
-export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored';
-export type CatalogDivergenceAction = 'deactivate' | 'reactivate';
+export type CatalogDivergenceKind = 'variant_missing' | 'product_inactive' | 'variant_restored' | 'sku_changed';
+export type CatalogDivergenceAction = 'deactivate' | 'reactivate' | 'sync_sku';
 
 export interface CatalogDivergence {
   readonly kind: CatalogDivergenceKind;
@@ -20,6 +20,10 @@ export interface CatalogDivergence {
   /** Status do produto na Shopify quando a variante ainda existe (DRAFT,
    *  ARCHIVED…); `null` quando a variante sumiu de vez. */
   readonly shopifyProductStatus: string | null;
+  /** Só em `sku_changed`: SKU gravado na peça e SKU atual da variante na
+   *  Shopify (`null` = sem SKU / SKU removido). */
+  readonly previousSku?: string | null;
+  readonly shopifySku?: string | null;
 }
 
 export interface CatalogSyncReport {
@@ -39,6 +43,13 @@ interface LinkedUnit {
   readonly active: boolean;
   readonly shopifyVariantId: string | null;
   readonly shopifyVariantMissingAt: Date | null;
+  readonly shopifySku: string | null;
+}
+
+/** SKU vazio ou só com espaços vale o mesmo que "sem SKU" (mesma regra do
+ *  ShopifyAdminClient ao ler a variante). */
+function normalizeSku(sku: string | null | undefined): string | null {
+  return sku?.trim() || null;
 }
 
 function isLiveShopifyVariant(variant: { id: string; product: { status: string } }): boolean {
@@ -91,7 +102,7 @@ export class ShopifyCatalogSyncService {
         ...(options.rentalUnitIds ? { id: { in: [...options.rentalUnitIds] } } : {}),
         ...(productIds ? { shopifyProductId: { in: productIds } } : {}),
       },
-      select: { id: true, code: true, name: true, active: true, shopifyVariantId: true, shopifyVariantMissingAt: true },
+      select: { id: true, code: true, name: true, active: true, shopifyVariantId: true, shopifyVariantMissingAt: true, shopifySku: true },
       orderBy: { code: 'asc' },
     });
 
@@ -129,13 +140,47 @@ export class ShopifyCatalogSyncService {
         // nem cancele automaticamente" se estende ao mesmo espírito para
         // decisões humanas sobre a peça.
         divergent.push({ unit, kind: 'variant_restored', action: 'reactivate' });
+      } else if (!unit.shopifyVariantMissingAt) {
+        // SKU: a Shopify é a fonte e o vínculo é SEMPRE o `shopifyVariantId`
+        // (o SKU vem da variante lida na Admin API, nunca de payload de
+        // webhook). Só vale para peça não arquivada pela sincronização —
+        // arquivada fica com SKU desvinculado de propósito, e a reativação
+        // já relê o SKU. Peça inativa por decisão manual também acompanha
+        // o SKU (só o dado comercial; `active` não é tocado).
+        const shopifyVariant = variantById.get(variantId);
+        if (shopifyVariant && normalizeSku(unit.shopifySku) !== shopifyVariant.sku) {
+          divergent.push({ unit, kind: 'sku_changed', action: 'sync_sku' });
+        }
       }
     }
 
     const missingIds = divergent.filter((d) => d.action === 'deactivate').map((d) => d.unit.id);
     const upcomingByUnit = missingIds.length > 0 ? await this.upcomingReservationCounts(missingIds) : new Map<string, number>();
 
-    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action }) => ({
+    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action }) => {
+      if (kind === 'sku_changed') {
+        const previousSku = normalizeSku(unit.shopifySku);
+        const shopifySku = variantById.get(unit.shopifyVariantId as string)?.sku ?? null;
+        return {
+          kind,
+          rentalUnitId: unit.id,
+          code: unit.code,
+          name: unit.name,
+          shopifyVariantId: unit.shopifyVariantId as string,
+          action,
+          applied: false,
+          upcomingReservations: 0,
+          shopifyProductStatus: variantById.get(unit.shopifyVariantId as string)?.product.status ?? null,
+          previousSku,
+          shopifySku,
+          note: !shopifySku
+            ? 'SKU removido na Shopify — peça segue vinculada pela variante, marcada como SKU ausente.'
+            : previousSku
+              ? `SKU alterado na Shopify (${previousSku} → ${shopifySku}).`
+              : `SKU cadastrado na Shopify (${shopifySku}).`,
+        };
+      }
+      return {
       kind,
       rentalUnitId: unit.id,
       code: unit.code,
@@ -151,7 +196,8 @@ export class ShopifyCatalogSyncService {
           : kind === 'product_inactive'
             ? 'Produto arquivado ou inativo na Shopify — peça desativada, indisponível para novas reservas e para disponibilidade online até reativação.'
           : 'Variante voltou a existir na Shopify — peça pode ser reativada com segurança, sem duplicar cadastro.',
-    }));
+      };
+    });
 
     const state = await this.prisma.catalogSyncState.findUnique({ where: { id: 'default' } });
 
@@ -163,11 +209,13 @@ export class ShopifyCatalogSyncService {
         const applied =
           d.action === 'deactivate'
             ? await this.applyDeactivate(d, options.actor)
-            : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
+            : d.action === 'sync_sku'
+              ? await this.applySkuSync(d, divergent[i].unit.shopifySku, options.actor)
+              : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
         if (applied) {
           divergences[i] = { ...d, applied: true };
           if (d.action === 'deactivate') deactivated++;
-          else reactivated++;
+          else if (d.action === 'reactivate') reactivated++;
         }
       }
       await this.prisma.catalogSyncState.upsert({
@@ -294,6 +342,49 @@ export class ShopifyCatalogSyncService {
       );
     } catch (err) {
       this.logger.error(`Falha ao desativar peça ${d.rentalUnitId} na sincronização de catálogo: ${errorCode(err)}`);
+      return false;
+    }
+  }
+
+  /** SKU da variante mudou na Shopify (cadastrado, alterado ou removido) →
+   *  grava o SKU atual na peça. Condicional no vínculo (`shopifyVariantId`),
+   *  em "não arquivada" e no SKU exatamente como foi lido: se algo mudou por
+   *  fora no meio tempo, não aplica — a próxima rodada relê tudo. Idempotente:
+   *  rodar de novo encontra o SKU já igual e nem chega aqui. Só escreve
+   *  `shopifySku` — `active`, reservas, bloqueios e histórico não são tocados. */
+  private async applySkuSync(d: CatalogDivergence, storedSku: string | null, actor?: { id: string; name: string }): Promise<boolean> {
+    const shopifySku = d.shopifySku ?? null;
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
+          const updated = await tx.rentalUnit.updateMany({
+            where: { id: d.rentalUnitId, shopifyVariantId: d.shopifyVariantId, shopifyVariantMissingAt: null, shopifySku: storedSku },
+            data: { shopifySku },
+          });
+          if (updated.count !== 1) return false;
+
+          await writeAdminAuditEvent(tx, {
+            adminUserId: actor?.id ?? null,
+            adminUserName: actor?.name ?? 'Sistema (sincronização de catálogo)',
+            action: 'CATALOG_UNIT_SKU_SYNCED',
+            entityType: 'RentalUnit',
+            entityId: d.rentalUnitId,
+            before: { shopifySku: d.previousSku ?? null },
+            after: { shopifySku },
+            detail: {
+              origin: 'shopify_catalog_sync',
+              reason: !shopifySku ? 'shopify_sku_removed' : d.previousSku ? 'shopify_sku_changed' : 'shopify_sku_added',
+              code: d.code,
+              shopifyVariantId: d.shopifyVariantId,
+            },
+          });
+          return true;
+        },
+        { timeout: 15_000, maxWait: 5_000 },
+      );
+    } catch (err) {
+      this.logger.error(`Falha ao sincronizar SKU da peça ${d.rentalUnitId}: ${errorCode(err)}`);
       return false;
     }
   }

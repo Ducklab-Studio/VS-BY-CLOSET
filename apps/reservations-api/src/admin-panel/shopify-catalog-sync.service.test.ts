@@ -37,11 +37,15 @@ class FakeShopifyAdminClient {
 
 const DECOY_VARIANT = 'gid://shopify/ProductVariant/decoy-nao-relacionada';
 
+// A variante simulada tem, por padrão, o MESMO SKU que `createUnit` grava na
+// peça (`<code>-sku` para a variante `<code>-variant`): estes cenários são de
+// arquivamento/reativação, não de SKU divergente — esse caso tem suíte própria
+// (shopify-sku-sync.integration.test.ts).
 function variant(id: string, overrides: Partial<ShopifyCatalogVariant> = {}): ShopifyCatalogVariant {
   return {
     id,
     title: 'Default Title',
-    sku: null,
+    sku: id.endsWith('-variant') ? id.replace(/-variant$/, '-sku') : null,
     inventoryQuantity: null,
     imageUrl: null,
     imageAlt: null,
@@ -256,7 +260,11 @@ describe('ShopifyCatalogSyncService (PostgreSQL isolado, Shopify simulada)', () 
 
     fake.variants = [variant(piece.shopifyVariantId as string)];
     const report = await reconcile({ apply: true, actor: ACTOR });
-    expect(report.divergences.find((d) => d.rentalUnitId === piece.id)).toBeUndefined();
+    // Nada de arquivar/reativar de novo; o único ajuste é o SKU, que o
+    // arquivamento tinha desvinculado e a sincronização relê da Shopify.
+    const divergences = report.divergences.filter((d) => d.rentalUnitId === piece.id);
+    expect(divergences.map((d) => [d.kind, d.applied])).toEqual([['sku_changed', true]]);
+    expect(await unit(piece.id)).toMatchObject({ active: true, shopifySku: piece.shopifySku });
     expect(await prisma.rentalUnit.count({ where: { shopifyVariantId: piece.shopifyVariantId } })).toBe(1);
   });
 
