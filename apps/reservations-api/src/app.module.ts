@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { trustedClientIp, type ClientIpRequest } from './client-ip';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { AvailabilityModule } from './availability/availability.module';
@@ -27,7 +28,9 @@ import { AppController } from './app.controller';
     // Limite conservador — este serviço só recebe tráfego de dois lugares
     // conhecidos (webhooks Shopify BR/CL e o widget de calendário), não é
     // API pública de alto volume.
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    // Balde por IP confiável (client-ip.ts): na Railway o X-Real-IP da borda,
+    // fora dela a conexão TCP — nunca um X-Forwarded-For escrito pelo cliente.
+    ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 100 }], getTracker: (req) => Promise.resolve(trustedClientIp(req as ClientIpRequest)) }),
     PrismaModule,
     AvailabilityModule,
     RentalPlanModule,
