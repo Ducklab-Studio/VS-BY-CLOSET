@@ -1,4 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { PUBLIC_WRITE_THROTTLE } from '../public-write-throttle';
 import { CheckoutService, type CheckoutResponse } from './checkout.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 
@@ -10,6 +12,7 @@ export class CheckoutController {
   // existente (replay idempotente) — "aqui está o checkout desta
   // reserva" é mais honesto que "algo foi criado agora" nos dois casos.
   @Post()
+  @Throttle(PUBLIC_WRITE_THROTTLE)
   @HttpCode(HttpStatus.OK)
   createCheckout(@Body() dto: CreateCheckoutDto): Promise<CheckoutResponse> {
     return this.checkout.createCheckout(dto);

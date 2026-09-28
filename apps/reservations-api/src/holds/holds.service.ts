@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, Injectable, Logger, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,7 @@ import type { CreateHoldDto } from './dto/create-hold.dto';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import { TECHNICAL_MAX_PIECES } from '../rental-rules/rental-limits';
+import { HOLD_BUSY_MESSAGE, HOLD_CLIENT_LIMIT_MESSAGE, HOLD_LIMITS, type HoldClient, maxHeldPieces } from './hold-client';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
 
@@ -75,6 +76,8 @@ export interface AttemptContext {
    *  Nunca gravado; `holdTokenHash` (abaixo) é o que vai pro banco. */
   readonly holdToken: string;
   readonly holdTokenHash: string;
+  /** Quem pede (ver hold-client.ts). Ausente = chamada interna/teste, sem limites por cliente. */
+  readonly client?: HoldClient | null;
 }
 
 /**
@@ -109,7 +112,7 @@ export class HoldsService {
     private readonly rentalRuleConfig: RentalRuleConfigService,
   ) {}
 
-  async createHold(dto: CreateHoldDto, idempotencyKey?: string): Promise<HoldResponse> {
+  async createHold(dto: CreateHoldDto, idempotencyKey?: string, client: HoldClient | null = null): Promise<HoldResponse> {
     if (idempotencyKey !== undefined) validateIdempotencyKeyFormat(idempotencyKey);
 
     const normalizedItems = normalizeItems(dto.items);
@@ -144,6 +147,7 @@ export class HoldsService {
       requestHash,
       holdToken,
       holdTokenHash,
+      client,
     };
 
     for (let attempt = 1; attempt <= MAX_ALLOCATION_ATTEMPTS; attempt++) {
@@ -234,6 +238,46 @@ export class HoldsService {
     // Nunca deleta a linha (item 13: "nunca delete" — um pagamento
     // tardio ainda precisa achar esta Reservation depois).
     await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE status = 'pending_payment' AND payment_expires_at <= now()`;
+
+    // Limites por quem pede (hold-client.ts) — depois de expirar os vencidos
+    // (que não contam) e depois da idempotência (reenvio da mesma chave devolve
+    // o HOLD existente acima, sem passar por aqui). Um lock só para HOLDs
+    // públicos deixa as três contagens exatas mesmo com rajadas simultâneas.
+    if (ctx.client) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('holds:public-client-limits'))`;
+      const [usage] = await tx.$queryRaw<{ browserHolds: number; browserPieces: number; networkHolds: number; networkPieces: number; recentGlobal: number }[]>`
+        WITH active AS (
+          SELECT e.detail ->> 'browserKey' AS browser_key, e.detail ->> 'networkKey' AS network_key,
+                 (SELECT count(*) FROM reservation_items ri WHERE ri.reservation_id = r.id) AS pieces
+          FROM reservation_events e
+          JOIN reservations r ON r.id = e.reservation_id
+          WHERE e.type = 'HOLD_CLIENT'
+            AND e.created_at > now() - interval '1 day'
+            AND r.status IN ('hold', 'pending_payment')
+            AND e.detail ->> 'networkKey' = ${ctx.client.networkKey}
+        )
+        SELECT
+          (SELECT count(*) FROM active WHERE browser_key = ${ctx.client.browserKey})::int AS "browserHolds",
+          (SELECT coalesce(sum(pieces), 0) FROM active WHERE browser_key = ${ctx.client.browserKey})::int AS "browserPieces",
+          (SELECT count(*) FROM active)::int AS "networkHolds",
+          (SELECT coalesce(sum(pieces), 0) FROM active)::int AS "networkPieces",
+          (SELECT count(*) FROM reservation_events g
+             WHERE g.type = 'HOLD_CLIENT'
+               AND g.created_at > now() - make_interval(mins => ${HOLD_LIMITS.global.windowMinutes}::int))::int AS "recentGlobal"
+      `;
+      const requested = ctx.normalizedItems.reduce((total, item) => total + item.quantity, 0);
+      if (usage.recentGlobal >= HOLD_LIMITS.global.holds) {
+        throw new HttpException(HOLD_BUSY_MESSAGE, HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (
+        usage.browserHolds >= HOLD_LIMITS.perBrowser.holds ||
+        usage.browserPieces + requested > maxHeldPieces('perBrowser', config.maxPieces) ||
+        usage.networkHolds >= HOLD_LIMITS.perNetwork.holds ||
+        usage.networkPieces + requested > maxHeldPieces('perNetwork', config.maxPieces)
+      ) {
+        throw new HttpException(HOLD_CLIENT_LIMIT_MESSAGE, HttpStatus.TOO_MANY_REQUESTS);
+      }
+    }
 
     // Flags REAIS de cada variante — nunca as que o cliente mandou (o
     // DTO nem declara esses campos). Variante sem nenhuma RentalUnit
@@ -338,6 +382,12 @@ export class HoldsService {
       )
       RETURNING id, expires_at AS "expiresAt"
     `;
+
+    if (ctx.client) {
+      await tx.reservationEvent.create({
+        data: { reservationId, type: 'HOLD_CLIENT', detail: { networkKey: ctx.client.networkKey, browserKey: ctx.client.browserKey } },
+      });
+    }
 
     for (const unitIds of allocationResult.allocation.values()) {
       for (const unitId of unitIds) {
