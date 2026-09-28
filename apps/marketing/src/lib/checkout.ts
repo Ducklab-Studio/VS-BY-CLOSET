@@ -44,7 +44,11 @@ export async function createHold(input: {
   try {
     res = await fetch(base, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': input.idempotencyKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': input.idempotencyKey,
+        'X-Client-Id': browserId(typeof window === 'undefined' ? null : window.localStorage, () => crypto.randomUUID()),
+      },
       body: JSON.stringify({
         items: input.items,
         pickupDate: input.pickupDate,
@@ -167,4 +171,37 @@ export async function createCheckout(reservationId: string, holdToken: string): 
     return { ok: true, checkoutUrl: body.checkoutUrl };
   }
   return { ok: false, expired: res.status === 410, message: typeof body.message === 'string' ? body.message : 'Não foi possível continuar para o pagamento.' };
+}
+
+// ── Id do navegador (X-Client-Id do HOLD) ──────────────────────────────
+// Mora aqui, e não num módulo à parte, para este arquivo continuar sem
+// dependências (scripts/checkout-flow.test.mjs o carrega isolado).
+/**
+ * Identificador aleatório deste navegador, enviado no pedido de HOLD
+ * (`X-Client-Id`). A API usa para separar pessoas diferentes que dividem o
+ * mesmo IP (casa, escritório, operadora móvel) — não é credencial nem dado
+ * pessoal, e sozinho não libera nada: o limite da rede continua valendo.
+ * Sem armazenamento disponível (aba anônima bloqueada), vale um id da aba.
+ */
+const BROWSER_ID_KEY = 'vsc_browser_id';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+let fallbackId: string | null = null;
+
+interface KeyValueStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export function browserId(storage: KeyValueStore | null, newId: () => string): string {
+  try {
+    const stored = storage?.getItem(BROWSER_ID_KEY);
+    if (stored && UUID_RE.test(stored)) return stored;
+    const id = newId();
+    storage?.setItem(BROWSER_ID_KEY, id);
+    if (storage) return id;
+  } catch {
+    // armazenamento bloqueado: cai no id da aba abaixo
+  }
+  fallbackId ??= newId();
+  return fallbackId;
 }
