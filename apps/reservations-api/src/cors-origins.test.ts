@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { allowedOrigins, isOriginAllowed, VERCEL_PREVIEW_ORIGIN } from './cors-origins';
+import { allowedOrigins, corsOriginCallback, isOriginAllowed, VERCEL_PREVIEW_ORIGIN } from './cors-origins';
 
 /**
  * Bug real de produção: previews da Vercel (URL única por deploy) não
@@ -74,5 +74,26 @@ describe('allowedOrigins — leitura de CORS_ALLOWED_ORIGINS', () => {
     delete process.env.CORS_ALLOWED_ORIGINS;
     process.env.NODE_ENV = 'production';
     expect(() => allowedOrigins()).toThrow(/CORS_ALLOWED_ORIGINS não configurada/);
+  });
+});
+
+describe('corsOriginCallback — origem não permitida nunca vira 500', () => {
+  const decide = (origin: string | undefined) => {
+    let result: { err: Error | null; allow?: boolean } | null = null;
+    corsOriginCallback(['https://vsbycloset.vercel.app'])(origin, (err, allow) => {
+      result = { err, allow };
+    });
+    return result!;
+  };
+
+  test('origem desconhecida: sem erro (resposta normal), mas SEM liberar CORS', () => {
+    expect(decide('https://atacante.example')).toEqual({ err: null, allow: false });
+    expect(decide('https://vsbycloset.vercel.app.atacante.example')).toEqual({ err: null, allow: false });
+  });
+
+  test('origem permitida e requisição sem Origin continuam liberadas', () => {
+    expect(decide('https://vsbycloset.vercel.app')).toEqual({ err: null, allow: true });
+    expect(decide('https://vsbycloset-abc123-ducklab.vercel.app')).toEqual({ err: null, allow: true });
+    expect(decide(undefined)).toEqual({ err: null, allow: true });
   });
 });
