@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { adminPost } from './admin-api';
@@ -19,7 +20,7 @@ export { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUs
  * desativado) — nunca lança, quem chama decide o que fazer (página de
  * login deixa passar, layout protegido redireciona).
  */
-export async function getAdminSession(): Promise<AdminSessionUser | null> {
+export const getAdminSession = cache(async (): Promise<AdminSessionUser | null> => {
   const store = await cookies();
   const token = store.get(ADMIN_SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -29,7 +30,7 @@ export async function getAdminSession(): Promise<AdminSessionUser | null> {
   } catch {
     return null;
   }
-}
+});
 
 /** Usado pelo layout protegido — nunca confia só em esconder um link no
  *  menu (item 15: "Backend precisa validar role em TODA ação
