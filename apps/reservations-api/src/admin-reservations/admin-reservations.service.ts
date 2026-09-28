@@ -43,6 +43,9 @@ export interface ManualReservationResponse {
 }
 
 export interface ReservationListFilters {
+  /** Paginação opcional (DTO: 1–300 e 0–100000). Sem ela, até 300 como sempre. */
+  readonly limit?: number;
+  readonly offset?: number;
   readonly status?: string;
   readonly source?: string;
   readonly from?: string;
@@ -608,8 +611,8 @@ export class AdminReservationsService {
           r.archived_at::text AS "archivedAt"
         FROM reservations r
         WHERE ${Prisma.join(conditions, ' AND ')}
-        ORDER BY r.pickup_date DESC NULLS LAST, r.created_at DESC
-        LIMIT 300
+        ORDER BY r.pickup_date DESC NULLS LAST, r.created_at DESC, r.id
+        LIMIT ${filters.limit ?? 300} OFFSET ${filters.offset ?? 0}
       `);
     } catch (err) {
       this.logger.error(`Falha ao listar reservas: ${errorCode(err)}`);
