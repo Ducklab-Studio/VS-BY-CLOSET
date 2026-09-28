@@ -1,6 +1,7 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { ADMIN_SESSION_COOKIE } from './admin-cookie';
+import { isSafeAdminPath } from './admin-path';
 
 /**
  * Fase 9 — ponte server-to-server com o reservations-api para o
@@ -25,6 +26,11 @@ export class AdminApiError extends Error {
   }
 }
 
+function safePath(path: string): string {
+  if (!isSafeAdminPath(path)) throw new AdminApiError(400, 'Requisição inválida.');
+  return path;
+}
+
 function baseUrl(): string {
   const url = process.env.RESERVATIONS_API_ADMIN_URL;
   if (!url) throw new AdminApiError(503, 'ClosetAdmin não está configurado (RESERVATIONS_API_ADMIN_URL ausente).');
@@ -38,10 +44,11 @@ function token(): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const target = safePath(path); // fora do try: caminho inválido é 400, não "sem conexão"
   const sessionToken = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${path}`, {
+    res = await fetch(`${baseUrl()}${target}`, {
       ...init,
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
@@ -74,8 +81,8 @@ export function adminGet<T>(path: string, adminUserId: string): Promise<T> {
   return request<T>(withAdminUserId(path, adminUserId), { method: 'GET' });
 }
 
-export function adminPost<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: 'POST', body: JSON.stringify(body) });
+export function adminPost<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}) });
 }
 
 export function adminPatch<T>(path: string, body: unknown): Promise<T> {
@@ -92,10 +99,11 @@ export function adminPut<T>(path: string, body: unknown): Promise<T> {
  * de guards, nunca um "quase igual" genérico demais.
  */
 export async function adminGetPdf(path: string, adminUserId: string): Promise<Buffer> {
+  const target = safePath(withAdminUserId(path, adminUserId));
   const sessionToken = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${withAdminUserId(path, adminUserId)}`, {
+    res = await fetch(`${baseUrl()}${target}`, {
       method: 'GET',
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),

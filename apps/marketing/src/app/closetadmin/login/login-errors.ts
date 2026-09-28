@@ -26,7 +26,7 @@ export function classifyLoginFailure(status: number, apiMessage: string): LoginF
 
 export const LOGIN_FAILURE_MESSAGES: Record<LoginFailureKind, string> = {
   credentials: 'Nome, telefone ou PIN incorretos.',
-  rate_limited: 'Muitas tentativas. Aguarde um minuto e tente novamente.',
+  rate_limited: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
   misconfigured: 'O painel está indisponível por um problema de configuração do servidor. Avise o responsável técnico.',
   unavailable: 'Não foi possível entrar agora. Tente novamente em instantes.',
 };
