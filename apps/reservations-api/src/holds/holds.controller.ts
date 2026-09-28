@@ -1,4 +1,8 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import { holdClient } from './hold-client';
+import { trustedClientIp, type ClientIpRequest } from '../client-ip';
+import { Throttle } from '@nestjs/throttler';
+import { PUBLIC_WRITE_THROTTLE } from '../public-write-throttle';
 import { HoldsService, type HoldResponse } from './holds.service';
 import { CreateHoldDto } from './dto/create-hold.dto';
 
@@ -18,8 +22,14 @@ export class HoldsController {
    * por HOLD devolvido só pra quem criou).
    */
   @Post()
+  @Throttle(PUBLIC_WRITE_THROTTLE)
   @HttpCode(HttpStatus.CREATED)
-  createHold(@Body() dto: CreateHoldDto, @Headers('idempotency-key') idempotencyKey?: string): Promise<HoldResponse> {
-    return this.holds.createHold(dto, idempotencyKey);
+  createHold(
+    @Body() dto: CreateHoldDto,
+    @Req() req: ClientIpRequest,
+    @Headers('idempotency-key') idempotencyKey?: string,
+    @Headers('x-client-id') browserId?: string,
+  ): Promise<HoldResponse> {
+    return this.holds.createHold(dto, idempotencyKey, holdClient(trustedClientIp(req), browserId));
   }
 }

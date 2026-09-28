@@ -1,10 +1,12 @@
 import 'server-only';
 
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { adminPost } from './admin-api';
 
 import { ADMIN_SESSION_COOKIE } from './admin-cookie';
+import { createSessionMemo } from './session-memo';
 export { ADMIN_SESSION_COOKIE } from './admin-cookie';
 
 import { hasAdminModule, type AdminModuleName, type AdminSessionUser } from './admin-permissions';
@@ -19,16 +21,27 @@ export { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUs
  * desativado) — nunca lança, quem chama decide o que fazer (página de
  * login deixa passar, layout protegido redireciona).
  */
+// Uma única validação por requisição. O layout protegido e cada página chamam
+// isto; sem memorizar, toda navegação ia à API 2+ vezes para validar a MESMA
+// sessão. `cache` do React dá uma memória NOVA por requisição (nunca
+// compartilhada entre requisições/usuários) e, dentro dela, a chave é o token
+// (session-memo.ts). Fora da renderização (route handler, server action),
+// `cache` só repassa a chamada — cada chamada valida de novo.
+const sessionMemoForRequest = cache(() =>
+  createSessionMemo(async (token: string): Promise<AdminSessionUser | null> => {
+    try {
+      return await adminPost<AdminSessionUser>('/admin/auth/session', { token });
+    } catch {
+      return null;
+    }
+  }),
+);
+
 export async function getAdminSession(): Promise<AdminSessionUser | null> {
   const store = await cookies();
   const token = store.get(ADMIN_SESSION_COOKIE)?.value;
   if (!token) return null;
-
-  try {
-    return await adminPost<AdminSessionUser>('/admin/auth/session', { token });
-  } catch {
-    return null;
-  }
+  return sessionMemoForRequest()(token);
 }
 
 /** Usado pelo layout protegido — nunca confia só em esconder um link no

@@ -1,6 +1,7 @@
 import 'server-only';
+import { pathSegment } from './admin-path';
 
-import { adminGet, adminPatch, adminPost, adminPut } from './admin-api';
+import { AdminApiError, adminGet, adminPatch, adminPost, adminPut } from './admin-api';
 import type { AdminModuleName } from './admin-session';
 
 /** Fase 9 — tipos e chamadas ao reservations-api usadas pelas páginas
@@ -22,7 +23,7 @@ export interface CalendarItem {
 }
 
 export function getCalendar(adminUserId: string, from: string, to: string): Promise<CalendarItem[]> {
-  return adminGet(`/admin/calendar?from=${from}&to=${to}`, adminUserId);
+  return adminGet(`/admin/calendar?from=${pathSegment(from)}&to=${pathSegment(to)}`, adminUserId);
 }
 
 export interface ReservationListItem {
@@ -85,7 +86,7 @@ export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'
 }
 
 export function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {
-  return adminGet(`/admin/reservations/${id}`, adminUserId);
+  return adminGet(`/admin/reservations/${pathSegment(id)}`, adminUserId);
 }
 
 export interface CreateManualReservationInput {
@@ -109,11 +110,19 @@ export function createManualReservation(input: CreateManualReservationInput) {
 }
 
 export function cancelManualReservation(id: string, reason?: string) {
-  return adminPost(`/admin/reservations/${id}/cancel`, { reason });
+  return adminPost(`/admin/reservations/${pathSegment(id)}/cancel`, { reason });
 }
 
-export function advanceReservationItem(id: string, itemId: string, action: 'receive' | 'start-cleaning' | 'complete-cleaning', note?: string) {
-  return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string }>(`/admin/reservations/${id}/items/${itemId}/${action}`, { note });
+const ITEM_ACTIONS = ['receive', 'start-cleaning', 'complete-cleaning'] as const;
+
+export function advanceReservationItem(id: string, itemId: string, action: (typeof ITEM_ACTIONS)[number], note?: string) {
+  // `action` chega de server action (valor do navegador): o tipo não vale em
+  // tempo de execução, então só as três ações conhecidas viram caminho.
+  if (!ITEM_ACTIONS.includes(action)) return Promise.reject(new AdminApiError(400, 'Ação inválida.'));
+  return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string }>(
+    `/admin/reservations/${pathSegment(id)}/items/${pathSegment(itemId)}/${action}`,
+    { note },
+  );
 }
 
 export interface PieceListItem {
@@ -143,7 +152,7 @@ export function updatePiece(
   input: { active?: boolean; reservableOnline?: boolean; countsTowardRentalDuration?: boolean; reason?: string },
   adminUserId: string,
 ): Promise<PieceListItem> {
-  return adminPatch(`/admin/pieces/${id}`, { ...input, adminUserId });
+  return adminPatch(`/admin/pieces/${pathSegment(id)}`, { ...input, adminUserId });
 }
 
 export interface PiecesToDaysRule {
@@ -199,15 +208,15 @@ export function createBlock(input: BlockInput, adminUserId: string): Promise<Blo
 }
 
 export function updateBlock(id: string, input: Partial<BlockInput>, adminUserId: string): Promise<BlockItem> {
-  return adminPatch(`/admin/blocks/${id}`, { ...input, adminUserId });
+  return adminPatch(`/admin/blocks/${pathSegment(id)}`, { ...input, adminUserId });
 }
 
 export function setBlockActive(id: string, active: boolean, adminUserId: string): Promise<BlockItem> {
-  return adminPost(`/admin/blocks/${id}/${active ? 'activate' : 'deactivate'}`, { adminUserId });
+  return adminPost(`/admin/blocks/${pathSegment(id)}/${active ? 'activate' : 'deactivate'}`, { adminUserId });
 }
 
 export function removeBlock(id: string, adminUserId: string): Promise<BlockItem> {
-  return adminPost(`/admin/blocks/${id}/remove`, { adminUserId });
+  return adminPost(`/admin/blocks/${pathSegment(id)}/remove`, { adminUserId });
 }
 
 export interface AuditEntry {
@@ -296,7 +305,7 @@ export function executeArchive(
 }
 
 export function restoreReservation(id: string, adminUserId: string, adminUserName: string): Promise<{ reservationId: string; status: string }> {
-  return adminPost(`/admin/reservations-archive/${id}/restore`, { adminUserId, adminUserName });
+  return adminPost(`/admin/reservations-archive/${pathSegment(id)}/restore`, { adminUserId, adminUserName });
 }
 
 /** Sistema de autorização de funcionários — exclusivo de SUPER_ADMIN no
@@ -332,26 +341,26 @@ export function createEmployee(input: CreateEmployeeInput, adminUserId: string):
 }
 
 export function blockEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
-  return adminPost(`/admin/employees/${id}/block`, { adminUserId });
+  return adminPost(`/admin/employees/${pathSegment(id)}/block`, { adminUserId });
 }
 
 export function reactivateEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
-  return adminPost(`/admin/employees/${id}/reactivate`, { adminUserId });
+  return adminPost(`/admin/employees/${pathSegment(id)}/reactivate`, { adminUserId });
 }
 
 export function removeEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
-  return adminPost(`/admin/employees/${id}/remove`, { adminUserId });
+  return adminPost(`/admin/employees/${pathSegment(id)}/remove`, { adminUserId });
 }
 
 export function restoreEmployee(id: string, adminUserId: string): Promise<EmployeeListItem> {
-  return adminPost(`/admin/employees/${id}/restore`, { adminUserId });
+  return adminPost(`/admin/employees/${pathSegment(id)}/restore`, { adminUserId });
 }
 
 /** "Excluir permanentemente" — DELETE físico real, só quem já foi
  *  removido antes. Backend recusa se ativo, SUPER_ADMIN, ou o próprio
  *  ator. */
 export function purgeEmployee(id: string, adminUserId: string): Promise<{ id: string }> {
-  return adminPost(`/admin/employees/${id}/purge`, { adminUserId });
+  return adminPost(`/admin/employees/${pathSegment(id)}/purge`, { adminUserId });
 }
 
 /** Valle Pass — vale-presente/crédito de compra, produto TOTALMENTE
@@ -389,11 +398,11 @@ export function createValePassCampaign(input: CreateValePassCampaignInput, admin
 }
 
 export function activateValePassCampaign(id: string, adminUserId: string): Promise<ValePassCampaign> {
-  return adminPost(`/admin/vale-pass/campaigns/${id}/activate`, { adminUserId });
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(id)}/activate`, { adminUserId });
 }
 
 export function deactivateValePassCampaign(id: string, adminUserId: string): Promise<ValePassCampaign> {
-  return adminPost(`/admin/vale-pass/campaigns/${id}/deactivate`, { adminUserId });
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(id)}/deactivate`, { adminUserId });
 }
 
 export type ValePassStatus = 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
@@ -438,24 +447,24 @@ export function listValePassVouchers(adminUserId: string, filters: ValePassVouch
 }
 
 export function findValePassVoucherByCode(code: string, adminUserId: string): Promise<ValePassVoucher> {
-  return adminGet(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}`, adminUserId);
+  return adminGet(`/admin/vale-pass/vouchers/${pathSegment(code)}`, adminUserId);
 }
 
 export function markValePassVoucherUsed(code: string, adminUserId: string): Promise<ValePassVoucher> {
-  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/use`, { adminUserId });
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/use`, { adminUserId });
 }
 
 export function cancelValePassVoucher(code: string, reason: string, adminUserId: string): Promise<ValePassVoucher> {
-  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/cancel`, { reason, adminUserId });
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/cancel`, { reason, adminUserId });
 }
 
 /** Sem `adminUserId` no corpo — RestoreValePassDto não aceita esse campo;
  *  identidade só vem da sessão validada (mesmo padrão mais novo já usado
  *  em outras ações administrativas deste projeto). */
 export function restoreValePassVoucher(code: string, reason: string): Promise<ValePassVoucher> {
-  return adminPost(`/admin/vale-pass/vouchers/${encodeURIComponent(code)}/restore`, { reason });
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/restore`, { reason });
 }
 
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
-  return adminPut(`/admin/employees/${id}/permissions`, { moduleAccess, adminUserId });
+  return adminPut(`/admin/employees/${pathSegment(id)}/permissions`, { moduleAccess, adminUserId });
 }

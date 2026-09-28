@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -34,22 +34,22 @@ export class AdminEmployeesController {
   }
 
   @Post(':id/block')
-  block(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  block(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.block(id, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Post(':id/reactivate')
-  reactivate(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  reactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.reactivate(id, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Post(':id/remove')
-  remove(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  remove(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.remove(id, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Post(':id/restore')
-  restore(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  restore(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.restore(id, req.adminUser!.id, req.adminUser!.name);
   }
 
@@ -57,18 +57,18 @@ export class AdminEmployeesController {
    *  deste controller que faz isso. POST (não DELETE HTTP) pra manter o
    *  mesmo padrão de ação explícita já usado em todo o resto da API. */
   @Post(':id/purge')
-  purge(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<{ id: string }> {
+  purge(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<{ id: string }> {
     return this.employees.purge(id, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Put(':id/permissions')
-  updatePermissions(@Param('id') id: string, @Body() dto: UpdateEmployeePermissionsDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  updatePermissions(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateEmployeePermissionsDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.updatePermissions(id, dto.moduleAccess, req.adminUser!.id, req.adminUser!.name);
   }
 
   /** Promover/rebaixar (inclusive a SUPER_ADMIN). Ator sempre da sessão. */
   @Put(':id/role')
-  updateRole(@Param('id') id: string, @Body() dto: UpdateEmployeeRoleDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
+  updateRole(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateEmployeeRoleDto, @Req() req: RequestWithAdminUser): Promise<EmployeeListItem> {
     return this.employees.updateRole(
       id,
       { role: dto.role, moduleAccess: dto.moduleAccess, superAdminConfirmation: dto.superAdminConfirmation },

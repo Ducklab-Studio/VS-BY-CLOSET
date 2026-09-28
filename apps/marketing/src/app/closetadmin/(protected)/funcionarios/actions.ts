@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { pathSegment } from '@/lib/admin-path';
 import { requireAdminRole, requireAdminSession, type AdminModuleName } from '@/lib/admin-session';
 import {
   blockEmployee,
@@ -163,7 +164,7 @@ export async function updateEmployeeRoleAction(
 
   try {
     const { role, moduleAccess, superAdminConfirmation } = input;
-    await adminPut(`/admin/employees/${encodeURIComponent(id)}/role`, { role, moduleAccess, superAdminConfirmation, adminUserId: session.id });
+    await adminPut(`/admin/employees/${pathSegment(id)}/role`, { role, moduleAccess, superAdminConfirmation, adminUserId: session.id });
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o papel.' };
   }

@@ -4,7 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { allowedOrigins, isOriginAllowed } from './cors-origins';
+import { allowedOrigins, corsOriginCallback } from './cors-origins';
 
 async function bootstrap() {
   // rawBody: true — item 3 da Fase 7, OBRIGATÓRIO pro webhook Shopify:
@@ -27,16 +27,7 @@ async function bootstrap() {
 
   const staticOrigins = allowedOrigins();
   app.enableCors({
-    origin(origin, callback) {
-      // Sem header Origin = chamada server-to-server (curl, healthcheck,
-      // webhook da Shopify) — CORS é uma restrição do navegador, não se
-      // aplica aqui.
-      if (!origin || isOriginAllowed(origin, staticOrigins)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Origem não permitida por CORS.'));
-    },
+    origin: corsOriginCallback(staticOrigins),
     methods: ['GET', 'POST'],
   });
 

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ListReservationsQueryDto } from './dto/list-reservations-query.dto';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireModule } from '../admin/require-module.decorator';
@@ -40,7 +41,7 @@ export class AdminReservationsController {
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
-  cancel(@Param('id') id: string, @Body() dto: CancelManualReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ManualReservationCancelResponse> {
+  cancel(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelManualReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ManualReservationCancelResponse> {
     return this.adminReservations.cancelManual(id, { ...dto, adminUserId: request.adminUser.id, adminUserName: request.adminUser.name });
   }
 
@@ -48,7 +49,7 @@ export class AdminReservationsController {
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
-  receive(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+  receive(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
     return this.adminReservations.advanceOperational(id, itemId, 'receive', request.adminUser, dto.note);
   }
 
@@ -56,7 +57,7 @@ export class AdminReservationsController {
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
-  startCleaning(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+  startCleaning(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
     return this.adminReservations.advanceOperational(id, itemId, 'start-cleaning', request.adminUser, dto.note);
   }
 
@@ -64,14 +65,15 @@ export class AdminReservationsController {
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
-  completeCleaning(@Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+  completeCleaning(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
     return this.adminReservations.advanceOperational(id, itemId, 'complete-cleaning', request.adminUser, dto.note);
   }
 
   @Get()
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
-  list(@Query() query: Record<string, string | undefined>): Promise<ReservationListItem[]> {
+  list(@Query() query: ListReservationsQueryDto): Promise<ReservationListItem[]> {
+    if (query.from && query.to && query.from > query.to) throw new BadRequestException('"to" não pode ser anterior a "from".');
     const filters: ReservationListFilters = {
       status: query.status || undefined,
       source: query.source || undefined,
@@ -83,6 +85,8 @@ export class AdminReservationsController {
       code: query.code || undefined,
       includeArchived: query.includeArchived === 'true',
       archivedOnly: query.archivedOnly === 'true',
+      limit: query.limit,
+      offset: query.offset,
     };
     return this.adminReservations.listReservations(filters);
   }
@@ -90,7 +94,7 @@ export class AdminReservationsController {
   @Get(':id')
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
-  detail(@Param('id') id: string): Promise<ReservationDetailResponse> {
+  detail(@Param('id', ParseUUIDPipe) id: string): Promise<ReservationDetailResponse> {
     return this.adminReservations.getReservationDetail(id);
   }
 }

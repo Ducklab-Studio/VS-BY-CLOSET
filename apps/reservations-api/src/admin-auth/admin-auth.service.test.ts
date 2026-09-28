@@ -4,7 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../admin/admin-pin';
 import { normalizePhone } from '../admin/admin-phone';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
-import { AdminAuthService } from './admin-auth.service';
+import {
+  AdminAuthService,
+  LOGIN_LOCKED_MESSAGE,
+  LOGIN_LOCKOUT_WINDOW_MINUTES,
+  LOGIN_MAX_FAILURES_PER_IDENTIFIER,
+  LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP,
+  LOGIN_MAX_FAILURES_PER_IP,
+  LOGIN_MAX_PIN_FAILURES,
+} from './admin-auth.service';
 
 /**
  * Integração real (Neon) — mesmo padrão de admin-reservations.service.test.ts.
@@ -269,5 +277,114 @@ describe('AdminAuthGuard × login — 401 de configuração é distinguível', (
     expect(message).toBe('Credencial administrativa inválida ou ausente.');
     expect(message).not.toBe('Credenciais inválidas.');
     expect(guard.canActivate(contextWith('Bearer token-configurado-no-servidor-de-teste'))).toBe(true);
+  });
+});
+
+describe('AdminAuthService — bloqueio por conta contra força bruta de PIN (integração real)', () => {
+  const wrong = (user: { name: string; phone: string }) => service.login({ name: user.name, phone: user.phone, pin: '0000' });
+  const status = (err: unknown) => (err as { getStatus?: () => number }).getStatus?.();
+  const sessions = (id: string) => prisma.adminSession.count({ where: { adminUserId: id } });
+
+  test('22) 5 PINs errados → a 6ª tentativa é recusada com 429 MESMO com o PIN certo, sem criar sessão', async () => {
+    const { user, pin } = await createUser();
+    for (let i = 0; i < LOGIN_MAX_PIN_FAILURES; i++) await expect(wrong(user)).rejects.toThrow(UnauthorizedException);
+
+    const err = await service.login({ name: user.name, phone: user.phone, pin }).catch((e: unknown) => e);
+    expect(status(err)).toBe(429);
+    expect((err as Error).message).toBe(LOGIN_LOCKED_MESSAGE);
+    expect(await sessions(user.id)).toBe(0);
+    const reasons = (await prisma.adminAuditEvent.findMany({ where: { adminUserId: user.id, action: 'LOGIN_FAILED' } })).map((e) => (e.detail as { reason: string }).reason);
+    expect(reasons.filter((r) => r === 'wrong_pin')).toHaveLength(LOGIN_MAX_PIN_FAILURES);
+    expect(reasons).toContain('locked_out');
+  });
+
+  test('23) tentativas simultâneas não furam o limite: no máximo 5 PINs são testados', async () => {
+    const { user, pin } = await createUser();
+    const results = await Promise.allSettled(Array.from({ length: 12 }, () => wrong(user)));
+    const statuses = results.map((r) => (r.status === 'rejected' ? status(r.reason) : 200));
+    // Simultânea no mesmo telefone é recusada na hora (429) sem testar PIN;
+    // nenhuma passa, nenhuma vira 503, e no máximo 5 PINs são de fato testados.
+    expect(statuses.every((s) => s === 401 || s === 429)).toBe(true);
+    expect(statuses.filter((s) => s === 401).length).toBeGreaterThanOrEqual(1);
+    expect(statuses.filter((s) => s === 401).length).toBeLessThanOrEqual(LOGIN_MAX_PIN_FAILURES);
+    // Em sequência, completa as 5 falhas da janela e trava.
+    while ((await prisma.adminAuditEvent.count({ where: { adminUserId: user.id, action: 'LOGIN_FAILED', detail: { path: ['reason'], equals: 'wrong_pin' } } })) < LOGIN_MAX_PIN_FAILURES) {
+      await wrong(user).catch(() => undefined);
+    }
+    expect(await prisma.adminAuditEvent.count({ where: { adminUserId: user.id, action: 'LOGIN_FAILED', detail: { path: ['reason'], equals: 'wrong_pin' } } })).toBe(LOGIN_MAX_PIN_FAILURES);
+    expect(status(await service.login({ name: user.name, phone: user.phone, pin }).catch((e: unknown) => e))).toBe(429);
+  }, 30_000);
+
+  test('24) login certo zera a contagem; erros antes dele não somam depois', async () => {
+    const { user, pin } = await createUser();
+    for (let i = 0; i < LOGIN_MAX_PIN_FAILURES - 1; i++) await expect(wrong(user)).rejects.toThrow(UnauthorizedException);
+    await expect(service.login({ name: user.name, phone: user.phone, pin })).resolves.toMatchObject({ adminUser: { id: user.id } });
+    for (let i = 0; i < LOGIN_MAX_PIN_FAILURES - 1; i++) await expect(wrong(user)).rejects.toThrow(UnauthorizedException);
+    await expect(service.login({ name: user.name, phone: user.phone, pin })).resolves.toMatchObject({ adminUser: { id: user.id } });
+  });
+
+  test('25) o bloqueio é da conta: outra pessoa continua entrando normalmente', async () => {
+    const { user: locked } = await createUser();
+    const { user: other, pin } = await createUser({ name: 'Joana Teste' });
+    for (let i = 0; i < LOGIN_MAX_PIN_FAILURES; i++) await expect(wrong(locked)).rejects.toThrow(UnauthorizedException);
+    await expect(service.login({ name: other.name, phone: other.phone, pin })).resolves.toMatchObject({ adminUser: { id: other.id } });
+  });
+
+  test('26) passada a janela, o PIN certo volta a entrar', async () => {
+    const { user, pin } = await createUser();
+    for (let i = 0; i < LOGIN_MAX_PIN_FAILURES; i++) await expect(wrong(user)).rejects.toThrow(UnauthorizedException);
+    const past = new Date(Date.now() - (LOGIN_LOCKOUT_WINDOW_MINUTES + 1) * 60_000);
+    await prisma.adminAuditEvent.updateMany({ where: { adminUserId: user.id, action: 'LOGIN_FAILED' }, data: { createdAt: past } });
+    await expect(service.login({ name: user.name, phone: user.phone, pin })).resolves.toMatchObject({ adminUser: { id: user.id } });
+  });
+});
+
+describe('AdminAuthService — contagem por telefone + IP (sem bloquear a dona da conta, sem enumeração)', () => {
+  const status = (err: unknown) => (err as { getStatus?: () => number }).getStatus?.();
+  const attempt = (name: string, phone: string, pin: string, ip: string) => service.login({ name, phone, pin }, ip).catch((e: unknown) => e);
+
+  test('27) atacante trava só o PRÓPRIO IP: a dona da conta, de outro IP, continua entrando', async () => {
+    const { user, pin } = await createUser();
+    for (let i = 0; i < LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP; i++) expect(status(await attempt(user.name, user.phone, '0000', '198.51.100.10'))).toBe(401);
+    expect(status(await attempt(user.name, user.phone, pin, '198.51.100.10'))).toBe(429);
+    await expect(service.login({ name: user.name, phone: user.phone, pin }, '203.0.113.20')).resolves.toMatchObject({ adminUser: { id: user.id } });
+  });
+
+  test('28) telefone que NÃO existe se comporta igual (401 e depois 429) — sem enumeração', async () => {
+    const ghost = normalizePhone(`+56${PHONE_TAG}999`);
+    for (let i = 0; i < LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP; i++) expect(status(await attempt('Ninguém', ghost, '0000', '198.51.100.11'))).toBe(401);
+    const locked = await attempt('Ninguém', ghost, '0000', '198.51.100.11');
+    expect(status(locked)).toBe(429);
+    expect((locked as Error).message).toBe(LOGIN_LOCKED_MESSAGE);
+  });
+
+  test('29) ataque distribuído (muitos IPs no mesmo telefone) trava a conta — por tempo limitado', async () => {
+    const { user, pin } = await createUser();
+    for (let i = 0; i < LOGIN_MAX_FAILURES_PER_IDENTIFIER; i++) expect(status(await attempt(user.name, user.phone, '0000', `192.0.2.${i + 1}`))).toBe(401);
+    expect(status(await attempt(user.name, user.phone, pin, '192.0.2.200'))).toBe(429);
+    // Passada a janela, volta sozinho (nada é permanente).
+    await prisma.adminAuditEvent.updateMany({ where: { adminUserId: user.id, action: 'LOGIN_FAILED' }, data: { createdAt: new Date(Date.now() - (LOGIN_LOCKOUT_WINDOW_MINUTES + 1) * 60_000) } });
+    await expect(service.login({ name: user.name, phone: user.phone, pin }, '192.0.2.200')).resolves.toMatchObject({ adminUser: { id: user.id } });
+  }, 60_000);
+
+  test('30) um IP varrendo vários telefones é travado; outro IP segue normal', async () => {
+    const ip = '198.51.100.12';
+    for (let i = 0; i < LOGIN_MAX_FAILURES_PER_IP; i++) expect(status(await attempt('Varredura', normalizePhone(`+56${PHONE_TAG}8${i}`), '0000', ip))).toBe(401);
+    const { user, pin } = await createUser();
+    expect(status(await attempt(user.name, user.phone, pin, ip))).toBe(429);
+    await expect(service.login({ name: user.name, phone: user.phone, pin }, '203.0.113.21')).resolves.toMatchObject({ adminUser: { id: user.id } });
+  }, 90_000);
+
+  test('31) IP ausente ou forjado com lixo cai num balde único, nunca vira chave arbitrária', async () => {
+    const { user, pin } = await createUser();
+    for (const junk of [undefined, '', '1.2.3.4, 5.6.7.8', "'; DROP TABLE admin_users;--"]) {
+      expect(status(await attempt(user.name, user.phone, '0000', junk as string))).toBe(401);
+    }
+    expect(status(await attempt(user.name, user.phone, '0000', 'x'.repeat(500)))).toBe(401);
+    // 5 falhas no balde "unknown" → travado lá, mas um IP válido ainda entra.
+    expect(status(await attempt(user.name, user.phone, pin, 'lixo'))).toBe(429);
+    await expect(service.login({ name: user.name, phone: user.phone, pin }, '203.0.113.22')).resolves.toMatchObject({ adminUser: { id: user.id } });
+    const details = (await prisma.adminAuditEvent.findMany({ where: { adminUserId: user.id, action: 'LOGIN_FAILED' } })).map((e) => JSON.stringify(e.detail));
+    for (const d of details) expect(d).not.toMatch(/203\.0\.113|DROP|x{20}/);
   });
 });

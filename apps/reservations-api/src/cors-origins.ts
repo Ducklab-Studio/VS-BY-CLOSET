@@ -53,3 +53,17 @@ export const VERCEL_PREVIEW_ORIGIN = /^https:\/\/vsbycloset-[a-z0-9-]+-ducklab\.
 export function isOriginAllowed(origin: string, staticOrigins: string[]): boolean {
   return staticOrigins.includes(origin) || VERCEL_PREVIEW_ORIGIN.test(origin);
 }
+
+/**
+ * Callback de origem do `enableCors`. Origem fora da lista NÃO é erro do
+ * servidor: antes, `callback(new Error(...))` virava HTTP 500 para qualquer
+ * requisição com um `Origin` desconhecido (inclusive GETs públicos). Agora a
+ * resposta segue normal, só SEM os headers de CORS — o navegador de uma origem
+ * não permitida continua sem conseguir ler nada, que é a proteção de fato.
+ * Sem `Origin` (servidor → servidor, webhook da Shopify, curl) segue liberado.
+ */
+export function corsOriginCallback(staticOrigins: string[]) {
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void): void => {
+    callback(null, !origin || isOriginAllowed(origin, staticOrigins));
+  };
+}

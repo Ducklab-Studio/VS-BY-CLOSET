@@ -1,12 +1,34 @@
-import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizePhone, phoneLookupCandidates } from '../admin/admin-phone';
 import { verifyPin } from '../admin/admin-pin';
 import { generateSessionToken, hashSessionToken } from '../admin/admin-session-token';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
+import type { AdminUser as AdminUserRow } from '@prisma/client';
+import { loginKey, normalizeClientIp } from './login-keys';
 import type { AdminLoginDto } from './dto/login.dto';
 
 const SESSION_TTL_HOURS = 12;
+
+/**
+ * Proteção contra força bruta do PIN (4 a 8 dígitos). As falhas são contadas
+ * na auditoria (LOGIN_FAILED, com hash do telefone digitado e do IP — nunca os
+ * valores crus) dentro de uma janela deslizante, em três recortes:
+ *  - telefone + IP: 5 falhas → esse IP para de tentar esse telefone. Um
+ *    atacante bloqueia só a si mesmo, não a pessoa dona da conta;
+ *  - telefone (qualquer IP): 20 → trava ataque distribuído em muitos IPs;
+ *  - IP (qualquer telefone): 30 → trava quem varre vários telefones.
+ * Vale para telefone que existe ou não (mesma resposta, sem enumeração).
+ * Nada é permanente: passa a janela, ou o login certo zera a contagem da conta.
+ * O throttler por IP não resolve sozinho: o login chega pelo servidor do site.
+ */
+export const LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP = 5;
+export const LOGIN_MAX_FAILURES_PER_IDENTIFIER = 20;
+export const LOGIN_MAX_FAILURES_PER_IP = 30;
+/** Compatibilidade com quem já importava o nome antigo. */
+export const LOGIN_MAX_PIN_FAILURES = LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP;
+export const LOGIN_LOCKOUT_WINDOW_MINUTES = 15;
+export const LOGIN_LOCKED_MESSAGE = 'Muitas tentativas. Aguarde alguns minutos e tente novamente.';
 
 export interface AdminUserPublic {
   readonly id: string;
@@ -36,43 +58,80 @@ export class AdminAuthService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async login(dto: AdminLoginDto): Promise<LoginResponse> {
+  async login(dto: AdminLoginDto, clientIp?: string): Promise<LoginResponse> {
     const phone = normalizePhone(dto.phone);
+    const idKey = loginKey('id', phone);
+    const ip = normalizeClientIp(clientIp);
+    const ipKey = loginKey('ip', ip);
     const genericError = () => new UnauthorizedException('Credenciais inválidas.');
 
-    let user;
+    let result: { outcome: 'ok' | 'failed' | 'locked_out'; user: AdminUserRow | null };
     try {
-      // Com e sem "+": um cadastro antigo pode ter sido gravado sem ele. Se
-      // existirem os dois, vale o que bate exatamente com o digitado.
-      const matches = await this.prisma.adminUser.findMany({ where: { phone: { in: phoneLookupCandidates(phone) } } });
-      user = matches.find((u) => u.phone === phone) ?? matches[0] ?? null;
+      // Contagem → identificação → PIN → registro da falha, numa transação que
+      // só roda com o lock do telefone. Tentativa simultânea no MESMO telefone
+      // não espera na fila (fila prenderia conexões do banco numa rajada): é
+      // recusada na hora, sem testar PIN. Assim nunca passam do limite juntas.
+      result = await this.prisma.$transaction(
+        async (tx) => {
+          const [{ acquired }] = await tx.$queryRaw<{ acquired: boolean }[]>`
+            SELECT pg_try_advisory_xact_lock(hashtext(${'admin-login-id:' + idKey})) AS acquired
+          `;
+          if (!acquired) return { outcome: 'locked_out' as const, user: null };
+
+          // Com e sem "+": um cadastro antigo pode ter sido gravado sem ele. Se
+          // existirem os dois, vale o que bate exatamente com o digitado.
+          const matches = await tx.adminUser.findMany({ where: { phone: { in: phoneLookupCandidates(phone) } } });
+          const user = matches.find((u) => u.phone === phone) ?? matches[0] ?? null;
+
+          const windowStart = new Date(Date.now() - LOGIN_LOCKOUT_WINDOW_MINUTES * 60_000);
+          const lastSession = user
+            ? await tx.adminSession.findFirst({ where: { adminUserId: user.id }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
+            : null;
+          // Login certo zera a contagem do telefone; a do IP não (um login
+          // válido não pode "limpar" a varredura de outros telefones).
+          const identitySince = lastSession && lastSession.createdAt > windowStart ? lastSession.createdAt : windowStart;
+          const failed = { action: 'LOGIN_FAILED', NOT: { detail: { path: ['reason'], equals: 'locked_out' } } };
+          const [perPair, perIdentity, perIp] = await Promise.all([
+            tx.adminAuditEvent.count({ where: { ...failed, createdAt: { gt: identitySince }, AND: [{ detail: { path: ['idKey'], equals: idKey } }, { detail: { path: ['ipKey'], equals: ipKey } }] } }),
+            tx.adminAuditEvent.count({ where: { ...failed, createdAt: { gt: identitySince }, detail: { path: ['idKey'], equals: idKey } } }),
+            tx.adminAuditEvent.count({ where: { ...failed, createdAt: { gt: windowStart }, detail: { path: ['ipKey'], equals: ipKey } } }),
+          ]);
+
+          const fail = async (reason: string, outcome: 'failed' | 'locked_out' = 'failed') => {
+            await writeAdminAuditEvent(tx, {
+              adminUserId: user?.id ?? null,
+              adminUserName: user ? null : dto.name,
+              action: 'LOGIN_FAILED',
+              detail: { reason, idKey, ipKey }, // nunca o PIN, o telefone ou o IP crus
+            });
+            return { outcome, user };
+          };
+
+          // O teto por IP só vale para IP de verdade: sem IP repassado, todo
+          // mundo cairia no mesmo balde e uma pessoa travaria o login de todos.
+          const ipCeilingHit = ip !== 'unknown' && perIp >= LOGIN_MAX_FAILURES_PER_IP;
+          if (perPair >= LOGIN_MAX_FAILURES_PER_IDENTIFIER_AND_IP || perIdentity >= LOGIN_MAX_FAILURES_PER_IDENTIFIER || ipCeilingHit) {
+            return fail('locked_out', 'locked_out');
+          }
+          if (!user) return fail('user_not_found');
+          // Nome nunca é fator de segurança (item 2) — mas é checado como
+          // parte da identificação: se não bate, é tratado com a MESMA
+          // resposta genérica de PIN errado, nunca um erro diferente que
+          // revelaria "o telefone existe, só o nome está errado".
+          if (!sameName(user.name, dto.name)) return fail('name_mismatch');
+          if (!user.active || user.removedAt) return fail('inactive');
+          if (!(await verifyPin(dto.pin, user.pinHash))) return fail('wrong_pin');
+          return { outcome: 'ok' as const, user };
+        },
+        { timeout: 15_000, maxWait: 10_000 },
+      );
     } catch (err) {
-      this.logger.error(`Falha ao consultar admin_users: ${errorCode(err)}`);
+      this.logger.error(`Falha ao verificar tentativa de login: ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível autenticar no momento.');
     }
-
-    if (!user) {
-      await this.auditLoginFailure(null, dto.name, 'user_not_found');
-      throw genericError();
-    }
-    // Nome nunca é fator de segurança (item 2) — mas é checado como
-    // parte da identificação: se não bate, é tratado com a MESMA
-    // resposta genérica de PIN errado, nunca um erro diferente que
-    // revelaria "o telefone existe, só o nome está errado".
-    if (!sameName(user.name, dto.name)) {
-      await this.auditLoginFailure(user.id, dto.name, 'name_mismatch');
-      throw genericError();
-    }
-    if (!user.active || user.removedAt) {
-      await this.auditLoginFailure(user.id, dto.name, 'inactive');
-      throw genericError();
-    }
-
-    const pinOk = await verifyPin(dto.pin, user.pinHash);
-    if (!pinOk) {
-      await this.auditLoginFailure(user.id, dto.name, 'wrong_pin');
-      throw genericError();
-    }
+    if (result.outcome === 'locked_out') throw new HttpException(LOGIN_LOCKED_MESSAGE, HttpStatus.TOO_MANY_REQUESTS);
+    if (result.outcome !== 'ok' || !result.user) throw genericError();
+    const user = result.user;
 
     const token = generateSessionToken();
     const tokenHash = hashSessionToken(token);

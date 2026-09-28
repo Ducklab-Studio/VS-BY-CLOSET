@@ -18,25 +18,19 @@ export default async function ClosetAdminEmployeesPage() {
   const session = await requireAdminSession();
   requireAdminRole(session, 'SUPER_ADMIN');
 
-  let employees: Awaited<ReturnType<typeof listEmployees>> | null = null;
-  let errorMessage: string | null = null;
-  try {
-    employees = await listEmployees(session.id);
-  } catch (err) {
-    errorMessage = err instanceof AdminApiError ? err.message : 'Erro inesperado.';
-  }
+  // Lista e presença são independentes: em paralelo, não em fila.
+  const [employeesResult, presenceResult] = await Promise.allSettled([
+    listEmployees(session.id),
+    adminGet<EmployeePresence[]>('/admin/presence', session.id),
+  ]);
 
-  if (!employees) {
-    return <ErrorState message={errorMessage ?? 'Erro inesperado.'} />;
+  if (employeesResult.status === 'rejected') {
+    const err = employeesResult.reason;
+    return <ErrorState message={err instanceof AdminApiError ? err.message : 'Erro inesperado.'} />;
   }
-
+  const employees = employeesResult.value;
   // Online/offline — falha aqui não impede a lista (a tela tenta de novo sozinha).
-  let presence: EmployeePresence[] | null = null;
-  try {
-    presence = await adminGet<EmployeePresence[]>('/admin/presence', session.id);
-  } catch {
-    presence = null;
-  }
+  const presence: EmployeePresence[] | null = presenceResult.status === 'fulfilled' ? presenceResult.value : null;
 
   return (
     <div>

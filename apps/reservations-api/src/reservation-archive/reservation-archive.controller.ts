@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -52,7 +52,7 @@ export class ReservationArchiveController {
   }
 
   @Post(':id/restore')
-  restore(@Param('id') id: string, @Req() req: RequestWithAdminUser) {
+  restore(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser) {
     return this.archive.restore(id, req.adminUser!.id, req.adminUser!.name);
   }
 }

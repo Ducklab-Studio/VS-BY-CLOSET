@@ -10,7 +10,7 @@ import { ArrowUpRight } from 'lucide-react';
  *  Next.js. Erros já tratados nas próprias páginas (loja fora do ar,
  *  catálogo não configurado) continuam com seus estados dedicados e
  *  nunca chegam até aqui. */
-export default function GlobalPageError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function GlobalPageError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -21,7 +21,7 @@ export default function GlobalPageError({ error, reset }: { error: Error & { dig
       <h1 className="mt-3 font-heading text-2xl sm:text-3xl">Não conseguimos carregar esta página.</h1>
       <p className="mt-3 text-ink/70">Foi um erro pontual. Tente novamente ou continue explorando o closet.</p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-5">
-        <button type="button" onClick={reset} className="editorial-button">
+        <button type="button" onClick={() => retry()} className="editorial-button">
           Tentar novamente
         </button>
         <Link href="/pecas" className="text-sm font-medium text-marsala underline underline-offset-4 hover:no-underline">

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query, Res, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireModule } from '../admin/require-module.decorator';
@@ -39,7 +39,7 @@ export class AdminPdfController {
 
   @Get('reservations/:id/pdf')
   @RequireModule('RESERVATIONS')
-  async reservationPdfRoute(@Param('id') id: string, @Res() res: PdfResponse): Promise<void> {
+  async reservationPdfRoute(@Param('id', ParseUUIDPipe) id: string, @Res() res: PdfResponse): Promise<void> {
     const detail = await this.adminReservations.getReservationDetail(id);
     const buffer = await this.reservationPdf.generate(detail);
     sendPdf(res, buffer, `reserva-${id.slice(0, 8)}.pdf`);

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -42,13 +42,13 @@ export class ValePassCampaignsController {
 
   @Post(':id/activate')
   @RequireRole('ADMIN')
-  activate(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<ValePassCampaignItem> {
+  activate(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<ValePassCampaignItem> {
     return this.campaigns.setActive(id, true, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Post(':id/deactivate')
   @RequireRole('ADMIN')
-  deactivate(@Param('id') id: string, @Req() req: RequestWithAdminUser): Promise<ValePassCampaignItem> {
+  deactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: RequestWithAdminUser): Promise<ValePassCampaignItem> {
     return this.campaigns.setActive(id, false, req.adminUser!.id, req.adminUser!.name);
   }
 }

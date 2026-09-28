@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -30,7 +30,7 @@ export class AdminPiecesController {
   // de ADMIN. `AdminRoleGuard` já revalidou o role fresco no banco.
   @Patch(':id')
   @RequireRole('ADMIN')
-  update(@Param('id') id: string, @Body() dto: UpdatePieceDto, @Req() req: RequestWithAdminUser): Promise<PieceListItem> {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePieceDto, @Req() req: RequestWithAdminUser): Promise<PieceListItem> {
     const input: UpdatePieceInput = { active: dto.active, reservableOnline: dto.reservableOnline, countsTowardRentalDuration: dto.countsTowardRentalDuration, reason: dto.reason };
     return this.pieces.update(id, input, req.adminUser!.id, req.adminUser!.name);
   }

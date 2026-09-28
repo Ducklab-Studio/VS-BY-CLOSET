@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminSession } from '@/lib/admin-session';
 import { adminGetPdf, AdminApiError } from '@/lib/admin-api';
+import { isUuid, pathSegment } from '@/lib/admin-path';
 
 /**
  * Fase 10, item 1/6 — proxy server-to-server pro PDF de uma reserva. O
@@ -15,8 +16,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!session) return NextResponse.json({ message: 'Sessão inválida ou expirada.' }, { status: 401 });
 
   const { id } = await params;
+  // Formato inválido (inclusive tentativa de `../`) é erro do pedido: 400, sem chamar a API.
+  if (!isUuid(id)) return NextResponse.json({ message: 'Identificador de reserva inválido.' }, { status: 400 });
   try {
-    const pdf = await adminGetPdf(`/admin/reservations/${id}/pdf`, session.id);
+    const pdf = await adminGetPdf(`/admin/reservations/${pathSegment(id)}/pdf`, session.id);
     return new Response(new Uint8Array(pdf), {
       status: 200,
       headers: {

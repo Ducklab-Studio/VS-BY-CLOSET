@@ -1,4 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { CalendarQueryDto } from './dto/calendar-query.dto';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireModule } from '../admin/require-module.decorator';
@@ -11,7 +12,7 @@ export class AdminCalendarController {
   constructor(private readonly calendar: AdminCalendarService) {}
 
   @Get()
-  get(@Query('from') from: string, @Query('to') to: string): Promise<CalendarItem[]> {
-    return this.calendar.getCalendar(from, to);
+  get(@Query() query: CalendarQueryDto): Promise<CalendarItem[]> {
+    return this.calendar.getCalendar(query.from, query.to);
   }
 }

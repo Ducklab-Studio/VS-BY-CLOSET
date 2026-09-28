@@ -1,9 +1,10 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { adminPost, AdminApiError } from '@/lib/admin-api';
 import { ADMIN_SESSION_COOKIE } from '@/lib/admin-session';
+import { CLIENT_IP_HEADER, clientIpFromHeaders } from '@/lib/client-ip';
 import { LOGIN_FAILURE_MESSAGES, classifyLoginFailure } from './login-errors';
 
 export interface LoginFormState {
@@ -37,7 +38,9 @@ export async function loginAction(_prev: LoginFormState, formData: FormData): Pr
 
   let result: LoginResponse;
   try {
-    result = await adminPost<LoginResponse>('/admin/auth/login', { name, phone, pin });
+    // IP de quem digitou, para a API contar tentativas por pessoa (ver client-ip.ts).
+    const clientIp = clientIpFromHeaders(await headers());
+    result = await adminPost<LoginResponse>('/admin/auth/login', { name, phone, pin }, clientIp ? { [CLIENT_IP_HEADER]: clientIp } : undefined);
   } catch (err) {
     const kind = err instanceof AdminApiError ? classifyLoginFailure(err.status, err.message) : 'unavailable';
     if (kind === 'misconfigured') {
