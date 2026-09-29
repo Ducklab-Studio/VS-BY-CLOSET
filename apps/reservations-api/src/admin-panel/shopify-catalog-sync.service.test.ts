@@ -38,14 +38,14 @@ class FakeShopifyAdminClient {
 const DECOY_VARIANT = 'gid://shopify/ProductVariant/decoy-nao-relacionada';
 
 // A variante simulada tem, por padrão, o MESMO SKU que `createUnit` grava na
-// peça (`<code>-sku` para a variante `<code>-variant`): estes cenários são de
+// peça (o próprio código, para a variante `<code>-variant`): estes cenários são de
 // arquivamento/reativação, não de SKU divergente — esse caso tem suíte própria
 // (shopify-sku-sync.integration.test.ts).
 function variant(id: string, overrides: Partial<ShopifyCatalogVariant> = {}): ShopifyCatalogVariant {
   return {
     id,
     title: 'Default Title',
-    sku: id.endsWith('-variant') ? id.replace(/-variant$/, '-sku') : null,
+    sku: id.endsWith('-variant') ? id.replace(/-variant$/, '') : null,
     inventoryQuantity: null,
     imageUrl: null,
     imageAlt: null,
@@ -64,7 +64,7 @@ async function createUnit(opts: { active?: boolean; shopifyVariantId?: string | 
       name: 'Blazer Kensington',
       shopifyProductId: `${code}-product`,
       shopifyVariantId: opts.shopifyVariantId === undefined ? `${code}-variant` : opts.shopifyVariantId,
-      shopifySku: `${code}-sku`,
+      shopifySku: code, // código == SKU: estes cenários não são de renomeação
       active: opts.active ?? true,
       reservableOnline: true,
       countsTowardRentalDuration: true,

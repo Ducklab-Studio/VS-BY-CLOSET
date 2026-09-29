@@ -24,6 +24,10 @@ export interface CatalogDivergence {
    *  Shopify (`null` = sem SKU / SKU removido). */
   readonly previousSku?: string | null;
   readonly shopifySku?: string | null;
+  /** Só em `sku_changed`: código da peça antes/depois. O código acompanha o
+   *  SKU quando a variante tem uma única peça física (ver reconcile). */
+  readonly previousCode?: string;
+  readonly newCode?: string;
 }
 
 export interface CatalogSyncReport {
@@ -122,7 +126,12 @@ export class ShopifyCatalogSyncService {
     const variantById = new Map(variants.map((v) => [v.id, v]));
     const liveVariantIds = new Set(variants.filter(isLiveShopifyVariant).map((v) => v.id));
     const inactiveVariantIds = new Set(variants.filter((v) => !isLiveShopifyVariant(v)).map((v) => v.id));
-    const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction }[] = [];
+    const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction; codeTarget?: string }[] = [];
+    // O código da peça é o SKU da variante — mas só quando a variante tem UMA
+    // peça física (não arquivada): com várias peças no mesmo SKU (ex.: dois
+    // sobretudos iguais), os códigos precisam continuar distintos e ficam
+    // como foram cadastrados.
+    const singleUnitVariants = await this.singleUnitVariantIds(units.map((u) => u.shopifyVariantId).filter((v): v is string => !!v));
     for (const unit of units as LinkedUnit[]) {
       const variantId = unit.shopifyVariantId;
       if (!variantId) continue;
@@ -154,8 +163,30 @@ export class ShopifyCatalogSyncService {
         // já relê o SKU. Peça inativa por decisão manual também acompanha
         // o SKU (só o dado comercial; `active` não é tocado).
         const shopifyVariant = variantById.get(variantId);
-        if (shopifyVariant && normalizeSku(unit.shopifySku) !== shopifyVariant.sku) {
-          divergent.push({ unit, kind: 'sku_changed', action: 'sync_sku' });
+        if (shopifyVariant) {
+          const skuDiffers = normalizeSku(unit.shopifySku) !== shopifyVariant.sku;
+          // SKU removido/vazio nunca vira código (a peça não pode ficar sem código).
+          const codeTarget = shopifyVariant.sku && singleUnitVariants.has(variantId) ? shopifyVariant.sku : undefined;
+          if (skuDiffers || (codeTarget && unit.code !== codeTarget)) {
+            divergent.push({ unit, kind: 'sku_changed', action: 'sync_sku', codeTarget });
+          }
+        }
+      }
+    }
+
+    // Código já usado por OUTRA peça (o código é único): não renomeia — só o
+    // SKU é atualizado. Se nem o SKU mudou, não há o que fazer.
+    const wantedCodes = divergent.filter((d) => d.codeTarget && d.codeTarget !== d.unit.code).map((d) => d.codeTarget as string);
+    if (wantedCodes.length > 0) {
+      const taken = await this.prisma.rentalUnit.findMany({ where: { code: { in: wantedCodes } }, select: { id: true, code: true } });
+      const owner = new Map(taken.map((t) => [t.code, t.id]));
+      for (let i = divergent.length - 1; i >= 0; i--) {
+        const d = divergent[i];
+        const holder = d.codeTarget ? owner.get(d.codeTarget) : undefined;
+        if (holder && holder !== d.unit.id) {
+          this.logger.warn(`Código ${d.codeTarget} já é de outra peça — ${d.unit.code} mantém o código atual.`);
+          d.codeTarget = undefined;
+          if (normalizeSku(d.unit.shopifySku) === (variantById.get(d.unit.shopifyVariantId as string)?.sku ?? null)) divergent.splice(i, 1);
         }
       }
     }
@@ -163,7 +194,7 @@ export class ShopifyCatalogSyncService {
     const missingIds = divergent.filter((d) => d.action === 'deactivate').map((d) => d.unit.id);
     const upcomingByUnit = missingIds.length > 0 ? await this.upcomingReservationCounts(missingIds) : new Map<string, number>();
 
-    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action }) => {
+    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action, codeTarget }) => {
       if (kind === 'variant_deleted_inactive') {
         return {
           kind,
@@ -181,6 +212,8 @@ export class ShopifyCatalogSyncService {
       if (kind === 'sku_changed') {
         const previousSku = normalizeSku(unit.shopifySku);
         const shopifySku = variantById.get(unit.shopifyVariantId as string)?.sku ?? null;
+        const newCode = codeTarget ?? unit.code;
+        const codeNote = newCode !== unit.code ? ` Código da peça ${unit.code} → ${newCode}.` : '';
         return {
           kind,
           rentalUnitId: unit.id,
@@ -193,11 +226,16 @@ export class ShopifyCatalogSyncService {
           shopifyProductStatus: variantById.get(unit.shopifyVariantId as string)?.product.status ?? null,
           previousSku,
           shopifySku,
-          note: !shopifySku
-            ? 'SKU removido na Shopify — peça segue vinculada pela variante, marcada como SKU ausente.'
-            : previousSku
-              ? `SKU alterado na Shopify (${previousSku} → ${shopifySku}).`
-              : `SKU cadastrado na Shopify (${shopifySku}).`,
+          previousCode: unit.code,
+          newCode,
+          note:
+            (!shopifySku
+              ? 'SKU removido na Shopify — peça segue vinculada pela variante, marcada como SKU ausente.'
+              : previousSku === shopifySku
+                ? 'Código da peça passa a ser o SKU da Shopify.'
+                : previousSku
+                  ? `SKU alterado na Shopify (${previousSku} → ${shopifySku}).`
+                  : `SKU cadastrado na Shopify (${shopifySku}).`) + (previousSku === shopifySku ? ` (${unit.code} → ${newCode})` : codeNote),
         };
       }
       return {
@@ -230,7 +268,7 @@ export class ShopifyCatalogSyncService {
           d.action === 'deactivate'
             ? await this.applyDeactivate(d, options.actor)
             : d.action === 'sync_sku'
-              ? await this.applySkuSync(d, divergent[i].unit.shopifySku, options.actor)
+              ? await this.applySkuSync(d, divergent[i].unit.shopifySku, divergent[i].unit.code, options.actor)
               : d.action === 'archive'
                 ? await this.applyArchiveInactive(d, options.actor)
                 : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
@@ -275,6 +313,17 @@ export class ShopifyCatalogSyncService {
 
   private async hasActiveLinkedUnits(): Promise<boolean> {
     return (await this.prisma.rentalUnit.count({ where: { active: true, shopifyVariantId: { not: null } } })) > 0;
+  }
+
+  /** Variantes com exatamente UMA peça física não arquivada. */
+  private async singleUnitVariantIds(variantIds: readonly string[]): Promise<Set<string>> {
+    if (variantIds.length === 0) return new Set();
+    const rows = await this.prisma.rentalUnit.groupBy({
+      by: ['shopifyVariantId'],
+      where: { shopifyVariantId: { in: [...new Set(variantIds)] }, shopifyVariantMissingAt: null },
+      _count: { _all: true },
+    });
+    return new Set(rows.filter((r) => r._count._all === 1 && r.shopifyVariantId).map((r) => r.shopifyVariantId as string));
   }
 
   private async upcomingReservationCounts(unitIds: readonly string[]): Promise<Map<string, number>> {
@@ -418,15 +467,16 @@ export class ShopifyCatalogSyncService {
    *  fora no meio tempo, não aplica — a próxima rodada relê tudo. Idempotente:
    *  rodar de novo encontra o SKU já igual e nem chega aqui. Só escreve
    *  `shopifySku` — `active`, reservas, bloqueios e histórico não são tocados. */
-  private async applySkuSync(d: CatalogDivergence, storedSku: string | null, actor?: { id: string; name: string }): Promise<boolean> {
+  private async applySkuSync(d: CatalogDivergence, storedSku: string | null, storedCode: string, actor?: { id: string; name: string }): Promise<boolean> {
     const shopifySku = d.shopifySku ?? null;
+    const newCode = d.newCode ?? storedCode;
     try {
       return await this.prisma.$transaction(
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
           const updated = await tx.rentalUnit.updateMany({
-            where: { id: d.rentalUnitId, shopifyVariantId: d.shopifyVariantId, shopifyVariantMissingAt: null, shopifySku: storedSku },
-            data: { shopifySku },
+            where: { id: d.rentalUnitId, shopifyVariantId: d.shopifyVariantId, shopifyVariantMissingAt: null, shopifySku: storedSku, code: storedCode },
+            data: { shopifySku, ...(newCode !== storedCode ? { code: newCode } : {}) },
           });
           if (updated.count !== 1) return false;
 
@@ -436,11 +486,17 @@ export class ShopifyCatalogSyncService {
             action: 'CATALOG_UNIT_SKU_SYNCED',
             entityType: 'RentalUnit',
             entityId: d.rentalUnitId,
-            before: { shopifySku: d.previousSku ?? null },
-            after: { shopifySku },
+            before: { shopifySku: d.previousSku ?? null, code: storedCode },
+            after: { shopifySku, code: newCode },
             detail: {
               origin: 'shopify_catalog_sync',
-              reason: !shopifySku ? 'shopify_sku_removed' : d.previousSku ? 'shopify_sku_changed' : 'shopify_sku_added',
+              reason: !shopifySku
+                ? 'shopify_sku_removed'
+                : d.previousSku === shopifySku
+                  ? 'code_follows_sku'
+                  : d.previousSku
+                    ? 'shopify_sku_changed'
+                    : 'shopify_sku_added',
               code: d.code,
               shopifyVariantId: d.shopifyVariantId,
             },
@@ -450,6 +506,7 @@ export class ShopifyCatalogSyncService {
         { timeout: 15_000, maxWait: 5_000 },
       );
     } catch (err) {
+      // P2002: outra peça pegou o mesmo código no meio tempo — não renomeia agora.
       this.logger.error(`Falha ao sincronizar SKU da peça ${d.rentalUnitId}: ${errorCode(err)}`);
       return false;
     }

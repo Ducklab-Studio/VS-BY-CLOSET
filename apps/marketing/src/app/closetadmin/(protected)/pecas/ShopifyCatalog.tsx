@@ -155,7 +155,7 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
           ) : null}
 
           <p className="mt-2 text-[11px] text-ink/45 dark:text-dark-subtle">
-            Separe vários códigos por vírgula. O SKU e o estoque vêm da Shopify e são só referência: nenhum dos dois cria peças físicas automaticamente.
+            Separe vários códigos por vírgula. Com uma única peça nesta variante, o código passa a ser o SKU da Shopify automaticamente. O SKU e o estoque nunca criam peças físicas sozinhos.
           </p>
           {message ? (
             <p className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
