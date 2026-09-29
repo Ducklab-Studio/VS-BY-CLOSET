@@ -17,6 +17,8 @@ export interface ShopifyNoteAttribute {
  *  reservation-binding.ts faz. */
 export interface ShopifyOrderLineItem {
   readonly variant_id?: number | string | null;
+  /// Identifica o Valle Pass mesmo numa variante nova do mesmo produto.
+  readonly product_id?: number | string | null;
   readonly quantity?: number;
 }
 
@@ -45,6 +47,7 @@ export interface ShopifyOrderPayload {
   /// `closed_at` preenchido = pedido arquivado/fechado na Shopify;
   /// `updated_at` ordena entregas fora de ordem de `orders/updated`.
   readonly closed_at?: string | null;
+  readonly created_at?: string | null;
   readonly updated_at?: string | null;
   readonly cancel_reason?: string | null;
   readonly note_attributes?: readonly ShopifyNoteAttribute[];

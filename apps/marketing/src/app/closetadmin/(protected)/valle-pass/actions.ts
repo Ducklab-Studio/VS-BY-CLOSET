@@ -8,11 +8,13 @@ import {
   createValePassCampaign,
   deactivateValePassCampaign,
   listValePassCampaigns,
+  listValePassOrders,
   listValePassVouchers,
   markValePassVoucherUsed,
   restoreValePassVoucher,
   type CreateValePassCampaignInput,
   type ValePassCampaign,
+  type ValePassOrder,
   type ValePassVoucher,
   type ValePassVoucherFilters,
 } from '@/lib/admin-data';
@@ -75,6 +77,17 @@ export async function listValePassVouchersAction(filters: ValePassVoucherFilters
     return { vouchers, error: null };
   } catch (err) {
     return { vouchers: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os vales.' };
+  }
+}
+
+export async function listValePassOrdersAction(): Promise<{ orders: ValePassOrder[] | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    const orders = await listValePassOrders(session.id);
+    return { orders, error: null };
+  } catch (err) {
+    return { orders: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os pedidos.' };
   }
 }
 

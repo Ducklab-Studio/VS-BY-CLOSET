@@ -57,6 +57,10 @@ transação, com rollback total em caso de erro (a Shopify reentrega).
   `source: SHOPIFY`, `origin`, `topic`, `orderId`, `from`/`to`) além dos eventos de
   detalhe, todos ligados ao `WebhookEvent` de origem.
 
+## Pedidos do Valle Pass
+
+Pedidos de Valle Pass (vale-presente, sem `reservation_id`) não passam por reserva. Eles têm registro próprio (`vale_pass_orders`), alimentado pelos mesmos webhooks e por uma reconciliação periódica própria. Ver [vale-pass-orders.md](vale-pass-orders.md).
+
 ## Reconciliação (rede de segurança)
 
 A Shopify **não tem tópico de "pedido arquivado"** (arquivar = `closed_at`, que só chega

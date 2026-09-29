@@ -446,6 +446,31 @@ export function listValePassVouchers(adminUserId: string, filters: ValePassVouch
   return adminGet(`/admin/vale-pass/vouchers${qs ? `?${qs}` : ''}`, adminUserId);
 }
 
+/** Situação do PEDIDO na Shopify (não do vale): todo pedido de Valle Pass
+ *  aparece desde a criação, pago ou não. */
+export type ValePassOrderStatus = 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'CANCELLED' | 'DECLINED' | 'REFUNDED';
+
+export interface ValePassOrder {
+  readonly id: string;
+  readonly shopifyOrderId: string;
+  readonly shopifyOrderName: string | null;
+  readonly status: ValePassOrderStatus;
+  readonly financialStatus: string | null;
+  readonly cancelReason: string | null;
+  readonly quantity: number;
+  readonly customerName: string | null;
+  readonly customerPhone: string | null;
+  readonly customerEmail: string | null;
+  readonly orderCreatedAt: string | null;
+  readonly statusChangedAt: string;
+  readonly deletedInShopifyAt: string | null;
+  readonly vouchers: readonly { readonly code: string; readonly status: ValePassStatus }[];
+}
+
+export function listValePassOrders(adminUserId: string, status?: ValePassOrderStatus): Promise<ValePassOrder[]> {
+  return adminGet(`/admin/vale-pass/orders${status ? `?status=${status}` : ''}`, adminUserId);
+}
+
 export function findValePassVoucherByCode(code: string, adminUserId: string): Promise<ValePassVoucher> {
   return adminGet(`/admin/vale-pass/vouchers/${pathSegment(code)}`, adminUserId);
 }

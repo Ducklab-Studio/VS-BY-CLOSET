@@ -746,6 +746,75 @@ model ValePassOrderCancellation {
   @@map("vale_pass_order_cancellations")
 }
 
+/// Situação do PEDIDO Shopify que contém Valle Pass (não do vale): o vale só
+/// nasce com o pagamento confirmado; o pedido existe desde `orders/create`.
+enum ValePassOrderStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+  DECLINED
+  REFUNDED
+
+  @@map("vale_pass_order_status")
+}
+
+/// Todo pedido Shopify com linha de Valle Pass, do `orders/create` em diante —
+/// inclusive os que nunca foram pagos (pendentes, expirados, cancelados,
+/// recusados). Antes, só `orders/paid` deixava rastro (o vale), e um pedido
+/// pendente que expirava sumia sem aparecer no ClosetAdmin. Alimentado pelos
+/// webhooks e pela reconciliação periódica; uma linha por pedido
+/// (`shopify_order_id` único), nunca apagada. Não toca aluguel: nenhuma
+/// reserva, HOLD ou peça.
+model ValePassOrder {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyOrderId      String              @unique @map("shopify_order_id")
+  shopifyOrderGid     String?             @map("shopify_order_gid")
+  shopifyOrderName    String?             @map("shopify_order_name")
+  status              ValePassOrderStatus @default(PENDING)
+  /// Minúsculo, como a Shopify informa (pending, paid, expired, voided...).
+  financialStatus     String?             @map("financial_status")
+  cancelReason        String?             @map("cancel_reason")
+  /// Unidades de Valle Pass no pedido (só as linhas de Valle Pass).
+  quantity            Int                 @default(0)
+  customerName        String?             @map("customer_name")
+  customerPhone       String?             @map("customer_phone")
+  customerEmail       String?             @map("customer_email")
+  orderCreatedAt      DateTime?           @map("order_created_at") @db.Timestamptz(6)
+  /// `updated_at` do estado já aplicado: um estado mais antigo (webhook
+  /// atrasado/fora de ordem) nunca sobrescreve um mais novo.
+  shopifyUpdatedAt    DateTime?           @map("shopify_updated_at") @db.Timestamptz(6)
+  statusChangedAt     DateTime            @default(now()) @map("status_changed_at") @db.Timestamptz(6)
+  /// Pagamento confirmado já passou pela emissão de vales (emitidos ou
+  /// sinalizados para revisão) — a reconciliação não repete.
+  vouchersProcessedAt DateTime?           @map("vouchers_processed_at") @db.Timestamptz(6)
+  deletedInShopifyAt  DateTime?           @map("deleted_in_shopify_at") @db.Timestamptz(6)
+  lastSyncSource      String              @map("last_sync_source")
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  events ValePassOrderEvent[]
+
+  @@index([status])
+  @@index([orderCreatedAt])
+  @@map("vale_pass_orders")
+}
+
+/// Histórico do pedido (registrado, mudança de status, excluído na Shopify).
+/// Só INSERT; nunca alterado nem apagado.
+model ValePassOrderEvent {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  valePassOrderId String   @map("vale_pass_order_id") @db.Uuid
+  type            String
+  detail          Json?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order ValePassOrder @relation(fields: [valePassOrderId], references: [id])
+
+  @@index([valePassOrderId])
+  @@map("vale_pass_order_events")
+}
+
 /// Trilha de eventos por vale (criado, usado, cancelado, expirado) —
 /// mesmo espírito de ReservationEvent, mas num domínio totalmente
 /// separado (nunca mistura com auditoria/eventos de reserva).

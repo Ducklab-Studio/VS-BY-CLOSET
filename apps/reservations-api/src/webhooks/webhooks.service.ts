@@ -135,34 +135,23 @@ export class WebhooksService {
 
   private async dispatch(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<DispatchResult> {
     switch (topic) {
+      // Valle Pass — produto totalmente separado do fluxo de aluguel (ver
+      // ValePassWebhookService.handleOrderWebhook). Passo ADICIONAL, nunca
+      // substitui o resultado da reserva: um pedido sem reserva continua
+      // caindo em `ignored` no fluxo de aluguel; isto só soma o registro do
+      // pedido de Valle Pass (qualquer status, desde `orders/create`) e os
+      // vales emitidos (só com pagamento confirmado) ao mesmo log de eventos.
       case 'orders/create':
-      case 'orders/paid': {
-        const order = payload as ShopifyOrderPayload;
-        const reservationResult = await this.handleOrderPaidOrCreated(tx, order, topic);
-        // Valle Pass — produto totalmente separado do fluxo de aluguel
-        // (ver ValePassWebhookService). Passo ADICIONAL, nunca
-        // substitui o resultado acima: um pedido sem reserva já cai em
-        // `ignored` no branch de cima, exatamente como sempre caiu;
-        // isto só soma vales emitidos (se houver) ao mesmo log de
-        // eventos. Só dispara em `orders/paid` já pago — nunca em
-        // `orders/create`, pra nunca emitir código resgatável antes da
-        // confirmação de pagamento.
-        if (topic === 'orders/paid' && order.financial_status === 'paid') {
-          const valePassEvents = await this.valePass.handleOrderPaid(tx, order);
-          if (valePassEvents.length > 0) {
-            return { ...reservationResult, status: 'processed', events: [...reservationResult.events, ...valePassEvents] };
-          }
-        }
-        return reservationResult;
-      }
+      case 'orders/paid':
+        return this.withValePass(tx, topic, payload, await this.handleOrderPaidOrCreated(tx, payload as ShopifyOrderPayload, topic));
       case 'orders/cancelled':
-        return this.handleOrderCancelled(tx, payload as ShopifyOrderPayload);
+        return this.withValePass(tx, topic, payload, await this.handleOrderCancelled(tx, payload as ShopifyOrderPayload));
       case 'orders/updated':
-        return this.handleOrderUpdated(tx, payload as ShopifyOrderPayload);
+        return this.withValePass(tx, topic, payload, await this.handleOrderUpdated(tx, payload as ShopifyOrderPayload));
       case 'orders/delete':
-        return this.handleOrderDeleted(tx, payload as { id: number | string });
+        return this.withValePass(tx, topic, payload, await this.handleOrderDeleted(tx, payload as { id: number | string }));
       case 'refunds/create':
-        return this.handleRefundCreated(tx, payload as ShopifyRefundPayload);
+        return this.withValePass(tx, topic, payload, await this.handleRefundCreated(tx, payload as ShopifyRefundPayload));
       case 'products/create':
       case 'products/update':
       case 'products/delete':
@@ -188,6 +177,12 @@ export class WebhooksService {
       default:
         return { status: 'ignored', events: [{ type: 'WEBHOOK_RECEIVED', detail: { topic, note: 'tópico não tratado por esta fase' } }] };
     }
+  }
+
+  private async withValePass(tx: Prisma.TransactionClient, topic: string, payload: unknown, result: DispatchResult): Promise<DispatchResult> {
+    const valePassEvents = await this.valePass.handleOrderWebhook(tx, topic, payload);
+    if (valePassEvents.length === 0) return result;
+    return { ...result, status: 'processed', events: [...result.events, ...valePassEvents] };
   }
 
   // ── orders/create, orders/paid ──────────────────────────────────

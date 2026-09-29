@@ -38,6 +38,24 @@ export interface ShopifyOrderState {
   readonly reservationId: string | null;
 }
 
+/** Pedido com linhas (só ids e quantidade), para a reconciliação do Valle
+ *  Pass. Sem dados de cliente: exigiriam escopo extra e não são necessários
+ *  para decidir o status — o webhook é quem traz o contato. */
+export interface ShopifyOrderWithLines {
+  readonly gid: string;
+  readonly orderId: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly cancelledAt: string | null;
+  /** Minúsculo: customer, declined, fraud, inventory, other, staff. */
+  readonly cancelReason: string | null;
+  /** Minúsculo: paid, pending, voided, expired, refunded... */
+  readonly financialStatus: string | null;
+  /** Ids numéricos (o mesmo formato do webhook REST). */
+  readonly lines: readonly { readonly variantId: string | null; readonly productId: string | null; readonly quantity: number }[];
+}
+
 interface ShopifyAdminCredentials {
   readonly shopifyDomain: string;
   readonly clientId: string;
@@ -126,6 +144,48 @@ const RECENT_ORDERS_QUERY = `
     }
   }
 `;
+
+// Custo por página (limite da Shopify: 1000 pontos por consulta): 10 pedidos ×
+// 20 linhas × 3 objetos ≈ 630 pontos. Por isso a página é pequena.
+const ORDERS_WITH_LINES_PAGE = 10;
+const ORDER_WITH_LINES_FIELDS = `
+  id
+  name
+  createdAt
+  updatedAt
+  cancelledAt
+  cancelReason
+  displayFinancialStatus
+  lineItems(first: 20) { nodes { quantity variant { id } product { id } } }
+`;
+
+const ORDERS_WITH_LINES_QUERY = `
+  query ClosetAdminValePassOrders($first: Int!, $after: String, $query: String!) {
+    orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+      nodes { ${ORDER_WITH_LINES_FIELDS} }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+const ORDERS_WITH_LINES_BY_ID_QUERY = `
+  query ClosetAdminValePassOrdersById($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order { ${ORDER_WITH_LINES_FIELDS} }
+    }
+  }
+`;
+
+interface RawShopifyOrderWithLines {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly cancelledAt: string | null;
+  readonly cancelReason: string | null;
+  readonly displayFinancialStatus: string | null;
+  readonly lineItems: { readonly nodes: readonly { quantity: number; variant: { id: string } | null; product: { id: string } | null }[] };
+}
 
 interface RawShopifyOrder {
   readonly id: string;
@@ -221,6 +281,38 @@ export class ShopifyAdminClient {
       }
     } while (after);
     return { orders: orders.slice(0, max), truncated };
+  }
+
+  /** Pedidos ALTERADOS desde `sinceIso` (criados, pagos, expirados,
+   *  cancelados...), do mais recente para o mais antigo, página a página até
+   *  `maxPages`. `truncated` = havia mais páginas do que o teto. */
+  async listOrdersWithLinesUpdatedSince(sinceIso: string, maxPages: number): Promise<{ orders: ShopifyOrderWithLines[]; truncated: boolean }> {
+    const orders: ShopifyOrderWithLines[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < maxPages; page++) {
+      const data: { orders: { nodes: RawShopifyOrderWithLines[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await this.graphql(
+        ORDERS_WITH_LINES_QUERY,
+        { first: ORDERS_WITH_LINES_PAGE, after, query: `updated_at:>='${sinceIso}'` },
+      );
+      orders.push(...data.orders.nodes.map(normalizeOrderWithLines));
+      after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+      if (!after) return { orders, truncated: false };
+    }
+    return { orders, truncated: true };
+  }
+
+  /** Mesmos campos, por GID. `null` = a Shopify não devolveu o pedido. */
+  async getOrdersWithLinesByGid(gids: readonly string[]): Promise<Map<string, ShopifyOrderWithLines | null>> {
+    const result = new Map<string, ShopifyOrderWithLines | null>();
+    for (let i = 0; i < gids.length; i += ORDERS_WITH_LINES_PAGE) {
+      const chunk = gids.slice(i, i + ORDERS_WITH_LINES_PAGE);
+      const data = await this.graphql<{ nodes: (RawShopifyOrderWithLines | null)[] }>(ORDERS_WITH_LINES_BY_ID_QUERY, { ids: chunk });
+      chunk.forEach((gid, index) => {
+        const node = data.nodes[index];
+        result.set(gid, node && node.id ? normalizeOrderWithLines(node) : null);
+      });
+    }
+    return result;
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -329,6 +421,22 @@ function normalizeOrder(raw: RawShopifyOrder): ShopifyOrderState {
     closedAt: raw.closedAt,
     financialStatus: raw.displayFinancialStatus ? raw.displayFinancialStatus.toLowerCase() : null,
     reservationId: reservationId || null,
+  };
+}
+
+const lastSegment = (gid: string | null | undefined) => (gid ? gid.slice(gid.lastIndexOf('/') + 1) || null : null);
+
+function normalizeOrderWithLines(raw: RawShopifyOrderWithLines): ShopifyOrderWithLines {
+  return {
+    gid: raw.id,
+    orderId: lastSegment(raw.id) ?? raw.id,
+    name: raw.name,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    cancelledAt: raw.cancelledAt,
+    cancelReason: raw.cancelReason ? raw.cancelReason.toLowerCase() : null,
+    financialStatus: raw.displayFinancialStatus ? raw.displayFinancialStatus.toLowerCase() : null,
+    lines: (raw.lineItems?.nodes ?? []).map((line) => ({ variantId: lastSegment(line.variant?.id), productId: lastSegment(line.product?.id), quantity: line.quantity })),
   };
 }
 
