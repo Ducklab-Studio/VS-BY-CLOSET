@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
@@ -126,7 +127,7 @@ export class ShopifyCatalogSyncService {
     const variantById = new Map(variants.map((v) => [v.id, v]));
     const liveVariantIds = new Set(variants.filter(isLiveShopifyVariant).map((v) => v.id));
     const inactiveVariantIds = new Set(variants.filter((v) => !isLiveShopifyVariant(v)).map((v) => v.id));
-    const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction; codeTarget?: string }[] = [];
+    const divergent: { unit: LinkedUnit; kind: CatalogDivergenceKind; action: CatalogDivergenceAction; codeTarget?: string; releaseFrom?: string }[] = [];
     // O código da peça é o SKU da variante — mas só quando a variante tem UMA
     // peça física (não arquivada): com várias peças no mesmo SKU (ex.: dois
     // sobretudos iguais), os códigos precisam continuar distintos e ficam
@@ -174,15 +175,23 @@ export class ShopifyCatalogSyncService {
       }
     }
 
-    // Código já usado por OUTRA peça (o código é único): não renomeia — só o
-    // SKU é atualizado. Se nem o SKU mudou, não há o que fazer.
+    // Código já usado por OUTRA peça (o código é único). Se quem ocupa é uma
+    // peça ARQUIVADA pela sincronização (fora de operação, só histórico), ela
+    // libera o código e passa a "<código>-ARQ" (applySkuSync). Peça ativa ou
+    // desativada à mão nunca é renomeada: aí não troca — só o SKU é atualizado,
+    // e se nem o SKU mudou, não há o que fazer.
     const wantedCodes = divergent.filter((d) => d.codeTarget && d.codeTarget !== d.unit.code).map((d) => d.codeTarget as string);
     if (wantedCodes.length > 0) {
-      const taken = await this.prisma.rentalUnit.findMany({ where: { code: { in: wantedCodes } }, select: { id: true, code: true } });
-      const owner = new Map(taken.map((t) => [t.code, t.id]));
+      const taken = await this.prisma.rentalUnit.findMany({ where: { code: { in: wantedCodes } }, select: { id: true, code: true, shopifyVariantMissingAt: true } });
+      const owner = new Map(taken.map((t) => [t.code, t]));
       for (let i = divergent.length - 1; i >= 0; i--) {
         const d = divergent[i];
-        const holder = d.codeTarget ? owner.get(d.codeTarget) : undefined;
+        const holderRow = d.codeTarget ? owner.get(d.codeTarget) : undefined;
+        const holder = holderRow?.id;
+        if (holderRow && holder !== d.unit.id && holderRow.shopifyVariantMissingAt) {
+          d.releaseFrom = holderRow.id;
+          continue;
+        }
         if (holder && holder !== d.unit.id) {
           this.logger.warn(`Código ${d.codeTarget} já é de outra peça — ${d.unit.code} mantém o código atual.`);
           d.codeTarget = undefined;
@@ -194,7 +203,7 @@ export class ShopifyCatalogSyncService {
     const missingIds = divergent.filter((d) => d.action === 'deactivate').map((d) => d.unit.id);
     const upcomingByUnit = missingIds.length > 0 ? await this.upcomingReservationCounts(missingIds) : new Map<string, number>();
 
-    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action, codeTarget }) => {
+    const divergences: CatalogDivergence[] = divergent.map(({ unit, kind, action, codeTarget, releaseFrom }) => {
       if (kind === 'variant_deleted_inactive') {
         return {
           kind,
@@ -213,7 +222,9 @@ export class ShopifyCatalogSyncService {
         const previousSku = normalizeSku(unit.shopifySku);
         const shopifySku = variantById.get(unit.shopifyVariantId as string)?.sku ?? null;
         const newCode = codeTarget ?? unit.code;
-        const codeNote = newCode !== unit.code ? ` Código da peça ${unit.code} → ${newCode}.` : '';
+        const codeNote =
+          (newCode !== unit.code ? ` Código da peça ${unit.code} → ${newCode}.` : '') +
+          (releaseFrom ? ` A peça arquivada que usava ${newCode} passa a ${newCode}-ARQ.` : '');
         return {
           kind,
           rentalUnitId: unit.id,
@@ -235,7 +246,7 @@ export class ShopifyCatalogSyncService {
                 ? 'Código da peça passa a ser o SKU da Shopify.'
                 : previousSku
                   ? `SKU alterado na Shopify (${previousSku} → ${shopifySku}).`
-                  : `SKU cadastrado na Shopify (${shopifySku}).`) + (previousSku === shopifySku ? ` (${unit.code} → ${newCode})` : codeNote),
+                  : `SKU cadastrado na Shopify (${shopifySku}).`) + (previousSku === shopifySku ? ` (${unit.code} → ${newCode})` + (releaseFrom ? ` A peça arquivada que usava ${newCode} passa a ${newCode}-ARQ.` : '') : codeNote),
         };
       }
       return {
@@ -268,7 +279,7 @@ export class ShopifyCatalogSyncService {
           d.action === 'deactivate'
             ? await this.applyDeactivate(d, options.actor)
             : d.action === 'sync_sku'
-              ? await this.applySkuSync(d, divergent[i].unit.shopifySku, divergent[i].unit.code, options.actor)
+              ? await this.applySkuSync(d, divergent[i].unit.shopifySku, divergent[i].unit.code, options.actor, divergent[i].releaseFrom)
               : d.action === 'archive'
                 ? await this.applyArchiveInactive(d, options.actor)
                 : await this.applyReactivate(d, variantById.get(d.shopifyVariantId), options.actor);
@@ -313,6 +324,37 @@ export class ShopifyCatalogSyncService {
 
   private async hasActiveLinkedUnits(): Promise<boolean> {
     return (await this.prisma.rentalUnit.count({ where: { active: true, shopifyVariantId: { not: null } } })) > 0;
+  }
+
+  /** Peça ARQUIVADA pela sincronização libera `code` para a peça ativa: passa
+   *  a `<code>-ARQ` (ou `-ARQ-2`, `-ARQ-3`… se já existir). Condicional em
+   *  "continua arquivada e com este código"; reservas e histórico apontam para
+   *  a peça pelo id, então nada se perde. Auditado nas duas pontas. */
+  private async releaseArchivedCode(
+    tx: Prisma.TransactionClient,
+    holderId: string,
+    code: string,
+    d: CatalogDivergence,
+    actor?: { id: string; name: string },
+  ): Promise<boolean> {
+    let freed = `${code}-ARQ`;
+    for (let n = 2; await tx.rentalUnit.findUnique({ where: { code: freed }, select: { id: true } }); n++) freed = `${code}-ARQ-${n}`;
+    const moved = await tx.rentalUnit.updateMany({
+      where: { id: holderId, code, shopifyVariantMissingAt: { not: null } },
+      data: { code: freed },
+    });
+    if (moved.count !== 1) return false;
+    await writeAdminAuditEvent(tx, {
+      adminUserId: actor?.id ?? null,
+      adminUserName: actor?.name ?? 'Sistema (sincronização de catálogo)',
+      action: 'CATALOG_UNIT_CODE_RELEASED',
+      entityType: 'RentalUnit',
+      entityId: holderId,
+      before: { code },
+      after: { code: freed },
+      detail: { origin: 'shopify_catalog_sync', reason: 'code_released_to_active_piece', code, takenBy: d.rentalUnitId, takenByCode: d.code },
+    });
+    return true;
   }
 
   /** Variantes com exatamente UMA peça física não arquivada. */
@@ -467,13 +509,26 @@ export class ShopifyCatalogSyncService {
    *  fora no meio tempo, não aplica — a próxima rodada relê tudo. Idempotente:
    *  rodar de novo encontra o SKU já igual e nem chega aqui. Só escreve
    *  `shopifySku` — `active`, reservas, bloqueios e histórico não são tocados. */
-  private async applySkuSync(d: CatalogDivergence, storedSku: string | null, storedCode: string, actor?: { id: string; name: string }): Promise<boolean> {
+  private async applySkuSync(
+    d: CatalogDivergence,
+    storedSku: string | null,
+    storedCode: string,
+    actor?: { id: string; name: string },
+    releaseFrom?: string,
+  ): Promise<boolean> {
     const shopifySku = d.shopifySku ?? null;
     const newCode = d.newCode ?? storedCode;
     try {
       return await this.prisma.$transaction(
         async (tx) => {
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + d.rentalUnitId}))`;
+          // Duas peças na mesma transação: locks sempre em ordem de id (sem deadlock).
+          for (const id of [d.rentalUnitId, ...(releaseFrom ? [releaseFrom] : [])].sort()) {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'rental-unit:' + id}))`;
+          }
+          if (releaseFrom && newCode !== storedCode) {
+            const released = await this.releaseArchivedCode(tx, releaseFrom, newCode, d, actor);
+            if (!released) return false; // quem ocupava não está mais arquivado/no código: nada muda
+          }
           const updated = await tx.rentalUnit.updateMany({
             where: { id: d.rentalUnitId, shopifyVariantId: d.shopifyVariantId, shopifyVariantMissingAt: null, shopifySku: storedSku, code: storedCode },
             data: { shopifySku, ...(newCode !== storedCode ? { code: newCode } : {}) },

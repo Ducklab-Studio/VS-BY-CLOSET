@@ -29,6 +29,7 @@ const ACTION_LABELS: Record<string, string> = {
   CATALOG_UNIT_DEACTIVATED: 'Peça arquivada pela sincronização Shopify',
   CATALOG_UNIT_REACTIVATED: 'Peça reativada pela sincronização Shopify',
   CATALOG_UNIT_SKU_SYNCED: 'SKU sincronizado da Shopify',
+  CATALOG_UNIT_CODE_RELEASED: 'Código liberado por peça arquivada',
   UNIT_ACTIVATED: 'Peça ativada',
   UNIT_DEACTIVATED: 'Peça desativada',
   UNIT_UPDATED: 'Peça atualizada',
