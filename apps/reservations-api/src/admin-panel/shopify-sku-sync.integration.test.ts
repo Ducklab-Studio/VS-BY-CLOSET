@@ -479,4 +479,75 @@ describe('Código da peça acompanha o SKU da Shopify', () => {
 
     expect(await unit(piece.id)).toMatchObject({ shopifySku: null, code: codeBefore });
   });
+
+  /** Peça arquivada pela sincronização ocupando `code` (com uma reserva antiga no histórico). */
+  async function archivedHolder(code: string) {
+    const { units: [holder] } = await fixture([sku('ANTIGA')]);
+    await prisma.rentalUnit.update({ where: { id: holder.id }, data: { code, active: false, shopifyVariantMissingAt: new Date(), shopifySku: null } });
+    const reservationId = await createFutureReservation(holder.id);
+    return { holder, reservationId };
+  }
+
+  test('código ocupado por peça ARQUIVADA: ela passa a "-ARQ" e a peça ativa fica com o código', async () => {
+    const target = sku('02L');
+    const { holder, reservationId } = await archivedHolder(target);
+    const history = await snapshotReservation(reservationId);
+    const { productId, units: [piece] } = await fixture([target]);
+    await prisma.rentalUnit.update({ where: { id: piece.id }, data: { code: `${PREFIX}-0002L` } });
+    fake.variants = [variant(piece.shopifyVariantId!, productId, target)];
+
+    const report = await reconcile([piece.id]);
+
+    expect(report.divergences).toEqual([expect.objectContaining({ kind: 'sku_changed', applied: true, newCode: target })]);
+    expect(await unit(piece.id)).toMatchObject({ code: target, shopifySku: target, active: true });
+    const after = await unit(holder.id);
+    expect(after).toMatchObject({ code: `${target}-ARQ`, active: false });
+    expect(after.shopifyVariantMissingAt).not.toBeNull(); // continua arquivada
+    expect(await snapshotReservation(reservationId)).toEqual(history); // histórico intacto
+    const [released] = await prisma.adminAuditEvent.findMany({ where: { entityId: holder.id, action: 'CATALOG_UNIT_CODE_RELEASED' } });
+    expect(released).toMatchObject({ before: { code: target }, after: { code: `${target}-ARQ` } });
+    expect(released.detail).toMatchObject({ takenBy: piece.id });
+    expect((await reconcile([piece.id])).divergences).toHaveLength(0); // idempotente
+  });
+
+  test('"-ARQ" já existe: usa "-ARQ-2"', async () => {
+    const target = sku('03L');
+    const { holder } = await archivedHolder(target);
+    const { units: [blocker] } = await fixture([sku('BLOQ')]);
+    await prisma.rentalUnit.update({ where: { id: blocker.id }, data: { code: `${target}-ARQ` } });
+    const { productId, units: [piece] } = await fixture([target]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, target)];
+
+    await reconcile([piece.id]);
+
+    expect(await unit(piece.id)).toMatchObject({ code: target });
+    expect(await unit(holder.id)).toMatchObject({ code: `${target}-ARQ-2` });
+    expect(await unit(blocker.id)).toMatchObject({ code: `${target}-ARQ` });
+  });
+
+  test('peça desativada À MÃO (não arquivada) nunca libera o código', async () => {
+    const target = sku('04L');
+    const { units: [manual] } = await fixture([sku('MANUAL')]);
+    await prisma.rentalUnit.update({ where: { id: manual.id }, data: { code: target, active: false } });
+    const { productId, units: [piece] } = await fixture([target]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, target)];
+
+    await reconcile([piece.id]);
+
+    expect(await unit(manual.id)).toMatchObject({ code: target, active: false });
+    expect(await unit(piece.id)).toMatchObject({ code: piece.code, shopifySku: target });
+  });
+
+  test('relatório (sem aplicar) não renomeia ninguém', async () => {
+    const target = sku('05L');
+    const { holder } = await archivedHolder(target);
+    const { productId, units: [piece] } = await fixture([target]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, target)];
+
+    const preview = await sync.reconcile({ apply: false, rentalUnitIds: [piece.id] });
+
+    expect(preview.divergences[0].note).toContain(`${target}-ARQ`);
+    expect(await unit(holder.id)).toMatchObject({ code: target });
+    expect(await unit(piece.id)).toMatchObject({ code: piece.code });
+  });
 });
