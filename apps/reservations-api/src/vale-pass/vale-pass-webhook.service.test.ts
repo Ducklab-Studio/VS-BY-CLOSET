@@ -84,6 +84,14 @@ async function cleanup() {
     await prisma.$executeRaw`DELETE FROM vale_passes WHERE id = ANY(${voucherIds}::uuid[])`;
   }
   await prisma.$executeRaw`DELETE FROM vale_pass_campaigns WHERE name = ${`Campanha VP-WH-${SUFFIX}`}`;
+  // Registro dos pedidos de Valle Pass criado pelos mesmos webhooks.
+  const orderIds = (await prisma.$queryRaw<{ id: string }[]>`
+    SELECT DISTINCT order_id AS id FROM webhook_events WHERE shopify_webhook_id LIKE ${`VP-WH-${SUFFIX}-webhook-%`} AND order_id IS NOT NULL
+  `).map((r) => r.id);
+  if (orderIds.length) {
+    await prisma.$executeRaw`DELETE FROM vale_pass_order_events WHERE vale_pass_order_id IN (SELECT id FROM vale_pass_orders WHERE shopify_order_id = ANY(${orderIds}::text[]))`;
+    await prisma.$executeRaw`DELETE FROM vale_pass_orders WHERE shopify_order_id = ANY(${orderIds}::text[])`;
+  }
   // reservation_events primeiro — todo evento (mesmo os de Valle Pass,
   // sem reservationId) é gravado vinculado ao WebhookEvent pelo loop
   // genérico em WebhooksService.processWebhook(); a FK impede apagar o

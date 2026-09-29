@@ -104,7 +104,11 @@ async function cleanup() {
     await prisma.$executeRaw`DELETE FROM vale_passes WHERE id = ANY(${ids}::uuid[])`;
   }
   await prisma.$executeRaw`DELETE FROM vale_pass_campaigns WHERE name = ${CAMPAIGN_NAME}`;
-  if (createdOrderIds.length) await prisma.$executeRaw`DELETE FROM vale_pass_order_cancellations WHERE shopify_order_id = ANY(${createdOrderIds}::text[])`;
+  if (createdOrderIds.length) {
+    await prisma.$executeRaw`DELETE FROM vale_pass_order_cancellations WHERE shopify_order_id = ANY(${createdOrderIds}::text[])`;
+    await prisma.$executeRaw`DELETE FROM vale_pass_order_events WHERE vale_pass_order_id IN (SELECT id FROM vale_pass_orders WHERE shopify_order_id = ANY(${createdOrderIds}::text[]))`;
+    await prisma.$executeRaw`DELETE FROM vale_pass_orders WHERE shopify_order_id = ANY(${createdOrderIds}::text[])`;
+  }
 
   const reservationIds = (await prisma.$queryRaw<{ id: string }[]>`
     SELECT DISTINCT ri.reservation_id AS id FROM reservation_items ri JOIN rental_units ru ON ru.id = ri.rental_unit_id WHERE ru.code LIKE ${TAG + '%'}

@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Prisma, ValePass } from '@prisma/client';
+import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
+import { KNOWN_VALE_PASS_VARIANT_ID, valePassUnits } from './vale-pass-order-status';
+import { ValePassOrderRegistry, type ValePassOrderSnapshot } from './vale-pass-order-registry';
 import {
   extractCustomerEmail,
   extractCustomerName,
   extractCustomerPhone,
   extractOrderLineVariants,
   type ShopifyOrderPayload,
+  type ShopifyRefundPayload,
 } from '../webhooks/shopify-order-payload';
 
 interface EventInput {
@@ -25,18 +28,11 @@ interface EventInput {
  *
  * Mesmo ID hardcoded como default no frontend
  * (apps/marketing/src/lib/vale-pass-product.ts) — é o MESMO produto
- * real, só configurável por variável de ambiente aqui também, pelo
- * mesmo motivo (pode mudar sem precisar de rebuild).
+ * real, só configurável por variável de ambiente (VALE_PASS_VARIANT_ID).
+ * Resolvido em vale-pass-order-status.ts; reexportado aqui para
+ * scripts/backfill-vale-pass-voucher.ts continuar usando a MESMA resolução.
  */
-function resolveKnownValePassVariantId(): string {
-  const raw = process.env.VALE_PASS_VARIANT_ID?.trim() || '49174518595684';
-  const match = raw.match(/(\d+)\s*$/);
-  return match ? match[1] : raw;
-}
-// Exportado para scripts/backfill-vale-pass-voucher.ts reusar a MESMA
-// resolução (nunca duplicar o "qual é a variante real do Valle Pass" em
-// dois lugares que podem divergir).
-export const KNOWN_VALE_PASS_VARIANT_ID = resolveKnownValePassVariantId();
+export { KNOWN_VALE_PASS_VARIANT_ID };
 
 /**
  * Valle Pass é um produto TOTALMENTE separado do fluxo de aluguel —
@@ -64,6 +60,79 @@ export const KNOWN_VALE_PASS_VARIANT_ID = resolveKnownValePassVariantId();
 @Injectable()
 export class ValePassWebhookService {
   private readonly logger = new Logger(ValePassWebhookService.name);
+  readonly orders = new ValePassOrderRegistry();
+
+  /**
+   * Registro do PEDIDO de Valle Pass (tabela `vale_pass_orders`), para todos
+   * os tópicos de pedido — é o que faz um pedido pendente, expirado,
+   * cancelado ou recusado aparecer no ClosetAdmin, e não só o pago. Mesma
+   * transação e mesmo lock de pedido do WebhooksService. Pedido sem linha de
+   * Valle Pass (aluguel, outros produtos) devolve `[]` e nada é gravado.
+   *
+   * O vale continua nascendo só com pagamento confirmado: `orders/paid` pago
+   * (regra de sempre) ou, se esse webhook se perdeu, o `orders/updated` que
+   * mostra o pedido pago. `orders/create` nunca emite vale.
+   */
+  async handleOrderWebhook(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<EventInput[]> {
+    const source = `webhook:${topic}`;
+    switch (topic) {
+      case 'refunds/create':
+        return this.orders.markRefunded(tx, String((payload as ShopifyRefundPayload).order_id), source);
+      case 'orders/delete':
+        return this.orders.markDeleted(tx, String((payload as { id: number | string }).id), source);
+      case 'orders/create':
+      case 'orders/paid':
+      case 'orders/updated':
+      case 'orders/cancelled':
+        break;
+      default:
+        return [];
+    }
+
+    const order = payload as ShopifyOrderPayload;
+    const quantity = await this.valePassQuantity(tx, order);
+    if (quantity === 0) return [];
+    const result = await this.orders.apply(tx, snapshotFromPayload(order, quantity), source);
+    const events: EventInput[] = [...result.events];
+
+    if (topic === 'orders/paid' && order.financial_status === 'paid' && (result.order.status === 'EXPIRED' || result.order.status === 'DECLINED')) {
+      // `orders/paid` mais antigo que a expiração/recusa já aplicada (webhook
+      // atrasado): pedido expirado não fica confirmado nem ganha vale ativo.
+      events.push({ type: 'VALE_PASS_PAYMENT_NOT_APPLIED', detail: { orderId: result.order.shopifyOrderId, status: result.order.status, reason: 'estado mais recente do pedido é expirado/recusado' } });
+    } else if (topic === 'orders/paid' && order.financial_status === 'paid') {
+      const issued = await this.handleOrderPaid(tx, order);
+      events.push(...issued);
+      await this.orders.markVouchersProcessed(tx, result.order.id, source, issued);
+    } else if (topic === 'orders/updated') {
+      events.push(...(await this.issueForConfirmedOrder(tx, result.order, order, source)));
+    }
+    return events;
+  }
+
+  /** Pedido CONFIRMADO cujo pagamento ainda não passou pela emissão (o
+   *  `orders/paid` se perdeu ou ainda não chegou). Idempotente: `handleOrderPaid`
+   *  não emite de novo para um pedido que já tem vale. */
+  async issueForConfirmedOrder(tx: Prisma.TransactionClient, order: ValePassOrder, payload: ShopifyOrderPayload, source: string): Promise<EventInput[]> {
+    if (order.status !== 'CONFIRMED' || order.vouchersProcessedAt) return [];
+    const issued = await this.handleOrderPaid(tx, payload);
+    await this.orders.markVouchersProcessed(tx, order.id, source, issued);
+    return [
+      { type: 'VALE_PASS_PAYMENT_RECOVERED', detail: { orderId: order.shopifyOrderId, source, note: 'pagamento confirmado processado fora do orders/paid (webhook perdido ou fora de ordem)' } },
+      ...issued,
+    ];
+  }
+
+  /** Unidades de Valle Pass no pedido (produto/variante conhecidos ou variante de campanha). */
+  async valePassQuantity(tx: Prisma.TransactionClient, order: Pick<ShopifyOrderPayload, 'line_items'>): Promise<number> {
+    const lines = (order.line_items ?? []).map((line) => ({
+      variantId: line.variant_id,
+      productId: line.product_id,
+      quantity: typeof line.quantity === 'number' ? line.quantity : 0,
+    }));
+    if (lines.length === 0) return 0;
+    const campaigns = await tx.valePassCampaign.findMany({ select: { shopifyVariantId: true } });
+    return valePassUnits(lines, campaigns.map((c) => c.shopifyVariantId));
+  }
 
   /** Chamado de dentro da MESMA transação/lock do webhook (mesmo `tx`
    *  do WebhooksService) — nunca abre transação própria. Devolve `[]`
@@ -214,4 +283,28 @@ export class ValePassWebhookService {
     }
     throw new Error('Não foi possível gerar um código único para o Valle Pass após 5 tentativas.');
   }
+}
+
+function parseDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Payload REST do webhook → snapshot do registro de pedidos. */
+export function snapshotFromPayload(order: ShopifyOrderPayload, quantity: number): ValePassOrderSnapshot {
+  return {
+    orderId: String(order.id),
+    orderGid: order.admin_graphql_api_id ?? null,
+    orderName: order.name ?? null,
+    financialStatus: order.financial_status ?? null,
+    cancelledAt: order.cancelled_at ?? null,
+    cancelReason: order.cancel_reason ?? null,
+    createdAt: parseDate(order.created_at),
+    updatedAt: parseDate(order.updated_at),
+    quantity,
+    customerName: extractCustomerName(order),
+    customerPhone: extractCustomerPhone(order),
+    customerEmail: extractCustomerEmail(order),
+  };
 }

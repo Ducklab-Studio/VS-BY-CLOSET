@@ -1,18 +1,47 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, RotateCcw, Search, ShieldAlert, Ticket, XCircle } from 'lucide-react';
-import type { ValePassCampaign, ValePassStatus, ValePassVoucher } from '@/lib/admin-data';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, RotateCcw, Search, ShieldAlert, ShoppingBag, Ticket, XCircle } from 'lucide-react';
+import type { ValePassCampaign, ValePassOrder, ValePassOrderStatus, ValePassStatus, ValePassVoucher } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { EmptyState } from '@/components/closetadmin/ui';
 import {
   cancelValePassVoucherAction,
   createValePassCampaignAction,
+  listValePassOrdersAction,
   listValePassVouchersAction,
   markValePassVoucherUsedAction,
   restoreValePassVoucherAction,
   toggleValePassCampaignAction,
 } from './actions';
+
+/** Pedidos e vales se atualizam sozinhos enquanto a aba está visível. */
+const AUTO_REFRESH_MS = 30_000;
+
+const ORDER_STATUS_LABELS: Record<ValePassOrderStatus, string> = {
+  PENDING: 'Pendente',
+  CONFIRMED: 'Confirmada',
+  EXPIRED: 'Expirada',
+  CANCELLED: 'Cancelada',
+  DECLINED: 'Recusada',
+  REFUNDED: 'Reembolsada',
+};
+const ORDER_STATUS_STYLES: Record<ValePassOrderStatus, string> = {
+  PENDING: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
+  CONFIRMED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
+  EXPIRED: 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400',
+  CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+  DECLINED: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+  REFUNDED: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
+};
+type OrderFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'CLOSED';
+const ORDER_FILTERS: { value: OrderFilter; label: string; matches: (status: ValePassOrderStatus) => boolean }[] = [
+  { value: 'ALL', label: 'Todos', matches: () => true },
+  { value: 'PENDING', label: 'Pendentes', matches: (s) => s === 'PENDING' },
+  { value: 'CONFIRMED', label: 'Confirmados', matches: (s) => s === 'CONFIRMED' },
+  { value: 'EXPIRED', label: 'Expirados', matches: (s) => s === 'EXPIRED' },
+  { value: 'CLOSED', label: 'Cancelados / recusados', matches: (s) => s === 'CANCELLED' || s === 'DECLINED' || s === 'REFUNDED' },
+];
 
 const inputClass =
   'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-surface dark:text-dark-text dark:focus:border-gold dark:focus:ring-gold/20';
@@ -31,18 +60,27 @@ function formatCurrency(cents: number): string {
 function formatDatePt(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR');
 }
+function formatDateTimePt(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 
 export function ValePassSection({
   initialCampaigns,
   initialVouchers,
+  initialOrders,
   canManageCampaigns,
 }: {
   initialCampaigns: ValePassCampaign[];
   initialVouchers: ValePassVoucher[];
+  initialOrders: ValePassOrder[];
   canManageCampaigns: boolean;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [vouchers, setVouchers] = useState(initialVouchers);
+  const [orders, setOrders] = useState(initialOrders);
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>('ALL');
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const [statusFilter, setStatusFilter] = useState<ValePassStatus | ''>('');
   const [search, setSearch] = useState('');
   // Item novo — "Restauráveis": recorte client-side sobre CANCELLED (o
@@ -66,8 +104,79 @@ export function ValePassSection({
     setVouchers(fresh);
   }
 
+  // Atualização automática: pedido novo, pago, expirado ou cancelado aparece
+  // sem recarregar a página. A lista de vales mantém o filtro/busca atuais.
+  const refreshVouchersRef = useRef(refreshVouchers);
+  useEffect(() => {
+    refreshVouchersRef.current = refreshVouchers;
+  });
+  useEffect(() => {
+    let active = true;
+    async function tick() {
+      if (document.visibilityState !== 'visible') return;
+      const { orders: fresh, error } = await listValePassOrdersAction();
+      if (!active) return;
+      if (fresh) {
+        setOrders(fresh);
+        setOrdersError(null);
+        setRefreshedAt(new Date());
+      } else {
+        setOrdersError(error ?? 'Não foi possível atualizar os pedidos.');
+      }
+      await refreshVouchersRef.current();
+    }
+    const timer = setInterval(() => void tick(), AUTO_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  const activeOrderFilter = ORDER_FILTERS.find((f) => f.value === orderFilter) ?? ORDER_FILTERS[0];
+  const visibleOrders = orders.filter((order) => activeOrderFilter.matches(order.status));
+
   return (
     <div className="space-y-8">
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShoppingBag size={18} className="text-marsala dark:text-gold" />
+            <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">Pedidos na Shopify</h2>
+          </div>
+          <p className="text-xs text-ink/45 dark:text-dark-subtle">
+            Atualiza sozinho a cada 30 s{refreshedAt ? ` · última atualização ${refreshedAt.toLocaleTimeString('pt-BR')}` : ''}
+          </p>
+        </div>
+        <p className="text-sm text-ink/55 dark:text-dark-muted">
+          Todo pedido de Valle Pass aparece aqui assim que é criado na Shopify, pago ou não. O vale só é emitido quando o pagamento é confirmado.
+        </p>
+
+        <div className="flex flex-wrap gap-2">
+          {ORDER_FILTERS.map((filter) => (
+            <FilterPill key={filter.value} active={orderFilter === filter.value} onClick={() => setOrderFilter(filter.value)}>
+              {filter.label} ({orders.filter((order) => filter.matches(order.status)).length})
+            </FilterPill>
+          ))}
+        </div>
+
+        {ordersError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{ordersError}</p> : null}
+
+        {visibleOrders.length === 0 ? (
+          <EmptyState title="Nenhum pedido de Valle Pass" description={orderFilter === 'ALL' ? 'Quando um cliente fizer um pedido do Valle Pass na Shopify, ele aparece aqui.' : undefined} />
+        ) : (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {visibleOrders.map((order) => (
+              <OrderCard key={order.id} order={order} />
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Gift size={18} className="text-marsala dark:text-gold" />
@@ -357,6 +466,38 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
       ) : null}
 
       {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+    </article>
+  );
+}
+
+function OrderCard({ order }: { order: ValePassOrder }) {
+  return (
+    <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">{order.shopifyOrderName ?? `Pedido ${order.shopifyOrderId}`}</p>
+          <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
+            {order.quantity} Valle Pass · {order.orderCreatedAt ? `criado em ${formatDateTimePt(order.orderCreatedAt)}` : 'data de criação não informada'}
+          </p>
+        </div>
+        <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${ORDER_STATUS_STYLES[order.status]}`}>
+          {ORDER_STATUS_LABELS[order.status]}
+        </span>
+      </div>
+
+      <div className="mt-3.5 space-y-1 border-t border-ink/5 pt-3 text-xs text-ink/60 dark:border-white/5 dark:text-dark-muted">
+        <p>{order.customerName ?? 'Cliente não informado'} {order.customerPhone ? `· ${order.customerPhone}` : ''}</p>
+        {order.customerEmail ? <p>{order.customerEmail}</p> : null}
+        <p>Status desde {formatDateTimePt(order.statusChangedAt)}</p>
+        {order.status === 'PENDING' ? <p className="text-amber-700 dark:text-amber-300">Aguardando pagamento — nenhum vale emitido.</p> : null}
+        {order.deletedInShopifyAt ? <p className="text-red-500 dark:text-red-400">Pedido excluído na Shopify em {formatDateTimePt(order.deletedInShopifyAt)}.</p> : null}
+        {order.vouchers.length > 0 ? (
+          <p>
+            Vale{order.vouchers.length > 1 ? 's' : ''}:{' '}
+            {order.vouchers.map((voucher) => `${voucher.code} (${STATUS_LABELS[voucher.status].toLowerCase()})`).join(', ')}
+          </p>
+        ) : null}
+      </div>
     </article>
   );
 }
