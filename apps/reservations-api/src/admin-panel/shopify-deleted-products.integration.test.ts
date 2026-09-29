@@ -90,7 +90,7 @@ async function product(names: readonly string[]) {
           name: names[i],
           shopifyProductId: productId,
           shopifyVariantId: `gid://shopify/ProductVariant/${number}${i}`,
-          shopifySku: `SKU-${number}-${i}`,
+          shopifySku: `${PREFIX}-${number}-${i}`, // == código: estes cenários não são de renomeação
           active: true,
           reservableOnline: true,
           countsTowardRentalDuration: true,

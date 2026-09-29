@@ -31,6 +31,8 @@ import { ShopifyCatalogSyncController } from './shopify-catalog-sync.controller'
  */
 const prisma = new PrismaService();
 const RUN = Date.now();
+/** SKU único por rodada: o código da peça passa a ser o SKU, e código é único no banco. */
+const sku = (label: string) => `${label}-${RUN}`;
 const PREFIX = `sku-sync-${RUN}`;
 const WEBHOOK_PREFIX = `sku-sync-wh-${RUN}`;
 const PHONE_TAG = `8${RUN}`;
@@ -132,7 +134,10 @@ async function snapshotReservation(id: string) {
 }
 
 async function cleanup() {
-  const units = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM rental_units WHERE code LIKE ${PREFIX + '%'}`;
+  // Pelo produto também: a peça renomeada para o SKU não começa mais com PREFIX.
+  const units = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM rental_units WHERE code LIKE ${PREFIX + '%'} OR shopify_product_id LIKE ${'gid://shopify/Product/' + RUN + '%'}
+  `;
   const unitIds = units.map((u) => u.id);
   if (unitIds.length) {
     const reservations = await prisma.$queryRaw<{ id: string }[]>`
@@ -174,14 +179,14 @@ afterAll(async () => {
 describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres de teste, Shopify simulada)', () => {
   test('1) variante sem SKU recebe SKU: aparece na peça, auditado como SKU cadastrado', async () => {
     const { productId, units: [piece] } = await fixture([null]);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'VS-SOB-PRETO')];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('VS-SOB-PRETO'))];
 
     const report = await reconcile([piece.id]);
 
-    expect(report.divergences).toEqual([expect.objectContaining({ kind: 'sku_changed', applied: true, previousSku: null, shopifySku: 'VS-SOB-PRETO' })]);
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'VS-SOB-PRETO', active: true, shopifyVariantMissingAt: null });
+    expect(report.divergences).toEqual([expect.objectContaining({ kind: 'sku_changed', applied: true, previousSku: null, shopifySku: sku('VS-SOB-PRETO') })]);
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('VS-SOB-PRETO'), active: true, shopifyVariantMissingAt: null });
     const [audit] = await skuAudits(piece.id);
-    expect(audit).toMatchObject({ adminUserName: 'Sistema (sincronização de catálogo)', before: { shopifySku: null }, after: { shopifySku: 'VS-SOB-PRETO' } });
+    expect(audit).toMatchObject({ adminUserName: 'Sistema (sincronização de catálogo)', before: { shopifySku: null }, after: { shopifySku: sku('VS-SOB-PRETO') } });
     expect(audit.detail).toMatchObject({ origin: 'shopify_catalog_sync', reason: 'shopify_sku_added', shopifyVariantId: piece.shopifyVariantId });
     expect(JSON.stringify(audit)).not.toMatch(/token|secret|password/i);
 
@@ -190,24 +195,24 @@ describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres 
   });
 
   test('2) variante com SKU altera o SKU: a peça passa a mostrar o novo, sem recadastro', async () => {
-    const { productId, units: [piece] } = await fixture(['SKU-ANTIGO']);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-NOVO')];
+    const { productId, units: [piece] } = await fixture([sku('SKU-ANTIGO')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-NOVO'))];
 
     const [item] = (await catalog.list()).filter((v) => v.id === piece.shopifyVariantId);
     expect(item.skuStatus).toBe('pending'); // antes da sincronização o painel avisa
 
     await reconcile([piece.id]);
 
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-NOVO', code: piece.code, active: true });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-NOVO'), code: sku('SKU-NOVO'), active: true }); // o código acompanha o SKU
     const [audit] = await skuAudits(piece.id);
-    expect(audit).toMatchObject({ before: { shopifySku: 'SKU-ANTIGO' }, after: { shopifySku: 'SKU-NOVO' } });
+    expect(audit).toMatchObject({ before: { shopifySku: sku('SKU-ANTIGO') }, after: { shopifySku: sku('SKU-NOVO') } });
     expect(audit.detail).toMatchObject({ reason: 'shopify_sku_changed' });
     const [synced] = (await catalog.list()).filter((v) => v.id === piece.shopifyVariantId);
     expect(synced.skuStatus).toBe('synced');
   });
 
   test('3) SKU removido na Shopify: SKU ausente, vínculo e peça preservados, nada apagado', async () => {
-    const { productId, units: [piece] } = await fixture(['SKU-QUE-SAI']);
+    const { productId, units: [piece] } = await fixture([sku('SKU-QUE-SAI')]);
     fake.variants = [variant(piece.shopifyVariantId!, productId, null)]; // o client já normaliza SKU vazio para null
 
     await reconcile([piece.id]);
@@ -220,37 +225,37 @@ describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres 
       shopifyVariantMissingAt: null,
     });
     const [audit] = await skuAudits(piece.id);
-    expect(audit).toMatchObject({ before: { shopifySku: 'SKU-QUE-SAI' }, after: { shopifySku: null } });
+    expect(audit).toMatchObject({ before: { shopifySku: sku('SKU-QUE-SAI') }, after: { shopifySku: null } });
     expect(audit.detail).toMatchObject({ reason: 'shopify_sku_removed' });
     const [item] = (await catalog.list()).filter((v) => v.id === piece.shopifyVariantId);
     expect(item.skuStatus).toBe('missing');
   });
 
-  test('4) duas variantes do mesmo produto mantêm SKUs independentes', async () => {
-    const { productId, units: [p, g] } = await fixture(['SOB-P', 'SOB-G']);
-    fake.variants = [variant(p.shopifyVariantId!, productId, 'SOB-P-2026'), variant(g.shopifyVariantId!, productId, 'SOB-G')];
+  test('4) duas variantes do mesmo produto mantêm SKUs independentes; cada peça fica com o código do próprio SKU', async () => {
+    const { productId, units: [p, g] } = await fixture([sku('SOB-P'), sku('SOB-G')]);
+    fake.variants = [variant(p.shopifyVariantId!, productId, sku('SOB-P-2026')), variant(g.shopifyVariantId!, productId, sku('SOB-G'))];
 
-    const report = await reconcile([p.id, g.id]);
+    await reconcile([p.id, g.id]);
 
-    expect(report.divergences.map((d) => d.rentalUnitId)).toEqual([p.id]);
-    expect(await unit(p.id)).toMatchObject({ shopifySku: 'SOB-P-2026' });
-    expect(await unit(g.id)).toMatchObject({ shopifySku: 'SOB-G' });
-    expect(await skuAudits(g.id)).toHaveLength(0);
+    expect(await unit(p.id)).toMatchObject({ shopifySku: sku('SOB-P-2026'), code: sku('SOB-P-2026') });
+    expect(await unit(g.id)).toMatchObject({ shopifySku: sku('SOB-G'), code: sku('SOB-G') }); // SKU igual, só o código acompanhou
+    const [gAudit] = await skuAudits(g.id);
+    expect(gAudit.detail).toMatchObject({ reason: 'code_follows_sku' });
   });
 
   test('5) webhook repetido é idempotente; SKU do corpo é ignorado, vale o da Admin API', async () => {
-    const { number, productId, units: [piece] } = await fixture(['SKU-V1']);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-V2')];
+    const { number, productId, units: [piece] } = await fixture([sku('SKU-V1')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-V2'))];
     const webhookId = nextWebhookId();
     // Corpo com um SKU forjado: o payload só diz QUAL produto mudou.
-    const payload = { id: Number(number), variants: [{ id: Number(`${number}0`), sku: 'SKU-FORJADO' }] };
+    const payload = { id: Number(number), variants: [{ id: Number(`${number}0`), sku: sku('SKU-FORJADO') }] };
 
     const first = await webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: webhookId, payload });
     const again = await webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: webhookId, payload });
     const otherDelivery = await webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: nextWebhookId(), payload });
 
     expect([first.outcome, again.outcome, otherDelivery.outcome]).toEqual(['processed', 'duplicate', 'processed']);
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-V2' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-V2') });
     expect(await skuAudits(piece.id)).toHaveLength(1);
     const rows = await prisma.webhookEvent.findMany({ where: { shopifyWebhookId: webhookId } });
     expect(rows).toHaveLength(1);
@@ -260,17 +265,17 @@ describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres 
 
   test('5b) products/create também sincroniza pelo mesmo caminho', async () => {
     const { number, productId, units: [piece] } = await fixture([null]);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-NOVO-PRODUTO')];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-NOVO-PRODUTO'))];
 
     const res = await webhooks.handleIncoming({ topic: 'products/create', shopifyWebhookId: nextWebhookId(), payload: { id: Number(number) } });
 
     expect(res.outcome).toBe('processed');
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-NOVO-PRODUTO' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-NOVO-PRODUTO') });
   });
 
   test('6) webhook inválido (assinatura errada ou outra loja) é rejeitado e não muda nada', async () => {
-    const { number, productId, units: [piece] } = await fixture(['SKU-ORIGINAL']);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-ATACANTE')];
+    const { number, productId, units: [piece] } = await fixture([sku('SKU-ORIGINAL')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-ATACANTE'))];
     const body = JSON.stringify({ id: Number(number) });
     const webhookId = nextWebhookId();
     const valid = createHmac('sha256', SECRET).update(Buffer.from(body, 'utf8')).digest('base64');
@@ -280,26 +285,26 @@ describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres 
     await expect(controller.receive({ rawBody: Buffer.from(body) }, undefined, 'products/update', webhookId, 'dev-store.myshopify.com')).rejects.toBeInstanceOf(UnauthorizedException);
     await expect(controller.receive({ rawBody: Buffer.from(body) }, valid, 'products/update', webhookId, 'outra-loja.myshopify.com')).rejects.toBeInstanceOf(UnauthorizedException);
 
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-ORIGINAL' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-ORIGINAL') });
     expect(await prisma.webhookEvent.count({ where: { shopifyWebhookId: webhookId } })).toBe(0);
     expect(await skuAudits(piece.id)).toHaveLength(0);
 
     // A mesma entrega com assinatura correta passa (prova que o teste não recusa tudo).
     await controller.receive({ rawBody: Buffer.from(body) }, valid, 'products/update', webhookId, 'dev-store.myshopify.com');
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-ATACANTE' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-ATACANTE') });
   });
 
   test('7) produto arquivado mantém o arquivamento lógico e preserva o histórico de SKU', async () => {
-    const { productId, units: [piece] } = await fixture(['SKU-1']);
+    const { productId, units: [piece] } = await fixture([sku('SKU-1')]);
     const reservationId = await createFutureReservation(piece.id);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-2')];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-2'))];
     await reconcile([piece.id]);
     const before = await snapshotReservation(reservationId);
 
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-2', { product: { id: productId, title: 'Sobretudo', handle: 'sobretudo', productType: '', status: 'ARCHIVED' } })];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-2'), { product: { id: productId, title: 'Sobretudo', handle: 'sobretudo', productType: '', status: 'ARCHIVED' } })];
     await reconcile([piece.id]);
     // Arquivada: nenhuma nova troca de SKU é aplicada enquanto estiver assim.
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-3', { product: { id: productId, title: 'Sobretudo', handle: 'sobretudo', productType: '', status: 'ARCHIVED' } })];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-3'), { product: { id: productId, title: 'Sobretudo', handle: 'sobretudo', productType: '', status: 'ARCHIVED' } })];
     const report = await reconcile([piece.id]);
 
     expect(report.divergences).toHaveLength(0);
@@ -316,59 +321,59 @@ describe('SKU Shopify → ClosetAdmin, vinculado por shopifyVariantId (Postgres 
     const number = productNumber();
     const productId = `gid://shopify/Product/${number}`;
     const variantId = `gid://shopify/ProductVariant/${number}0`;
-    fake.variants = [variant(variantId, productId, 'SKU-SEM-PECA', { inventoryQuantity: 7 })];
+    fake.variants = [variant(variantId, productId, sku('SKU-SEM-PECA'), { inventoryQuantity: 7 })];
 
     await webhooks.handleIncoming({ topic: 'products/create', shopifyWebhookId: nextWebhookId(), payload: { id: Number(number) } });
     await webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: nextWebhookId(), payload: { id: Number(number) } });
 
     expect(await prisma.rentalUnit.count({ where: { shopifyVariantId: variantId } })).toBe(0);
     const [item] = (await catalog.list()).filter((v) => v.id === variantId);
-    expect(item).toMatchObject({ sku: 'SKU-SEM-PECA', skuStatus: 'synced', physicalUnitsTotal: 0, inventoryQuantity: 7 });
+    expect(item).toMatchObject({ sku: sku('SKU-SEM-PECA'), skuStatus: 'synced', physicalUnitsTotal: 0, inventoryQuantity: 7 });
   });
 
   test('9) troca de SKU não toca reservas, itens nem histórico', async () => {
-    const { productId, units: [piece] } = await fixture(['SKU-A']);
+    const { productId, units: [piece] } = await fixture([sku('SKU-A')]);
     const reservationId = await createFutureReservation(piece.id);
     const before = await snapshotReservation(reservationId);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-B')];
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-B'))];
 
     await reconcile([piece.id]);
 
     expect(await snapshotReservation(reservationId)).toEqual(before);
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-B', active: true, reservableOnline: true, code: piece.code });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-B'), active: true, reservableOnline: true, code: sku('SKU-B') });
   });
 
   test('10) reconciliação corrige SKU divergente (webhook perdido) e depois não faz mais nada', async () => {
-    const { productId, units: [piece] } = await fixture(['SKU-CERTO']);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-CERTO')];
-    await prisma.rentalUnit.update({ where: { id: piece.id }, data: { shopifySku: 'SKU-DESATUALIZADO' } });
+    const { productId, units: [piece] } = await fixture([sku('SKU-CERTO')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-CERTO'))];
+    await prisma.rentalUnit.update({ where: { id: piece.id }, data: { shopifySku: sku('SKU-DESATUALIZADO') } });
 
     const preview = await sync.reconcile({ apply: false, rentalUnitIds: [piece.id] });
     expect(preview.divergences).toEqual([expect.objectContaining({ kind: 'sku_changed', applied: false })]);
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-DESATUALIZADO' }); // relatório não escreve
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-DESATUALIZADO') }); // relatório não escreve
 
     await reconcile([piece.id]);
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-CERTO' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-CERTO') });
     const rerun = await reconcile([piece.id]);
     expect(rerun.divergences).toHaveLength(0);
     expect(await skuAudits(piece.id)).toHaveLength(1);
   });
 
   test('11) falha temporária da Shopify: webhook responde 503, fica "failed" e a reentrega aplica', async () => {
-    const { number, productId, units: [piece] } = await fixture(['SKU-OLD']);
-    fake.variants = [variant(piece.shopifyVariantId!, productId, 'SKU-NEW')];
+    const { number, productId, units: [piece] } = await fixture([sku('SKU-OLD')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('SKU-NEW'))];
     fake.failuresLeft = 1;
     const webhookId = nextWebhookId();
 
     await expect(webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: webhookId, payload: { id: Number(number) } })).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-OLD' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-OLD') });
     expect(await prisma.webhookEvent.findUniqueOrThrow({ where: { shopifyWebhookId: webhookId } })).toMatchObject({ status: 'failed' });
 
     const retry = await webhooks.handleIncoming({ topic: 'products/update', shopifyWebhookId: webhookId, payload: { id: Number(number) } });
     expect(retry.outcome).toBe('processed');
-    expect(await unit(piece.id)).toMatchObject({ shopifySku: 'SKU-NEW' });
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: sku('SKU-NEW') });
     expect(await prisma.webhookEvent.findUniqueOrThrow({ where: { shopifyWebhookId: webhookId } })).toMatchObject({ status: 'processed' });
   });
 });
@@ -413,5 +418,65 @@ describe('12) permissão da sincronização (guard real sobre os metadados do co
   test('ADMIN com PIECES sincroniza', async () => {
     const { user, token } = await session('ADMIN', ['PIECES']);
     await expect(guard.canActivate(context(syncHandler, token, user.id))).resolves.toBe(true);
+  });
+});
+
+describe('Código da peça acompanha o SKU da Shopify', () => {
+  test('caso relatado: SKU já "02" e código "0002" → o código vira "02"; reservas intactas', async () => {
+    const tag = sku('02');
+    const { productId, units: [piece] } = await fixture([tag]);
+    await prisma.rentalUnit.update({ where: { id: piece.id }, data: { code: `${PREFIX}-0002` } });
+    const reservationId = await createFutureReservation(piece.id);
+    const before = await snapshotReservation(reservationId);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, tag)];
+
+    const report = await reconcile([piece.id]);
+
+    expect(report.divergences).toEqual([expect.objectContaining({ kind: 'sku_changed', applied: true, previousCode: `${PREFIX}-0002`, newCode: tag })]);
+    expect(await unit(piece.id)).toMatchObject({ code: tag, shopifySku: tag });
+    const [audit] = await skuAudits(piece.id);
+    expect(audit).toMatchObject({ before: { code: `${PREFIX}-0002`, shopifySku: tag }, after: { code: tag, shopifySku: tag } });
+    expect(audit.detail).toMatchObject({ reason: 'code_follows_sku' });
+    expect(await snapshotReservation(reservationId)).toEqual(before); // reserva aponta para a peça pelo id, não pelo código
+    expect((await reconcile([piece.id])).divergences).toHaveLength(0); // idempotente
+  });
+
+  test('variante com VÁRIAS peças: só o SKU acompanha; os códigos continuam distintos', async () => {
+    const { productId, units: [a] } = await fixture([sku('PAR-A')]);
+    const b = await prisma.rentalUnit.create({
+      data: { code: `${PREFIX}-par-b-${RUN}`, name: 'Sobretudo par', shopifyProductId: productId, shopifyVariantId: a.shopifyVariantId, shopifySku: sku('PAR-A'), active: true, reservableOnline: true, countsTowardRentalDuration: true },
+    });
+    fake.variants = [variant(a.shopifyVariantId!, productId, sku('PAR-NOVO'))];
+
+    await reconcile([a.id, b.id]);
+
+    expect(await unit(a.id)).toMatchObject({ shopifySku: sku('PAR-NOVO'), code: a.code });
+    expect(await unit(b.id)).toMatchObject({ shopifySku: sku('PAR-NOVO'), code: b.code });
+  });
+
+  test('código já usado por OUTRA peça: não renomeia, não dá erro, SKU segue sincronizado', async () => {
+    const taken = sku('OCUPADO');
+    const { units: [other] } = await fixture([sku('OUTRA')]);
+    await prisma.rentalUnit.update({ where: { id: other.id }, data: { code: taken } });
+    const { productId, units: [piece] } = await fixture([sku('ANTES')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, taken)];
+
+    await expect(reconcile([piece.id])).resolves.toBeDefined();
+
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: taken, code: piece.code });
+    expect(await unit(other.id)).toMatchObject({ code: taken });
+    expect((await reconcile([piece.id])).divergences).toHaveLength(0); // nada pendente para repetir
+  });
+
+  test('SKU removido: a peça mantém o código (nunca fica sem código)', async () => {
+    const { productId, units: [piece] } = await fixture([sku('VAI-SAIR')]);
+    fake.variants = [variant(piece.shopifyVariantId!, productId, sku('VAI-SAIR'))];
+    await reconcile([piece.id]);
+    const codeBefore = (await unit(piece.id)).code;
+    fake.variants = [variant(piece.shopifyVariantId!, productId, null)];
+
+    await reconcile([piece.id]);
+
+    expect(await unit(piece.id)).toMatchObject({ shopifySku: null, code: codeBefore });
   });
 });
