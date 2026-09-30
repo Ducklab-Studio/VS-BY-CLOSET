@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ValePassOrderStatus, ValePassStatus } from '@prisma/client';
+import type { Prisma, ValePassOrderStatus, ValePassStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ShopifyAdminClient, type ShopifyOrderWithLines } from '../admin-panel/shopify-admin.client';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import type { ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
-import { valePassUnits } from './vale-pass-order-status';
+import { ATTENTION_STATUSES, needsAttention, valePassUnits } from './vale-pass-order-status';
 import type { ValePassOrderSnapshot } from './vale-pass-order-registry';
 import { ValePassWebhookService } from './vale-pass-webhook.service';
 
@@ -28,6 +28,8 @@ export interface ValePassOrderItem {
   readonly orderCreatedAt: string | null;
   readonly statusChangedAt: string;
   readonly deletedInShopifyAt: string | null;
+  /** Conta no contador do menu (ver `needsAttention`). */
+  readonly needsAttention: boolean;
   readonly vouchers: readonly { readonly code: string; readonly status: ValePassStatus }[];
 }
 
@@ -94,8 +96,49 @@ export class ValePassOrdersService {
       orderCreatedAt: row.orderCreatedAt?.toISOString() ?? null,
       statusChangedAt: row.statusChangedAt.toISOString(),
       deletedInShopifyAt: row.deletedInShopifyAt?.toISOString() ?? null,
+      needsAttention: needsAttention(row),
       vouchers: vouchers.filter((v) => v.shopifyOrderId === row.shopifyOrderId).map((v) => ({ code: v.code, status: v.status })),
     }));
+  }
+
+  /** Mesma regra de `needsAttention`, no banco (a listagem mostra só os 100 mais recentes). */
+  private attentionWhere(): Prisma.ValePassOrderWhereInput {
+    return {
+      status: { in: [...ATTENTION_STATUSES] },
+      OR: [{ viewedAt: null }, { viewedAt: { lt: this.prisma.valePassOrder.fields.statusChangedAt } }],
+    };
+  }
+
+  /** Contador do menu: global para a equipe, só leitura. */
+  async attentionCount(): Promise<{ count: number }> {
+    return { count: await this.prisma.valePassOrder.count({ where: this.attentionWhere() }) };
+  }
+
+  /**
+   * Marca como vistos os pedidos que a tela do Valle Pass EXIBIU. Só grava
+   * `viewed_at`/`viewed_by` (nunca status, pagamento ou vale) e só se o
+   * pedido ainda estiver no status que foi exibido: se mudou depois (ex.:
+   * pagou enquanto a tela estava aberta), continua contando. Condicional no
+   * próprio UPDATE — duas abas marcando juntas gravam uma vez só.
+   */
+  async markViewed(orders: readonly { id: string; statusChangedAt: string }[], actor: { id: string; name: string }): Promise<{ marked: number }> {
+    const unique = [...new Map(orders.map((o) => [o.id, o])).values()];
+    return this.prisma.$transaction(async (tx) => {
+      let marked = 0;
+      for (const order of unique) {
+        const shown = new Date(order.statusChangedAt).getTime();
+        if (!Number.isFinite(shown)) continue;
+        const updated = await tx.valePassOrder.updateMany({
+          // O ISO exibido tem milissegundos; o banco guarda microssegundos.
+          where: { id: order.id, statusChangedAt: { lt: new Date(shown + 1) }, ...this.attentionWhere() },
+          data: { viewedAt: new Date(), viewedBy: actor.id },
+        });
+        if (updated.count !== 1) continue;
+        marked++;
+        await tx.valePassOrderEvent.create({ data: { valePassOrderId: order.id, type: 'VIEWED', detail: { adminUserId: actor.id, adminUserName: actor.name } } });
+      }
+      return { marked };
+    });
   }
 
   /** Uma rodada por processo: chamadas simultâneas recebem o mesmo resultado.

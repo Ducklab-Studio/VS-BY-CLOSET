@@ -38,7 +38,7 @@ jobs:
         run: pnpm lint
 
       - name: Checkout flow and legacy guards
-        run: node --test scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs
+        run: node --test scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/valle-pass-attention.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs
 
   reservations-api:
     name: API — typecheck, testes e build
@@ -103,6 +103,9 @@ jobs:
 
       - name: Testar SKU desvinculado na tela de peças
         run: pnpm --filter @valle/marketing run test:pecas-sku-inactive
+
+      - name: Testar contador do Valle Pass no menu
+        run: pnpm --filter @valle/marketing run test:valle-pass-badge
 
   build:
     name: Build da vitrine (Next.js)

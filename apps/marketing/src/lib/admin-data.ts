@@ -464,11 +464,23 @@ export interface ValePassOrder {
   readonly orderCreatedAt: string | null;
   readonly statusChangedAt: string;
   readonly deletedInShopifyAt: string | null;
+  /** Conta no contador do menu: pendente ou pago, ainda não visto neste status. */
+  readonly needsAttention: boolean;
   readonly vouchers: readonly { readonly code: string; readonly status: ValePassStatus }[];
 }
 
 export function listValePassOrders(adminUserId: string, status?: ValePassOrderStatus): Promise<ValePassOrder[]> {
   return adminGet(`/admin/vale-pass/orders${status ? `?status=${status}` : ''}`, adminUserId);
+}
+
+/** Contador do menu lateral (global para a equipe). */
+export function getValePassAttention(adminUserId: string): Promise<{ count: number }> {
+  return adminGet('/admin/vale-pass/orders/attention', adminUserId);
+}
+
+/** Sem `adminUserId` no corpo: quem viu vem da sessão validada. */
+export function markValePassOrdersViewed(orders: readonly { id: string; statusChangedAt: string }[]): Promise<{ marked: number }> {
+  return adminPost('/admin/vale-pass/orders/viewed', { orders });
 }
 
 export function findValePassVoucherByCode(code: string, adminUserId: string): Promise<ValePassVoucher> {

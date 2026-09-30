@@ -1,15 +1,17 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
+import { getAdminSession, hasAdminModule, requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import {
   activateValePassCampaign,
   cancelValePassVoucher,
   createValePassCampaign,
   deactivateValePassCampaign,
+  getValePassAttention,
   listValePassCampaigns,
   listValePassOrders,
   listValePassVouchers,
+  markValePassOrdersViewed,
   markValePassVoucherUsed,
   restoreValePassVoucher,
   type CreateValePassCampaignInput,
@@ -88,6 +90,33 @@ export async function listValePassOrdersAction(): Promise<{ orders: ValePassOrde
     return { orders, error: null };
   } catch (err) {
     return { orders: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os pedidos.' };
+  }
+}
+
+/**
+ * Contador do menu. Chamado em segundo plano pelo menu de qualquer página do
+ * painel, então nunca redireciona: sem sessão ou sem o módulo VALLE_PASS
+ * devolve `forbidden` (o menu esconde o badge e para de perguntar) e não
+ * consulta a API.
+ */
+export async function getValePassAttentionAction(): Promise<{ count: number } | { forbidden: true } | { error: true }> {
+  const session = await getAdminSession();
+  if (!session || !hasAdminModule(session, 'VALLE_PASS')) return { forbidden: true };
+  try {
+    return { count: (await getValePassAttention(session.id)).count };
+  } catch (err) {
+    return err instanceof AdminApiError && (err.status === 401 || err.status === 403) ? { forbidden: true } : { error: true };
+  }
+}
+
+/** A tela do Valle Pass marca como vistos os pedidos que exibiu. Só visualização. */
+export async function markValePassOrdersViewedAction(orders: readonly { id: string; statusChangedAt: string }[]): Promise<{ marked: number } | { error: true }> {
+  const session = await getAdminSession();
+  if (!session || !hasAdminModule(session, 'VALLE_PASS') || orders.length === 0) return { marked: 0 };
+  try {
+    return await markValePassOrdersViewed(orders.slice(0, 300).map(({ id, statusChangedAt }) => ({ id, statusChangedAt })));
+  } catch {
+    return { error: true };
   }
 }
 
