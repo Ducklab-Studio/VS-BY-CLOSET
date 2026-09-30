@@ -3,10 +3,11 @@
  * retirada e a opção de devolução ficam guardadas no navegador enquanto o
  * cliente volta ao catálogo para escolher mais peças. Nada disso é reserva:
  * não cria HOLD nem pedido — só vira carrinho no "Alugar agora", todas as
- * peças juntas, com as mesmas datas. Arquivo puro (sem imports) para
- * test/rental-draft.test.mjs.
+ * peças juntas, com as mesmas datas. Arquivo puro (só importa o também puro
+ * rental-price) para test/rental-draft.test.mjs.
  */
 import type { ReturnChoice } from './rental-selection';
+import { amountToCents, isCurrencyCode } from './rental-price';
 
 export const RENTAL_DRAFT_KEY = 'vsc_rental_draft';
 /** Cópia em cookie (só peças e datas; nada pessoal) para o catálogo já sair do
@@ -22,8 +23,9 @@ export interface DraftPiece {
   readonly sku: string;
   readonly title: string;
   readonly handle: string;
-  readonly priceAmount: string;
-  readonly currencyCode: string;
+  /** Preço da vitrine (texto decimal da Shopify, "0.0" é válido). `null` = a confirmar no carrinho. */
+  readonly priceAmount: string | null;
+  readonly currencyCode: string | null;
 }
 
 export interface RentalDraft {
@@ -42,9 +44,23 @@ const isPiece = (value: unknown): value is DraftPiece => {
   const p = value as Record<string, unknown> | null;
   return (
     !!p &&
-    ['variantId', 'sku', 'title', 'handle', 'priceAmount', 'currencyCode'].every((key) => typeof p[key] === 'string' && (p[key] as string).length > 0 && (p[key] as string).length <= 300) &&
+    ['variantId', 'sku', 'title', 'handle'].every((key) => typeof p[key] === 'string' && (p[key] as string).length > 0 && (p[key] as string).length <= 300) &&
     HANDLE.test(p.handle as string)
   );
+};
+
+/** Preço ausente ou ilegível fica `null` ("a confirmar") — nunca vira 0 e nunca some com a peça. */
+const withPrice = (piece: DraftPiece): DraftPiece => {
+  const amount = typeof piece.priceAmount === 'string' && amountToCents(piece.priceAmount) !== null ? piece.priceAmount.trim() : null;
+  const currencyCode = isCurrencyCode(piece.currencyCode) ? piece.currencyCode : null;
+  return {
+    variantId: piece.variantId,
+    sku: piece.sku,
+    title: piece.title,
+    handle: piece.handle,
+    priceAmount: amount !== null && currencyCode !== null ? amount : null,
+    currencyCode,
+  };
 };
 
 /** Guardado há mais de RENTAL_DRAFT_TTL_MS (ou ilegível)? */
@@ -65,7 +81,7 @@ export function parseDraft(raw: string | null): RentalDraft {
   try {
     const value = JSON.parse(raw) as Partial<RentalDraft>;
     if (typeof value.updatedAt !== 'number') return EMPTY_DRAFT;
-    const pieces = Array.isArray(value.pieces) ? dedupe(value.pieces.filter(isPiece)) : [];
+    const pieces = Array.isArray(value.pieces) ? dedupe(value.pieces.filter(isPiece).map(withPrice)) : [];
     const pickup = typeof value.pickup === 'string' && ISO_DATE.test(value.pickup) ? value.pickup : null;
     const returnOption = value.returnOption === 'saturday' || value.returnOption === 'mondayMorning' ? value.returnOption : null;
     return { pickup, returnOption, pieces, updatedAt: value.updatedAt };
@@ -108,15 +124,6 @@ export function withDates(draft: RentalDraft, pickup: string | null, returnOptio
 /** Já atingiu o máximo de peças por reserva? */
 export function atPieceLimit(selectionCount: number, otherPieces: number, maxPieces: number | null): boolean {
   return maxPieces !== null && selectionCount + otherPieces >= maxPieces;
-}
-
-/** Soma dos valores (o valor do aluguel não muda com os dias). `null` se as moedas divergirem. */
-export function totalPrice(pieces: readonly DraftPiece[]): { amount: string; currencyCode: string } | null {
-  if (pieces.length === 0) return null;
-  const currency = pieces[0].currencyCode;
-  if (pieces.some((p) => p.currencyCode !== currency)) return null;
-  const cents = pieces.reduce((sum, p) => sum + Math.round(Number(p.priceAmount) * 100), 0);
-  return Number.isFinite(cents) ? { amount: (cents / 100).toFixed(2), currencyCode: currency } : null;
 }
 
 export interface KeyValueStore {

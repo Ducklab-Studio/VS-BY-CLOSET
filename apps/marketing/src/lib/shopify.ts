@@ -362,14 +362,22 @@ export async function listAllProductHandles(first = 250): Promise<string[]> {
 
 /** Preço formatado na moeda da loja — BRL na loja BR, CLP na do Chile. */
 export function formatPrice(amount: string, currencyCode: string, locale = 'pt-BR'): string {
+  // `Number('')` e `Number(null)` dão 0: preço ausente viraria "R$ 0,00".
+  // Ausente não é zero — sem valor, nada é exibido ("0.0" continua R$ 0,00).
+  if (typeof amount !== 'string' || amount.trim() === '') return '';
   const value = Number(amount);
   if (Number.isNaN(value)) return '';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: currencyCode,
-    // CLP não usa centavos; deixar o Intl decidir evita "CLP 45.000,00".
-    minimumFractionDigits: currencyCode === 'CLP' ? 0 : 2,
-  }).format(value);
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: currencyCode,
+      // CLP não usa centavos; deixar o Intl decidir evita "CLP 45.000,00".
+      minimumFractionDigits: currencyCode === 'CLP' ? 0 : 2,
+    }).format(value);
+  } catch {
+    // Moeda ausente/inválida: o Intl lança RangeError — não derruba a página.
+    return '';
+  }
 }
 
 /** Loja configurada? Usado pra esconder nav/CTA em vez de linkar pra lugar nenhum. */

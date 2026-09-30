@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
-import { CartError, addRentalSelectionToCart, getCart, isCartConfigured, type Cart } from '@/lib/cart';
+import { CartError, addRentalSelectionToCart, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
 import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
-import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, totalPrice, withDates, type DraftPiece } from '@/lib/rental-draft';
+import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, type DraftPiece } from '@/lib/rental-draft';
+import { centsToAmount, reservationSummary, type ReservationSummary, type SummaryRow, type SummaryTotal } from '@/lib/rental-price';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
+import { isValePassProduct } from '@/lib/vale-pass-product';
 import { RentalAction } from './RentalAction';
 import { useRentalDraft } from './useRentalDraft';
 
@@ -82,23 +84,30 @@ export function RentalCalendar({
   // "Adicionar outra peça": peças já escolhidas, retirada e opção de devolução
   // guardadas entre páginas (lib/rental-draft.ts). Esta peça sempre entra.
   const { draft, loaded: draftLoaded, write: writeDraft } = useRentalDraft();
+  // Preço ausente fica `null` (a confirmar), nunca 0 — "0.0" é preço válido.
+  const priceAmount = variant.price?.amount ?? null;
+  const priceCurrency = variant.price?.currencyCode ?? null;
   const currentPiece = useMemo<DraftPiece>(
-    () => ({ variantId: variant.id, sku, title: productTitle, handle: productHandle, priceAmount: variant.price.amount, currencyCode: variant.price.currencyCode }),
-    [variant.id, sku, productTitle, productHandle, variant.price.amount, variant.price.currencyCode],
+    () => ({ variantId: variant.id, sku, title: productTitle, handle: productHandle, priceAmount, currencyCode: priceCurrency }),
+    [variant.id, sku, productTitle, productHandle, priceAmount, priceCurrency],
   );
   const selectionPieces = useMemo(() => selectionWith(draft, currentPiece), [draft, currentPiece]);
 
   const [view, setView] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState<Date | null>(null);
   const [sundayChoice, setSundayChoice] = useState<ReturnChoice | null>(null);
-  /** Linhas do carrinho (variante e quantidade); null enquanto o carrinho é lido. */
-  const [cartLines, setCartLines] = useState<{ variantId: string; quantity: number }[] | null>(null);
+  /** Carrinho da Shopify (fonte de verdade do valor); `undefined` enquanto é lido, `null` = sem carrinho. */
+  const [cart, setCart] = useState<Cart | null | undefined>(undefined);
   const [maxPieces, setMaxPieces] = useState<number | null>(null);
   /** Disponibilidade por mês e quantidade de peças (`peças|YYYY-MM`), carregada quando o mês é exibido. */
   const [months, setMonths] = useState<ReadonlyMap<string, AvailabilityDay[]>>(() => new Map());
   const [failedMonths, setFailedMonths] = useState<ReadonlySet<string>>(() => new Set());
   const [operationStartDate, setOperationStartDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** Peça sendo removida do carrinho (variante). */
+  const [removing, setRemoving] = useState<string | null>(null);
+  /** Prévia (centavos) mostrada no clique de "Alugar agora", para avisar se a Shopify confirmou outro total. */
+  const [submittedPreview, setSubmittedPreview] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Trava síncrona: dois cliques seguidos nunca viram duas inclusões.
   const submittingRef = useRef(false);
@@ -113,11 +122,24 @@ export function RentalCalendar({
   }, [today, operationStartDate]);
 
   // Peças da reserva = seleção (já escolhidas + esta) + as outras que já estão
-  // no carrinho. Não limita artificialmente em 6: se passar do máximo, o
-  // backend responde `max_pieces_exceeded` (capar escondia uma 7ª peça).
+  // no carrinho, cada variante uma vez. Não limita artificialmente em 6: se
+  // passar do máximo, o backend responde `max_pieces_exceeded` (capar
+  // escondia uma 7ª peça). O valor vem do mesmo resumo (lib/rental-price.ts):
+  // soma de TODAS as linhas, e o total oficial da Shopify quando tudo já está
+  // no carrinho — nunca o preço da peça desta página.
   const selectionIds = useMemo(() => new Set(selectionPieces.map((piece) => piece.variantId)), [selectionPieces]);
-  const otherPieces = cartLines === null ? null : cartLines.filter((line) => !selectionIds.has(line.variantId)).reduce((sum, line) => sum + line.quantity, 0);
-  const pieces = otherPieces === null ? null : selectionPieces.length + otherPieces;
+  const rentalCart = useMemo(() => {
+    if (!cart) return null;
+    const lines = cart.lines.filter((line) => !isValePassProduct({ variantId: line.merchandise.id }));
+    // Se algo que não é aluguel estivesse no carrinho, o total dele não seria o da reserva.
+    return { lines, cost: lines.length === cart.lines.length ? cart.cost : null };
+  }, [cart]);
+  const summary = useMemo<ReservationSummary | null>(
+    () => (cart === undefined ? null : reservationSummary(selectionPieces, rentalCart)),
+    [cart, rentalCart, selectionPieces],
+  );
+  const pieces = summary ? summary.pieces : null;
+  const otherPieces = pieces === null ? null : pieces - selectionPieces.length;
   const limitReached = otherPieces !== null && atPieceLimit(selectionPieces.length, otherPieces, maxPieces);
 
   const viewKey = monthKey(view);
@@ -131,7 +153,8 @@ export function RentalCalendar({
   // ---- peças no carrinho (uma vez por variante) ----
   useEffect(() => {
     let cancelled = false;
-    setCartLines(null);
+    setCart(undefined);
+    setSubmittedPreview(null);
     setMonths(new Map());
     setFailedMonths(new Set());
     setSelected(null);
@@ -139,8 +162,8 @@ export function RentalCalendar({
     setError(null);
 
     void (async () => {
-      const cart = isCartConfigured ? await getCart().catch(() => null) : null;
-      if (!cancelled) setCartLines(linesOf(cart));
+      const current = isCartConfigured ? await getCart().catch(() => null) : null;
+      if (!cancelled) setCart(current);
     })();
     return () => {
       cancelled = true;
@@ -273,13 +296,21 @@ export function RentalCalendar({
 
   async function handleSubmit() {
     // A seleção é lida AGORA, no clique: é exatamente o que o resumo mostra.
-    if (!selection || !sku || pieces === null || submittingRef.current) return;
+    if (!selection || !sku || pieces === null || !summary || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
     setError(null);
+    const previewCents = summary.total.source === 'preview' ? summary.total.cents : null;
     try {
-      // Revalida TODAS as peças com a quantidade total e as mesmas datas.
-      const unavailable = await unavailablePieces(selectionPieces, pieces, selection);
+      // Revalida TODAS as peças com a quantidade total e as mesmas datas: as
+      // escolhidas e as do carrinho com a mesma retirada (a devolução delas
+      // acompanha a da reserva).
+      const sameReservation = (cart?.lines ?? [])
+        .filter((line) => !selectionIds.has(line.merchandise.id) && !isValePassProduct({ variantId: line.merchandise.id }))
+        .filter((line) => line.attributes.some((a) => a.key === '_vsc_pickup' && a.value === selection.pickup))
+        .map((line) => ({ variantId: line.merchandise.id, title: line.merchandise.product.title }));
+      const toCheck = [...new Map([...selectionPieces, ...sameReservation].map((piece) => [piece.variantId, piece] as const)).values()];
+      const unavailable = await unavailablePieces(toCheck, pieces, selection);
       if (unavailable === null) {
         setError('Não foi possível confirmar a disponibilidade de todas as peças agora. Tente novamente.');
         return;
@@ -288,7 +319,7 @@ export function RentalCalendar({
         setError(`Indisponível nestas datas: ${unavailable.join(', ')}. Remova da seleção ou escolha outra data de retirada.`);
         return;
       }
-      const cart = await addRentalSelectionToCart({
+      const updated = await addRentalSelectionToCart({
         pieces: selectionPieces.map((piece) => ({ variantId: piece.variantId, sku: piece.sku })),
         pickup: selection.pickup,
         return: selection.return,
@@ -296,8 +327,10 @@ export function RentalCalendar({
         pickupLabel: fromISO(selection.pickup).toLocaleDateString(locale),
         returnLabel: fromISO(selection.return).toLocaleDateString(locale),
       });
-      // Tudo no carrinho: a reserva em montagem acabou.
-      setCartLines(linesOf(cart));
+      // Tudo no carrinho: a reserva em montagem acabou. Daqui em diante o
+      // resumo mostra o total que a Shopify devolveu, não a prévia.
+      setCart(updated);
+      setSubmittedPreview(previewCents);
       writeDraft(EMPTY_DRAFT);
       window.dispatchEvent(new Event('closet:cart-added'));
     } catch (err) {
@@ -320,10 +353,40 @@ export function RentalCalendar({
     router.push('/pecas');
   }
 
+  /**
+   * Tira uma peça da reserva: da seleção em montagem e, se já estiver no
+   * carrinho, também do carrinho (a Shopify devolve o total recalculado). A
+   * peça desta página não tem "Remover" — ela é a que está sendo alugada aqui.
+   */
+  async function handleRemove(row: SummaryRow) {
+    if (submittingRef.current || row.variantId === variant.id) return;
+    setError(null);
+    setSubmittedPreview(null);
+    if (row.inSelection) writeDraft(removePiece(draft, row.variantId));
+    if (!row.inCart || !cart) return;
+    submittingRef.current = true;
+    setRemoving(row.variantId);
+    try {
+      let next: Cart | null = cart;
+      for (const line of cart.lines.filter((l) => l.merchandise.id === row.variantId)) next = await removeCartLine(line.id);
+      setCart(next);
+    } catch {
+      setError('Não foi possível remover a peça do carrinho. Tente novamente.');
+    } finally {
+      submittingRef.current = false;
+      setRemoving(null);
+    }
+  }
+
+  const busy = submitting || removing !== null;
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
-  const canAddAnother = !submitting && otherPieces !== null && !limitReached && !selectedUnavailable && !loading;
-  const multi = selectionPieces.length > 1;
-  const total = totalPrice(selectionPieces);
+  const canAddAnother = !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading;
+  const total = summary?.total ?? null;
+  const showSummary = !!summary && (!!effectiveReturnISO || summary.rows.length > 1);
+  const actionTotal =
+    showSummary && summary && total && total.source !== 'unknown'
+      ? `${formatPrice(total.amount, total.currencyCode, locale)} · ${summary.pieces} ${summary.pieces === 1 ? 'peça' : 'peças'}`
+      : null;
 
   const whatsappHref = whatsapp
     ? `https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
@@ -437,103 +500,132 @@ export function RentalCalendar({
         <Legend className="border-marsala bg-marsala">Selecionado</Legend>
       </div>
 
-      {selected && selectedInfo?.bookable && (
+      {selected && selectedInfo?.bookable && needsSundayChoice && (
+        <div className="mt-5 rounded-xl bg-marsala/[0.06] p-4">
+          <p className="text-[0.8rem] font-medium text-marsala">
+            A devolução calculada cai num domingo — a loja não abre. Escolha uma opção:
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            {selectedInfo.returnOptions?.map((option) => {
+              const unavailable = option.available === false;
+              return (
+                <button
+                  key={option.type}
+                  type="button"
+                  disabled={unavailable || busy}
+                  aria-pressed={sundayChoice === option.type}
+                  data-return-option={option.type}
+                  onClick={() => {
+                    setSundayChoice(option.type);
+                    persistDates(selected, option.type);
+                  }}
+                  className={[
+                    'flex-1 rounded-lg border px-3.5 py-2.5 text-left text-[0.8rem] transition-colors disabled:cursor-not-allowed disabled:opacity-45',
+                    sundayChoice === option.type && !unavailable
+                      ? 'border-marsala bg-marsala text-cream'
+                      : 'border-ink/15 hover:border-marsala/40',
+                  ].join(' ')}
+                >
+                  <span className="block font-medium">
+                    {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
+                  </span>
+                  <span className="block text-[0.72rem] opacity-80">
+                    {fromISO(option.date).toLocaleDateString(locale, LONG_DATE)}
+                    {unavailable ? ' · indisponível' : option.window ? ` · ${option.window}` : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[0.7rem] text-marsala/70">Nenhuma diária adicional nessas opções.</p>
+        </div>
+      )}
+
+      {showSummary && summary && total && (
         <>
-          {needsSundayChoice && (
-            <div className="mt-5 rounded-xl bg-marsala/[0.06] p-4">
-              <p className="text-[0.8rem] font-medium text-marsala">
-                A devolução calculada cai num domingo — a loja não abre. Escolha uma opção:
-              </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                {selectedInfo.returnOptions?.map((option) => {
-                  const unavailable = option.available === false;
-                  return (
-                    <button
-                      key={option.type}
-                      type="button"
-                      disabled={unavailable || submitting}
-                      aria-pressed={sundayChoice === option.type}
-                      data-return-option={option.type}
-                      onClick={() => {
-                        setSundayChoice(option.type);
-                        persistDates(selected, option.type);
-                      }}
-                      className={[
-                        'flex-1 rounded-lg border px-3.5 py-2.5 text-left text-[0.8rem] transition-colors disabled:cursor-not-allowed disabled:opacity-45',
-                        sundayChoice === option.type && !unavailable
-                          ? 'border-marsala bg-marsala text-cream'
-                          : 'border-ink/15 hover:border-marsala/40',
-                      ].join(' ')}
-                    >
-                      <span className="block font-medium">
-                        {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
+          <dl
+            className="mt-5 rounded-xl bg-ink/[0.03] p-4"
+            data-testid="rental-summary"
+            data-pickup={selection?.pickup}
+            data-return={effectiveReturnISO}
+            data-pieces={pieces ?? undefined}
+            data-total-source={total.source}
+            data-total={total.source === 'unknown' ? undefined : total.amount}
+          >
+            <div className="mb-3 border-b border-ink/10 pb-3">
+              <dt className="text-[0.75rem] text-ink/50">
+                {summary.pieces === 1 ? 'Peça da reserva' : `Peças da reserva (${summary.pieces})`}
+              </dt>
+              <dd>
+                <ul className="mt-1.5 space-y-1" data-testid="selected-pieces">
+                  {summary.rows.map((row) => (
+                    <li key={row.variantId} data-variant={row.variantId} data-price={row.unitAmount ?? undefined} className="flex items-center justify-between gap-2 text-[0.8rem]">
+                      <span className="min-w-0 truncate">
+                        {row.variantId === variant.id || !row.handle ? (
+                          row.title
+                        ) : (
+                          <Link href={`/pecas/${row.handle}`} className="hover:text-marsala focus-visible:underline focus-visible:outline-none">{row.title}</Link>
+                        )}
+                        {row.quantity > 1 && <span className="text-ink/60"> × {row.quantity}</span>}
+                        {row.variantId === variant.id ? (
+                          <span className="text-ink/45"> · esta peça</span>
+                        ) : row.inCart ? (
+                          <span className="text-ink/45"> · no carrinho</span>
+                        ) : null}
                       </span>
-                      <span className="block text-[0.72rem] opacity-80">
-                        {fromISO(option.date).toLocaleDateString(locale, LONG_DATE)}
-                        {unavailable ? ' · indisponível' : option.window ? ` · ${option.window}` : ''}
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="tabular-nums text-ink/60">
+                          {row.unitAmount !== null && row.currencyCode ? formatPrice(row.unitAmount, row.currencyCode, locale) : 'a confirmar'}
+                        </span>
+                        {row.variantId !== variant.id && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void handleRemove(row)}
+                            aria-label={`Remover ${row.title} da reserva`}
+                            className="rounded px-1 text-[0.72rem] text-marsala underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 disabled:opacity-40"
+                          >
+                            {removing === row.variantId ? 'Removendo…' : 'Remover'}
+                          </button>
+                        )}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-2 text-[0.7rem] text-marsala/70">Nenhuma diária adicional nessas opções.</p>
+                    </li>
+                  ))}
+                </ul>
+              </dd>
             </div>
-          )}
+            <SumRow label="Retirada">{selected ? selected.toLocaleDateString(locale, LONG_DATE) : 'escolha no calendário'}</SumRow>
+            <SumRow label="Devolução">
+              {effectiveReturnISO
+                ? fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)
+                : needsSundayChoice
+                  ? 'escolha sábado ou segunda'
+                  : 'calculada pela retirada'}
+            </SumRow>
+            <SumRow label="Período">
+              {selectedInfo?.bookable && selectedInfo.durationDays
+                ? `${selectedInfo.durationDays} ${selectedInfo.durationDays === 1 ? 'dia' : 'dias'}`
+                : '—'}
+            </SumRow>
+            <div className="mt-1.5 border-t border-ink/10 pt-3">
+              <SumRow label={total.source === 'shopify' ? 'Total no carrinho' : 'Total estimado'} emphasis>
+                {total.source === 'unknown' ? 'a confirmar' : formatPrice(total.amount, total.currencyCode, locale)}
+              </SumRow>
+            </div>
+          </dl>
+          <p
+            className="mt-2 text-right text-[0.7rem] leading-relaxed text-ink/50"
+            data-testid="total-note"
+            data-total-changed={total.source === 'shopify' && submittedPreview !== null && submittedPreview !== total.cents ? 'true' : undefined}
+          >
+            {totalNote(total, submittedPreview, locale)}
+          </p>
 
           {effectiveReturnISO && (
-            <>
-              <dl className="mt-5 rounded-xl bg-ink/[0.03] p-4" data-pickup={selection?.pickup} data-return={effectiveReturnISO} data-pieces={pieces ?? undefined}>
-                {multi && (
-                  <div className="mb-3 border-b border-ink/10 pb-3">
-                    <dt className="text-[0.75rem] text-ink/50">Peças selecionadas ({selectionPieces.length})</dt>
-                    <dd>
-                      <ul className="mt-1.5 space-y-1" data-testid="selected-pieces">
-                        {selectionPieces.map((piece) => (
-                          <li key={piece.variantId} className="flex items-center justify-between gap-2 text-[0.8rem]">
-                            <span className="min-w-0 truncate">
-                              {piece.variantId === variant.id ? (
-                                <>{piece.title} <span className="text-ink/45">· esta peça</span></>
-                              ) : (
-                                <Link href={`/pecas/${piece.handle}`} className="hover:text-marsala focus-visible:underline focus-visible:outline-none">{piece.title}</Link>
-                              )}
-                            </span>
-                            <span className="flex shrink-0 items-center gap-2">
-                              <span className="text-ink/60">{formatPrice(piece.priceAmount, piece.currencyCode, locale)}</span>
-                              {piece.variantId !== variant.id && (
-                                <button
-                                  type="button"
-                                  disabled={submitting}
-                                  onClick={() => writeDraft(removePiece(draft, piece.variantId))}
-                                  aria-label={`Remover ${piece.title} da reserva`}
-                                  className="rounded px-1 text-[0.72rem] text-marsala underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 disabled:opacity-40"
-                                >
-                                  Remover
-                                </button>
-                              )}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </dd>
-                  </div>
-                )}
-                <SumRow label="Retirada">{selected.toLocaleDateString(locale, LONG_DATE)}</SumRow>
-                <SumRow label="Devolução">{fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)}</SumRow>
-                <SumRow label="Período">
-                  {selectedInfo.durationDays} {selectedInfo.durationDays === 1 ? 'dia' : 'dias'}
-                </SumRow>
-                <div className="mt-1.5 border-t border-ink/10 pt-3">
-                  <SumRow label={multi ? `Valor total (${selectionPieces.length} peças)` : 'Valor'} emphasis>
-                    {total ? formatPrice(total.amount, total.currencyCode, locale) : formatPrice(variant.price.amount, variant.price.currencyCode, locale)}
-                  </SumRow>
-                </div>
-              </dl>
-
-              <p className="mt-3 text-[0.7rem] leading-relaxed text-ink/50">
-                O período é definido pela quantidade de peças ({pieces} no total). Ao adicionar
-                mais peças, a devolução é recalculada.
-              </p>
-            </>
+            <p className="mt-3 text-[0.7rem] leading-relaxed text-ink/50">
+              O período é definido pela quantidade de peças ({pieces} no total). Ao adicionar
+              mais peças, a devolução é recalculada.
+            </p>
           )}
         </>
       )}
@@ -579,11 +671,20 @@ export function RentalCalendar({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-4 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
+          disabled={!canSubmit || busy}
+          className={`flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-4 ${actionTotal ? 'py-2' : 'py-3.5'} text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35`}
         >
           {submitting && <Spinner light />}
-          Alugar agora
+          <span className="flex flex-col items-center leading-tight">
+            Alugar agora
+            {/* No celular a barra fica fixa por cima do fim do resumo: o total
+                vai junto do botão para nunca ficar escondido. */}
+            {actionTotal && (
+              <span data-testid="action-total" aria-hidden className="mt-0.5 text-[0.68rem] font-medium normal-case tracking-normal opacity-85">
+                {actionTotal}
+              </span>
+            )}
+          </span>
         </button>
       </div>
       </RentalAction>
@@ -602,7 +703,18 @@ export function RentalCalendar({
   );
 }
 
-const linesOf = (cart: Cart | null) => (cart ? cart.lines.map((line) => ({ variantId: line.merchandise.id, quantity: line.quantity })) : []);
+/** Diz de onde vem o total exibido: prévia (soma local) ou o carrinho da Shopify (oficial). */
+function totalNote(total: SummaryTotal, submittedPreview: number | null, locale: string): string {
+  if (total.source === 'shopify') {
+    return submittedPreview !== null && submittedPreview !== total.cents
+      ? `Total confirmado pela Shopify (a prévia era ${formatPrice(centsToAmount(submittedPreview), total.currencyCode, locale)}).`
+      : 'Valor oficial do carrinho (Shopify).';
+  }
+  if (total.source === 'preview') return 'Prévia: soma de todas as peças. O valor oficial é o do carrinho.';
+  return total.reason === 'mixed_currency'
+    ? 'Peças em moedas diferentes: o valor é confirmado no carrinho.'
+    : 'Uma das peças está sem preço aqui: o valor é confirmado no carrinho.';
+}
 
 function limitMessage(maxPieces: number | null): string {
   return maxPieces ? `Você atingiu o máximo de ${maxPieces} peças por reserva.` : 'Você atingiu o máximo de peças por reserva.';
@@ -612,7 +724,7 @@ function limitMessage(maxPieces: number | null): string {
  * Nomes das peças que NÃO cabem nas datas escolhidas (com a quantidade total de
  * peças). `null` = não deu para confirmar (API fora do ar): não adiciona nada.
  */
-async function unavailablePieces(pieces: readonly DraftPiece[], countedPieces: number, selection: RentalSelection): Promise<string[] | null> {
+async function unavailablePieces(pieces: readonly { variantId: string; title: string }[], countedPieces: number, selection: RentalSelection): Promise<string[] | null> {
   const pickup = fromISO(selection.pickup);
   const checks = await Promise.all(
     pieces.map(async (piece) => {
