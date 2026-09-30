@@ -5,11 +5,13 @@ import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, RotateCcw, Search, Shie
 import type { ValePassCampaign, ValePassOrder, ValePassOrderStatus, ValePassStatus, ValePassVoucher } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { EmptyState } from '@/components/closetadmin/ui';
+import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
 import {
   cancelValePassVoucherAction,
   createValePassCampaignAction,
   listValePassOrdersAction,
   listValePassVouchersAction,
+  markValePassOrdersViewedAction,
   markValePassVoucherUsedAction,
   restoreValePassVoucherAction,
   toggleValePassCampaignAction,
@@ -78,6 +80,9 @@ export function ValePassSection({
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [vouchers, setVouchers] = useState(initialVouchers);
   const [orders, setOrders] = useState(initialOrders);
+  // Pedidos que estavam "para ver" quando apareceram nesta tela: continuam com
+  // a etiqueta "Novo" até sair da página, mesmo depois de marcados como vistos.
+  const [newIds, setNewIds] = useState(() => new Set(initialOrders.filter((order) => order.needsAttention).map((order) => order.id)));
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('ALL');
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
@@ -118,6 +123,7 @@ export function ValePassSection({
       if (!active) return;
       if (fresh) {
         setOrders(fresh);
+        setNewIds((prev) => new Set([...prev, ...fresh.filter((order) => order.needsAttention).map((order) => order.id)]));
         setOrdersError(null);
         setRefreshedAt(new Date());
       } else {
@@ -137,8 +143,35 @@ export function ValePassSection({
     };
   }, []);
 
-  const activeOrderFilter = ORDER_FILTERS.find((f) => f.value === orderFilter) ?? ORDER_FILTERS[0];
-  const visibleOrders = orders.filter((order) => activeOrderFilter.matches(order.status));
+  const visibleOrders = useMemo(() => {
+    const active = ORDER_FILTERS.find((f) => f.value === orderFilter) ?? ORDER_FILTERS[0];
+    return orders.filter((order) => active.matches(order.status));
+  }, [orders, orderFilter]);
+
+  // Pedido "para ver" exibido nesta tela, com a aba visível → marcado como
+  // visto (só visualização: status, pagamento e vale não mudam). Mandado uma
+  // vez por pedido+status; o menu desta e das outras abas é avisado.
+  const sentViews = useRef(new Set<string>());
+  useEffect(() => {
+    const viewKey = (order: ValePassOrder) => `${order.id}@${order.statusChangedAt}`;
+    const shown = visibleOrders.filter((order) => order.needsAttention && !sentViews.current.has(viewKey(order)));
+    if (shown.length === 0) return;
+    let cancelled = false;
+    const mark = async () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', mark);
+      shown.forEach((order) => sentViews.current.add(viewKey(order)));
+      const result = await markValePassOrdersViewedAction(shown.map((order) => ({ id: order.id, statusChangedAt: order.statusChangedAt })));
+      if ('error' in result) shown.forEach((order) => sentViews.current.delete(viewKey(order)));
+      else if (result.marked > 0) notifyValePassAttentionChanged();
+    };
+    if (document.visibilityState === 'visible') void mark();
+    else document.addEventListener('visibilitychange', mark);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', mark);
+    };
+  }, [visibleOrders]);
 
   return (
     <div className="space-y-8">
@@ -171,7 +204,11 @@ export function ValePassSection({
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {visibleOrders.map((order) => (
-              <OrderCard key={order.id} order={order} />
+              <OrderCard
+                key={order.id}
+                order={order}
+                isNew={order.needsAttention || (newIds.has(order.id) && (order.status === 'PENDING' || order.status === 'CONFIRMED'))}
+              />
             ))}
           </div>
         )}
@@ -470,12 +507,20 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
   );
 }
 
-function OrderCard({ order }: { order: ValePassOrder }) {
+function OrderCard({ order, isNew }: { order: ValePassOrder; isNew: boolean }) {
   return (
-    <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
+    <article
+      data-new={isNew ? 'true' : undefined}
+      className={`rounded-xl border bg-white p-4 shadow-sm transition-colors dark:bg-dark-card ${isNew ? 'border-marsala/30 dark:border-gold/30' : 'border-ink/10 dark:border-white/10'}`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">{order.shopifyOrderName ?? `Pedido ${order.shopifyOrderId}`}</p>
+          {isNew ? (
+            <span className="mt-1 inline-flex rounded-full border border-marsala/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-marsala dark:border-gold/40 dark:text-gold">
+              Novo
+            </span>
+          ) : null}
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
             {order.quantity} Valle Pass · {order.orderCreatedAt ? `criado em ${formatDateTimePt(order.orderCreatedAt)}` : 'data de criação não informada'}
           </p>

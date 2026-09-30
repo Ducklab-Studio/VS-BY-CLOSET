@@ -788,6 +788,11 @@ model ValePassOrder {
   /// Pagamento confirmado já passou pela emissão de vales (emitidos ou
   /// sinalizados para revisão) — a reconciliação não repete.
   vouchersProcessedAt DateTime?           @map("vouchers_processed_at") @db.Timestamptz(6)
+  /// Alguém do ClosetAdmin viu o pedido NESTE status (a tela do Valle Pass
+  /// marca ao exibir). Se o status mudar depois (ex.: pendente → pago), volta
+  /// a contar como "para ver". Só visualização: nunca muda status nem cria vale.
+  viewedAt            DateTime?           @map("viewed_at") @db.Timestamptz(6)
+  viewedBy            String?             @map("viewed_by") @db.Uuid
   deletedInShopifyAt  DateTime?           @map("deleted_in_shopify_at") @db.Timestamptz(6)
   lastSyncSource      String              @map("last_sync_source")
   createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)

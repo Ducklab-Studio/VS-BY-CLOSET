@@ -79,6 +79,19 @@ export function deriveValePassOrderStatus(state: ShopifyPaymentState): ValePassO
   return 'PENDING';
 }
 
+/**
+ * Contador do menu ("pedidos para ver"): pedidos que ainda pedem ação do
+ * operador — pendente de pagamento ou pago — e que ninguém viu NESTE status.
+ * Expirado, cancelado, recusado e reembolsado nunca contam. Mudou de status
+ * depois de visto (pendente → pago)? Volta a contar. Global para a equipe:
+ * visto por um operador, visto por todos.
+ */
+export const ATTENTION_STATUSES: readonly ValePassOrderStatus[] = ['PENDING', 'CONFIRMED'];
+
+export function needsAttention(order: { status: ValePassOrderStatus; viewedAt: Date | null; statusChangedAt: Date }): boolean {
+  return ATTENTION_STATUSES.includes(order.status) && (!order.viewedAt || order.viewedAt < order.statusChangedAt);
+}
+
 /** PENDING < CONFIRMED < finais (expirado, recusado, cancelado, reembolsado). */
 const RANK: Record<ValePassOrderStatus, number> = { PENDING: 0, CONFIRMED: 1, EXPIRED: 2, DECLINED: 2, CANCELLED: 2, REFUNDED: 2 };
 
