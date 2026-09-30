@@ -16,6 +16,9 @@ const transpile = (path) =>
 const selection = {};
 runInNewContext(transpile('src/lib/rental-selection.ts'), { exports: selection, Date, Number, Set });
 const { isSundayISO, resolveRentalSelection, selectableReturnOptions, planCartChange, returnOptionFromLines } = selection;
+// cart.ts recusa o Valle Pass: carrega o detector real (com a loja sem URL configurada).
+const valePass = {};
+runInNewContext(transpile('src/lib/vale-pass-product.ts'), { exports: valePass, require: () => ({ storeUrl: () => '#' }), process: { env: {} } });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 // Caso relatado: retirada 07/10/2026, devolução calculada domingo 11/10/2026.
@@ -102,6 +105,7 @@ function loadCart({ storedCartId = null, responses }) {
     exports,
     require: (name) => {
       if (name === './rental-selection') return selection;
+      if (name === './vale-pass-product') return valePass;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env },

@@ -14,11 +14,22 @@ const transpile = (path) =>
   }).outputText;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
+const priceLib = {};
+runInNewContext(transpile('src/lib/rental-price.ts'), { exports: priceLib, Set, Map, Number, Math, String });
 const draftLib = {};
-runInNewContext(transpile('src/lib/rental-draft.ts'), { exports: draftLib, JSON, Set, Number, Math, Array, encodeURIComponent, decodeURIComponent });
+const draftRequire = (name) => {
+  if (name === './rental-price') return priceLib;
+  throw new Error(`import inesperado: ${name}`);
+};
+runInNewContext(transpile('src/lib/rental-draft.ts'), { exports: draftLib, require: draftRequire, JSON, Set, Number, Math, Array, encodeURIComponent, decodeURIComponent });
 const selectionLib = {};
 runInNewContext(transpile('src/lib/rental-selection.ts'), { exports: selectionLib, Date, Number, Set });
-const { EMPTY_DRAFT, RENTAL_DRAFT_TTL_MS, addPiece, removePiece, withDates, selectionWith, atPieceLimit, totalPrice, parseDraft, isDraftExpired, saveDraft, loadDraft, draftCookie, draftRawFromCookie } = draftLib;
+const shopifyLib = {};
+runInNewContext(transpile('src/lib/shopify.ts'), { exports: shopifyLib, process: { env: {} }, Number, Intl });
+const valePassLib = {};
+runInNewContext(transpile('src/lib/vale-pass-product.ts'), { exports: valePassLib, require: () => shopifyLib, process: { env: {} } });
+const { EMPTY_DRAFT, RENTAL_DRAFT_TTL_MS, addPiece, removePiece, withDates, selectionWith, atPieceLimit, parseDraft, isDraftExpired, saveDraft, loadDraft, draftCookie, draftRawFromCookie } = draftLib;
+const { selectionTotal } = priceLib;
 
 const piece = (n, price = '150.0') => ({ variantId: `gid://shopify/ProductVariant/${n}`, sku: `VS-${n}`, title: `Peça ${n}`, handle: `peca-${n}`, priceAmount: price, currencyCode: 'BRL' });
 
@@ -59,9 +70,18 @@ test('limite de peças por reserva, contando as que já estão no carrinho', () 
 });
 
 test('valor total soma as peças (o valor não muda com os dias); moedas diferentes não somam', () => {
-  assert.deepEqual(plain(totalPrice([piece(1, '150.0'), piece(2, '89.90'), piece(3, '10.05')])), { amount: '249.95', currencyCode: 'BRL' });
-  assert.equal(totalPrice([]), null);
-  assert.equal(totalPrice([piece(1), { ...piece(2), currencyCode: 'CLP' }]), null);
+  assert.deepEqual(plain(selectionTotal([piece(1, '150.0'), piece(2, '89.90'), piece(3, '10.05')])), { status: 'ok', cents: 24995, amount: '249.95', currencyCode: 'BRL' });
+  assert.deepEqual(plain(selectionTotal([piece(1, '200.0'), piece(2, '0.0')])).amount, '200.00');
+  assert.equal(selectionTotal([]).status, 'empty');
+  assert.equal(selectionTotal([piece(1), { ...piece(2), currencyCode: 'CLP' }]).status, 'mixed_currency');
+});
+
+test('peça com preço zero, ausente ou ilegível continua na seleção (zero é zero; ausente é "a confirmar")', () => {
+  const stored = JSON.stringify({ pickup: null, returnOption: null, updatedAt: 1, pieces: [piece(1, '0.0'), piece(2, null), piece(3, ''), piece(4, 'abc'), { ...piece(5, '10'), currencyCode: '' }] });
+  const pieces = plain(parseDraft(stored).pieces);
+  assert.deepEqual(pieces.map((p) => [p.sku, p.priceAmount]), [['VS-1', '0.0'], ['VS-2', null], ['VS-3', null], ['VS-4', null], ['VS-5', null]]);
+  assert.equal(selectionTotal(parseDraft(stored).pieces).status, 'missing');
+  assert.equal(selectionTotal(parseDraft(stored).pieces.slice(0, 1)).amount, '0.00');
 });
 
 test('retirada e opção de devolução valem para todas as peças; atualizar a página preserva tudo', () => {
@@ -112,6 +132,7 @@ function loadCart({ storedCartId = null, responses }) {
     exports,
     require: (name) => {
       if (name === './rental-selection') return selectionLib;
+      if (name === './vale-pass-product') return valePassLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env: { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' } },

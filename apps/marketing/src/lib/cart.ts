@@ -28,6 +28,7 @@
  */
 
 import { planCartChange, type ReturnChoice } from './rental-selection';
+import { isValePassProduct } from './vale-pass-product';
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
@@ -340,6 +341,10 @@ export async function addRentalSelectionToCart(selection: RentalSelectionInput):
   const seen = new Set<string>();
   const lines = selection.pieces.filter((p) => (seen.has(p.variantId) ? false : (seen.add(p.variantId), true))).map(lineFor);
   if (lines.length === 0) throw new CartError('not_added', 'Nenhuma peça selecionada.');
+  // Valle Pass é vale-presente (compra direta na Shopify), nunca peça de aluguel.
+  if (lines.some((line) => isValePassProduct({ variantId: line.variantId }))) {
+    throw new CartError('not_added', 'O Valle Pass não entra numa reserva de aluguel.');
+  }
   const verify = (cart: Cart) => {
     for (const line of lines) assertLineSaved(cart, line);
     return cart;

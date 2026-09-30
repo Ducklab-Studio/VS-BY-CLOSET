@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { RENTAL_DRAFT_COOKIE, RENTAL_DRAFT_EVENT, RENTAL_DRAFT_KEY, RENTAL_DRAFT_TTL_MS, draftCookie, parseDraft, readDraftRaw, saveDraft, type RentalDraft } from '@/lib/rental-draft';
+import { isValePassProduct } from '@/lib/vale-pass-product';
 
 function storage(): Storage | null {
   try {
@@ -35,7 +36,12 @@ const snapshot = () => readDraftRaw(storage(), Date.now());
  */
 export function useRentalDraft(initialRaw?: string | null): { draft: RentalDraft; loaded: boolean; write: (next: RentalDraft) => void } {
   const raw = useSyncExternalStore(subscribe, snapshot, () => (initialRaw === undefined ? undefined : initialRaw));
-  const draft = useMemo(() => parseDraft(raw ?? null), [raw]);
+  // Valle Pass nunca entra na reserva de aluguel, nem vindo de um armazenamento adulterado.
+  const draft = useMemo(() => {
+    const parsed = parseDraft(raw ?? null);
+    const pieces = parsed.pieces.filter((piece) => !isValePassProduct({ variantId: piece.variantId }));
+    return pieces.length === parsed.pieces.length ? parsed : { ...parsed, pieces };
+  }, [raw]);
   const write = useCallback((next: RentalDraft) => {
     const now = Date.now();
     saveDraft(storage(), next, now);
