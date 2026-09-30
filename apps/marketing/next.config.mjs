@@ -37,7 +37,25 @@ const apiOrigins = [
   })
   .filter((origin) => origin !== null);
 
-const uniqueApiOrigins = [...new Set(apiOrigins)];
+/**
+ * Storefront API da Shopify: o carrinho (`src/lib/cart.ts`) roda NO
+ * NAVEGADOR e chama `https://<loja>/api/.../graphql.json` direto. Faltava na
+ * CSP desde que ela entrou: o navegador bloqueava toda chamada do carrinho
+ * antes de sair ("Alugar agora" falhava em qualquer data). Mesma variável que
+ * o código do carrinho usa — domínio puro (`loja.myshopify.com`) ou URL.
+ */
+function storefrontOrigin(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  try {
+    const { origin, protocol } = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return protocol === 'https:' ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+const uniqueApiOrigins = [...new Set([...apiOrigins, storefrontOrigin(process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN)].filter((origin) => origin !== null))];
 
 /**
  * Content-Security-Policy.

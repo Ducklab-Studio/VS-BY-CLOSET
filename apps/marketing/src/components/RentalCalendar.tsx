@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
-import { addRentalToCart, countPiecesInCart, isCartConfigured } from '@/lib/cart';
+import { CartError, addRentalToCart, countPiecesWith, isCartConfigured } from '@/lib/cart';
+import { resolveRentalSelection, type ReturnChoice } from '@/lib/rental-selection';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
 import { RentalAction } from './RentalAction';
 
@@ -29,9 +30,11 @@ const monthIndex = (d: Date) => d.getFullYear() * 12 + d.getMonth();
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 
 interface ReturnOption {
-  type: 'saturday' | 'mondayMorning';
+  type: ReturnChoice;
   date: string;
   window?: string;
+  /** Disponibilidade da própria data desta opção (API). */
+  available?: boolean;
 }
 
 interface AvailabilityDay {
@@ -70,7 +73,7 @@ export function RentalCalendar({
 
   const [view, setView] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState<Date | null>(null);
-  const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
+  const [sundayChoice, setSundayChoice] = useState<ReturnChoice | null>(null);
   /** Peças que a reserva terá (carrinho + esta); null enquanto o carrinho é lido. */
   const [pieces, setPieces] = useState<number | null>(null);
   /** Disponibilidade por mês (`YYYY-MM`), carregada quando o mês é exibido. */
@@ -79,6 +82,8 @@ export function RentalCalendar({
   const [operationStartDate, setOperationStartDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Trava síncrona: dois cliques seguidos nunca viram duas inclusões.
+  const submittingRef = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
   // O limite parte da primeira retirada possível, não só de hoje: com a
@@ -104,12 +109,13 @@ export function RentalCalendar({
     setError(null);
 
     void (async () => {
-      const cartPieces = isCartConfigured ? await countPiecesInCart().catch(() => 0) : 0;
       // Não limita artificialmente em 6 aqui. Se o cliente já estiver no
       // máximo, o backend precisa receber a quantidade prospectiva real e
       // responder `max_pieces_exceeded`; capar em 6 permitia uma 7ª peça
-      // parecer disponível no calendário e só falhar muito depois.
-      if (!cancelled) setPieces(cartPieces + 1);
+      // parecer disponível no calendário e só falhar muito depois. A mesma
+      // peça já no carrinho não conta duas vezes (alugar de novo só troca as datas).
+      const prospective = isCartConfigured ? await countPiecesWith(variant.id).catch(() => 1) : 1;
+      if (!cancelled) setPieces(prospective);
     })();
     return () => {
       cancelled = true;
@@ -204,12 +210,10 @@ export function RentalCalendar({
 
   const selectedInfo = selected ? dayMap.get(toISO(selected)) : undefined;
   const needsSundayChoice = !!selectedInfo?.hasSundayReturnException;
-  const chosenOption =
-    needsSundayChoice && sundayChoice
-      ? selectedInfo?.returnOptions?.find((o) => o.type === sundayChoice)
-      : undefined;
-  const effectiveReturnISO = needsSundayChoice ? chosenOption?.date : selectedInfo?.calculatedReturnDate;
-  const canSubmit = !!selected && !!selectedInfo?.bookable && !!effectiveReturnISO;
+  // Uma só seleção para o resumo E para o carrinho: a data exibida é a enviada.
+  const selection = resolveRentalSelection(selectedInfo, sundayChoice);
+  const effectiveReturnISO = selection?.return;
+  const canSubmit = !!selection;
 
   function moveFocus(iso: string, step: number) {
     const target = addDays(fromISO(iso), step);
@@ -223,23 +227,26 @@ export function RentalCalendar({
   }
 
   async function handleSubmit() {
-    if (!selected || !effectiveReturnISO || !sku) return;
+    // A seleção é lida AGORA, no clique: é exatamente o que o resumo mostra.
+    if (!selection || !sku || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
-      const returnDate = fromISO(effectiveReturnISO);
       await addRentalToCart({
         variantId: variant.id,
         sku,
-        pickup: toISO(selected),
-        return: effectiveReturnISO,
-        pickupLabel: selected.toLocaleDateString(locale),
-        returnLabel: returnDate.toLocaleDateString(locale),
+        pickup: selection.pickup,
+        return: selection.return,
+        returnOption: selection.returnOption,
+        pickupLabel: fromISO(selection.pickup).toLocaleDateString(locale),
+        returnLabel: fromISO(selection.return).toLocaleDateString(locale),
       });
       window.dispatchEvent(new Event('closet:cart-added'));
-    } catch {
-      setError('Não foi possível adicionar ao carrinho. Tente novamente.');
+    } catch (err) {
+      setError(cartErrorMessage(err));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -363,27 +370,33 @@ export function RentalCalendar({
                 A devolução calculada cai num domingo — a loja não abre. Escolha uma opção:
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                {selectedInfo.returnOptions?.map((option) => (
-                  <button
-                    key={option.type}
-                    type="button"
-                    onClick={() => setSundayChoice(option.type)}
-                    className={[
-                      'flex-1 rounded-lg border px-3.5 py-2.5 text-left text-[0.8rem] transition-colors',
-                      sundayChoice === option.type
-                        ? 'border-marsala bg-marsala text-cream'
-                        : 'border-ink/15 hover:border-marsala/40',
-                    ].join(' ')}
-                  >
-                    <span className="block font-medium">
-                      {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
-                    </span>
-                    <span className="block text-[0.72rem] opacity-80">
-                      {fromISO(option.date).toLocaleDateString(locale, LONG_DATE)}
-                      {option.window ? ` · ${option.window}` : ''}
-                    </span>
-                  </button>
-                ))}
+                {selectedInfo.returnOptions?.map((option) => {
+                  const unavailable = option.available === false;
+                  return (
+                    <button
+                      key={option.type}
+                      type="button"
+                      disabled={unavailable || submitting}
+                      aria-pressed={sundayChoice === option.type}
+                      data-return-option={option.type}
+                      onClick={() => setSundayChoice(option.type)}
+                      className={[
+                        'flex-1 rounded-lg border px-3.5 py-2.5 text-left text-[0.8rem] transition-colors disabled:cursor-not-allowed disabled:opacity-45',
+                        sundayChoice === option.type && !unavailable
+                          ? 'border-marsala bg-marsala text-cream'
+                          : 'border-ink/15 hover:border-marsala/40',
+                      ].join(' ')}
+                    >
+                      <span className="block font-medium">
+                        {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
+                      </span>
+                      <span className="block text-[0.72rem] opacity-80">
+                        {fromISO(option.date).toLocaleDateString(locale, LONG_DATE)}
+                        {unavailable ? ' · indisponível' : option.window ? ` · ${option.window}` : ''}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <p className="mt-2 text-[0.7rem] text-marsala/70">Nenhuma diária adicional nessas opções.</p>
             </div>
@@ -391,7 +404,7 @@ export function RentalCalendar({
 
           {effectiveReturnISO && (
             <>
-              <dl className="mt-5 rounded-xl bg-ink/[0.03] p-4">
+              <dl className="mt-5 rounded-xl bg-ink/[0.03] p-4" data-pickup={selection?.pickup} data-return={effectiveReturnISO}>
                 <SumRow label="Retirada">{selected.toLocaleDateString(locale, LONG_DATE)}</SumRow>
                 <SumRow label="Devolução">{fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)}</SumRow>
                 <SumRow label="Período">
@@ -457,6 +470,19 @@ export function RentalCalendar({
       )}
     </section>
   );
+}
+
+/**
+ * Mensagem de falha ao adicionar ao carrinho. Produção: amigável (e específica
+ * quando a Shopify não manteve a peça). Desenvolvimento: também a causa real.
+ */
+function cartErrorMessage(err: unknown): string {
+  const friendly =
+    err instanceof CartError && err.code === 'not_added'
+      ? 'Esta peça não está disponível na loja para estas datas agora. Fale com o atendimento.'
+      : 'Não foi possível adicionar ao carrinho. Tente novamente.';
+  if (process.env.NODE_ENV === 'production') return friendly;
+  return `${friendly} [dev: ${err instanceof Error ? err.message : String(err)}]`;
 }
 
 const LONG_DATE: Intl.DateTimeFormatOptions = {

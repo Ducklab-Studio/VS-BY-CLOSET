@@ -5,6 +5,7 @@ import { AvailabilityService } from './availability.service';
 import {
   type CivilDate,
   addDays,
+  civilDateFromISO,
   civilDateToISO,
   isSunday,
 } from '../rental-rules/civil-date';
@@ -38,6 +39,7 @@ const VARIANT_INACTIVE = `avail-test-inactive-${SUFFIX}`;
 const VARIANT_ACCESSORY = `avail-test-accessory-${SUFFIX}`;
 const VARIANT_MISSING = `avail-test-missing-${SUFFIX}`;
 const VARIANT_OVERLAP = `avail-test-overlap-${SUFFIX}`;
+const VARIANT_SUNDAY = `avail-test-sunday-${SUFFIX}`;
 
 /**
  * Primeiro dia, a partir de hoje + N dias, que NÃO cai na temporada
@@ -111,6 +113,7 @@ beforeAll(async () => {
       { code: `AVAIL-INACTIVE-${SUFFIX}`, name: 'Peça inativa', shopifyVariantId: VARIANT_INACTIVE, active: false, reservableOnline: true, countsTowardRentalDuration: true },
       { code: `AVAIL-ACCESSORY-${SUFFIX}`, name: 'Luva', shopifyVariantId: VARIANT_ACCESSORY, active: true, reservableOnline: false, countsTowardRentalDuration: false },
       { code: `AVAIL-OVERLAP-${SUFFIX}`, name: 'Sobretudo p/ sobreposição', shopifyVariantId: VARIANT_OVERLAP, active: true, reservableOnline: true, countsTowardRentalDuration: true },
+      { code: `AVAIL-SUNDAY-${SUFFIX}`, name: 'Sobretudo devolução no domingo', shopifyVariantId: VARIANT_SUNDAY, active: true, reservableOnline: true, countsTowardRentalDuration: true },
     ],
   });
 
@@ -347,6 +350,47 @@ describe('AvailabilityService — integração real (Neon)', () => {
         to: civilDateToISO(pairPickup),
       });
       expect(res.days[0]).toMatchObject({ quantityAvailable: 1, bookable: true });
+    });
+  });
+
+  describe('devolução calculada no domingo — cada opção com a própria disponibilidade', () => {
+    /** Primeira retirada válida (a partir de +40 dias) cuja devolução calculada cai no domingo. */
+    async function sundayReturnDay() {
+      const from = futurePickup(40);
+      const res = await service.getAvailability({ shopifyVariantId: VARIANT_SUNDAY, countedPieces: 1, from: civilDateToISO(from), to: civilDateToISO(addDays(from, 20)) });
+      const day = res.days.find((d) => d.bookable && d.hasSundayReturnException);
+      if (!day) throw new Error('nenhuma retirada com devolução no domingo na janela de teste');
+      return day;
+    }
+
+    test('as duas livres: sábado e segunda disponíveis; nenhuma opção cai no domingo', async () => {
+      const day = await sundayReturnDay();
+      expect(isSunday(civilDateFromISO(day.calculatedReturnDate!))).toBe(true);
+      expect(day.returnOptions).toEqual([
+        expect.objectContaining({ type: 'saturday', available: true, quantityAvailable: 1 }),
+        expect.objectContaining({ type: 'mondayMorning', available: true, quantityAvailable: 1 }),
+      ]);
+      const calculated = civilDateFromISO(day.calculatedReturnDate!);
+      expect(day.returnOptions!.map((o) => o.date)).toEqual([civilDateToISO(addDays(calculated, -1)), civilDateToISO(addDays(calculated, 1))]);
+      expect(day.returnOptions!.some((o) => isSunday(civilDateFromISO(o.date)))).toBe(false);
+    });
+
+    test('segunda ocupada e sábado livre: o dia continua reservável, mas só o sábado é oferecido', async () => {
+      const day = await sundayReturnDay();
+      const pickup = civilDateFromISO(day.date);
+      const saturday = civilDateFromISO(day.returnOptions!.find((o) => o.type === 'saturday')!.date);
+      // Reserva que começa logo depois do bloqueio da opção "sábado": não
+      // encosta nele, mas invade o bloqueio da opção "segunda" (2 dias maior).
+      const saturdayRange = calculateBlockedRange(pickup, saturday, CFG);
+      const unit = await prisma.rentalUnit.findFirstOrThrow({ where: { shopifyVariantId: VARIANT_SUNDAY } });
+      await createConfirmedReservation(unit.id, { blockedFrom: saturdayRange.blockedUntilExclusive, blockedUntilExclusive: addDays(saturdayRange.blockedUntilExclusive, 1) });
+
+      const res = await service.getAvailability({ shopifyVariantId: VARIANT_SUNDAY, countedPieces: 1, from: day.date, to: day.date });
+      expect(res.days[0]).toMatchObject({ bookable: true, quantityAvailable: 1, hasSundayReturnException: true });
+      expect(res.days[0].returnOptions).toEqual([
+        expect.objectContaining({ type: 'saturday', available: true, quantityAvailable: 1 }),
+        expect.objectContaining({ type: 'mondayMorning', available: false, quantityAvailable: 0 }),
+      ]);
     });
   });
 });

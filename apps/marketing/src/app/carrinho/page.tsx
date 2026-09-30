@@ -14,6 +14,7 @@ import {
 } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
 import { type SundayReturnOptionInfo } from '@/lib/checkout';
+import { returnOptionFromLines } from '@/lib/rental-selection';
 import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
@@ -71,6 +72,9 @@ export default function CarrinhoPage() {
       .then(async (result) => {
         if (cancelled) return;
         setCart(result);
+        // Devolução de domingo já escolhida na página da peça: o HOLD recebe a
+        // MESMA opção (a mesma data do item), sem perguntar de novo.
+        setSundayChoice(result ? returnOptionFromLines(result.lines) : null);
         if (result?.lines.length) {
           setStockLoading(true);
           try {
