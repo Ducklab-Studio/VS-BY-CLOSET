@@ -249,57 +249,57 @@ export async function getCart(): Promise<Cart | null> {
   return flatten(data.cart);
 }
 
-export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
-  const lineInput = {
-    merchandiseId: line.variantId,
-    quantity: 1,
-    attributes: attributesFor(line),
-  };
+/** Várias peças da MESMA reserva: mesmas datas para todas. */
+export interface RentalSelectionInput {
+  pieces: readonly { variantId: string; sku: string }[];
+  /** ISO yyyy-mm-dd */
+  pickup: string;
+  /** ISO yyyy-mm-dd */
+  return: string;
+  returnOption?: ReturnChoice | null;
+  pickupLabel: string;
+  returnLabel: string;
+}
 
-  // Carrinho salvo que ainda existe: a mesma peça nunca vira uma segunda linha.
-  const current = readStoredCartId() ? await getCart() : null;
-  if (current) {
-    const plan = planCartChange(current.lines, line);
-    if (plan.kind === 'noop') return current;
+type LineUpdate = { id: string; attributes: { key: string; value: string }[] };
+type LineAdd = { merchandiseId: string; quantity: number; attributes: { key: string; value: string }[] };
 
-    if (plan.kind === 'update') {
-      const data = await cartFetch<{
-        cartLinesUpdate: { cart: Cart | null; userErrors: { message: string }[] };
-      }>(
-        `mutation UpdateLineDates($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
-          cartLinesUpdate(cartId: $cartId, lines: $lines) {
-            cart { ${CART_FIELDS} }
-            userErrors { message }
-          }
-        }`,
-        { cartId: current.id, lines: [{ id: plan.lineId, attributes: lineInput.attributes }] },
-      );
-      throwOnUserErrors(data.cartLinesUpdate.userErrors);
-      if (!data.cartLinesUpdate.cart) throw new CartError('shopify', 'A Shopify não devolveu o carrinho atualizado.');
-      return assertLineSaved(flatten(data.cartLinesUpdate.cart), line);
-    }
+async function linesUpdate(cartId: string, lines: LineUpdate[]): Promise<Cart> {
+  const data = await cartFetch<{
+    cartLinesUpdate: { cart: Cart | null; userErrors: { message: string }[] };
+  }>(
+    `mutation UpdateLineDates($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
+      cartLinesUpdate(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FIELDS} }
+        userErrors { message }
+      }
+    }`,
+    { cartId, lines },
+  );
+  throwOnUserErrors(data.cartLinesUpdate.userErrors);
+  if (!data.cartLinesUpdate.cart) throw new CartError('shopify', 'A Shopify não devolveu o carrinho atualizado.');
+  return flatten(data.cartLinesUpdate.cart);
+}
 
-    const data = await cartFetch<{
-      cartLinesAdd: { cart: Cart | null; userErrors: { message: string }[] };
-    }>(
-      `mutation AddLine($cartId: ID!, $lines: [CartLineInput!]!) {
-        cartLinesAdd(cartId: $cartId, lines: $lines) {
-          cart { ${CART_FIELDS} }
-          userErrors { message }
-        }
-      }`,
-      { cartId: current.id, lines: [lineInput] },
-    );
+/** `null` = o carrinho salvo deixou de existir (expirou ou foi fechado na Shopify). */
+async function linesAdd(cartId: string, lines: LineAdd[]): Promise<Cart | null> {
+  const data = await cartFetch<{
+    cartLinesAdd: { cart: Cart | null; userErrors: { message: string }[] };
+  }>(
+    `mutation AddLine($cartId: ID!, $lines: [CartLineInput!]!) {
+      cartLinesAdd(cartId: $cartId, lines: $lines) {
+        cart { ${CART_FIELDS} }
+        userErrors { message }
+      }
+    }`,
+    { cartId, lines },
+  );
+  if (!data.cartLinesAdd.cart) return null;
+  throwOnUserErrors(data.cartLinesAdd.userErrors);
+  return flatten(data.cartLinesAdd.cart);
+}
 
-    if (data.cartLinesAdd.cart) {
-      throwOnUserErrors(data.cartLinesAdd.userErrors);
-      return assertLineSaved(flatten(data.cartLinesAdd.cart), line);
-    }
-    // Carrinho salvo deixou de existir entre a leitura e a escrita (expirou ou
-    // foi fechado na Shopify): esquece e cria outro, em vez de falhar para sempre.
-    forgetCart();
-  }
-
+async function cartCreate(lines: LineAdd[]): Promise<Cart> {
   const data = await cartFetch<{
     cartCreate: { cart: Cart | null; userErrors: { message: string }[] };
   }>(
@@ -309,14 +309,74 @@ export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
         userErrors { message }
       }
     }`,
-    { lines: [lineInput] },
+    { lines },
   );
-
   throwOnUserErrors(data.cartCreate.userErrors);
   if (!data.cartCreate.cart) throw new CartError('shopify', 'Não foi possível criar o carrinho.');
-
   storeCartId(data.cartCreate.cart.id);
-  return assertLineSaved(flatten(data.cartCreate.cart), line);
+  return flatten(data.cartCreate.cart);
+}
+
+const attributeOf = (line: CartLine, key: string) => line.attributes.find((a) => a.key === key)?.value ?? null;
+
+/**
+ * Coloca TODAS as peças da reserva no carrinho, juntas e com as mesmas datas.
+ *  - peça que ainda não está no carrinho: entra (uma linha por peça);
+ *  - peça que já está: a linha passa a ter estas datas (nunca vira duas linhas);
+ *  - outras peças do carrinho com a mesma retirada: mesma devolução (é uma
+ *    reserva só, e a devolução depende do total de peças);
+ *  - no fim, confere que a Shopify gravou cada peça com as datas enviadas.
+ */
+export async function addRentalSelectionToCart(selection: RentalSelectionInput): Promise<Cart> {
+  const lineFor = (piece: { variantId: string; sku: string }): RentalLineInput => ({
+    variantId: piece.variantId,
+    sku: piece.sku,
+    pickup: selection.pickup,
+    return: selection.return,
+    returnOption: selection.returnOption ?? null,
+    pickupLabel: selection.pickupLabel,
+    returnLabel: selection.returnLabel,
+  });
+  const seen = new Set<string>();
+  const lines = selection.pieces.filter((p) => (seen.has(p.variantId) ? false : (seen.add(p.variantId), true))).map(lineFor);
+  if (lines.length === 0) throw new CartError('not_added', 'Nenhuma peça selecionada.');
+  const verify = (cart: Cart) => {
+    for (const line of lines) assertLineSaved(cart, line);
+    return cart;
+  };
+  const toAdd = (line: RentalLineInput): LineAdd => ({ merchandiseId: line.variantId, quantity: 1, attributes: attributesFor(line) });
+
+  const current = readStoredCartId() ? await getCart() : null;
+  if (current) {
+    const updates: LineUpdate[] = [];
+    const adds: LineAdd[] = [];
+    for (const line of lines) {
+      const plan = planCartChange(current.lines, line);
+      if (plan.kind === 'update') updates.push({ id: plan.lineId, attributes: attributesFor(line) });
+      else if (plan.kind === 'add') adds.push(toAdd(line));
+    }
+    for (const other of current.lines) {
+      if (seen.has(other.merchandise.id) || attributeOf(other, '_vsc_pickup') !== selection.pickup) continue;
+      const line = lineFor({ variantId: other.merchandise.id, sku: attributeOf(other, '_vsc_sku') ?? other.merchandise.sku ?? '' });
+      if (planCartChange([other], line).kind === 'update') updates.push({ id: other.id, attributes: attributesFor(line) });
+    }
+
+    let cart = current;
+    if (updates.length > 0) cart = await linesUpdate(current.id, updates);
+    if (adds.length === 0) return verify(cart);
+    const added = await linesAdd(current.id, adds);
+    if (added) return verify(added);
+    // Carrinho salvo deixou de existir entre a leitura e a escrita: esquece e
+    // cria outro com a reserva inteira, em vez de falhar para sempre.
+    forgetCart();
+  }
+
+  return verify(await cartCreate(lines.map(toAdd)));
+}
+
+/** Uma peça só (sem outras escolhidas): mesma regra da reserva com várias peças. */
+export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
+  return addRentalSelectionToCart({ ...line, pieces: [{ variantId: line.variantId, sku: line.sku }] });
 }
 
 /**

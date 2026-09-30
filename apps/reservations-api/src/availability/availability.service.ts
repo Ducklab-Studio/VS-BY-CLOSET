@@ -49,6 +49,9 @@ export interface AvailabilityResponse {
   /** YYYY-MM-DD da primeira retirada aceita (ou null) — só pra mensagem do
    *  calendário; quem decide o dia continua sendo `days[].bookable`. */
   readonly operationStartDate: string | null;
+  /** Máximo de peças por reserva (painel → Regras): a vitrine usa para travar
+   *  "Adicionar outra peça" antes de o cliente montar uma reserva impossível. */
+  readonly maxPieces: number;
   readonly days: readonly AvailabilityDay[];
 }
 
@@ -133,6 +136,7 @@ export class AvailabilityService {
       countedPieces: query.countedPieces,
       unitsTotal: reservableUnits.length,
       operationStartDate: config.operationStartDate,
+      maxPieces: config.maxPieces,
       days,
     };
   }

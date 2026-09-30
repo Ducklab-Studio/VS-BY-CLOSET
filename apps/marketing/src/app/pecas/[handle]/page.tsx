@@ -157,6 +157,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
                 key={variant.id}
                 variant={variant}
                 productTitle={product.title}
+                productHandle={product.handle}
                 whatsapp={OFFICIAL_WHATSAPP}
               />
             )}

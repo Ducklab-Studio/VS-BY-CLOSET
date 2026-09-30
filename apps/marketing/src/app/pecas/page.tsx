@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { ProductCard } from '@/components/ProductCard';
 import Link from 'next/link';
 import {
@@ -8,6 +9,8 @@ import {
 } from '@/lib/shopify';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { CategorySelect } from '@/components/CategorySelect';
+import { RentalSelectionBar } from '@/components/RentalSelectionBar';
+import { RENTAL_DRAFT_COOKIE, draftRawFromCookie } from '@/lib/rental-draft';
 
 export const metadata: Metadata = {
   title: 'Peças',
@@ -29,6 +32,9 @@ export default async function PecasPage({
   searchParams: Promise<{ categoria?: string }>;
 }) {
   const { categoria } = await searchParams;
+  // Reserva em montagem ("Adicionar outra peça"): o cookie espelho deixa a
+  // barra e as marcas dos cards saírem prontas do servidor, sem deslocar a grade.
+  const draftRaw = draftRawFromCookie((await cookies()).get(RENTAL_DRAFT_COOKIE)?.value);
   if (!isShopifyConfigured && !isDemoCatalogEnabled) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
@@ -81,6 +87,9 @@ export default async function PecasPage({
         )}
       </header>
 
+      {/* "Adicionar outra peça": reserva em montagem (só aparece se houver). */}
+      <RentalSelectionBar initialRaw={draftRaw} />
+
       {/* Filtro por nicho. Rota própria (não estado de cliente) de propósito:
           um link compartilhável direto pra "botas premium" é útil, e o
           catálogo pré-carrega sem esperar JS no navegador do cliente. */}
@@ -116,7 +125,7 @@ export default async function PecasPage({
       ) : (
         <div className="catalog-grid">
           {products.map((product, index) => (
-            <ProductCard key={product.id} product={product} catalog priority={index < 2} imageSizes={catalogImageSizes(products.length)} />
+            <ProductCard key={product.id} product={product} catalog priority={index < 2} imageSizes={catalogImageSizes(products.length)} draftRaw={draftRaw} />
           ))}
         </div>
       )}
