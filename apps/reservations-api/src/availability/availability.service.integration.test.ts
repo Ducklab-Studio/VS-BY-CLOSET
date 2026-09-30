@@ -166,6 +166,12 @@ async function cleanup() {
 }
 
 describe('AvailabilityService — integração real (Neon)', () => {
+  test('a resposta informa o máximo de peças por reserva configurado no painel', async () => {
+    const res = await service.getAvailability({ shopifyVariantId: VARIANT_FREE, countedPieces: 1, from: civilDateToISO(futurePickup(30)), to: civilDateToISO(futurePickup(30)) });
+    expect(res.maxPieces).toBe((await rentalRuleConfig.load()).maxPieces);
+    expect(res.maxPieces).toBeGreaterThan(0);
+  });
+
   test('unidade totalmente livre → bookable, quantityAvailable=1', async () => {
     const pickup = futurePickup(20); // ver comentário de futurePickup acima — >= minAdvanceDays sempre
     const res = await service.getAvailability({

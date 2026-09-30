@@ -1,11 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
-import { CartError, addRentalToCart, countPiecesWith, isCartConfigured } from '@/lib/cart';
-import { resolveRentalSelection, type ReturnChoice } from '@/lib/rental-selection';
+import { CartError, addRentalSelectionToCart, getCart, isCartConfigured, type Cart } from '@/lib/cart';
+import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
+import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, totalPrice, withDates, type DraftPiece } from '@/lib/rental-draft';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
 import { RentalAction } from './RentalAction';
+import { useRentalDraft } from './useRentalDraft';
 
 /**
  * Calendário de aluguel.
@@ -54,29 +58,43 @@ interface AvailabilityResponse {
   unitsTotal: number;
   /** YYYY-MM-DD da primeira retirada online aceita (configurada no painel), ou null. */
   operationStartDate?: string | null;
+  /** Máximo de peças por reserva (painel → Regras). Ausente em API antiga. */
+  maxPieces?: number;
   days: AvailabilityDay[];
 }
 
 export function RentalCalendar({
   variant,
   productTitle,
+  productHandle,
   locale = 'pt-BR',
   whatsapp,
 }: {
   variant: StorefrontVariant;
   productTitle: string;
+  productHandle: string;
   locale?: string;
   whatsapp?: string;
 }) {
   const sku = variant.sku ?? '';
   const today = useMemo(() => startOfDay(new Date()), []);
+  const router = useRouter();
+  // "Adicionar outra peça": peças já escolhidas, retirada e opção de devolução
+  // guardadas entre páginas (lib/rental-draft.ts). Esta peça sempre entra.
+  const { draft, loaded: draftLoaded, write: writeDraft } = useRentalDraft();
+  const currentPiece = useMemo<DraftPiece>(
+    () => ({ variantId: variant.id, sku, title: productTitle, handle: productHandle, priceAmount: variant.price.amount, currencyCode: variant.price.currencyCode }),
+    [variant.id, sku, productTitle, productHandle, variant.price.amount, variant.price.currencyCode],
+  );
+  const selectionPieces = useMemo(() => selectionWith(draft, currentPiece), [draft, currentPiece]);
 
   const [view, setView] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState<Date | null>(null);
   const [sundayChoice, setSundayChoice] = useState<ReturnChoice | null>(null);
-  /** Peças que a reserva terá (carrinho + esta); null enquanto o carrinho é lido. */
-  const [pieces, setPieces] = useState<number | null>(null);
-  /** Disponibilidade por mês (`YYYY-MM`), carregada quando o mês é exibido. */
+  /** Linhas do carrinho (variante e quantidade); null enquanto o carrinho é lido. */
+  const [cartLines, setCartLines] = useState<{ variantId: string; quantity: number }[] | null>(null);
+  const [maxPieces, setMaxPieces] = useState<number | null>(null);
+  /** Disponibilidade por mês e quantidade de peças (`peças|YYYY-MM`), carregada quando o mês é exibido. */
   const [months, setMonths] = useState<ReadonlyMap<string, AvailabilityDay[]>>(() => new Map());
   const [failedMonths, setFailedMonths] = useState<ReadonlySet<string>>(() => new Set());
   const [operationStartDate, setOperationStartDate] = useState<string | null>(null);
@@ -94,14 +112,26 @@ export function RentalCalendar({
     return addDays(start && start > today ? start : today, RANGE_DAYS);
   }, [today, operationStartDate]);
 
+  // Peças da reserva = seleção (já escolhidas + esta) + as outras que já estão
+  // no carrinho. Não limita artificialmente em 6: se passar do máximo, o
+  // backend responde `max_pieces_exceeded` (capar escondia uma 7ª peça).
+  const selectionIds = useMemo(() => new Set(selectionPieces.map((piece) => piece.variantId)), [selectionPieces]);
+  const otherPieces = cartLines === null ? null : cartLines.filter((line) => !selectionIds.has(line.variantId)).reduce((sum, line) => sum + line.quantity, 0);
+  const pieces = otherPieces === null ? null : selectionPieces.length + otherPieces;
+  const limitReached = otherPieces !== null && atPieceLimit(selectionPieces.length, otherPieces, maxPieces);
+
   const viewKey = monthKey(view);
-  const loadFailed = failedMonths.has(viewKey);
-  const loading = pieces === null || (!months.has(viewKey) && !loadFailed);
+  const cacheKey = `${pieces ?? '-'}|${viewKey}`;
+  const loadFailed = failedMonths.has(cacheKey);
+  const loading = pieces === null || (!months.has(cacheKey) && !loadFailed);
+
+  // ---- reserva em montagem: retoma retirada e opção de devolução (uma vez por montagem) ----
+  const restoredFor = useRef<string | null>(null);
 
   // ---- peças no carrinho (uma vez por variante) ----
   useEffect(() => {
     let cancelled = false;
-    setPieces(null);
+    setCartLines(null);
     setMonths(new Map());
     setFailedMonths(new Set());
     setSelected(null);
@@ -109,22 +139,35 @@ export function RentalCalendar({
     setError(null);
 
     void (async () => {
-      // Não limita artificialmente em 6 aqui. Se o cliente já estiver no
-      // máximo, o backend precisa receber a quantidade prospectiva real e
-      // responder `max_pieces_exceeded`; capar em 6 permitia uma 7ª peça
-      // parecer disponível no calendário e só falhar muito depois. A mesma
-      // peça já no carrinho não conta duas vezes (alugar de novo só troca as datas).
-      const prospective = isCartConfigured ? await countPiecesWith(variant.id).catch(() => 1) : 1;
-      if (!cancelled) setPieces(prospective);
+      const cart = isCartConfigured ? await getCart().catch(() => null) : null;
+      if (!cancelled) setCartLines(linesOf(cart));
     })();
     return () => {
       cancelled = true;
+      // Remontagem (troca de peça ou o modo estrito do React): esta limpeza
+      // zera a seleção, então a retomada da reserva em montagem vale de novo.
+      restoredFor.current = null;
     };
   }, [variant.id]);
 
+  useEffect(() => {
+    if (!draftLoaded || restoredFor.current === variant.id) return;
+    restoredFor.current = variant.id;
+    if (!draft.pickup || fromISO(draft.pickup) < today) return;
+    const pickup = fromISO(draft.pickup);
+    setSelected(pickup);
+    setView(new Date(pickup.getFullYear(), pickup.getMonth(), 1));
+    setSundayChoice(draft.returnOption);
+  }, [draftLoaded, draft, variant.id, today]);
+
+  /** Retirada e devolução valem para TODAS as peças da reserva em montagem. */
+  function persistDates(pickup: Date | null, option: ReturnChoice | null) {
+    if (draft.pieces.length > 0) writeDraft(withDates(draft, pickup ? toISO(pickup) : null, option));
+  }
+
   // ---- disponibilidade real do mês exibido ----
   useEffect(() => {
-    if (pieces === null || months.has(viewKey)) return;
+    if (pieces === null || months.has(cacheKey)) return;
     let cancelled = false;
     const first = new Date(view.getFullYear(), view.getMonth(), 1);
     const last = new Date(view.getFullYear(), view.getMonth() + 1, 0);
@@ -136,27 +179,29 @@ export function RentalCalendar({
       const result = from > to ? { days: [], operationStartDate } : await fetchAvailability(variant.id, pieces, from, to);
       if (cancelled) return;
       if (result) {
-        setMonths((prev) => new Map(prev).set(viewKey, result.days));
+        setMonths((prev) => new Map(prev).set(cacheKey, result.days));
         setOperationStartDate(result.operationStartDate ?? null);
+        if ('maxPieces' in result && typeof result.maxPieces === 'number') setMaxPieces(result.maxPieces);
         setFailedMonths((prev) => {
           const next = new Set(prev);
-          next.delete(viewKey);
+          next.delete(cacheKey);
           return next;
         });
       } else {
-        setFailedMonths((prev) => new Set(prev).add(viewKey));
+        setFailedMonths((prev) => new Set(prev).add(cacheKey));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [variant.id, pieces, view, viewKey, months, today, rangeEnd, operationStartDate]);
+  }, [variant.id, pieces, view, cacheKey, months, today, rangeEnd, operationStartDate]);
 
+  // Só os dias calculados para a quantidade ATUAL de peças (mudar a seleção muda a devolução).
   const dayMap = useMemo(() => {
     const map = new Map<string, AvailabilityDay>();
-    for (const monthDays of months.values()) for (const d of monthDays) map.set(d.date, d);
+    for (const [key, monthDays] of months) if (key.startsWith(`${pieces ?? '-'}|`)) for (const d of monthDays) map.set(d.date, d);
     return map;
-  }, [months]);
+  }, [months, pieces]);
 
   const weekdays = useMemo(
     () =>
@@ -228,20 +273,32 @@ export function RentalCalendar({
 
   async function handleSubmit() {
     // A seleção é lida AGORA, no clique: é exatamente o que o resumo mostra.
-    if (!selection || !sku || submittingRef.current) return;
+    if (!selection || !sku || pieces === null || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
-      await addRentalToCart({
-        variantId: variant.id,
-        sku,
+      // Revalida TODAS as peças com a quantidade total e as mesmas datas.
+      const unavailable = await unavailablePieces(selectionPieces, pieces, selection);
+      if (unavailable === null) {
+        setError('Não foi possível confirmar a disponibilidade de todas as peças agora. Tente novamente.');
+        return;
+      }
+      if (unavailable.length > 0) {
+        setError(`Indisponível nestas datas: ${unavailable.join(', ')}. Remova da seleção ou escolha outra data de retirada.`);
+        return;
+      }
+      const cart = await addRentalSelectionToCart({
+        pieces: selectionPieces.map((piece) => ({ variantId: piece.variantId, sku: piece.sku })),
         pickup: selection.pickup,
         return: selection.return,
         returnOption: selection.returnOption,
         pickupLabel: fromISO(selection.pickup).toLocaleDateString(locale),
         returnLabel: fromISO(selection.return).toLocaleDateString(locale),
       });
+      // Tudo no carrinho: a reserva em montagem acabou.
+      setCartLines(linesOf(cart));
+      writeDraft(EMPTY_DRAFT);
       window.dispatchEvent(new Event('closet:cart-added'));
     } catch (err) {
       setError(cartErrorMessage(err));
@@ -250,6 +307,23 @@ export function RentalCalendar({
       setSubmitting(false);
     }
   }
+
+  /** Guarda esta peça (e as datas) na reserva em montagem e volta ao catálogo. */
+  function handleAddAnother() {
+    if (submittingRef.current || otherPieces === null) return;
+    const result = addPiece(draft, currentPiece, maxPieces, otherPieces);
+    if (!result.added && result.reason === 'limit') {
+      setError(limitMessage(maxPieces));
+      return;
+    }
+    writeDraft(withDates(result.draft, selected ? toISO(selected) : null, sundayChoice));
+    router.push('/pecas');
+  }
+
+  const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
+  const canAddAnother = !submitting && otherPieces !== null && !limitReached && !selectedUnavailable && !loading;
+  const multi = selectionPieces.length > 1;
+  const total = totalPrice(selectionPieces);
 
   const whatsappHref = whatsapp
     ? `https://wa.me/${whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(
@@ -349,6 +423,7 @@ export function RentalCalendar({
                 onSelect={() => {
                   setSelected(date);
                   setSundayChoice(null);
+                  persistDates(date, null);
                 }}
               />
             ))}
@@ -379,7 +454,10 @@ export function RentalCalendar({
                       disabled={unavailable || submitting}
                       aria-pressed={sundayChoice === option.type}
                       data-return-option={option.type}
-                      onClick={() => setSundayChoice(option.type)}
+                      onClick={() => {
+                        setSundayChoice(option.type);
+                        persistDates(selected, option.type);
+                      }}
                       className={[
                         'flex-1 rounded-lg border px-3.5 py-2.5 text-left text-[0.8rem] transition-colors disabled:cursor-not-allowed disabled:opacity-45',
                         sundayChoice === option.type && !unavailable
@@ -404,15 +482,49 @@ export function RentalCalendar({
 
           {effectiveReturnISO && (
             <>
-              <dl className="mt-5 rounded-xl bg-ink/[0.03] p-4" data-pickup={selection?.pickup} data-return={effectiveReturnISO}>
+              <dl className="mt-5 rounded-xl bg-ink/[0.03] p-4" data-pickup={selection?.pickup} data-return={effectiveReturnISO} data-pieces={pieces ?? undefined}>
+                {multi && (
+                  <div className="mb-3 border-b border-ink/10 pb-3">
+                    <dt className="text-[0.75rem] text-ink/50">Peças selecionadas ({selectionPieces.length})</dt>
+                    <dd>
+                      <ul className="mt-1.5 space-y-1" data-testid="selected-pieces">
+                        {selectionPieces.map((piece) => (
+                          <li key={piece.variantId} className="flex items-center justify-between gap-2 text-[0.8rem]">
+                            <span className="min-w-0 truncate">
+                              {piece.variantId === variant.id ? (
+                                <>{piece.title} <span className="text-ink/45">· esta peça</span></>
+                              ) : (
+                                <Link href={`/pecas/${piece.handle}`} className="hover:text-marsala focus-visible:underline focus-visible:outline-none">{piece.title}</Link>
+                              )}
+                            </span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              <span className="text-ink/60">{formatPrice(piece.priceAmount, piece.currencyCode, locale)}</span>
+                              {piece.variantId !== variant.id && (
+                                <button
+                                  type="button"
+                                  disabled={submitting}
+                                  onClick={() => writeDraft(removePiece(draft, piece.variantId))}
+                                  aria-label={`Remover ${piece.title} da reserva`}
+                                  className="rounded px-1 text-[0.72rem] text-marsala underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 disabled:opacity-40"
+                                >
+                                  Remover
+                                </button>
+                              )}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </dd>
+                  </div>
+                )}
                 <SumRow label="Retirada">{selected.toLocaleDateString(locale, LONG_DATE)}</SumRow>
                 <SumRow label="Devolução">{fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)}</SumRow>
                 <SumRow label="Período">
                   {selectedInfo.durationDays} {selectedInfo.durationDays === 1 ? 'dia' : 'dias'}
                 </SumRow>
                 <div className="mt-1.5 border-t border-ink/10 pt-3">
-                  <SumRow label="Valor" emphasis>
-                    {formatPrice(variant.price.amount, variant.price.currencyCode, locale)}
+                  <SumRow label={multi ? `Valor total (${selectionPieces.length} peças)` : 'Valor'} emphasis>
+                    {total ? formatPrice(total.amount, total.currencyCode, locale) : formatPrice(variant.price.amount, variant.price.currencyCode, locale)}
                   </SumRow>
                 </div>
               </dl>
@@ -444,18 +556,36 @@ export function RentalCalendar({
                   : null}
       </Status>
 
+      {selectedUnavailable && draft.pieces.length > 0 && (
+        <Status tone="warn">
+          Esta peça não está disponível na retirada escolhida para a reserva. Escolha outra data ou{' '}
+          <Link href="/pecas" className="underline underline-offset-2">volte ao catálogo</Link> sem ela.
+        </Status>
+      )}
+      {limitReached && <Status tone="warn">{limitMessage(maxPieces)}</Status>}
       {error && <Status tone="error">{error}</Status>}
 
       <RentalAction>
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={!canSubmit || submitting}
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
-      >
-        {submitting && <Spinner light />}
-        Alugar agora
-      </button>
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] gap-2">
+        <button
+          type="button"
+          onClick={handleAddAnother}
+          disabled={!canAddAnother}
+          data-testid="add-another-piece"
+          className="flex w-full items-center justify-center rounded-xl border border-marsala bg-cream px-3 py-2 text-[0.7rem] font-semibold uppercase leading-tight tracking-[0.08em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed"
+        >
+          Adicionar outra peça
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!canSubmit || submitting}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-4 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          {submitting && <Spinner light />}
+          Alugar agora
+        </button>
+      </div>
       </RentalAction>
 
       {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
@@ -470,6 +600,31 @@ export function RentalCalendar({
       )}
     </section>
   );
+}
+
+const linesOf = (cart: Cart | null) => (cart ? cart.lines.map((line) => ({ variantId: line.merchandise.id, quantity: line.quantity })) : []);
+
+function limitMessage(maxPieces: number | null): string {
+  return maxPieces ? `Você atingiu o máximo de ${maxPieces} peças por reserva.` : 'Você atingiu o máximo de peças por reserva.';
+}
+
+/**
+ * Nomes das peças que NÃO cabem nas datas escolhidas (com a quantidade total de
+ * peças). `null` = não deu para confirmar (API fora do ar): não adiciona nada.
+ */
+async function unavailablePieces(pieces: readonly DraftPiece[], countedPieces: number, selection: RentalSelection): Promise<string[] | null> {
+  const pickup = fromISO(selection.pickup);
+  const checks = await Promise.all(
+    pieces.map(async (piece) => {
+      const result = await fetchAvailability(piece.variantId, countedPieces, pickup, pickup);
+      if (!result) return null;
+      const day = result.days.find((d) => d.date === selection.pickup);
+      const same = resolveRentalSelection(day, selection.returnOption);
+      return same && same.return === selection.return ? '' : piece.title;
+    }),
+  );
+  if (checks.some((check) => check === null)) return null;
+  return checks.filter((check): check is string => !!check);
 }
 
 /**
