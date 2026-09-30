@@ -27,6 +27,8 @@
  * reservas sobrepostas da mesma peça.
  */
 
+import { planCartChange, type ReturnChoice } from './rental-selection';
+
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
 // Versão estável suportada; manter alinhada com shopify.ts e com o cliente
@@ -101,29 +103,50 @@ const CART_FIELDS = `
 
 export const isCartConfigured = STORE_DOMAIN.length > 0 && STOREFRONT_TOKEN.length > 0;
 
+/**
+ * Falha ao mexer no carrinho, com a causa real em `message` (a tela mostra em
+ * desenvolvimento) e um código para a mensagem amigável de produção.
+ *  - `not_added`: a Shopify respondeu, mas a peça não ficou no carrinho com as
+ *    datas enviadas (ex.: sem estoque na loja);
+ *  - `shopify`: erro de negócio/GraphQL da Shopify;
+ *  - `network`: sem resposta da Shopify;
+ *  - `config`: Storefront não configurada.
+ */
+export class CartError extends Error {
+  constructor(readonly code: 'not_added' | 'shopify' | 'network' | 'config', message: string) {
+    super(message);
+    this.name = 'CartError';
+  }
+}
+
 async function cartFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   if (!isCartConfigured) {
-    throw new Error('Storefront API não configurada.');
+    throw new CartError('config', 'Storefront API não configurada.');
   }
 
-  const res = await fetch(`https://${STORE_DOMAIN}/api/${API_VERSION}/graphql.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://${STORE_DOMAIN}/api/${API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch {
+    throw new CartError('network', 'Sem resposta da Storefront API.');
+  }
 
-  if (!res.ok) throw new Error(`Storefront API respondeu ${res.status}`);
+  if (!res.ok) throw new CartError('shopify', `Storefront API respondeu ${res.status}`);
 
   const json = (await res.json()) as {
     data?: T;
     errors?: { message: string }[];
   };
 
-  if (json.errors?.length) throw new Error(json.errors.map((e) => e.message).join('; '));
-  if (!json.data) throw new Error('Storefront API não retornou dados.');
+  if (json.errors?.length) throw new CartError('shopify', json.errors.map((e) => e.message).join('; '));
+  if (!json.data) throw new CartError('shopify', 'Storefront API não retornou dados.');
   return json.data;
 }
 
@@ -132,7 +155,7 @@ async function cartFetch<T>(query: string, variables: Record<string, unknown>): 
    existe") passar como sucesso e o cliente ver um carrinho vazio sem
    explicação. */
 function throwOnUserErrors(userErrors?: { message: string }[]) {
-  if (userErrors?.length) throw new Error(userErrors.map((e) => e.message).join('; '));
+  if (userErrors?.length) throw new CartError('shopify', userErrors.map((e) => e.message).join('; '));
 }
 
 function flatten(cart: unknown): Cart {
@@ -173,6 +196,8 @@ export interface RentalLineInput {
   pickup: string;
   /** ISO yyyy-mm-dd */
   return: string;
+  /** Opção escolhida quando a devolução calculada cai no domingo (vai para o HOLD do checkout). */
+  returnOption?: ReturnChoice | null;
   /** Como o cliente lê as datas, na língua da loja. */
   pickupLabel: string;
   returnLabel: string;
@@ -187,8 +212,23 @@ function attributesFor(line: RentalLineInput) {
     // ler. Formato ISO porque é o servidor que consome, não gente.
     { key: '_vsc_pickup', value: line.pickup },
     { key: '_vsc_return', value: line.return },
+    ...(line.returnOption ? [{ key: '_vsc_return_option', value: line.returnOption }] : []),
     { key: '_vsc_sku', value: line.sku },
   ];
+}
+
+/** A Shopify confirmou a peça com EXATAMENTE as datas enviadas? A Cart API
+ *  pode responder sem erro e mesmo assim não incluir a linha (estoque da loja
+ *  esgotado): sem esta checagem, a tela diria "adicionado" com a data antiga. */
+function assertLineSaved(cart: Cart, line: RentalLineInput): Cart {
+  const saved = cart.lines.some(
+    (l) =>
+      l.merchandise.id === line.variantId &&
+      l.attributes.some((a) => a.key === '_vsc_pickup' && a.value === line.pickup) &&
+      l.attributes.some((a) => a.key === '_vsc_return' && a.value === line.return),
+  );
+  if (!saved) throw new CartError('not_added', 'A Shopify não manteve a peça no carrinho com as datas escolhidas (estoque da loja indisponível?).');
+  return cart;
 }
 
 export async function getCart(): Promise<Cart | null> {
@@ -210,14 +250,35 @@ export async function getCart(): Promise<Cart | null> {
 }
 
 export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
-  const existingId = readStoredCartId();
   const lineInput = {
     merchandiseId: line.variantId,
     quantity: 1,
     attributes: attributesFor(line),
   };
 
-  if (existingId) {
+  // Carrinho salvo que ainda existe: a mesma peça nunca vira uma segunda linha.
+  const current = readStoredCartId() ? await getCart() : null;
+  if (current) {
+    const plan = planCartChange(current.lines, line);
+    if (plan.kind === 'noop') return current;
+
+    if (plan.kind === 'update') {
+      const data = await cartFetch<{
+        cartLinesUpdate: { cart: Cart | null; userErrors: { message: string }[] };
+      }>(
+        `mutation UpdateLineDates($cartId: ID!, $lines: [CartLineUpdateInput!]!) {
+          cartLinesUpdate(cartId: $cartId, lines: $lines) {
+            cart { ${CART_FIELDS} }
+            userErrors { message }
+          }
+        }`,
+        { cartId: current.id, lines: [{ id: plan.lineId, attributes: lineInput.attributes }] },
+      );
+      throwOnUserErrors(data.cartLinesUpdate.userErrors);
+      if (!data.cartLinesUpdate.cart) throw new CartError('shopify', 'A Shopify não devolveu o carrinho atualizado.');
+      return assertLineSaved(flatten(data.cartLinesUpdate.cart), line);
+    }
+
     const data = await cartFetch<{
       cartLinesAdd: { cart: Cart | null; userErrors: { message: string }[] };
     }>(
@@ -227,12 +288,15 @@ export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
           userErrors { message }
         }
       }`,
-      { cartId: existingId, lines: [lineInput] },
+      { cartId: current.id, lines: [lineInput] },
     );
 
-    throwOnUserErrors(data.cartLinesAdd.userErrors);
-    if (data.cartLinesAdd.cart) return flatten(data.cartLinesAdd.cart);
-    // Carrinho salvo expirou entre a leitura e a escrita: cai pro create.
+    if (data.cartLinesAdd.cart) {
+      throwOnUserErrors(data.cartLinesAdd.userErrors);
+      return assertLineSaved(flatten(data.cartLinesAdd.cart), line);
+    }
+    // Carrinho salvo deixou de existir entre a leitura e a escrita (expirou ou
+    // foi fechado na Shopify): esquece e cria outro, em vez de falhar para sempre.
     forgetCart();
   }
 
@@ -249,10 +313,10 @@ export async function addRentalToCart(line: RentalLineInput): Promise<Cart> {
   );
 
   throwOnUserErrors(data.cartCreate.userErrors);
-  if (!data.cartCreate.cart) throw new Error('Não foi possível criar o carrinho.');
+  if (!data.cartCreate.cart) throw new CartError('shopify', 'Não foi possível criar o carrinho.');
 
   storeCartId(data.cartCreate.cart.id);
-  return flatten(data.cartCreate.cart);
+  return assertLineSaved(flatten(data.cartCreate.cart), line);
 }
 
 /**
@@ -326,5 +390,17 @@ export async function countPiecesInCart(): Promise<number> {
     return cart?.totalQuantity ?? 0;
   } catch {
     return 0;
+  }
+}
+
+/** Peças da reserva se esta variante for alugada: a mesma peça já no carrinho
+ *  não conta duas vezes (alugar de novo só troca as datas daquela linha). */
+export async function countPiecesWith(variantId: string): Promise<number> {
+  try {
+    const cart = await getCart();
+    const total = cart?.totalQuantity ?? 0;
+    return cart?.lines.some((line) => line.merchandise.id === variantId) ? total : total + 1;
+  } catch {
+    return 1;
   }
 }

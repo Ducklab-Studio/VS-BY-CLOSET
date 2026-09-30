@@ -36,7 +36,10 @@ export interface AvailabilityDay {
   readonly durationDays?: number;
   readonly calculatedReturnDate?: string;
   readonly hasSundayReturnException?: boolean;
-  readonly returnOptions?: readonly { type: 'saturday' | 'mondayMorning'; date: string; window?: string }[];
+  /** Cada opção com a disponibilidade da PRÓPRIA data de devolução: a tela
+   *  só oferece a opção que de fato cabe (o dia é reservável se pelo menos
+   *  uma couber). */
+  readonly returnOptions?: readonly { type: 'saturday' | 'mondayMorning'; date: string; window?: string; available: boolean; quantityAvailable: number }[];
 }
 
 export interface AvailabilityResponse {
@@ -164,14 +167,12 @@ export class AvailabilityService {
       ? plan.returnOptions.map((o) => o.date)
       : [plan.calculatedReturnDate];
 
-    let bestAvailable = 0;
-    for (const effectiveReturn of candidateReturns) {
+    const freeFor = (effectiveReturn: (typeof candidateReturns)[number]) => {
       const range = calculateBlockedRange(pickupDate, effectiveReturn, config);
-      const freeCount = reservableUnits.filter(
-        (unit) => !occupied.some((o) => o.unitId === unit.id && blockedRangesOverlap(o.range, range)),
-      ).length;
-      bestAvailable = Math.max(bestAvailable, freeCount);
-    }
+      return reservableUnits.filter((unit) => !occupied.some((o) => o.unitId === unit.id && blockedRangesOverlap(o.range, range))).length;
+    };
+    const freeByReturn = candidateReturns.map(freeFor);
+    const bestAvailable = Math.max(0, ...freeByReturn);
 
     return {
       date: civilDateToISO(pickupDate),
@@ -181,10 +182,12 @@ export class AvailabilityService {
       durationDays: plan.durationDays,
       calculatedReturnDate: civilDateToISO(plan.calculatedReturnDate),
       hasSundayReturnException: plan.hasSundayReturnException,
-      returnOptions: plan.returnOptions.map((o) => ({
+      returnOptions: plan.returnOptions.map((o, index) => ({
         type: o.type,
         date: civilDateToISO(o.date),
         window: o.window,
+        available: freeByReturn[index] > 0,
+        quantityAvailable: freeByReturn[index],
       })),
     };
   }
