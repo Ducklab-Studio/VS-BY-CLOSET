@@ -123,7 +123,7 @@ export default async function PecasPage({
             : 'Nenhuma peça cadastrada ainda.'}
         </p>
       ) : (
-        <div className="catalog-grid">
+        <div id="catalogo-pecas" className="catalog-grid scroll-mt-24">
           {products.map((product, index) => (
             <ProductCard key={product.id} product={product} catalog priority={index < 2} imageSizes={catalogImageSizes(products.length)} draftRaw={draftRaw} />
           ))}

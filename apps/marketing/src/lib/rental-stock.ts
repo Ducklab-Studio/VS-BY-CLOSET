@@ -11,7 +11,12 @@ interface AvailabilityResponse {
 }
 
 export interface RentalStockEntry {
-  /** Estoque comercial informado pela Shopify. null = Shopify não expôs um número. */
+  /**
+   * Estoque comercial da Shopify. `0` SÓ quando a Shopify confirma que a
+   * variante não está à venda (`availableForSale: false`). `null` = sem número
+   * confiável: inventário não rastreado / venda sem estoque permitida (a
+   * Shopify devolve `quantityAvailable` 0 nesses casos) ou não informado.
+   */
   shopify: number | null;
   /** Unidades físicas livres para a data escolhida. null = ainda não foi possível consultar. */
   physical: number | null;
@@ -20,6 +25,8 @@ export interface RentalStockEntry {
 }
 
 export type RentalStockMap = Record<string, RentalStockEntry>;
+
+const STOCK_TIMEOUT_MS = 8_000;
 
 /**
  * Junta as duas autoridades de estoque sem confundir os papéis:
@@ -58,8 +65,10 @@ export async function fetchRentalStock(
       missingPickup: false,
     };
 
+    // Só um número positivo é contagem real; 0 com a variante à venda é
+    // inventário não rastreado (ou venda sem estoque), não "esgotado".
     const reported = line.merchandise.quantityAvailable;
-    if (reported !== null) {
+    if (typeof reported === 'number' && reported > 0) {
       current.shopify = current.shopify === null ? reported : Math.min(current.shopify, reported);
     }
     current.availableForSale = current.availableForSale && line.merchandise.availableForSale;
@@ -86,18 +95,25 @@ export async function fetchRentalStock(
           to: pickup,
         });
 
+        // Sem resposta em 8 s: estoque físico fica "a validar", nunca zero.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), STOCK_TIMEOUT_MS);
         try {
           const response = await fetch(`/api/availability?${params.toString()}`, {
             headers: { Accept: 'application/json' },
             cache: 'no-store',
+            signal: controller.signal,
           });
           if (response.ok) {
             const data = (await response.json()) as AvailabilityResponse;
-            const day = data.days.find((item) => item.date === pickup);
-            physical = day?.quantityAvailable ?? 0;
+            const day = data.days?.find((item) => item.date === pickup);
+            // Dia ausente na resposta não é "zero livre": fica sem número.
+            physical = typeof day?.quantityAvailable === 'number' ? day.quantityAvailable : null;
           }
         } catch {
           physical = null;
+        } finally {
+          clearTimeout(timer);
         }
       }
 
@@ -113,6 +129,13 @@ export async function fetchRentalStock(
   );
 
   return Object.fromEntries(entries);
+}
+
+/** Texto do estoque comercial: "Esgotado" só com confirmação explícita da Shopify. */
+export function shopifyStockLabel(entry: RentalStockEntry): string {
+  if (entry.shopify === 0) return 'Esgotado na Shopify';
+  if (entry.shopify === null) return 'Estoque será validado ao finalizar a reserva.';
+  return `Estoque Shopify: ${entry.shopify}`;
 }
 
 export function stockForVariant(stock: RentalStockMap, variantId: string): RentalStockEntry {

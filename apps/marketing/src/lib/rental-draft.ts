@@ -32,10 +32,13 @@ export interface RentalDraft {
   readonly pickup: string | null;
   readonly returnOption: ReturnChoice | null;
   readonly pieces: readonly DraftPiece[];
+  /** Devolução calculada no calendário e para quantas peças ela vale (muda com a quantidade). */
+  readonly returnDate: string | null;
+  readonly returnForPieces: number | null;
   readonly updatedAt: number;
 }
 
-export const EMPTY_DRAFT: RentalDraft = { pickup: null, returnOption: null, pieces: [], updatedAt: 0 };
+export const EMPTY_DRAFT: RentalDraft = { pickup: null, returnOption: null, pieces: [], returnDate: null, returnForPieces: null, updatedAt: 0 };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** O handle vira link (`/pecas/<handle>`): só o formato de handle da Shopify. */
@@ -84,7 +87,15 @@ export function parseDraft(raw: string | null): RentalDraft {
     const pieces = Array.isArray(value.pieces) ? dedupe(value.pieces.filter(isPiece).map(withPrice)) : [];
     const pickup = typeof value.pickup === 'string' && ISO_DATE.test(value.pickup) ? value.pickup : null;
     const returnOption = value.returnOption === 'saturday' || value.returnOption === 'mondayMorning' ? value.returnOption : null;
-    return { pickup, returnOption, pieces, updatedAt: value.updatedAt };
+    const hasReturn = typeof value.returnDate === 'string' && ISO_DATE.test(value.returnDate) && Number.isInteger(value.returnForPieces) && (value.returnForPieces as number) > 0;
+    return {
+      pickup,
+      returnOption,
+      pieces,
+      returnDate: hasReturn ? (value.returnDate as string) : null,
+      returnForPieces: hasReturn ? (value.returnForPieces as number) : null,
+      updatedAt: value.updatedAt,
+    };
   } catch {
     return EMPTY_DRAFT;
   }
@@ -118,7 +129,19 @@ export function removePiece(draft: RentalDraft, variantId: string): RentalDraft 
 
 /** Retirada e opção de devolução valem para TODAS as peças da reserva. */
 export function withDates(draft: RentalDraft, pickup: string | null, returnOption: ReturnChoice | null): RentalDraft {
-  return { ...draft, pickup: pickup && ISO_DATE.test(pickup) ? pickup : null, returnOption };
+  // Retirada/opção mudou: a devolução guardada deixa de valer até o calendário recalcular.
+  return { ...draft, pickup: pickup && ISO_DATE.test(pickup) ? pickup : null, returnOption, returnDate: null, returnForPieces: null };
+}
+
+/** Guarda a devolução calculada para `forPieces` peças (vale só enquanto a quantidade não mudar). */
+export function withReturn(draft: RentalDraft, returnDate: string | null, forPieces: number): RentalDraft {
+  const valid = !!returnDate && ISO_DATE.test(returnDate) && Number.isInteger(forPieces) && forPieces > 0;
+  return { ...draft, returnDate: valid ? returnDate : null, returnForPieces: valid ? forPieces : null };
+}
+
+/** Devolução guardada, se ainda vale para a quantidade atual de peças. */
+export function draftReturnDate(draft: RentalDraft): string | null {
+  return draft.returnDate && draft.returnForPieces === draft.pieces.length ? draft.returnDate : null;
 }
 
 /** Já atingiu o máximo de peças por reserva? */

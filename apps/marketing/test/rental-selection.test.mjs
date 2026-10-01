@@ -112,6 +112,8 @@ function loadCart({ storedCartId = null, responses }) {
     localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
     fetch: async (_url, init) => {
       const body = JSON.parse(init.body);
+      // Pré-checagem de estoque (nodes/availableForSale): tudo à venda, sem gastar respostas da fila.
+      if (/query VariantStock/.test(body.query)) return { ok: true, status: 200, json: async () => ({ data: { nodes: body.variables.ids.map((id) => ({ id, availableForSale: true })) } }) };
       calls.push(body);
       const next = responses.shift();
       if (next instanceof Error) throw next;
