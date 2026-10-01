@@ -131,9 +131,9 @@ export async function fetchRentalStock(
   return Object.fromEntries(entries);
 }
 
-/** Texto do estoque comercial: "Esgotado" só com confirmação explícita da Shopify. */
+/** Texto do estoque comercial: "Esgotada" só com confirmação explícita da Shopify. */
 export function shopifyStockLabel(entry: RentalStockEntry): string {
-  if (entry.shopify === 0) return 'Esgotado na Shopify';
+  if (entry.shopify === 0) return 'Esgotada na Shopify';
   if (entry.shopify === null) return 'Estoque será validado ao finalizar a reserva.';
   return `Estoque Shopify: ${entry.shopify}`;
 }

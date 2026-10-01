@@ -96,16 +96,21 @@ test('checkout: usa a opção escolhida na peça; linhas em conflito voltam a pe
 });
 
 // ── addRentalToCart com a Storefront API simulada ─────────────────────────
+// cart.ts consulta o estoque fresco da Shopify (lib/shopify-stock.ts, puro).
+const shopifyStockLib = {};
+runInNewContext(transpile('src/lib/shopify-stock.ts'), { exports: shopifyStockLib, Number, Object });
 function loadCart({ storedCartId = null, responses }) {
   const storage = new Map(storedCartId ? [['vsc_cart_id', storedCartId]] : []);
   const calls = [];
   const exports = {};
   const env = { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' };
   runInNewContext(transpile('src/lib/cart.ts'), {
+    AbortController, setTimeout, clearTimeout,
     exports,
     require: (name) => {
       if (name === './rental-selection') return selection;
       if (name === './vale-pass-product') return valePass;
+      if (name === './shopify-stock') return shopifyStockLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env },

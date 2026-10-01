@@ -76,13 +76,18 @@ function fakeShopify() {
   };
   return { state, handle, ops: () => state.calls.map((c) => c.op) };
 }
+// cart.ts consulta o estoque fresco da Shopify (lib/shopify-stock.ts, puro).
+const shopifyStockLib = {};
+runInNewContext(transpile('src/lib/shopify-stock.ts'), { exports: shopifyStockLib, Number, Object });
 function loadCart(shop, storage = new Map()) {
   const exports = {};
   runInNewContext(transpile('src/lib/cart.ts'), {
+    AbortController, setTimeout, clearTimeout,
     exports,
     require: (name) => {
       if (name === './rental-selection') return selectionLib;
       if (name === './vale-pass-product') return valePassLib;
+      if (name === './shopify-stock') return shopifyStockLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env: { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' } },
@@ -226,15 +231,15 @@ const availabilityOk = (quantityAvailable) => async (url) => {
   return { ok: true, json: async () => ({ shopifyVariantId: q.get('shopifyVariantId'), days: [{ date: q.get('from'), quantityAvailable }] }) };
 };
 
-test('14) estoque zero CONFIRMADO pela Shopify (não está à venda) → "Esgotado na Shopify"', async () => {
+test('14) estoque zero CONFIRMADO pela Shopify (não está à venda) → "Esgotada na Shopify"', async () => {
   const stock = loadStock(availabilityOk(1));
   const map = await stock.fetchRentalStock(cartWith([cartLine(3, { availableForSale: false, quantityAvailable: 0 })]));
   assert.equal(map[gid(3)].shopify, 0);
-  assert.equal(stock.shopifyStockLabel(map[gid(3)]), 'Esgotado na Shopify');
+  assert.equal(stock.shopifyStockLabel(map[gid(3)]), 'Esgotada na Shopify');
   assert.equal(map[gid(3)].effective, 0);
 });
 
-test('15) inventário não rastreado (à venda, quantityAvailable 0) → não é "Esgotado"; vale a disponibilidade da data', async () => {
+test('15) inventário não rastreado (à venda, quantityAvailable 0) → não é "Esgotada"; vale a disponibilidade da data', async () => {
   const stock = loadStock(availabilityOk(2));
   const map = await stock.fetchRentalStock(cartWith([cartLine(4, { quantityAvailable: 0 })]));
   assert.equal(map[gid(4)].shopify, null);

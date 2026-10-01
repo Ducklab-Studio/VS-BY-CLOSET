@@ -29,6 +29,7 @@
 
 import { planCartChange, type ReturnChoice } from './rental-selection';
 import { isValePassProduct } from './vale-pass-product';
+import { UNKNOWN_STOCK, classifyShopifyStock, type RawVariantStock, type ShopifyStock } from './shopify-stock';
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
@@ -132,12 +133,14 @@ export class CartError extends Error {
   }
 }
 
-async function cartFetch<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+async function cartFetch<T>(query: string, variables: Record<string, unknown>, timeoutMs?: number): Promise<T> {
   if (!isCartConfigured) {
     throw new CartError('config', 'Storefront API não configurada.');
   }
 
   let res: Response;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
     res = await fetch(`https://${STORE_DOMAIN}/api/${API_VERSION}/graphql.json`, {
       method: 'POST',
@@ -146,9 +149,12 @@ async function cartFetch<T>(query: string, variables: Record<string, unknown>): 
         'X-Shopify-Storefront-Access-Token': STOREFRONT_TOKEN,
       },
       body: JSON.stringify({ query, variables }),
+      ...(controller ? { signal: controller.signal } : {}),
     });
   } catch {
     throw new CartError('network', 'Sem resposta da Storefront API.');
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   if (!res.ok) throw new CartError('shopify', `Storefront API respondeu ${res.status}`);
@@ -367,22 +373,47 @@ async function removeLines(cartId: string, lineIds: readonly string[]): Promise<
   return data.cartLinesRemove.cart ? flatten(data.cartLinesRemove.cart) : null;
 }
 
+const STOCK_TIMEOUT_MS = 8_000;
+type StockNode = ({ id?: string } & RawVariantStock) | null;
+
 /**
- * Variantes que a Shopify diz EXPLICITAMENTE que não estão à venda
- * (`availableForSale: false` = sem estoque vendável). Consulta antes de mexer
- * no carrinho, para não deixar nada pela metade. Se a consulta falhar, segue:
- * a conferência depois da inclusão continua valendo (falha nunca vira "0").
+ * Estoque comercial ATUAL de cada variante, direto da Storefront API (no
+ * navegador, sem cache — a página da peça é ISR e o dado dela pode ter
+ * minutos). Erro, timeout ou campo ausente viram `unknown`, nunca "esgotada".
+ * Se a Shopify recusar algum campo de estoque, repete só com `availableForSale`.
+ */
+export async function fetchVariantStock(variantIds: readonly string[]): Promise<Map<string, ShopifyStock>> {
+  const result = new Map<string, ShopifyStock>(variantIds.map((id) => [id, UNKNOWN_STOCK]));
+  if (variantIds.length === 0) return result;
+  const ask = (fields: string) =>
+    cartFetch<{ nodes: StockNode[] }>(
+      `query VariantStock($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { id ${fields} } } }`,
+      { ids: variantIds },
+      STOCK_TIMEOUT_MS,
+    );
+  let nodes: StockNode[];
+  try {
+    nodes = (await ask('availableForSale quantityAvailable currentlyNotInStock')).nodes ?? [];
+  } catch (err) {
+    if (!(err instanceof CartError) || err.code !== 'shopify') return result;
+    try {
+      nodes = (await ask('availableForSale')).nodes ?? [];
+    } catch {
+      return result;
+    }
+  }
+  for (const node of nodes) if (node?.id && result.has(node.id)) result.set(node.id, classifyShopifyStock(node));
+  return result;
+}
+
+/**
+ * Variantes que a Shopify diz EXPLICITAMENTE que não estão à venda.
+ * Consulta antes de mexer no carrinho, para não deixar nada pela metade. Se a
+ * consulta falhar, segue: a conferência depois da inclusão continua valendo.
  */
 async function unsellableVariants(variantIds: readonly string[]): Promise<string[]> {
-  try {
-    const data = await cartFetch<{ nodes: ({ id?: string; availableForSale?: boolean } | null)[] }>(
-      `query VariantStock($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { id availableForSale } } }`,
-      { ids: variantIds },
-    );
-    return (data.nodes ?? []).filter((node) => !!node?.id && node.availableForSale === false).map((node) => node!.id as string);
-  } catch {
-    return [];
-  }
+  const stock = await fetchVariantStock(variantIds);
+  return variantIds.filter((id) => stock.get(id)?.status === 'sold_out');
 }
 
 const attributeOf = (line: CartLine, key: string) => line.attributes.find((a) => a.key === key)?.value ?? null;
