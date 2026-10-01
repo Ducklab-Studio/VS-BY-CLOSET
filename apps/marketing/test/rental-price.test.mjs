@@ -235,7 +235,7 @@ test('atualização do carrinho: nova devolução/terceira peça recalculam o to
   await lib.addRentalSelectionToCart(selectionOf([1, 2]));
   // Terceira peça: devolução passa a 12/10 para todas; linhas existentes atualizadas, nova adicionada.
   const cart = await lib.addRentalSelectionToCart(selectionOf([1, 2, 3], '2026-10-12'));
-  assert.deepEqual(shop.state.mutations, ['cartCreate', 'cartLinesUpdate', 'cartLinesAdd']);
+  assert.deepEqual(shop.state.mutations, ['cartCreate', 'cartLinesAdd', 'cartLinesUpdate']);
   assert.equal(cart.lines.length, 3);
   assert.equal(cart.cost.totalAmount.amount, '350.00');
   assert.ok(cart.lines.every((l) => l.attributes.find((a) => a.key === '_vsc_return').value === '2026-10-12'));

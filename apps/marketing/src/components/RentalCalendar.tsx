@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
 import { CartError, addRentalSelectionToCart, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
 import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
-import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, type DraftPiece } from '@/lib/rental-draft';
+import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, withReturn, type DraftPiece } from '@/lib/rental-draft';
 import { centsToAmount, reservationSummary, type ReservationSummary, type SummaryRow, type SummaryTotal } from '@/lib/rental-price';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
 import { isValePassProduct } from '@/lib/vale-pass-product';
@@ -301,15 +301,17 @@ export function RentalCalendar({
     setSubmitting(true);
     setError(null);
     const previewCents = summary.total.source === 'preview' ? summary.total.cents : null;
+    // Revalida TODAS as peças com a quantidade total e as mesmas datas: as
+    // escolhidas e as do carrinho com a mesma retirada (a devolução delas
+    // acompanha a da reserva).
+    const sameReservation = (cart?.lines ?? [])
+      .filter((line) => !selectionIds.has(line.merchandise.id) && !isValePassProduct({ variantId: line.merchandise.id }))
+      .filter((line) => line.attributes.some((a) => a.key === '_vsc_pickup' && a.value === selection.pickup))
+      .map((line) => ({ variantId: line.merchandise.id, title: line.merchandise.product.title }));
+    const toCheck: { variantId: string; title: string }[] = [
+      ...new Map([...selectionPieces, ...sameReservation].map((piece) => [piece.variantId, piece] as const)).values(),
+    ];
     try {
-      // Revalida TODAS as peças com a quantidade total e as mesmas datas: as
-      // escolhidas e as do carrinho com a mesma retirada (a devolução delas
-      // acompanha a da reserva).
-      const sameReservation = (cart?.lines ?? [])
-        .filter((line) => !selectionIds.has(line.merchandise.id) && !isValePassProduct({ variantId: line.merchandise.id }))
-        .filter((line) => line.attributes.some((a) => a.key === '_vsc_pickup' && a.value === selection.pickup))
-        .map((line) => ({ variantId: line.merchandise.id, title: line.merchandise.product.title }));
-      const toCheck = [...new Map([...selectionPieces, ...sameReservation].map((piece) => [piece.variantId, piece] as const)).values()];
       const unavailable = await unavailablePieces(toCheck, pieces, selection);
       if (unavailable === null) {
         setError('Não foi possível confirmar a disponibilidade de todas as peças agora. Tente novamente.');
@@ -331,10 +333,14 @@ export function RentalCalendar({
       // resumo mostra o total que a Shopify devolveu, não a prévia.
       setCart(updated);
       setSubmittedPreview(previewCents);
+      // Só aqui (Shopify confirmou cada peça com quantidade > 0) a seleção vira
+      // carrinho: limpa o rascunho e avisa a gaveta quantas peças entraram.
       writeDraft(EMPTY_DRAFT);
-      window.dispatchEvent(new Event('closet:cart-added'));
+      window.dispatchEvent(new CustomEvent('closet:cart-added', { detail: { pieces: toCheck.length } }));
     } catch (err) {
-      setError(cartErrorMessage(err));
+      // Falhou: rascunho intacto (nada foi confirmado) e o erro diz quais peças.
+      const titles = new Map(toCheck.map((piece) => [piece.variantId, piece.title] as const));
+      setError(cartErrorMessage(err, titles));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -349,7 +355,10 @@ export function RentalCalendar({
       setError(limitMessage(maxPieces));
       return;
     }
-    writeDraft(withDates(result.draft, selected ? toISO(selected) : null, sundayChoice));
+    // Só rascunho (nada vai à Shopify aqui). A devolução exibida no catálogo vale
+    // enquanto a quantidade for a mesma do cálculo (sem outras peças no carrinho).
+    const dated = withDates(result.draft, selected ? toISO(selected) : null, sundayChoice);
+    writeDraft(otherPieces === 0 && effectiveReturnISO ? withReturn(dated, effectiveReturnISO, dated.pieces.length) : dated);
     router.push('/pecas');
   }
 
@@ -380,7 +389,9 @@ export function RentalCalendar({
 
   const busy = submitting || removing !== null;
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
-  const canAddAnother = !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading;
+  // A Shopify diz explicitamente que esta variante não está à venda: não entra no carrinho.
+  const soldOut = variant.availableForSale === false;
+  const canAddAnother = !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading && !soldOut;
   const total = summary?.total ?? null;
   const showSummary = !!summary && (!!effectiveReturnISO || summary.rows.length > 1);
   const actionTotal =
@@ -654,6 +665,11 @@ export function RentalCalendar({
           <Link href="/pecas" className="underline underline-offset-2">volte ao catálogo</Link> sem ela.
         </Status>
       )}
+      {soldOut && (
+        <Status tone="warn">
+          Esta peça está esgotada na Shopify no momento e não pode ir ao carrinho. Fale com o atendimento.
+        </Status>
+      )}
       {limitReached && <Status tone="warn">{limitMessage(maxPieces)}</Status>}
       {error && <Status tone="error">{error}</Status>}
 
@@ -671,7 +687,7 @@ export function RentalCalendar({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!canSubmit || busy}
+          disabled={!canSubmit || busy || soldOut}
           className={`flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-4 ${actionTotal ? 'py-2' : 'py-3.5'} text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35`}
         >
           {submitting && <Spinner light />}
@@ -743,10 +759,13 @@ async function unavailablePieces(pieces: readonly { variantId: string; title: st
  * Mensagem de falha ao adicionar ao carrinho. Produção: amigável (e específica
  * quando a Shopify não manteve a peça). Desenvolvimento: também a causa real.
  */
-function cartErrorMessage(err: unknown): string {
+function cartErrorMessage(err: unknown, titles: ReadonlyMap<string, string> = new Map()): string {
+  const rejected = err instanceof CartError ? err.variantIds.map((id) => titles.get(id) ?? 'peça').join(', ') : '';
   const friendly =
     err instanceof CartError && err.code === 'not_added'
-      ? 'Esta peça não está disponível na loja para estas datas agora. Fale com o atendimento.'
+      ? rejected
+        ? `A Shopify não aceitou no carrinho (sem estoque vendável): ${rejected}. Nenhuma peça foi adicionada — remova da seleção ou fale com o atendimento.`
+        : 'Esta peça não está disponível na loja para estas datas agora. Fale com o atendimento.'
       : 'Não foi possível adicionar ao carrinho. Tente novamente.';
   if (process.env.NODE_ENV === 'production') return friendly;
   return `${friendly} [dev: ${err instanceof Error ? err.message : String(err)}]`;

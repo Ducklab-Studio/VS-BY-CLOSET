@@ -91,7 +91,7 @@ test('retirada e opção de devolução valem para todas as peças; atualizar a 
   draft = withDates(draft, '2026-10-07', 'mondayMorning');
   saveDraft(storage, draft, 1_000);
   const reloaded = loadDraft(storage, 2_000);
-  assert.deepEqual(plain(reloaded), { pickup: '2026-10-07', returnOption: 'mondayMorning', pieces: [plain(piece(1))], updatedAt: 1_000 });
+  assert.deepEqual(plain(reloaded), { pickup: '2026-10-07', returnOption: 'mondayMorning', pieces: [plain(piece(1))], returnDate: null, returnForPieces: null, updatedAt: 1_000 });
   // Trocar sábado/segunda muda só a opção, mantendo as peças.
   assert.equal(withDates(reloaded, '2026-10-07', 'saturday').returnOption, 'saturday');
   // Data inválida nunca é guardada.
@@ -139,6 +139,8 @@ function loadCart({ storedCartId = null, responses }) {
     localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
     fetch: async (_url, init) => {
       const body = JSON.parse(init.body);
+      // Pré-checagem de estoque (nodes/availableForSale): tudo à venda, sem gastar respostas da fila.
+      if (/query VariantStock/.test(body.query)) return { ok: true, status: 200, json: async () => ({ data: { nodes: body.variables.ids.map((id) => ({ id, availableForSale: true })) } }) };
       calls.push(body);
       const next = responses.shift();
       return { ok: true, status: 200, json: async () => (typeof next === 'function' ? next(body) : next) };
@@ -184,18 +186,21 @@ test('carrinho existente: peça que já estava tem as datas atualizadas (sem dup
     shopLine('L9', 'gid://shopify/ProductVariant/9', '2026-10-07', '2026-10-12', 'mondayMorning'),
     existing[2],
   ];
+  const newLines = [shopLine('N2', 'gid://shopify/ProductVariant/2', '2026-10-07', '2026-10-12', 'mondayMorning'), shopLine('N3', 'gid://shopify/ProductVariant/3', '2026-10-07', '2026-10-12', 'mondayMorning')];
   const { cart, calls } = loadCart({
     storedCartId: 'gid://shopify/Cart/C1',
     responses: [
       { data: { cart: cartOf(existing) } },
-      { data: { cartLinesUpdate: { cart: cartOf(after), userErrors: [] } } },
-      { data: { cartLinesAdd: { cart: cartOf([...after, shopLine('N2', 'gid://shopify/ProductVariant/2', '2026-10-07', '2026-10-12', 'mondayMorning'), shopLine('N3', 'gid://shopify/ProductVariant/3', '2026-10-07', '2026-10-12', 'mondayMorning')]), userErrors: [] } } },
+      // Primeiro as peças novas (se a Shopify recusar alguma, nada mais muda)…
+      { data: { cartLinesAdd: { cart: cartOf([...existing, ...newLines]), userErrors: [] } } },
+      // …depois as datas das que já estavam.
+      { data: { cartLinesUpdate: { cart: cartOf([...after, ...newLines]), userErrors: [] } } },
     ],
   });
   await cart.addRentalSelectionToCart(SELECTION);
-  assert.deepEqual(calls.map((c) => c.query.match(/(query Cart|cartLinesUpdate|cartLinesAdd|cartCreate)/)[1]), ['query Cart', 'cartLinesUpdate', 'cartLinesAdd']);
-  assert.deepEqual(calls[1].variables.lines.map((l) => l.id).sort(), ['L1', 'L9']);
-  assert.deepEqual(calls[2].variables.lines.map((l) => l.merchandiseId), ['gid://shopify/ProductVariant/2', 'gid://shopify/ProductVariant/3']);
+  assert.deepEqual(calls.map((c) => c.query.match(/(query Cart|cartLinesUpdate|cartLinesAdd|cartCreate)/)[1]), ['query Cart', 'cartLinesAdd', 'cartLinesUpdate']);
+  assert.deepEqual(calls[2].variables.lines.map((l) => l.id).sort(), ['L1', 'L9']);
+  assert.deepEqual(calls[1].variables.lines.map((l) => l.merchandiseId), ['gid://shopify/ProductVariant/2', 'gid://shopify/ProductVariant/3']);
   assert.ok(!JSON.stringify(calls).includes('"L8"'));
 });
 

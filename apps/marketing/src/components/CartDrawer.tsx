@@ -14,9 +14,11 @@ import {
 } from '@/lib/cart';
 import {
   fetchRentalStock,
+  shopifyStockLabel,
   stockForVariant,
   type RentalStockMap,
 } from '@/lib/rental-stock';
+import { formatPrice } from '@/lib/shopify';
 
 export function CartDrawer() {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -25,7 +27,8 @@ export function CartDrawer() {
   const [loading, setLoading] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [added, setAdded] = useState(false);
+  /** Peças confirmadas pela Shopify no último "Alugar agora" (0 = abriu pelo ícone). */
+  const [added, setAdded] = useState(0);
   const [open, setOpen] = useState(false);
   const [updatingLine, setUpdatingLine] = useState<string | null>(null);
   const request = useRef({ id: 0 });
@@ -49,8 +52,8 @@ export function CartDrawer() {
     }
   }
 
-  async function show(wasAdded = false) {
-    setAdded(wasAdded);
+  async function show(addedPieces = 0) {
+    setAdded(addedPieces);
     setOpen(true);
     dialog.current?.showModal();
     setLoading(true);
@@ -118,8 +121,11 @@ export function CartDrawer() {
 
   useEffect(() => {
     const pending = request.current;
-    const addedToCart = () => {
-      void show(true);
+    // Disparado SÓ depois que a Shopify confirmou as linhas (RentalCalendar);
+    // "Adicionar outra peça" mexe apenas no rascunho e nunca chega aqui.
+    const addedToCart = (event: Event) => {
+      const pieces = (event as CustomEvent<{ pieces?: number }>).detail?.pieces;
+      void show(typeof pieces === 'number' && pieces > 0 ? pieces : 1);
     };
     window.addEventListener('closet:cart-added', addedToCart);
     return () => {
@@ -160,14 +166,19 @@ export function CartDrawer() {
         <div className="drawer-heading">
           <div>
             <p className="eyebrow">Seu closet, toda estação</p>
-            <h2 id="cart-drawer-title">Seu closet de viagem</h2>
+            <h2 id="cart-drawer-title">Seu closet</h2>
           </div>
           <button type="button" onClick={close} aria-label="Fechar carrinho" autoFocus>
             <X size={23} />
           </button>
         </div>
 
-        {added && <p className="cart-success" role="status">Peça adicionada ao seu carrinho.</p>}
+        {/* Sucesso só com o carrinho REAL carregado e com linhas: nunca antes da Shopify confirmar. */}
+        {added > 0 && !loading && !!cart?.lines.length && (
+          <p className="cart-success" role="status">
+            {added === 1 ? 'Peça adicionada ao seu carrinho.' : 'Peças adicionadas ao seu carrinho.'}
+          </p>
+        )}
         {error && <p className="cart-success" role="alert" style={{ background: 'rgba(153,27,27,.09)', color: '#8f1d1d' }}>{error}</p>}
 
         <div className="drawer-items" aria-live="polite">
@@ -179,8 +190,8 @@ export function CartDrawer() {
           ) : !cart?.lines.length ? (
             <div className="drawer-empty">
               <ShoppingBag size={40} strokeWidth={1} />
-              <h3>Uma viagem cheia de possibilidades.</h3>
-              <p>Escolha suas peças e comece a preparar o seu próximo closet.</p>
+              <h3>Seu carrinho está vazio.</h3>
+              <p>Peças escolhidas em &quot;Sua reserva em montagem&quot; só entram aqui depois de &quot;Alugar agora&quot;.</p>
               <Link href="/pecas" onClick={close} className="editorial-button">
                 Explorar peças <ArrowUpRight size={18} />
               </Link>
@@ -212,13 +223,10 @@ export function CartDrawer() {
                     </Link>
 
                     <div className="mt-1 space-y-0.5 text-[0.72rem] text-ink/55">
-                      <p>
-                        {stock.shopify === null
-                          ? 'Estoque Shopify: sob consulta'
-                          : stock.shopify > 0
-                            ? `Estoque Shopify: ${stock.shopify}`
-                            : 'Esgotado na Shopify'}
+                      <p className="font-medium text-ink/75" data-testid="drawer-line-price">
+                        {line.quantity} × {formatPrice(line.merchandise.price?.amount, line.merchandise.price?.currencyCode) || 'Preço a confirmar'}
                       </p>
+                      <p>{stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}</p>
                       <p>
                         {stockLoading
                           ? 'Conferindo peças físicas para a data…'
@@ -282,11 +290,8 @@ export function CartDrawer() {
           <div className="drawer-bottom">
             <p>
               Total{' '}
-              <strong>
-                {new Intl.NumberFormat('pt-BR', {
-                  style: 'currency',
-                  currency: cart.cost.totalAmount.currencyCode,
-                }).format(Number(cart.cost.totalAmount.amount))}
+              <strong data-testid="drawer-total">
+                {formatPrice(cart.cost.totalAmount?.amount, cart.cost.totalAmount?.currencyCode) || 'a confirmar'}
               </strong>
             </p>
             <Link href="/carrinho" onClick={close} className="editorial-button">

@@ -18,6 +18,7 @@ import { returnOptionFromLines } from '@/lib/rental-selection';
 import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
+  shopifyStockLabel,
   stockForVariant,
   type RentalStockMap,
 } from '@/lib/rental-stock';
@@ -288,13 +289,7 @@ export default function CarrinhoPage() {
                 )}
 
                 <div className="mt-1 space-y-0.5 text-[0.72rem] text-ink/55">
-                  <p>
-                    {stock.shopify === null
-                      ? 'Estoque Shopify: sob consulta'
-                      : stock.shopify > 0
-                        ? `Estoque Shopify: ${stock.shopify}`
-                        : 'Esgotado na Shopify'}
-                  </p>
+                  <p>{stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}</p>
                   <p>
                     {stockLoading
                       ? 'Conferindo peças físicas para a data…'
@@ -354,7 +349,7 @@ export default function CarrinhoPage() {
 
               <div className="shrink-0 text-right">
                 <p className="font-semibold tabular-nums">
-                  {formatPrice(line.merchandise.price.amount, line.merchandise.price.currencyCode)}
+                  {formatPrice(line.merchandise.price?.amount, line.merchandise.price?.currencyCode) || 'Preço a confirmar'}
                 </p>
                 {line.quantity > 1 && <p className="mt-1 text-[0.68rem] text-ink/45">cada</p>}
               </div>
@@ -378,7 +373,7 @@ export default function CarrinhoPage() {
       <div className="mt-6 flex items-baseline justify-between border-t border-ink/10 pt-5">
         <span className="text-[0.8rem] uppercase tracking-[0.12em] text-ink/55">Total</span>
         <span className="text-2xl font-semibold text-marsala tabular-nums">
-          {formatPrice(cart.cost.totalAmount.amount, cart.cost.totalAmount.currencyCode)}
+          {formatPrice(cart.cost.totalAmount?.amount, cart.cost.totalAmount?.currencyCode) || 'a confirmar'}
         </span>
       </div>
 

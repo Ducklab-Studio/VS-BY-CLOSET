@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { X } from 'lucide-react';
 import { formatPrice } from '@/lib/shopify';
 import { fromISO } from '@/lib/rental-rules';
-import { removePiece } from '@/lib/rental-draft';
+import { draftReturnDate, removePiece } from '@/lib/rental-draft';
 import { selectionTotal } from '@/lib/rental-price';
 import { useRentalDraft } from './useRentalDraft';
 
@@ -21,7 +21,14 @@ export function RentalSelectionBar({ locale = 'pt-BR', initialRaw = null }: { lo
 
   const total = selectionTotal(draft.pieces);
   const last = draft.pieces[draft.pieces.length - 1];
-  const returnLabel = draft.returnOption === 'saturday' ? 'devolução sábado à noite' : draft.returnOption === 'mondayMorning' ? 'devolução segunda-feira' : null;
+  const returnDate = draftReturnDate(draft);
+  const optionLabel = draft.returnOption === 'saturday' ? ' (sábado à noite)' : draft.returnOption === 'mondayMorning' ? ' (segunda-feira)' : '';
+  // A devolução depende da quantidade de peças: só mostra a data calculada para esta quantidade.
+  const returnLabel = returnDate
+    ? `devolução ${fromISO(returnDate).toLocaleDateString(locale)}${optionLabel}`
+    : draft.pickup
+      ? 'devolução recalculada no calendário'
+      : null;
   return (
     <section
       aria-labelledby="rental-selection-title"
@@ -66,13 +73,23 @@ export function RentalSelectionBar({ locale = 'pt-BR', initialRaw = null }: { lo
           {total.status === 'ok' ? formatPrice(total.amount, total.currencyCode, locale) : 'confirmado no carrinho'}
         </strong>
       </p>
-      <p className="mt-1 text-[0.75rem] text-ink/55">Escolha outra peça abaixo ou volte ao calendário para alugar todas juntas.</p>
-      <Link
-        href={`/pecas/${last.handle}#rental-calendar`}
-        className="mt-3 inline-flex items-center rounded-xl bg-marsala px-4 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2"
-      >
-        Voltar ao calendário
-      </Link>
+      <p className="mt-1 text-[0.75rem] text-ink/55">
+        Selecionadas, ainda fora do carrinho: as peças só entram no carrinho em &quot;Alugar agora&quot;, todas juntas.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href="#catalogo-pecas"
+          className="inline-flex items-center rounded-xl border border-marsala px-4 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2"
+        >
+          Continuar escolhendo
+        </a>
+        <Link
+          href={`/pecas/${last.handle}#rental-calendar`}
+          className="inline-flex items-center rounded-xl bg-marsala px-4 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2"
+        >
+          Alugar agora
+        </Link>
+      </div>
     </section>
   );
 }
@@ -83,7 +100,7 @@ export function SelectionFlag({ handle, initialRaw = null }: { handle: string; i
   if (!draft.pieces.some((piece) => piece.handle === handle)) return null;
   return (
     <span data-testid="selection-flag" className="absolute left-2 top-2 z-[1] rounded-full bg-marsala px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-cream">
-      Na sua seleção
+      Selecionada
     </span>
   );
 }
