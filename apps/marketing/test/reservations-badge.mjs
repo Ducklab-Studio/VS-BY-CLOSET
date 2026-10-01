@@ -236,14 +236,23 @@ try {
   pass('com Reservas aberta, a reserva nova entrou na tabela sem recarregar e foi marcada como vista');
 
   // Mudou de status depois de vista → volta a notificar; abrir o detalhe marca de novo.
+  // Antes, o painel (já carregado) precisa estar de fato em 0 — senão o "1" da reserva
+  // "ao vivo" do passo anterior passaria pela espera abaixo.
+  assert.equal(await attentionInDb(), 0);
+  await poke(page);
+  await waitBadge(page, null, 15_000);
   await db.$executeRaw`UPDATE reservations SET status = 'confirmed' WHERE id = ${pendingId}::uuid`;
   await poke(page);
   await waitBadge(page, '1', 15_000);
   await tabB.close();
   await page.goto(`${reservasUrl}/${pendingId}`);
   await page.locator('[data-testid="reservation-new-tag"]').waitFor();
-  await waitBadge(page, null, 15_000);
+  // A marcação vem do servidor; só depois dela o menu (já carregado) pode zerar.
+  for (let i = 0; i < 30 && (await reservationRow(pendingId)).viewedStatus !== 'confirmed'; i++) await delay(500);
   assert.equal((await reservationRow(pendingId)).viewedStatus, 'confirmed');
+  await settled(page);
+  await poke(page);
+  await waitBadge(page, null, 15_000);
   pass('pendente paga depois de vista volta a contar (1); abrir o detalhe marca como vista de novo');
 
   // Expirar/cancelar uma já vista não gera alerta novo.
