@@ -124,15 +124,20 @@ test('cookie espelho: o catálogo do servidor lê a mesma seleção; vencido, va
 });
 
 // ── carrinho: todas as peças juntas, com as mesmas datas ──────────────────
+// cart.ts consulta o estoque fresco da Shopify (lib/shopify-stock.ts, puro).
+const shopifyStockLib = {};
+runInNewContext(transpile('src/lib/shopify-stock.ts'), { exports: shopifyStockLib, Number, Object });
 function loadCart({ storedCartId = null, responses }) {
   const storage = new Map(storedCartId ? [['vsc_cart_id', storedCartId]] : []);
   const calls = [];
   const exports = {};
   runInNewContext(transpile('src/lib/cart.ts'), {
+    AbortController, setTimeout, clearTimeout,
     exports,
     require: (name) => {
       if (name === './rental-selection') return selectionLib;
       if (name === './vale-pass-product') return valePassLib;
+      if (name === './shopify-stock') return shopifyStockLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env: { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' } },

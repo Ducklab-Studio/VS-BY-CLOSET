@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
-import { CartError, addRentalSelectionToCart, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
+import { CartError, addRentalSelectionToCart, fetchVariantStock, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
+import { UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
 import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
 import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, withReturn, type DraftPiece } from '@/lib/rental-draft';
 import { centsToAmount, reservationSummary, type ReservationSummary, type SummaryRow, type SummaryTotal } from '@/lib/rental-price';
@@ -108,6 +109,8 @@ export function RentalCalendar({
   const [removing, setRemoving] = useState<string | null>(null);
   /** Prévia (centavos) mostrada no clique de "Alugar agora", para avisar se a Shopify confirmou outro total. */
   const [submittedPreview, setSubmittedPreview] = useState<number | null>(null);
+  /** Estoque comercial ATUAL na Shopify (consulta sem cache no navegador); `null` enquanto confere. */
+  const [shopifyStock, setShopifyStock] = useState<ShopifyStock | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Trava síncrona: dois cliques seguidos nunca viram duas inclusões.
   const submittingRef = useRef(false);
@@ -164,6 +167,13 @@ export function RentalCalendar({
     void (async () => {
       const current = isCartConfigured ? await getCart().catch(() => null) : null;
       if (!cancelled) setCart(current);
+    })();
+    // Estoque comercial sempre fresco: o `availableForSale` da página vem do
+    // cache (ISR) e já bloqueou peça com 199 unidades à venda.
+    setShopifyStock(null);
+    void (async () => {
+      const stock = isCartConfigured ? (await fetchVariantStock([variant.id])).get(variant.id) ?? UNKNOWN_STOCK : UNKNOWN_STOCK;
+      if (!cancelled) setShopifyStock(stock);
     })();
     return () => {
       cancelled = true;
@@ -318,7 +328,7 @@ export function RentalCalendar({
         return;
       }
       if (unavailable.length > 0) {
-        setError(`Indisponível nestas datas: ${unavailable.join(', ')}. Remova da seleção ou escolha outra data de retirada.`);
+        setError(`Indisponível para esta data: ${unavailable.join(', ')}. Remova da seleção ou escolha outra data de retirada.`);
         return;
       }
       const updated = await addRentalSelectionToCart({
@@ -389,8 +399,9 @@ export function RentalCalendar({
 
   const busy = submitting || removing !== null;
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
-  // A Shopify diz explicitamente que esta variante não está à venda: não entra no carrinho.
-  const soldOut = variant.availableForSale === false;
+  // Só a Shopify AGORA (consulta fresca) confirmando que a variante não está à
+  // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
+  const soldOut = shopifyStock?.status === 'sold_out';
   const canAddAnother = !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading && !soldOut;
   const total = summary?.total ?? null;
   const showSummary = !!summary && (!!effectiveReturnISO || summary.rows.length > 1);
@@ -659,16 +670,24 @@ export function RentalCalendar({
                   : null}
       </Status>
 
-      {selectedUnavailable && draft.pieces.length > 0 && (
+      {selectedUnavailable && (
         <Status tone="warn">
-          Esta peça não está disponível na retirada escolhida para a reserva. Escolha outra data ou{' '}
-          <Link href="/pecas" className="underline underline-offset-2">volte ao catálogo</Link> sem ela.
+          Indisponível para esta data.
+          {draft.pieces.length > 0 && (
+            <>
+              {' '}Escolha outra retirada ou{' '}
+              <Link href="/pecas" className="underline underline-offset-2">volte ao catálogo</Link> sem esta peça.
+            </>
+          )}
         </Status>
       )}
-      {soldOut && (
-        <Status tone="warn">
-          Esta peça está esgotada na Shopify no momento e não pode ir ao carrinho. Fale com o atendimento.
-        </Status>
+      {/* Estoque comercial (Shopify) é separado da disponibilidade da data (agenda do ClosetAdmin). */}
+      {soldOut ? (
+        <Status tone="warn">Esgotada na Shopify. Esta peça não pode ir ao carrinho agora — fale com o atendimento.</Status>
+      ) : (
+        <p data-testid="shopify-stock" data-status={shopifyStock?.status ?? 'checking'} className="mt-3 text-[0.72rem] text-ink/55">
+          {shopifyStockText(shopifyStock)}
+        </p>
       )}
       {limitReached && <Status tone="warn">{limitMessage(maxPieces)}</Status>}
       {error && <Status tone="error">{error}</Status>}
