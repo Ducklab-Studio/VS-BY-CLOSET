@@ -12,6 +12,7 @@
     "test:operational-browser": "node test/operational-browser.mjs",
     "test:pecas-sku-inactive": "node test/pecas-sku-inactive.mjs",
     "test:valle-pass-badge": "node test/valle-pass-badge.mjs",
+    "test:reservations-badge": "node test/reservations-badge.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

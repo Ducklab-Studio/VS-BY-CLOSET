@@ -13,6 +13,8 @@ import {
   type ReservationListItem,
 } from './admin-reservations.service';
 import { CreateManualReservationDto } from './dto/create-manual-reservation.dto';
+import { MarkReservationsViewedDto } from './dto/mark-reservations-viewed.dto';
+import { ReservationAttentionService } from './reservation-attention.service';
 import { CancelManualReservationDto } from './dto/cancel-manual-reservation.dto';
 import { OperationalReservationDto } from './dto/operational-reservation.dto';
 
@@ -23,7 +25,28 @@ import { OperationalReservationDto } from './dto/operational-reservation.dto';
 @Controller('admin/reservations')
 @UseGuards(AdminAuthGuard)
 export class AdminReservationsController {
-  constructor(private readonly adminReservations: AdminReservationsService) {}
+  constructor(
+    private readonly adminReservations: AdminReservationsService,
+    private readonly attention: ReservationAttentionService,
+  ) {}
+
+  /** Contador do menu lateral: reservas da Shopify pendentes ou confirmadas
+   *  que ninguém da equipe viu neste status. Antes de `:id` (rota fixa). */
+  @Get('attention')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  attentionCount(): Promise<{ count: number }> {
+    return this.attention.attentionCount();
+  }
+
+  /** A tela de Reservas (lista ou detalhe) marca como vistas as reservas que exibiu. */
+  @Post('viewed')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.OK)
+  markViewed(@Body() dto: MarkReservationsViewedDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<{ marked: number }> {
+    return this.attention.markViewed(dto.reservations, { id: request.adminUser.id, name: request.adminUser.name });
+  }
 
   @Post('manual')
   @UseGuards(AdminRoleGuard)

@@ -24,6 +24,7 @@ function baseReservation(overrides: Partial<ReservationDetailResponse> = {}): Re
     id: '11111111-1111-1111-1111-111111111111',
     status: 'confirmed',
     source: 'manual_admin',
+    needsAttention: false,
     customerName: 'Maria Teste',
     customerPhone: '+56 9 1234 5678',
     customerEmail: 'maria@example.com',

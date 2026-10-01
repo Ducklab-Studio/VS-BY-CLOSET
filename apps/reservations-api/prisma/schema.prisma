@@ -462,6 +462,14 @@ model Reservation {
   /// reconciliação). Ignora entrega atrasada que desfaria um estado mais novo.
   shopifyOrderUpdatedAt DateTime? @map("shopify_order_updated_at") @db.Timestamptz(6)
 
+  /// Contador "novas reservas" do menu do ClosetAdmin: alguém da equipe viu a
+  /// reserva NESTE status (`viewedStatus`). Se o status mudar depois (ex.:
+  /// pendente → confirmada), volta a contar como nova. Só leitura da equipe:
+  /// nunca muda status, pagamento, datas, peças nem HOLD.
+  viewedAt     DateTime?          @map("viewed_at") @db.Timestamptz(6)
+  viewedStatus ReservationStatus? @map("viewed_status")
+  viewedBy     String?            @map("viewed_by") @db.Uuid
+
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
   idempotencyKeys       HoldIdempotencyKey[]

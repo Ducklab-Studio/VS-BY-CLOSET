@@ -38,6 +38,8 @@ export interface ReservationListItem {
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
   readonly archivedAt: string | null;
+  /** Nova para a equipe: reserva da Shopify pendente ou confirmada ainda não vista neste status. */
+  readonly needsAttention: boolean;
 }
 
 export interface ReservationFilters {
@@ -60,6 +62,16 @@ export function listReservations(adminUserId: string, filters: ReservationFilter
   }
   const qs = params.toString();
   return adminGet(`/admin/reservations${qs ? `?${qs}` : ''}`, adminUserId);
+}
+
+/** Contador do menu: novas reservas de aluguel da Shopify (global para a equipe). */
+export function getReservationAttention(adminUserId: string): Promise<{ count: number }> {
+  return adminGet('/admin/reservations/attention', adminUserId);
+}
+
+/** Sem `adminUserId` no corpo: quem viu vem da sessão validada. Só visualização. */
+export function markReservationsViewed(reservations: readonly { id: string; status: string }[]): Promise<{ marked: number }> {
+  return adminPost('/admin/reservations/viewed', { reservations });
 }
 
 export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'> {

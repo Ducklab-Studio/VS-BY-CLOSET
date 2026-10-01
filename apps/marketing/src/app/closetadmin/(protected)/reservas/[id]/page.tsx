@@ -9,6 +9,7 @@ import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, 
 import { CancelButton } from './CancelButton';
 import { OperationalButton } from './OperationalButton';
 import { RestoreButton } from './RestoreButton';
+import { MarkReservationViewed } from './MarkReservationViewed';
 
 export const metadata: Metadata = { title: 'Detalhe da reserva' };
 
@@ -66,6 +67,12 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
           <Card className="lg:col-span-2">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={reservation.status} />
+              {reservation.needsAttention ? (
+                <span data-testid="reservation-new-tag" className="rounded-full bg-marsala px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream dark:bg-gold dark:text-neutral-950">
+                  Nova
+                </span>
+              ) : null}
+              <MarkReservationViewed id={reservation.id} status={reservation.status} needsAttention={reservation.needsAttention} />
               <SourceBadge source={reservation.source} />
               {reservation.archivedAt ? <ArchivedBadge /> : null}
             </div>

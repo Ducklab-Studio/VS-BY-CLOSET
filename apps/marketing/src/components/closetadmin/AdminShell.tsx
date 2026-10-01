@@ -6,11 +6,22 @@ import { useState } from 'react';
 import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, Ticket, Users, X } from 'lucide-react';
 import { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUser } from '@/lib/admin-permissions';
 import { attentionBadgeText, attentionLabel } from '@/lib/valle-pass-attention';
+import { reservationAttentionLabel } from '@/lib/reservation-attention';
 import { logoutAction } from '@/app/closetadmin/actions';
 import { AdminThemeToggle } from './AdminThemeToggle';
-import { useValePassAttention, type ValePassAttention } from './useValePassAttention';
+import { useValePassAttention } from './useValePassAttention';
+import { useReservationAttention } from './useReservationAttention';
+import type { AdminAttention } from './useAdminAttention';
 
 const VALLE_PASS_HREF = '/closetadmin/valle-pass';
+const RESERVATIONS_HREF = '/closetadmin/reservas';
+
+/** Contador de um item do menu (Valle Pass, Reservas). */
+interface MenuBadge {
+  readonly attention: AdminAttention;
+  readonly label: (count: number | null) => string;
+  readonly testId: string;
+}
 
 interface NavItem {
   readonly href: string;
@@ -51,14 +62,24 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
   });
   const isActive = (href: string) => (href === '/closetadmin' ? pathname === href : pathname?.startsWith(href));
   // Só quem tem o módulo pergunta pelo contador; os outros nunca recebem o dado.
-  const attention = useValePassAttention(hasAdminModule(session, 'VALLE_PASS'));
-  const pendingText = attentionBadgeText(attention.count);
+  const valePass = useValePassAttention(hasAdminModule(session, 'VALLE_PASS'));
+  const reservations = useReservationAttention(hasAdminModule(session, 'RESERVATIONS'));
+  const badges: Record<string, MenuBadge> = {
+    [VALLE_PASS_HREF]: { attention: valePass, label: attentionLabel, testId: 'valle-pass-badge' },
+    [RESERVATIONS_HREF]: { attention: reservations, label: reservationAttentionLabel, testId: 'reservations-badge' },
+  };
+  const valePassPending = attentionBadgeText(valePass.count);
+  const reservationsPending = attentionBadgeText(reservations.count);
+  const menuLabel = [
+    reservationsPending ? `Reservas: ${reservationAttentionLabel(reservations.count)}` : null,
+    valePassPending ? `Valle Pass: ${attentionLabel(valePass.count)}` : null,
+  ].filter(Boolean);
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-dark-bg text-ink dark:text-dark-text transition-colors duration-200 lg:flex">
       {/* Sidebar — desktop */}
       <aside className="hidden w-64 shrink-0 border-r border-ink/10 dark:border-white/10 bg-white dark:bg-dark-surface lg:flex lg:flex-col transition-colors duration-200">
-        <SidebarContent items={items} isActive={isActive} session={session} attention={attention} />
+        <SidebarContent items={items} isActive={isActive} session={session} badges={badges} />
       </aside>
 
       {/* Nav mobile — overlay */}
@@ -66,7 +87,7 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
         <div className="fixed inset-0 z-40 lg:hidden">
           <button aria-label="Fechar menu" className="absolute inset-0 bg-black/40 dark:bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
           <aside className="absolute inset-y-0 left-0 flex w-72 flex-col bg-white dark:bg-dark-surface shadow-2xl border-r border-ink/10 dark:border-white/10">
-            <SidebarContent items={items} isActive={isActive} session={session} attention={attention} onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent items={items} isActive={isActive} session={session} badges={badges} onNavigate={() => setMobileOpen(false)} />
           </aside>
         </div>
       ) : null}
@@ -74,14 +95,17 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-ink/10 dark:border-white/10 bg-white dark:bg-dark-surface px-4 py-3 lg:px-6 transition-colors duration-200">
           <button
-            aria-label={pendingText ? `Abrir menu — Valle Pass: ${attentionLabel(attention.count)}` : 'Abrir menu'}
+            aria-label={menuLabel.length ? `Abrir menu — ${menuLabel.join('; ')}` : 'Abrir menu'}
             className="relative rounded-md p-2 text-ink/70 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 lg:hidden"
             onClick={() => setMobileOpen(true)}
           >
             <Menu size={22} />
-            {/* Menu fechado no celular/tablet: um ponto avisa que há pedido para ver. */}
-            {pendingText ? (
+            {/* Menu fechado no celular/tablet: um ponto avisa que há algo novo (mesmo lugar para os dois contadores). */}
+            {valePassPending ? (
               <span aria-hidden data-testid="valle-pass-menu-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface" />
+            ) : null}
+            {reservationsPending ? (
+              <span aria-hidden data-testid="reservations-menu-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface" />
             ) : null}
           </button>
           <div className="hidden font-heading text-lg text-marsala dark:text-gold tracking-wide lg:block font-bold">
@@ -111,13 +135,13 @@ function SidebarContent({
   items,
   isActive,
   session,
-  attention,
+  badges,
   onNavigate,
 }: {
   items: NavItem[];
   isActive: (href: string) => boolean | undefined;
   session: AdminSessionUser;
-  attention: ValePassAttention;
+  badges: Record<string, MenuBadge>;
   onNavigate?: () => void;
 }) {
   return (
@@ -149,7 +173,7 @@ function SidebarContent({
             >
               <Icon size={18} className={active ? 'text-marsala dark:text-gold' : 'opacity-70'} />
               {label}
-              {href === VALLE_PASS_HREF ? <AttentionBadge attention={attention} /> : null}
+              {badges[href] ? <AttentionBadge badge={badges[href]} /> : null}
             </Link>
           );
         })}
@@ -162,12 +186,13 @@ function SidebarContent({
 }
 
 /**
- * Badge do Valle Pass: pílula vinho à direita do item, na mesma altura da
- * linha (não empurra nada). Pedido novo (contagem subiu) pulsa de leve só
- * para quem não pediu movimento reduzido. Se a última atualização falhou,
- * mantém o último número, esmaecido.
+ * Badge do menu (Valle Pass, Reservas): pílula vinho à direita do item, na
+ * mesma altura da linha (não empurra nada). Item novo (contagem subiu) pulsa
+ * de leve só para quem não pediu movimento reduzido. Se a última atualização
+ * falhou, mantém o último número, esmaecido.
  */
-function AttentionBadge({ attention }: { attention: ValePassAttention }) {
+function AttentionBadge({ badge }: { badge: MenuBadge }) {
+  const { attention } = badge;
   const text = attentionBadgeText(attention.count);
   if (!text) return null;
   return (
@@ -175,7 +200,7 @@ function AttentionBadge({ attention }: { attention: ValePassAttention }) {
       <span
         key={attention.bump}
         aria-hidden
-        data-testid="valle-pass-badge"
+        data-testid={badge.testId}
         title={attention.stale ? 'Não foi possível atualizar agora — mostrando o último valor.' : undefined}
         className={`ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-marsala px-1.5 text-[11px] font-semibold leading-none tabular-nums text-cream ring-1 ring-marsala/20 dark:bg-gold dark:text-neutral-950 dark:ring-gold/30 ${
           attention.stale ? 'opacity-60' : ''
@@ -183,7 +208,7 @@ function AttentionBadge({ attention }: { attention: ValePassAttention }) {
       >
         {text}
       </span>
-      <span className="sr-only">{` — ${attentionLabel(attention.count)}`}</span>
+      <span className="sr-only">{` — ${badge.label(attention.count)}`}</span>
     </>
   );
 }

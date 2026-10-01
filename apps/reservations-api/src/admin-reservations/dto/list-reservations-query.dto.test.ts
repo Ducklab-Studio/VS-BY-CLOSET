@@ -3,6 +3,7 @@ import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ListReservationsQueryDto } from './list-reservations-query.dto';
 import { CalendarQueryDto } from '../../admin-panel/dto/calendar-query.dto';
 import { AdminReservationsController } from '../admin-reservations.controller';
+import { ReservationAttentionService } from '../reservation-attention.service';
 import type { AdminReservationsService } from '../admin-reservations.service';
 
 /** Mesmo pipe global de main.ts, aplicado como o Nest aplica em `@Query()`. */
@@ -64,7 +65,7 @@ describe('paginação e período da listagem', () => {
 
   test('"from" depois de "to" → 400 antes de consultar', () => {
     const service = { listReservations: () => { throw new Error('não deveria consultar'); } } as unknown as AdminReservationsService;
-    const controller = new AdminReservationsController(service);
+    const controller = new AdminReservationsController(service, {} as unknown as ReservationAttentionService);
     expect(() => controller.list(Object.assign(new ListReservationsQueryDto(), { from: '2026-10-31', to: '2026-10-01' }))).toThrow(BadRequestException);
   });
 });
