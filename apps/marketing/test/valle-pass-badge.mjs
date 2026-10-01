@@ -127,7 +127,8 @@ const pass = (name) => { results.push(name); console.log(`  ✓ ${name}`); };
 try {
   assert.equal(await attentionInDb(), 0, 'o banco de teste precisa começar sem pedidos de Valle Pass para ver');
   const staffToken = await createUser('Operador Valle Pass sintético', ['VALLE_PASS']);
-  const noModuleToken = await createUser('Operador sem Valle Pass sintético', ['RESERVATIONS']);
+  // Sem VALLE_PASS nem RESERVATIONS: não pode consultar contador nenhum.
+  const noModuleToken = await createUser('Operador sem Valle Pass sintético', ['CALENDAR']);
 
   const childEnv = {
     ...process.env, DATABASE_URL: databaseUrl, ADMIN_API_TOKEN: apiToken, PICKUP_REMINDER_ENABLED: 'false',

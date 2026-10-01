@@ -200,7 +200,9 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Registrar devolução', exact: true }).isVisible(), true);
   }
   let posts = 0;
-  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes(fixtures.returnDouble.id)) posts++; });
+  // Só as ações sobre ESTA reserva (o id vai no corpo). O contador de novas reservas do menu também
+  // faz POST de server action na URL da página, mas sem argumento — não é a devolução.
+  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes(fixtures.returnDouble.id) && (request.postData() ?? '').includes(fixtures.returnDouble.id)) posts++; });
   await clickAction(page, 'Registrar devolução', true);
   await page.getByRole('button', { name: 'Iniciar higienização', exact: true }).waitFor();
   assert.equal(posts, 1);

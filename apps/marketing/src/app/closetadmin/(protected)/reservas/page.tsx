@@ -16,6 +16,8 @@ import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge } from '@/components/closetadmin/ui';
 import { ReservationFiltersForm } from './ReservationFiltersForm';
 import { ExportPeriodPdfButton } from './ExportPeriodPdfButton';
+import { ReservationsLive } from './ReservationsLive';
+import { NewReservationTag } from './NewReservationTag';
 
 export const metadata: Metadata = { title: 'Reservas' };
 
@@ -76,6 +78,8 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
 
   return (
     <div>
+      {/* Lista ao vivo (sem recarregar) e reservas novas exibidas → vistas. */}
+      <ReservationsLive rows={reservations.map(({ id, status, needsAttention }) => ({ id, status, needsAttention }))} />
       <PageHeader
         title="Reservas"
         description="Acompanhe reservas online e manuais, retiradas, devoluções e ocorrências operacionais."
@@ -186,7 +190,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
               </thead>
               <tbody className="divide-y divide-ink/5 dark:divide-white/5">
                 {reservations.map((reservation) => (
-                  <tr key={reservation.id} className="transition hover:bg-ink/[0.035] dark:hover:bg-white/[0.035]">
+                  <tr key={reservation.id} data-reservation-id={reservation.id} className="transition hover:bg-ink/[0.035] dark:hover:bg-white/[0.035]">
                     <td className="px-4 py-3.5">
                       <Link href={`/closetadmin/reservas/${reservation.id}`} className="block">
                         <span className="font-mono text-xs font-medium text-ink/65 dark:text-dark-muted">#{shortId(reservation.id)}</span>
@@ -209,6 +213,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
                     <td className="px-4 py-3.5">
                       <Link href={`/closetadmin/reservas/${reservation.id}`} className="flex flex-wrap items-center gap-1.5">
                         <StatusBadge status={reservation.status} />
+                        <NewReservationTag id={reservation.id} status={reservation.status} needsAttention={reservation.needsAttention} />
                         {reservation.archivedAt ? <ArchivedBadge /> : null}
                       </Link>
                     </td>

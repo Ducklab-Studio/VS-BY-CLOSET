@@ -17,6 +17,7 @@ import {
   validateMinimumAdvance,
 } from '../rental-rules/rental-engine';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { reservationAttentionSql, reservationNeedsAttention } from './reservation-attention';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { canTransition, type ReservationStatusValue } from '../webhooks/reservation-state-machine';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
@@ -75,6 +76,9 @@ export interface ReservationListItem {
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
   readonly archivedAt: string | null;
+  /** Nova para a equipe (contador do menu): reserva da Shopify pendente ou
+   *  confirmada que ninguém viu neste status. */
+  readonly needsAttention: boolean;
 }
 
 /** Fase 10 — versão enxuta usada só pelos relatórios PDF (item 2): sem
@@ -608,7 +612,8 @@ export class AdminReservationsService {
           r.pickup_date::text AS "pickupDate", r.return_date::text AS "returnDate",
           r.shopify_order_id AS "shopifyOrderId",
           (SELECT count(*)::int FROM reservation_items ri WHERE ri.reservation_id = r.id) AS "itemCount",
-          r.archived_at::text AS "archivedAt"
+          r.archived_at::text AS "archivedAt",
+          ${reservationAttentionSql('r')} AS "needsAttention"
         FROM reservations r
         WHERE ${Prisma.join(conditions, ' AND ')}
         ORDER BY r.pickup_date DESC NULLS LAST, r.created_at DESC, r.id
@@ -756,6 +761,7 @@ export class AdminReservationsService {
       archivedAt: reservation.archivedAt?.toISOString() ?? null,
       archivedBy: reservation.archivedBy,
       archiveReason: reservation.archiveReason,
+      needsAttention: reservationNeedsAttention(reservation),
       items: items.map((i) => ({
         id: i.id,
         rentalUnitId: i.rentalUnitId,
