@@ -27,7 +27,7 @@ export interface SundayReturnOptionInfo {
 export type CreateHoldResult =
   | { ok: true; reservationId: string; holdToken: string }
   | { ok: false; reason: 'needs_sunday_choice'; returnOptions: SundayReturnOptionInfo[] }
-  | { ok: false; reason: 'error'; message: string };
+  | { ok: false; reason: 'error'; message: string; unavailableVariantIds?: string[] };
 
 export async function createHold(input: {
   items: HoldItemInput[];
@@ -61,7 +61,7 @@ export async function createHold(input: {
     return { ok: false, reason: 'error', message: 'Não foi possível iniciar a reserva. Verifique sua conexão.' };
   }
 
-  const body = (json ?? {}) as { reservationId?: unknown; holdToken?: unknown; message?: unknown; violations?: unknown; returnOptions?: unknown };
+  const body = (json ?? {}) as { reservationId?: unknown; holdToken?: unknown; message?: unknown; violations?: unknown; returnOptions?: unknown; unavailableVariantIds?: unknown };
 
   if (res.ok && typeof body.reservationId === 'string' && typeof body.holdToken === 'string') {
     return { ok: true, reservationId: body.reservationId, holdToken: body.holdToken };
@@ -71,7 +71,14 @@ export async function createHold(input: {
     return { ok: false, reason: 'needs_sunday_choice', returnOptions: Array.isArray(body.returnOptions) ? (body.returnOptions as SundayReturnOptionInfo[]) : [] };
   }
 
-  return { ok: false, reason: 'error', message: typeof body.message === 'string' ? body.message : 'Não foi possível iniciar a reserva.' };
+  // Peça ocupada/recusada no HOLD: a API manda o motivo real em `message` e quais variantes.
+  const unavailableVariantIds = Array.isArray(body.unavailableVariantIds) ? body.unavailableVariantIds.filter((id): id is string => typeof id === 'string') : undefined;
+  return {
+    ok: false,
+    reason: 'error',
+    message: typeof body.message === 'string' ? body.message : 'Não foi possível iniciar a reserva.',
+    ...(unavailableVariantIds?.length ? { unavailableVariantIds } : {}),
+  };
 }
 
 /**

@@ -213,7 +213,10 @@ export default function CarrinhoPage() {
         setSundayOptions(checkoutResult.returnOptions);
         setCheckoutError(null);
       } else {
-        setCheckoutError(checkoutResult.message);
+        // HOLD recusado por peça indisponível: diz QUAL peça, com o motivo real da API.
+        const unavailable = 'unavailableVariantIds' in checkoutResult ? checkoutResult.unavailableVariantIds ?? [] : [];
+        const titles = [...new Set(cart.lines.filter((line) => unavailable.includes(line.merchandise.id)).map((line) => line.merchandise.product.title))];
+        setCheckoutError(titles.length > 0 ? `${titles.join(', ')}: ${checkoutResult.message}` : checkoutResult.message);
       }
       setCheckingOut(false);
       return;

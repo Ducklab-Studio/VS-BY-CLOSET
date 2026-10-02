@@ -2,17 +2,16 @@ import { HttpException, Injectable, Logger, NotFoundException, ServiceUnavailabl
 import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
 import {
-  type BlockedRange,
   type PlanViolation,
   blockedRangesOverlap,
   calculateBlockedRange,
   calculateRentalPlan,
   today as engineToday,
 } from '../rental-rules/rental-engine';
-import { addDays, civilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO, compareCivilDates, diffDays } from '../rental-rules/civil-date';
-import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { addDays, civilDate, civilDateFromISO, civilDateToISO, compareCivilDates, diffDays } from '../rental-rules/civil-date';
 import type { AvailabilityQueryDto } from './dto/availability-query.dto';
-import { loadActiveStoreWideBlocks, loadActiveUnitBlocks } from '../admin/operational-blocks';
+import { loadOccupations } from './occupations';
+import { rankReasons, reasonsFor, type Occupation, type OccupationKind } from './unavailable-reason';
 
 const MAX_RANGE_DAYS = 180;
 const DEFAULT_RANGE_DAYS = 120;
@@ -24,6 +23,13 @@ export interface AvailabilityDay {
   readonly bookable: boolean;
   readonly quantityAvailable: number;
   readonly reason: DayUnavailableReason | null;
+  /**
+   * Quando `reason = no_units_available`: o motivo REAL, do mais prioritário ao
+   * menos (outra reserva, HOLD/pagamento pendente, preparação/limpeza, bloqueio
+   * operacional). Só códigos — nenhum dado da outra cliente.
+   */
+  readonly unavailableReason?: OccupationKind;
+  readonly unavailableReasons?: readonly OccupationKind[];
   /**
    * Presentes só quando `bookable` — são o mesmo `plan` que
    * `calculateRentalPlan` já calculou pra decidir se o dia é reservável.
@@ -147,7 +153,7 @@ export class AvailabilityService {
     config: Awaited<ReturnType<RentalRuleConfigService['load']>>,
     today: ReturnType<typeof civilDate>,
     reservableUnits: { id: string }[],
-    occupied: { unitId: string; range: BlockedRange }[],
+    occupied: Occupation[],
   ): AvailabilityDay {
     const planResult = calculateRentalPlan({ pickupDate, items }, config, today);
 
@@ -177,12 +183,18 @@ export class AvailabilityService {
     };
     const freeByReturn = candidateReturns.map(freeFor);
     const bestAvailable = Math.max(0, ...freeByReturn);
+    // Sem unidade livre: o motivo real, de todas as ocupações que impedem as datas possíveis.
+    const reasons =
+      bestAvailable > 0
+        ? []
+        : rankReasons(candidateReturns.flatMap((ret) => reasonsFor(reservableUnits, occupied, calculateBlockedRange(pickupDate, ret, config))));
 
     return {
       date: civilDateToISO(pickupDate),
       bookable: bestAvailable > 0,
       quantityAvailable: bestAvailable,
       reason: bestAvailable > 0 ? null : 'no_units_available',
+      ...(reasons.length > 0 ? { unavailableReason: reasons[0], unavailableReasons: reasons } : {}),
       durationDays: plan.durationDays,
       calculatedReturnDate: civilDateToISO(plan.calculatedReturnDate),
       hasSundayReturnException: plan.hasSundayReturnException,
@@ -212,40 +224,11 @@ export class AvailabilityService {
     unitIds: string[],
     searchFrom: ReturnType<typeof civilDate>,
     searchTo: ReturnType<typeof civilDate>,
-  ): Promise<{ unitId: string; range: BlockedRange }[]> {
-    if (unitIds.length === 0) return [];
-
-    type Row = { rentalUnitId: string; lo: Date; hi: Date };
-    let rows: Row[];
+  ): Promise<Occupation[]> {
     try {
-      rows = await this.prisma.$queryRaw<Row[]>`
-        SELECT
-          rental_unit_id AS "rentalUnitId",
-          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchFrom)}::date ELSE lower(blocked_range) END AS "lo",
-          CASE WHEN status IN ('returned', 'cleaning') THEN ${civilDateToISO(searchTo)}::date ELSE upper(blocked_range) END AS "hi"
-        FROM reservation_items
-        WHERE rental_unit_id = ANY(${unitIds}::uuid[])
-          AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND (
-            blocked_range && daterange(${civilDateToISO(searchFrom)}::date, ${civilDateToISO(searchTo)}::date, '[)')
-            OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(searchTo)}::date)
-          )
-      `;
+      return await loadOccupations(this.prisma, unitIds, searchFrom, searchTo);
     } catch (err) {
-      this.logger.error(`Falha ao consultar reservation_items: ${errorCode(err)}`);
-      throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
-    }
-
-    const occupied = rows.map((row) => ({
-      unitId: row.rentalUnitId,
-      range: { blockedFrom: civilDateFromPgDate(row.lo), blockedUntilExclusive: civilDateFromPgDate(row.hi) },
-    }));
-    try {
-      const unitBlocks = await loadActiveUnitBlocks(this.prisma, unitIds);
-      const storeBlocks = await loadActiveStoreWideBlocks(this.prisma, searchFrom, searchTo);
-      return [...occupied, ...unitBlocks, ...storeBlocks.flatMap((range) => unitIds.map((unitId) => ({ unitId, range })))];
-    } catch (err) {
-      this.logger.error(`Falha ao consultar bloqueios operacionais: ${errorCode(err)}`);
+      this.logger.error(`Falha ao consultar ocupações (reservas/bloqueios): ${errorCode(err)}`);
       throw new ServiceUnavailableException('Não foi possível consultar a disponibilidade no momento.');
     }
   }
