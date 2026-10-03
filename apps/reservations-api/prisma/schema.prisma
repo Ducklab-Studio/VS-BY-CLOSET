@@ -462,6 +462,12 @@ model Reservation {
   /// reconciliação). Ignora entrega atrasada que desfaria um estado mais novo.
   shopifyOrderUpdatedAt DateTime? @map("shopify_order_updated_at") @db.Timestamptz(6)
 
+  /// Pedido vinculado EXCLUÍDO na Shopify (orders/delete ou reconciliação).
+  /// Marca, nunca apaga: a reserva, os itens, os eventos e o `shopifyOrderId`
+  /// ficam. Gravada uma vez só — exclusão repetida, atrasada ou concorrente
+  /// não gera nova marcação, e estado posterior do pedido não reabre a reserva.
+  shopifyOrderDeletedAt DateTime? @map("shopify_order_deleted_at") @db.Timestamptz(6)
+
   /// Contador "novas reservas" do menu do ClosetAdmin: alguém da equipe viu a
   /// reserva NESTE status (`viewedStatus`). Se o status mudar depois (ex.:
   /// pendente → confirmada), volta a contar como nova. Só leitura da equipe:

@@ -113,6 +113,21 @@ As duas últimas são lidas exclusivamente por código marcado `server-only`
 Client Component tentar importar esse módulo, então "vazar pro navegador" é
 um erro de build, não um risco silencioso.
 
+### Builds locais e de CI nunca consultam a Shopify real
+
+O `next build` carrega o `.env.local` (credenciais reais) e consulta o catálogo
+para pré-gerar páginas. Por isso:
+
+- **Fora do deploy, só `pnpm --filter @valle/marketing build:mock`** (Shopify
+  simulada, `.env.local` não carregado, rede real bloqueada; reprova se houver
+  qualquer chamada externa ou domínio de loja real na saída).
+- Um `next build` direto fora da Vercel/Railway **para na `next.config.mjs`,
+  antes de gerar páginas**. Os builds de deploy seguem normais: Vercel
+  (`VERCEL=1` + `VERCEL_ENV` production/preview) e Railway (`RAILWAY_PROJECT_ID`
+  + `RAILWAY_ENVIRONMENT_NAME`), variáveis que as plataformas definem no build.
+- Testes (API, Node e navegador) rodam com a rede real bloqueada
+  (`scripts/no-real-network.mjs`): tentativa a host que não seja local reprova.
+
 ## 4. Shopify — o app real
 
 Configuração em `apps/shopify-app/`, gerenciado pelo Shopify CLI (workspace

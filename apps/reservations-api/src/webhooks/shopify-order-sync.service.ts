@@ -35,6 +35,9 @@ export interface SyncableReservation {
   readonly status: string;
 }
 
+/** Motivo gravado no arquivamento e exibido no ClosetAdmin. */
+export const SHOPIFY_DELETED_ARCHIVE_REASON = 'Pedido excluído na Shopify';
+
 /** Peças que ainda não entraram no ciclo de devolução. */
 const PRE_CYCLE_ITEM_STATUSES = new Set(['hold', 'pending_payment', 'confirmed']);
 const isOccupying = (status: string) => (OCCUPYING_RESERVATION_STATUSES as readonly string[]).includes(status);
@@ -102,23 +105,52 @@ export class ShopifyOrderSyncService {
       events.push({ type: 'ORDER_SYNC_SKIPPED', reservationId: reservation.id, detail: { ...base, reason: 'reserva não é online ou não pertence a este pedido' } });
       return events;
     }
+    if (snapshot.deleted) {
+      // Exclusão já registrada (outro webhook, entrega atrasada ou a reconciliação
+      // depois do webhook): nenhuma marcação, transição ou evento novo. Só arquiva
+      // se, desde então, a reserva chegou a um estado final (ex.: a equipe a
+      // encerrou depois da revisão).
+      if (reservation.shopifyOrderDeletedAt) {
+        await this.archiveIfDeleted(tx, reservation.id, events, base);
+        return events;
+      }
+      const marked = await tx.reservation.updateMany({ where: { id: reservation.id, shopifyOrderDeletedAt: null }, data: { shopifyOrderDeletedAt: new Date() } });
+      if (marked.count !== 1) return events;
+      events.push({ type: 'ORDER_DELETED', reservationId: reservation.id, detail: { ...base, status: reservation.status } });
+      events.push(auditEvent(reservation.id, 'deleted_in_shopify', reservation.status, reservation.status, base));
+      await this.handleDeletedOrder(tx, reservation, events, base);
+      await this.archiveIfTerminal(tx, reservation.id, SHOPIFY_DELETED_ARCHIVE_REASON, events, base);
+      return events;
+    }
+
+    if (reservation.shopifyOrderDeletedAt) {
+      // Pedido já excluído: estado posterior nunca reabre nem confirma a reserva.
+      // Só o cancelamento (pedido cancelado e depois excluído, com as entregas
+      // fora de ordem) ainda é aplicado — ele só encerra, nunca ocupa de novo.
+      if (snapshot.cancelledAt) {
+        events.push({ type: 'ORDER_CANCELLED', reservationId: reservation.id, detail: { ...base, cancelledAt: snapshot.cancelledAt } });
+        await this.cancelForOrder(tx, reservation, events, base);
+        await this.archiveIfDeleted(tx, reservation.id, events, base);
+      } else {
+        events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { ...base, reason: 'pedido já excluído na Shopify; estado posterior não reabre a reserva' } });
+      }
+      return events;
+    }
+
     if (snapshot.updatedAt && reservation.shopifyOrderUpdatedAt && snapshot.updatedAt < reservation.shopifyOrderUpdatedAt) {
       events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { ...base, reason: 'estado do pedido mais antigo que o já aplicado' } });
       return events;
     }
 
-    if (snapshot.deleted) {
-      events.push({ type: 'ORDER_DELETED', reservationId: reservation.id, detail: base });
-      await this.handleDeletedOrder(tx, reservation, events, base);
-    } else if (snapshot.cancelledAt) {
+    if (snapshot.cancelledAt) {
       events.push({ type: 'ORDER_CANCELLED', reservationId: reservation.id, detail: { ...base, cancelledAt: snapshot.cancelledAt } });
       await this.cancelForOrder(tx, reservation, events, base);
     } else if (snapshot.financialStatus === 'voided' || snapshot.financialStatus === 'expired') {
       await this.handleFailedPayment(tx, reservation, snapshot.financialStatus, events, base);
     }
 
-    if (snapshot.deleted || snapshot.closedAt) {
-      await this.archiveIfTerminal(tx, reservation.id, snapshot.deleted ? 'Shopify: pedido excluído' : 'Shopify: pedido arquivado', events, base);
+    if (snapshot.closedAt) {
+      await this.archiveIfTerminal(tx, reservation.id, 'Shopify: pedido arquivado', events, base);
     }
 
     if (snapshot.updatedAt && (!reservation.shopifyOrderUpdatedAt || snapshot.updatedAt > reservation.shopifyOrderUpdatedAt)) {
@@ -184,6 +216,16 @@ export class ShopifyOrderSyncService {
     const detail = { ...base, financialStatus, from, to };
     events.push({ type: 'RESERVATION_STATUS_CHANGED', reservationId: reservation.id, detail: { ...detail, note: 'pagamento falhou ou expirou na Shopify' } });
     events.push(auditEvent(reservation.id, to === 'expired' ? 'expired' : 'flagged_for_review', from, to, base));
+  }
+
+  /** Reserva de pedido JÁ excluído na Shopify que chegou depois a um estado
+   *  final (equipe encerrou a revisão, `orders/cancelled` atrasado...): só
+   *  arquiva. Ainda ativa → nenhum evento (a exclusão já foi registrada uma vez). */
+  async archiveIfDeleted(tx: Prisma.TransactionClient, reservationId: string, events: SyncEvent[], base: Record<string, unknown>): Promise<void> {
+    const row = await tx.reservation.findUniqueOrThrow({ where: { id: reservationId }, select: { shopifyOrderDeletedAt: true, status: true } });
+    if (row.shopifyOrderDeletedAt && isArchivable(row.status)) {
+      await this.archiveIfTerminal(tx, reservationId, SHOPIFY_DELETED_ARCHIVE_REASON, events, base);
+    }
   }
 
   /** Arquiva (nunca apaga) — só reserva terminal. Reserva ainda ativa fica

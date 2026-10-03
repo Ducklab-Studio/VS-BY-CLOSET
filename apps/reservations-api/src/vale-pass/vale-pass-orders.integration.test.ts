@@ -322,7 +322,7 @@ describe('Pedidos de Valle Pass — reconciliação periódica (Shopify simulada
     for (const id of [pending, paid, expired, cancelled]) expect(await rowCount(id)).toBe(1);
   }, 60_000);
 
-  test('pendente que parou de mudar é consultado direto e expira; pedido não encontrado fica como está', async () => {
+  test('pendente que parou de mudar é consultado direto e expira; pedido recente que sumiu da Shopify é registrado como excluído (sem apagar)', async () => {
     const stuck = nextOrderId();
     const missing = nextOrderId();
     await send('orders/create', payload(stuck, { updated: 1 }));
@@ -333,8 +333,11 @@ describe('Pedidos de Valle Pass — reconciliação periódica (Shopify simulada
     const report = await service.reconcile();
 
     expect(report.notFound).toBeGreaterThanOrEqual(1);
+    expect(report.deleted).toBeGreaterThanOrEqual(1);
     expect((await row(stuck))?.status).toBe('EXPIRED');
-    expect((await row(missing))?.status).toBe('PENDING');
+    expect(await row(missing)).toMatchObject({ status: 'CANCELLED', cancelReason: 'deleted_in_shopify', lastSyncSource: 'reconciliation' });
+    expect((await row(missing))?.deletedInShopifyAt).not.toBeNull();
+    expect(await rowCount(missing)).toBe(1);
   }, 45_000);
 
   test('vários pedidos futuros juntos → todos importados; pedidos de outros produtos e de aluguel ficam de fora', async () => {

@@ -226,6 +226,12 @@ export class WebhooksService {
       events.push({ type: 'WEBHOOK_UNRESOLVED_RESERVATION', detail: { reason: 'reserva manual não é vinculável a pedido', orderId } });
       return { status: 'ignored', orderId, events };
     }
+    // Pedido já excluído na Shopify: `orders/paid`/`orders/create` atrasado
+    // nunca confirma nem revincula a reserva (cancelamento segue pelo seu tópico).
+    if (reservation.shopifyOrderDeletedAt && reservation.shopifyOrderId === orderId && topic !== 'orders/cancelled') {
+      events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { origin: 'shopify_webhook', topic, orderId, reason: 'pedido já excluído na Shopify' } });
+      return { status: 'processed', orderId, reservationId: reservation.id, events };
+    }
 
     // Fingerprint e datas REAIS desta reserva — nunca o que o pedido
     // diz que deveria ser, sempre o que está gravado.
@@ -541,7 +547,9 @@ export class WebhooksService {
     // (peça já no ciclo físico → `problem`, nunca `cancelled`) vivem em
     // ShopifyOrderSyncService.cancelForOrder, compartilhada com orders/updated,
     // orders/delete e a reconciliação.
-    await this.sync.cancelForOrder(tx, reservation, events, {}, { origin: 'shopify_webhook', topic: 'orders/cancelled', orderId });
+    const audit = { origin: 'shopify_webhook', topic: 'orders/cancelled', orderId };
+    await this.sync.cancelForOrder(tx, reservation, events, {}, audit);
+    await this.sync.archiveIfDeleted(tx, reservation.id, events, audit);
     return { status: 'processed', orderId, reservationId: reservation.id, events };
   }
 
@@ -571,6 +579,12 @@ export class WebhooksService {
       events = [...events, ...linked.events.slice(1)];
       reservation = await this.sync.findOnlineReservation(tx, orderId);
       if (!reservation) return { ...linked, events };
+    } else if (reservation.shopifyOrderDeletedAt && !order.cancelled_at) {
+      // Pedido já excluído na Shopify: atualização atrasada não confirma, não
+      // reabre e não mexe nos dados da reserva (o cancelamento ainda passa,
+      // pelo applySnapshot abaixo).
+      events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { origin: 'shopify_webhook', topic: 'orders/updated', orderId, reason: 'pedido já excluído na Shopify' } });
+      return { status: 'processed', orderId, reservationId: reservation.id, events };
     } else if (isStaleOrderUpdate(reservation.shopifyOrderUpdatedAt, order.updated_at)) {
       // Entrega atrasada/fora de ordem: nada que já foi aplicado é desfeito.
       events.push({ type: 'ORDER_SYNC_STALE', reservationId: reservation.id, detail: { origin: 'shopify_webhook', topic: 'orders/updated', orderId, reason: 'estado do pedido mais antigo que o já aplicado' } });

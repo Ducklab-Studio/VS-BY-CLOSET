@@ -62,6 +62,9 @@ export interface ReservationListFilters {
    *  `archivedOnly` mostra só a aba "Histórico arquivado". */
   readonly includeArchived?: boolean;
   readonly archivedOnly?: boolean;
+  /** "Mostrar excluídos da Shopify": só reservas cujo pedido foi excluído na
+   *  Shopify, arquivadas ou ainda em revisão. */
+  readonly shopifyDeletedOnly?: boolean;
 }
 
 export interface ReservationListItem {
@@ -76,6 +79,8 @@ export interface ReservationListItem {
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
   readonly archivedAt: string | null;
+  /** Pedido vinculado excluído na Shopify (a reserva nunca é apagada). */
+  readonly shopifyOrderDeletedAt: string | null;
   /** Nova para a equipe (contador do menu): reserva da Shopify pendente ou
    *  confirmada que ninguém viu neste status. */
   readonly needsAttention: boolean;
@@ -613,6 +618,7 @@ export class AdminReservationsService {
           r.shopify_order_id AS "shopifyOrderId",
           (SELECT count(*)::int FROM reservation_items ri WHERE ri.reservation_id = r.id) AS "itemCount",
           r.archived_at::text AS "archivedAt",
+          r.shopify_order_deleted_at::text AS "shopifyOrderDeletedAt",
           ${reservationAttentionSql('r')} AS "needsAttention"
         FROM reservations r
         WHERE ${Prisma.join(conditions, ' AND ')}
@@ -643,7 +649,10 @@ export class AdminReservationsService {
     // "Limpar históricos" — ocultar arquivadas por padrão (item da tela
     // principal); `archivedOnly` tem prioridade sobre `includeArchived`
     // (aba "Histórico arquivado" nunca precisa dos dois juntos).
-    if (filters.archivedOnly) {
+    if (filters.shopifyDeletedOnly) {
+      conditions.push(Prisma.sql`r.shopify_order_deleted_at IS NOT NULL`);
+      if (filters.archivedOnly) conditions.push(Prisma.sql`r.archived_at IS NOT NULL`);
+    } else if (filters.archivedOnly) {
       conditions.push(Prisma.sql`r.archived_at IS NOT NULL`);
     } else if (!filters.includeArchived) {
       conditions.push(Prisma.sql`r.archived_at IS NULL`);
@@ -759,6 +768,7 @@ export class AdminReservationsService {
       createdAt: reservation.createdAt.toISOString(),
       updatedAt: reservation.updatedAt.toISOString(),
       archivedAt: reservation.archivedAt?.toISOString() ?? null,
+      shopifyOrderDeletedAt: reservation.shopifyOrderDeletedAt?.toISOString() ?? null,
       archivedBy: reservation.archivedBy,
       archiveReason: reservation.archiveReason,
       needsAttention: reservationNeedsAttention(reservation),

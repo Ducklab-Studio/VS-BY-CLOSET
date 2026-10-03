@@ -12,7 +12,7 @@ const marketingDir = fileURLToPath(new URL('..', import.meta.url));
 
 function connectSrc(env) {
   const script = `import(${JSON.stringify(config)}).then(async (m) => {
-    const headers = (await m.default.headers())[0].headers;
+    const headers = (await m.default('phase-production-server').headers())[0].headers;
     const csp = headers.find((h) => h.key === 'Content-Security-Policy').value;
     process.stdout.write(csp.split('; ').find((d) => d.startsWith('connect-src')));
   })`;

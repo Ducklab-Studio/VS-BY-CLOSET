@@ -158,7 +158,7 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     // pedido inexistente + reserva confirmada: nunca cancela nem libera — vai para revisão
     expect(await snapshot([missing.id])).toEqual([{ id: missing.id, status: 'problem', archivedAt: null }]);
     // pedido inexistente + reserva terminal: só arquiva
-    expect((await reservation(gone.id))).toMatchObject({ status: 'completed', archiveReason: 'Shopify: pedido excluído' });
+    expect((await reservation(gone.id))).toMatchObject({ status: 'completed', archiveReason: 'Pedido excluído na Shopify' });
     expect((await reservation(gone.id)).archivedAt).not.toBeNull();
     expect((await reservation(cancelled.id)).status).toBe('cancelled');
     expect((await reservation(closed.id)).archivedAt).not.toBeNull();

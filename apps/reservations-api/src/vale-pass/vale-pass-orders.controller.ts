@@ -27,9 +27,9 @@ export class ValePassOrdersController {
   constructor(private readonly orders: ValePassOrdersService) {}
 
   @Get()
-  list(@Query('status') status?: string): Promise<ValePassOrderItem[]> {
+  list(@Query('status') status?: string, @Query('includeDeleted') includeDeleted?: string): Promise<ValePassOrderItem[]> {
     const parsed = status && (VALE_PASS_ORDER_STATUSES as readonly string[]).includes(status) ? (status as ValePassOrderStatus) : undefined;
-    return this.orders.list({ status: parsed });
+    return this.orders.list({ status: parsed, includeDeleted: includeDeleted === 'true' });
   }
 
   /** Contador do menu lateral: pedidos pendentes ou pagos ainda não vistos. */

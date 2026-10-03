@@ -45,6 +45,8 @@ const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 const fixtures = {};
 const childProcesses = [];
 let browser;
+/** Requisições do navegador para fora do computador (deve ficar vazio). */
+const externalRequests = [];
 let userId;
 
 function spawnLocal(command, args, cwd, env) {
@@ -146,14 +148,19 @@ try {
   const childEnv = { ...process.env, DATABASE_URL: databaseUrl, ADMIN_API_TOKEN: apiToken, PICKUP_REMINDER_ENABLED: 'false' };
   spawnLocal(process.execPath, [path.join(apiDir, 'dist/src/main.js')], apiDir, { ...childEnv, PORT: '3350', NODE_ENV: 'development' });
   spawnLocal(process.execPath, [path.join(marketingDir, 'node_modules/next/dist/bin/next'), 'start', '-p', '3050', '-H', '127.0.0.1'], marketingDir, {
-    ...childEnv, NODE_ENV: 'production', RESERVATIONS_API_ADMIN_URL: apiUrl, RESERVATIONS_API_URL: apiUrl, NEXT_TELEMETRY_DISABLED: '1',
+    ...childEnv, NODE_ENV: 'production', RESERVATIONS_API_ADMIN_URL: apiUrl, RESERVATIONS_API_URL: apiUrl, NEXT_TELEMETRY_DISABLED: '1', __NEXT_PROCESSED_ENV: 'true',
   });
   await waitFor(`${apiUrl}/health`);
   await waitFor(`${webUrl}/closetadmin/login`);
 
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_BROWSER_CHANNEL ? { channel: process.env.PLAYWRIGHT_BROWSER_CHANNEL } : {}) });
   const context = await browser.newContext();
-  await context.route('**/*', (route) => ['localhost', '127.0.0.1'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
+  await context.route('**/*', (route) => {
+    const host = new URL(route.request().url()).hostname;
+    if (['localhost', '127.0.0.1'].includes(host)) return route.continue();
+    externalRequests.push(host); // navegador tentando sair (Shopify real, CDN...): reprova o teste
+    return route.abort();
+  });
   await context.addCookies([{ name: 'closetadmin_session', value: token, url: webUrl, httpOnly: true, sameSite: 'Lax' }]);
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
@@ -212,6 +219,7 @@ try {
   await clickAction(page, 'Cancelar reserva', true, 'Teste local de duplo clique');
   await page.getByText('Cancelada', { exact: true }).first().waitFor();
   assert.equal(await eventCount('cancelDouble', 'MANUAL_RESERVATION_CANCELLED'), 1);
+  assert.deepEqual(externalRequests, [], 'o navegador tentou acessar a internet (Shopify real?)');
   console.log('Navegador isolado: fluxo completo, estados, PDF, calendário, disponibilidade, responsividade e duplo clique passaram.');
 } finally {
   await clean();

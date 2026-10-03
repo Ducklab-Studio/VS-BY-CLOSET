@@ -101,6 +101,18 @@ export function ArchivedBadge() {
   );
 }
 
+/** Pedido vinculado excluído na Shopify (a reserva e o histórico continuam). */
+export function ShopifyDeletedBadge() {
+  return (
+    <span
+      data-testid="shopify-deleted-badge"
+      className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium tracking-wide text-red-600 dark:bg-red-400/10 dark:text-red-300"
+    >
+      Pedido excluído na Shopify
+    </span>
+  );
+}
+
 export function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <div className={`rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card p-5 dark:shadow-md dark:shadow-black/30 transition-colors ${className}`}>{children}</div>;
 }
