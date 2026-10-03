@@ -1,3 +1,4 @@
+import type { OccupationKind } from '../availability/unavailable-reason';
 /**
  * Sinais internos usados só dentro de HoldsService pra decidir o que fazer
  * DEPOIS que a transação aborta — nunca vazam pro cliente como estão
@@ -10,7 +11,11 @@
  *  NÃO é retentado — se a contagem real é insuficiente, tentar de novo
  *  não muda isso. Vira 409 direto. */
 export class InsufficientCapacityError extends Error {
-  constructor(readonly shortfallVariantIds: readonly string[]) {
+  constructor(
+    readonly shortfallVariantIds: readonly string[],
+    /** Motivo real (outra reserva, HOLD, preparação/limpeza, bloqueio), do mais prioritário ao menos. */
+    readonly reasons: readonly OccupationKind[] = [],
+  ) {
     super(`Capacidade insuficiente para: ${shortfallVariantIds.join(', ')}`);
     this.name = 'InsufficientCapacityError';
   }

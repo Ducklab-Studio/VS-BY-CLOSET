@@ -21,6 +21,8 @@ import type { CreateHoldDto } from './dto/create-hold.dto';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import { TECHNICAL_MAX_PIECES } from '../rental-rules/rental-limits';
+import { loadOccupations } from '../availability/occupations';
+import { reasonMessage, reasonsFor, type OccupationKind } from '../availability/unavailable-reason';
 import { HOLD_BUSY_MESSAGE, HOLD_CLIENT_LIMIT_MESSAGE, HOLD_LIMITS, type HoldClient, maxHeldPieces } from './hold-client';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
@@ -173,7 +175,7 @@ export class HoldsService {
         }
 
         if (err instanceof InsufficientCapacityError) {
-          throw new ConflictException('Não há unidades suficientes disponíveis para o período solicitado.');
+          throw unavailableConflict(err.reasons, err.shortfallVariantIds);
         }
 
         if (err instanceof HttpException) throw err;
@@ -357,7 +359,7 @@ export class HoldsService {
     const occupiedIds = new Set(occupiedRows.map((r) => r.rentalUnitId));
     const storeBlocks = await loadActiveStoreWideBlocks(tx, blockedRange.blockedFrom, blockedRange.blockedUntilExclusive);
     if (isRangeBlockedStoreWide(blockedRange, storeBlocks) !== null) {
-      throw new ConflictException('Não há disponibilidade para o período solicitado.');
+      throw unavailableConflict(['operational_block'], variantIds);
     }
     const unitBlocks = await loadActiveUnitBlocks(tx, candidateIds);
     for (const block of unitBlocks) {
@@ -368,8 +370,11 @@ export class HoldsService {
     const allocationResult = allocateFreeUnits(candidates, occupiedIds, needed);
     if (!allocationResult.ok) {
       // Lançado ANTES de qualquer INSERT — nada pra desfazer. Item 1 da
-      // Fase 5 (ALL OR NOTHING): basta não escrever nada.
-      throw new InsufficientCapacityError(allocationResult.shortfall);
+      // Fase 5 (ALL OR NOTHING): basta não escrever nada. O motivo real (só
+      // leitura, mesma regra da disponibilidade) vai junto para a tela.
+      const shortUnits = candidates.filter((unit) => allocationResult.shortfall.includes(unit.shopifyVariantId));
+      const occupations = await loadOccupations(tx, shortUnits.map((unit) => unit.id), blockedRange.blockedFrom, blockedRange.blockedUntilExclusive);
+      throw new InsufficientCapacityError(allocationResult.shortfall, reasonsFor(shortUnits, occupations, blockedRange));
     }
 
     const [{ id: reservationId, expiresAt }] = await tx.$queryRaw<{ id: string; expiresAt: Date }[]>`
@@ -530,4 +535,17 @@ function isIdempotencyKeyConflict(err: unknown): boolean {
 function errorCode(err: unknown): string {
   if (err && typeof err === 'object' && 'code' in err) return String((err as { code: unknown }).code);
   return err instanceof Error ? err.name : 'unknown';
+}
+
+/** 409 com o motivo real (só códigos e a mensagem; nenhum dado de outra reserva).
+ *  `unavailableVariantIds` deixa o carrinho dizer QUAL peça não cabe. */
+function unavailableConflict(reasons: readonly OccupationKind[], variantIds: readonly string[]): ConflictException {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    message: reasonMessage(reasons[0]),
+    reason: reasons[0] ?? null,
+    reasons,
+    unavailableVariantIds: variantIds,
+  });
 }

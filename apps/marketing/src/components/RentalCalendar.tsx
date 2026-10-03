@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
 import { CartError, addRentalSelectionToCart, fetchVariantStock, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
 import { UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
+import { GENERIC_UNAVAILABLE_MESSAGE, SHOPIFY_UNAVAILABLE_MESSAGE, unavailableExplanation } from '@/lib/unavailable-reason';
 import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
 import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, withReturn, type DraftPiece } from '@/lib/rental-draft';
 import { centsToAmount, reservationSummary, type ReservationSummary, type SummaryRow, type SummaryTotal } from '@/lib/rental-price';
@@ -53,6 +54,9 @@ interface AvailabilityDay {
   calculatedReturnDate?: string;
   hasSundayReturnException?: boolean;
   returnOptions?: ReturnOption[];
+  /** Motivo real da indisponibilidade (API do ClosetAdmin), do mais prioritário ao menos. Só códigos. */
+  unavailableReason?: string | null;
+  unavailableReasons?: string[] | null;
 }
 
 interface AvailabilityResponse {
@@ -96,6 +100,8 @@ export function RentalCalendar({
 
   const [view, setView] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState<Date | null>(null);
+  /** Data indisponível que o cliente tocou: só mostra o motivo (não vira a retirada). */
+  const [inspected, setInspected] = useState<Date | null>(null);
   const [sundayChoice, setSundayChoice] = useState<ReturnChoice | null>(null);
   /** Carrinho da Shopify (fonte de verdade do valor); `undefined` enquanto é lido, `null` = sem carrinho. */
   const [cart, setCart] = useState<Cart | null | undefined>(undefined);
@@ -328,7 +334,9 @@ export function RentalCalendar({
         return;
       }
       if (unavailable.length > 0) {
-        setError(`Indisponível para esta data: ${unavailable.join(', ')}. Remova da seleção ou escolha outra data de retirada.`);
+        // Nada vai ao carrinho; diz qual peça e o motivo real (API do ClosetAdmin).
+        const detail = unavailable.map((piece) => `${piece.title}: ${piece.message}`).join(' ');
+        setError(`Indisponível para esta data — ${detail} Nenhuma peça foi adicionada; remova da seleção ou escolha outra data de retirada.`);
         return;
       }
       const updated = await addRentalSelectionToCart({
@@ -399,6 +407,7 @@ export function RentalCalendar({
 
   const busy = submitting || removing !== null;
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
+  const inspectedExplanation = inspected ? unavailableExplanation(dayMap.get(toISO(inspected))) : null;
   // Só a Shopify AGORA (consulta fresca) confirmando que a variante não está à
   // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
   const soldOut = shopifyStock?.status === 'sold_out';
@@ -505,11 +514,14 @@ export function RentalCalendar({
                 locale={locale}
                 isToday={sameDay(date, today)}
                 isSelected={!!selected && sameDay(date, selected)}
+                isInspected={!!inspected && sameDay(date, inspected)}
                 onSelect={() => {
+                  setInspected(null);
                   setSelected(date);
                   setSundayChoice(null);
                   persistDates(date, null);
                 }}
+                onInspect={() => setInspected(date)}
               />
             ))}
           </>
@@ -670,9 +682,15 @@ export function RentalCalendar({
                   : null}
       </Status>
 
+      {inspectedExplanation && (
+        <div data-testid="unavailable-reason" role="status" className="mt-4 rounded-xl bg-marsala/[0.09] px-3.5 py-3 text-[0.8rem] leading-relaxed text-marsala">
+          <p className="font-medium">{inspectedExplanation.message}</p>
+          {inspectedExplanation.extra ? <p className="mt-1 text-[0.72rem] opacity-80">{inspectedExplanation.extra}</p> : null}
+        </div>
+      )}
       {selectedUnavailable && (
         <Status tone="warn">
-          Indisponível para esta data.
+          {unavailableExplanation(selectedInfo)?.message ?? GENERIC_UNAVAILABLE_MESSAGE}
           {draft.pieces.length > 0 && (
             <>
               {' '}Escolha outra retirada ou{' '}
@@ -683,7 +701,7 @@ export function RentalCalendar({
       )}
       {/* Estoque comercial (Shopify) é separado da disponibilidade da data (agenda do ClosetAdmin). */}
       {soldOut ? (
-        <Status tone="warn">Esgotada na Shopify. Esta peça não pode ir ao carrinho agora — fale com o atendimento.</Status>
+        <Status tone="warn">{SHOPIFY_UNAVAILABLE_MESSAGE}</Status>
       ) : (
         <p data-testid="shopify-stock" data-status={shopifyStock?.status ?? 'checking'} className="mt-3 text-[0.72rem] text-ink/55">
           {shopifyStockText(shopifyStock)}
@@ -756,10 +774,15 @@ function limitMessage(maxPieces: number | null): string {
 }
 
 /**
- * Nomes das peças que NÃO cabem nas datas escolhidas (com a quantidade total de
- * peças). `null` = não deu para confirmar (API fora do ar): não adiciona nada.
+ * Peças que NÃO cabem nas datas escolhidas (com a quantidade total de peças),
+ * com o motivo real devolvido pela API. `null` = não deu para confirmar (API
+ * fora do ar): não adiciona nada.
  */
-async function unavailablePieces(pieces: readonly { variantId: string; title: string }[], countedPieces: number, selection: RentalSelection): Promise<string[] | null> {
+async function unavailablePieces(
+  pieces: readonly { variantId: string; title: string }[],
+  countedPieces: number,
+  selection: RentalSelection,
+): Promise<{ title: string; message: string }[] | null> {
   const pickup = fromISO(selection.pickup);
   const checks = await Promise.all(
     pieces.map(async (piece) => {
@@ -767,11 +790,12 @@ async function unavailablePieces(pieces: readonly { variantId: string; title: st
       if (!result) return null;
       const day = result.days.find((d) => d.date === selection.pickup);
       const same = resolveRentalSelection(day, selection.returnOption);
-      return same && same.return === selection.return ? '' : piece.title;
+      if (same && same.return === selection.return) return { ok: true as const };
+      return { ok: false as const, title: piece.title, message: unavailableExplanation(day)?.message ?? GENERIC_UNAVAILABLE_MESSAGE };
     }),
   );
   if (checks.some((check) => check === null)) return null;
-  return checks.filter((check): check is string => !!check);
+  return checks.flatMap((check) => (check && !check.ok ? [{ title: check.title, message: check.message }] : []));
 }
 
 /**
@@ -783,7 +807,7 @@ function cartErrorMessage(err: unknown, titles: ReadonlyMap<string, string> = ne
   const friendly =
     err instanceof CartError && err.code === 'not_added'
       ? rejected
-        ? `A Shopify não aceitou no carrinho (sem estoque vendável): ${rejected}. Nenhuma peça foi adicionada — remova da seleção ou fale com o atendimento.`
+        ? `${SHOPIFY_UNAVAILABLE_MESSAGE.replace(/\.$/, '')}: ${rejected}. Nenhuma peça foi adicionada — remova da seleção ou fale com o atendimento.`
         : 'Esta peça não está disponível na loja para estas datas agora. Fale com o atendimento.'
       : 'Não foi possível adicionar ao carrinho. Tente novamente.';
   if (process.env.NODE_ENV === 'production') return friendly;
@@ -834,7 +858,9 @@ function DayCell({
   locale,
   isToday,
   isSelected,
+  isInspected,
   onSelect,
+  onInspect,
 }: {
   date: Date;
   bookable: boolean;
@@ -842,20 +868,24 @@ function DayCell({
   locale: string;
   isToday: boolean;
   isSelected: boolean;
+  isInspected: boolean;
   onSelect: () => void;
+  onInspect: () => void;
 }) {
   const human = date.toLocaleDateString(locale, { day: 'numeric', month: 'long' });
   const disabled = !bookable;
-  const label = disabled ? `${human} — indisponível` : human;
+  const label = disabled ? `${human} — indisponível${known ? ', ver motivo' : ''}` : human;
 
+  // Data indisponível com informação da API continua tocável: mostra o motivo
+  // (sem virar a retirada). Sem informação ainda (carregando), segue desligada.
   return (
     <button
       type="button"
       data-date={toISO(date)}
+      data-bookable={bookable ? 'true' : 'false'}
       aria-pressed={isSelected}
-      disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
-      onClick={onSelect}
+      disabled={!known}
+      onClick={bookable ? onSelect : onInspect}
       aria-label={label}
       className={[
         'grid aspect-square min-h-[2.75rem] place-items-center rounded-lg border text-sm tabular-nums transition-colors sm:min-h-0',
@@ -865,7 +895,7 @@ function DayCell({
           : !known
             ? 'cursor-not-allowed border-transparent text-ink/25'
             : disabled
-              ? 'cursor-not-allowed border-transparent text-ink/65 line-through'
+              ? `cursor-help border-transparent text-ink/65 line-through ${isInspected ? 'ring-2 ring-marsala/40' : ''}`
               : 'border-transparent hover:border-marsala/25 hover:bg-marsala/[0.06]',
       ].join(' ')}
     >
