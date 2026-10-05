@@ -67,6 +67,35 @@ test('só o 401 do próprio login vira "credencial errada"; o 401 do token do si
   assert.equal(errors.classifyLoginFailure(429, 'ThrottlerException: Too Many Requests'), 'rate_limited');
 });
 
+test('falhas da API: fora do ar x erro interno x configuração x limite, sempre sem login', () => {
+  for (const status of [404, 408, 502, 503, 504]) assert.equal(errors.classifyLoginFailure(status, 'Application not found'), 'unavailable', String(status));
+  for (const status of [500, 501, 418]) assert.equal(errors.classifyLoginFailure(status, 'Internal server error'), 'internal', String(status));
+  assert.equal(errors.classifyLoginFailure(403, 'Forbidden'), 'misconfigured');
+  assert.equal(errors.classifyLoginFailure(429, 'x'), 'rate_limited');
+  assert.equal(errors.classifyLoginFailure(401, 'Application not found'), 'misconfigured', 'qualquer 401 que não seja o do login NUNCA é credencial errada');
+});
+
+test('resposta de sucesso do login só vale com token e validade futura legíveis', () => {
+  const now = Date.parse('2026-10-05T12:00:00Z');
+  const ok = { token: 'a'.repeat(64), expiresAt: '2026-10-06T00:00:00Z' };
+  assert.equal(errors.isValidLoginResponse(ok, now), true);
+  for (const bad of [null, undefined, '', '<html>proxy</html>', 42, {}, { token: 'curto', expiresAt: ok.expiresAt }, { token: ok.token }, { token: ok.token, expiresAt: 'ontem' }, { token: ok.token, expiresAt: '2026-10-04T00:00:00Z' }, { token: 7, expiresAt: ok.expiresAt }, { token: 'a'.repeat(600), expiresAt: ok.expiresAt }]) {
+    assert.equal(errors.isValidLoginResponse(bad, now), false, JSON.stringify(bad));
+  }
+});
+
+test('sessão: só o 401 da própria validação é "expirada"; o resto é painel sem resposta; o aviso vem de lista fechada', () => {
+  assert.equal(errors.classifySessionLoss(401, 'Sessão inválida ou expirada.'), 'expired');
+  for (const [status, message] of [[401, 'Credencial administrativa inválida ou ausente.'], [503, 'Não foi possível validar a sessão no momento.'], [404, 'Application not found'], [500, 'x'], [503, 'Não foi possível conectar ao servidor do ClosetAdmin.']]) {
+    assert.equal(errors.classifySessionLoss(status, message), 'unavailable', `${status} ${message}`);
+  }
+  assert.equal(errors.parseSessionNotice('expirada'), 'expired');
+  assert.equal(errors.parseSessionNotice('indisponivel'), 'unavailable');
+  assert.equal(errors.parseSessionNotice(['expirada', 'x']), 'expired');
+  for (const bad of [undefined, '', 'EXPIRADA', '<script>alert(1)</script>', 'expirada ', 'qualquer coisa', 'javascript:1']) assert.equal(errors.parseSessionNotice(bad), null, String(bad));
+  assert.equal(new Set(Object.values(errors.SESSION_NOTICE_MESSAGES)).size, 2);
+});
+
 test('mensagens de login não revelam se o usuário existe nem expõem detalhes internos', () => {
   const messages = Object.values(errors.LOGIN_FAILURE_MESSAGES);
   assert.equal(new Set(messages).size, messages.length);
