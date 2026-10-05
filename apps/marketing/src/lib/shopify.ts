@@ -17,6 +17,8 @@
  * cliente pra um tema genérico no meio da decisão de compra custa venda.)
  */
 
+import { assertShopifyNetworkAllowed } from './shopify-network-guard';
+
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
 // Versão estável suportada na data desta auditoria. Manter alinhada com
@@ -51,6 +53,7 @@ async function storefrontFetch<T>(
       'Storefront API não configurada. Defina NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN e NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN.',
     );
   }
+  assertShopifyNetworkAllowed(STORE_DOMAIN, process.env.NEXT_PUBLIC_SHOPIFY_NETWORK);
 
   const res = await fetch(`https://${STORE_DOMAIN}/api/${API_VERSION}/graphql.json`, {
     method: 'POST',

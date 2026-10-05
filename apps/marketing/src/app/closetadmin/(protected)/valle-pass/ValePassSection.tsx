@@ -84,6 +84,10 @@ export function ValePassSection({
   // a etiqueta "Novo" até sair da página, mesmo depois de marcados como vistos.
   const [newIds, setNewIds] = useState(() => new Set(initialOrders.filter((order) => order.needsAttention).map((order) => order.id)));
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('ALL');
+  // "Mostrar excluídos da Shopify": por padrão o pedido excluído sai da lista
+  // (o registro e o histórico continuam no banco).
+  const [showDeleted, setShowDeleted] = useState(false);
+  const showDeletedRef = useRef(showDeleted);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
   const [statusFilter, setStatusFilter] = useState<ValePassStatus | ''>('');
@@ -115,12 +119,26 @@ export function ValePassSection({
   useEffect(() => {
     refreshVouchersRef.current = refreshVouchers;
   });
+  async function toggleShowDeleted(next: boolean) {
+    setShowDeleted(next);
+    showDeletedRef.current = next;
+    const { orders: fresh, error } = await listValePassOrdersAction({ includeDeleted: next });
+    if (showDeletedRef.current !== next) return;
+    if (fresh) {
+      setOrders(fresh);
+      setOrdersError(null);
+    } else {
+      setOrdersError(error ?? 'Não foi possível atualizar os pedidos.');
+    }
+  }
+
   useEffect(() => {
     let active = true;
     async function tick() {
       if (document.visibilityState !== 'visible') return;
-      const { orders: fresh, error } = await listValePassOrdersAction();
-      if (!active) return;
+      const includeDeleted = showDeletedRef.current;
+      const { orders: fresh, error } = await listValePassOrdersAction({ includeDeleted });
+      if (!active || includeDeleted !== showDeletedRef.current) return;
       if (fresh) {
         setOrders(fresh);
         setNewIds((prev) => new Set([...prev, ...fresh.filter((order) => order.needsAttention).map((order) => order.id)]));
@@ -196,6 +214,15 @@ export function ValePassSection({
             </FilterPill>
           ))}
         </div>
+        <label className="inline-flex items-center gap-2 text-sm text-ink/60 dark:text-dark-muted">
+          <input
+            type="checkbox"
+            checked={showDeleted}
+            onChange={(event) => void toggleShowDeleted(event.target.checked)}
+            className="h-4 w-4 rounded border-ink/20 accent-marsala dark:accent-gold"
+          />
+          Mostrar excluídos da Shopify
+        </label>
 
         {ordersError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{ordersError}</p> : null}
 
@@ -535,7 +562,12 @@ function OrderCard({ order, isNew }: { order: ValePassOrder; isNew: boolean }) {
         {order.customerEmail ? <p>{order.customerEmail}</p> : null}
         <p>Status desde {formatDateTimePt(order.statusChangedAt)}</p>
         {order.status === 'PENDING' ? <p className="text-amber-700 dark:text-amber-300">Aguardando pagamento — nenhum vale emitido.</p> : null}
-        {order.deletedInShopifyAt ? <p className="text-red-500 dark:text-red-400">Pedido excluído na Shopify em {formatDateTimePt(order.deletedInShopifyAt)}.</p> : null}
+        {order.deletedInShopifyAt ? (
+          <p data-testid="order-deleted-reason" className="text-red-500 dark:text-red-400">
+            Pedido excluído na Shopify em {formatDateTimePt(order.deletedInShopifyAt)}.
+            {order.status === 'CONFIRMED' ? ' O pedido estava pago: os vales não foram alterados.' : ''}
+          </p>
+        ) : null}
         {order.vouchers.length > 0 ? (
           <p>
             Vale{order.vouchers.length > 1 ? 's' : ''}:{' '}

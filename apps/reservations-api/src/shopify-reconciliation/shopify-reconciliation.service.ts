@@ -69,7 +69,12 @@ export class ShopifyReconciliationService {
     private readonly sync: ShopifyOrderSyncService,
   ) {}
 
-  async reconcile(options: { days: number; apply: boolean; actor?: { id: string; name: string }; orderIds?: readonly string[] }): Promise<ReconciliationReport> {
+  /**
+   * `deletionsOnly` (rodada automática): só procura pedido EXCLUÍDO na Shopify —
+   * não lista pedidos recentes nem aplica cancelamento/pagamento/arquivamento,
+   * que seguem pelos webhooks e pela reconciliação manual.
+   */
+  async reconcile(options: { days: number; apply: boolean; actor?: { id: string; name: string }; orderIds?: readonly string[]; deletionsOnly?: boolean }): Promise<ReconciliationReport> {
     const now = new Date();
     const since = new Date(now.getTime() - options.days * 86_400_000);
 
@@ -77,18 +82,39 @@ export class ShopifyReconciliationService {
       where: { source: 'online', shopifyOrderId: options.orderIds ? { in: [...options.orderIds] } : { not: null }, archivedAt: null },
       orderBy: { createdAt: 'desc' },
       take: MAX_RESERVATIONS + 1,
-      select: { id: true, status: true, shopifyOrderId: true, shopifyOrderGid: true, createdAt: true },
+      select: { id: true, status: true, shopifyOrderId: true, shopifyOrderGid: true, createdAt: true, shopifyOrderDeletedAt: true },
     });
     const truncatedReservations = reservations.length > MAX_RESERVATIONS;
-    const checked = reservations.slice(0, MAX_RESERVATIONS);
+    const window = reservations.slice(0, MAX_RESERVATIONS);
+    // Exclusão já registrada não é consultada de novo: a reserva fica em revisão
+    // e, se já estiver encerrada, só falta arquivar (sem nova marcação).
+    const alreadyDeleted = window.filter((r) => r.shopifyOrderDeletedAt);
+    const checked = window.filter((r) => !r.shopifyOrderDeletedAt);
 
     const gidOf = (r: { shopifyOrderId: string | null; shopifyOrderGid: string | null }) => r.shopifyOrderGid ?? `gid://shopify/Order/${r.shopifyOrderId}`;
-    const states = await this.shopify.getOrdersByGid(checked.map(gidOf));
+    const states = checked.length ? await this.shopify.getOrdersByGid(checked.map(gidOf)) : new Map<string, ShopifyOrderState | null>();
     const missingCount = checked.filter((r) => (states.get(gidOf(r)) ?? null) === null).length;
     const massMissing = checked.length >= MASS_MISSING_GUARD_MIN && missingCount === checked.length;
 
     const divergences: Divergence[] = [];
     const applicable: { index: number; snapshot: OrderSnapshot }[] = [];
+
+    for (const reservation of alreadyDeleted) {
+      if (!isArchivable(reservation.status)) continue;
+      const orderId = reservation.shopifyOrderId as string;
+      divergences.push({
+        kind: 'missing_in_shopify',
+        orderId,
+        orderName: null,
+        reservationId: reservation.id,
+        reservationStatus: reservation.status,
+        shopify: null,
+        action: 'archive',
+        applied: false,
+        note: 'exclusão na Shopify já registrada; a reserva agora encerrada é arquivada (sem nova marcação)',
+      });
+      applicable.push({ index: divergences.length - 1, snapshot: { orderId, updatedAt: null, cancelledAt: null, closedAt: null, financialStatus: null, deleted: true } });
+    }
 
     for (const reservation of checked) {
       const orderId = reservation.shopifyOrderId as string;
@@ -114,6 +140,7 @@ export class ShopifyReconciliationService {
         continue;
       }
 
+      if (options.deletionsOnly) continue;
       const divergence = this.classify(reservation, state);
       if (!divergence) continue;
       divergences.push({ ...divergence, applied: false });
@@ -125,8 +152,11 @@ export class ShopifyReconciliationService {
       }
     }
 
-    // Escopo por pedido (uso interno/testes): não procura pedidos sem reserva.
-    const recent = options.orderIds ? { orders: [] as ShopifyOrderState[], truncated: false } : await this.shopify.listOrdersCreatedSince(since.toISOString(), MAX_ORDERS);
+    // Escopo por pedido (uso interno/testes) ou só exclusões: não procura pedidos sem reserva.
+    const recent =
+      options.orderIds || options.deletionsOnly
+        ? { orders: [] as ShopifyOrderState[], truncated: false }
+        : await this.shopify.listOrdersCreatedSince(since.toISOString(), MAX_ORDERS);
     const candidates = recent.orders.filter((order) => order.reservationId && !order.cancelledAt);
     const linked = candidates.length
       ? new Set((await this.prisma.reservation.findMany({ where: { shopifyOrderId: { in: candidates.map((o) => o.orderId) } }, select: { shopifyOrderId: true } })).map((r) => r.shopifyOrderId))

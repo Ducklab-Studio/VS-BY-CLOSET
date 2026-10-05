@@ -30,6 +30,7 @@
 import { planCartChange, type ReturnChoice } from './rental-selection';
 import { isValePassProduct } from './vale-pass-product';
 import { UNKNOWN_STOCK, classifyShopifyStock, type RawVariantStock, type ShopifyStock } from './shopify-stock';
+import { assertShopifyNetworkAllowed } from './shopify-network-guard';
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
@@ -136,6 +137,11 @@ export class CartError extends Error {
 async function cartFetch<T>(query: string, variables: Record<string, unknown>, timeoutMs?: number): Promise<T> {
   if (!isCartConfigured) {
     throw new CartError('config', 'Storefront API não configurada.');
+  }
+  try {
+    assertShopifyNetworkAllowed(STORE_DOMAIN, process.env.NEXT_PUBLIC_SHOPIFY_NETWORK);
+  } catch (err) {
+    throw new CartError('config', err instanceof Error ? err.message : 'Shopify real bloqueada.');
   }
 
   let res: Response;

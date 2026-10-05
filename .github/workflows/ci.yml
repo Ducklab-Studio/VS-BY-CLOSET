@@ -38,7 +38,7 @@ jobs:
         run: pnpm lint
 
       - name: Checkout flow and legacy guards
-        run: node --test scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/valle-pass-attention.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs apps/marketing/test/rental-draft.test.mjs apps/marketing/test/rental-price.test.mjs apps/marketing/test/rental-cart.test.mjs apps/marketing/test/shopify-stock.test.mjs apps/marketing/test/reservation-attention.test.mjs apps/marketing/test/unavailable-reason.test.mjs
+        run: node scripts/no-real-network.mjs node --test apps/marketing/test/shopify-network-guard.test.mjs scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/valle-pass-attention.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs apps/marketing/test/rental-draft.test.mjs apps/marketing/test/rental-price.test.mjs apps/marketing/test/rental-cart.test.mjs apps/marketing/test/shopify-stock.test.mjs apps/marketing/test/reservation-attention.test.mjs apps/marketing/test/unavailable-reason.test.mjs
 
   reservations-api:
     name: API — typecheck, testes e build
@@ -89,11 +89,10 @@ jobs:
       - name: Build API
         run: pnpm --filter @valle/reservations-api run build
 
+      # Shopify simulada: build fora da Vercel nunca consulta a loja real
+      # (apps/marketing/scripts/shopify-build-guard.mjs) e reprova se tentar.
       - name: Build ClosetAdmin para navegador isolado
-        run: pnpm --filter @valle/marketing build
-        env:
-          NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: ci-placeholder.myshopify.com
-          NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: ci-placeholder
+        run: pnpm --filter @valle/marketing build:mock
 
       - name: Instalar navegador de teste
         run: pnpm --filter @valle/marketing exec playwright install --with-deps chromium
@@ -109,6 +108,9 @@ jobs:
 
       - name: Testar contador de novas reservas no menu
         run: pnpm --filter @valle/marketing run test:reservations-badge
+
+      - name: Testar pedidos excluídos na Shopify no painel
+        run: pnpm --filter @valle/marketing run test:shopify-deleted-orders
 
   build:
     name: Build da vitrine (Next.js)
@@ -128,12 +130,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Placeholder: build não deve depender de credenciais reais de produção.
+      # Shopify simulada, rede real bloqueada: build não depende de nem
+      # consulta credenciais reais de produção.
       - name: Build
-        run: pnpm --filter @valle/marketing build
-        env:
-          NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: ci-placeholder.myshopify.com
-          NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: ci-placeholder
+        run: pnpm --filter @valle/marketing build:mock
 
 # `theme/` é legado e não participa da aplicação em produção (README.md).
 # O Theme Check antigo fazia a CI inteira ficar vermelha por um artefato

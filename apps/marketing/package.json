@@ -8,11 +8,13 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
+    "build:mock": "node scripts/build-mock.mjs",
     "start": "next start -p 3000",
-    "test:operational-browser": "node test/operational-browser.mjs",
-    "test:pecas-sku-inactive": "node test/pecas-sku-inactive.mjs",
-    "test:valle-pass-badge": "node test/valle-pass-badge.mjs",
-    "test:reservations-badge": "node test/reservations-badge.mjs",
+    "test:operational-browser": "node ../../scripts/no-real-network.mjs node test/operational-browser.mjs",
+    "test:pecas-sku-inactive": "node ../../scripts/no-real-network.mjs node test/pecas-sku-inactive.mjs",
+    "test:valle-pass-badge": "node ../../scripts/no-real-network.mjs node test/valle-pass-badge.mjs",
+    "test:reservations-badge": "node ../../scripts/no-real-network.mjs node test/reservations-badge.mjs",
+    "test:shopify-deleted-orders": "node ../../scripts/no-real-network.mjs node test/shopify-deleted-orders.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

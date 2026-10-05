@@ -12,6 +12,9 @@ const transpile = (path) =>
   ts.transpileModule(readFileSync(new URL(path, root), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
   }).outputText;
+// Trava da Shopify real (sem rede) — importada por shopify.ts e cart.ts.
+const guardLib = {};
+runInNewContext(transpile('src/lib/shopify-network-guard.ts'), { exports: guardLib, URL });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const priceLib = {};
@@ -25,7 +28,7 @@ runInNewContext(transpile('src/lib/rental-draft.ts'), { exports: draftLib, requi
 const selectionLib = {};
 runInNewContext(transpile('src/lib/rental-selection.ts'), { exports: selectionLib, Date, Number, Set });
 const shopifyLib = {};
-runInNewContext(transpile('src/lib/shopify.ts'), { exports: shopifyLib, process: { env: {} }, Number, Intl });
+runInNewContext(transpile('src/lib/shopify.ts'), { exports: shopifyLib, require: () => guardLib, process: { env: {} }, Number, Intl });
 const valePassLib = {};
 runInNewContext(transpile('src/lib/vale-pass-product.ts'), { exports: valePassLib, require: () => shopifyLib, process: { env: {} } });
 const { EMPTY_DRAFT, RENTAL_DRAFT_TTL_MS, addPiece, removePiece, withDates, selectionWith, atPieceLimit, parseDraft, isDraftExpired, saveDraft, loadDraft, draftCookie, draftRawFromCookie } = draftLib;
@@ -138,6 +141,7 @@ function loadCart({ storedCartId = null, responses }) {
       if (name === './rental-selection') return selectionLib;
       if (name === './vale-pass-product') return valePassLib;
       if (name === './shopify-stock') return shopifyStockLib;
+      if (name === './shopify-network-guard') return guardLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env: { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' } },

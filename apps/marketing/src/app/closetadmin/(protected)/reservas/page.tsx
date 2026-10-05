@@ -13,7 +13,7 @@ import {
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge } from '@/components/closetadmin/ui';
+import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge, ShopifyDeletedBadge } from '@/components/closetadmin/ui';
 import { ReservationFiltersForm } from './ReservationFiltersForm';
 import { ExportPeriodPdfButton } from './ExportPeriodPdfButton';
 import { ReservationsLive } from './ReservationsLive';
@@ -32,6 +32,7 @@ type SearchParams = {
   code?: string;
   includeArchived?: string;
   archivedOnly?: string;
+  shopifyDeletedOnly?: string;
 };
 
 /**
@@ -45,7 +46,8 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
   const rawFilters = await searchParams;
   const includeArchived = rawFilters.includeArchived === 'true';
   const archivedOnly = rawFilters.archivedOnly === 'true';
-  const filters = { ...rawFilters, includeArchived, archivedOnly };
+  const shopifyDeletedOnly = rawFilters.shopifyDeletedOnly === 'true';
+  const filters = { ...rawFilters, includeArchived, archivedOnly, shopifyDeletedOnly };
 
   let reservations: ReservationListItem[] | null = null;
   let allReservations: ReservationListItem[] | null = null;
@@ -69,7 +71,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
     ['hold', 'pending_payment'].includes(reservation.status),
   ).length;
   const attentionCount = allReservations.filter((reservation) => reservation.status === 'problem').length;
-  const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && Boolean(value)).length;
+  const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && key !== 'shopifyDeletedOnly' && Boolean(value)).length;
   // Estimativa pro texto de confirmação do "Limpar lista" — `allReservations`
   // já exclui arquivadas por padrão (ver ReservationListFilters), então isto
   // é o teto de candidatas ANTES do período mínimo de segurança do
@@ -215,6 +217,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
                         <StatusBadge status={reservation.status} />
                         <NewReservationTag id={reservation.id} status={reservation.status} needsAttention={reservation.needsAttention} />
                         {reservation.archivedAt ? <ArchivedBadge /> : null}
+                        {reservation.shopifyOrderDeletedAt ? <ShopifyDeletedBadge /> : null}
                       </Link>
                     </td>
                     <td className="px-4 py-3.5">

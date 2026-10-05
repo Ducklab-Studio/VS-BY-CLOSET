@@ -82,11 +82,11 @@ export async function listValePassVouchersAction(filters: ValePassVoucherFilters
   }
 }
 
-export async function listValePassOrdersAction(): Promise<{ orders: ValePassOrder[] | null; error: string | null }> {
+export async function listValePassOrdersAction(options: { includeDeleted?: boolean } = {}): Promise<{ orders: ValePassOrder[] | null; error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   try {
-    const orders = await listValePassOrders(session.id);
+    const orders = await listValePassOrders(session.id, { includeDeleted: options.includeDeleted === true });
     return { orders, error: null };
   } catch (err) {
     return { orders: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os pedidos.' };

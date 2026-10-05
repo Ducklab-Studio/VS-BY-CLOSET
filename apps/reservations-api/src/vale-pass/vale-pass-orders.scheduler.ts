@@ -44,10 +44,10 @@ export class ValePassOrdersScheduler implements OnModuleInit, OnModuleDestroy {
   async runOnce(): Promise<void> {
     try {
       const report = await this.orders.reconcile();
-      const changed = report.created + report.statusChanged + report.vouchersRecovered;
+      const changed = report.created + report.statusChanged + report.vouchersRecovered + report.deleted;
       if (changed > 0 || report.failed > 0) {
         this.logger.log(
-          `Pedidos de Valle Pass: ${report.created} novo(s), ${report.statusChanged} com status atualizado, ${report.vouchersRecovered} com vale recuperado, ${report.failed} falha(s).`,
+          `Pedidos de Valle Pass: ${report.created} novo(s), ${report.statusChanged} com status atualizado, ${report.vouchersRecovered} com vale recuperado, ${report.deleted} excluído(s) na Shopify, ${report.failed} falha(s).`,
         );
       }
     } catch (err) {

@@ -30,5 +30,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 20_000,
     globalSetup: ['./test/global-setup.ts'],
+    // Rede real bloqueada em todo arquivo; tentativa reprova o arquivo.
+    setupFiles: ['./test/no-real-network.setup.mjs'],
   },
 });

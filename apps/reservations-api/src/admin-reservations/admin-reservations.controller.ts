@@ -108,6 +108,7 @@ export class AdminReservationsController {
       code: query.code || undefined,
       includeArchived: query.includeArchived === 'true',
       archivedOnly: query.archivedOnly === 'true',
+      shopifyDeletedOnly: query.shopifyDeletedOnly === 'true',
       limit: query.limit,
       offset: query.offset,
     };

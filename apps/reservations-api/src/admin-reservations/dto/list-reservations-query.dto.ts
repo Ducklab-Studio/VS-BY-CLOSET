@@ -59,6 +59,10 @@ export class ListReservationsQueryDto {
   @IsIn(['true', 'false'])
   archivedOnly?: string;
 
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  shopifyDeletedOnly?: string;
+
   /** Paginação opcional. Sem ela, o comportamento de sempre (até 300). */
   @IsOptional()
   @Type(() => Number)

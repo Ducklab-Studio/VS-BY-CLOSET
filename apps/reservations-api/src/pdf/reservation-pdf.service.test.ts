@@ -38,6 +38,7 @@ function baseReservation(overrides: Partial<ReservationDetailResponse> = {}): Re
     createdAt: '2026-11-01T12:00:00.000Z',
     updatedAt: '2026-11-01T12:00:00.000Z',
     archivedAt: null,
+    shopifyOrderDeletedAt: null,
     archivedBy: null,
     archiveReason: null,
     items: [{

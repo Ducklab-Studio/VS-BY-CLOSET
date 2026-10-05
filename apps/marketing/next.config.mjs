@@ -1,3 +1,6 @@
+import { PHASE_PRODUCTION_BUILD } from 'next/constants.js';
+import { shopifyBuildViolation } from './scripts/shopify-build-guard.mjs';
+
 /**
  * Aplicação Next.js ativa: vitrine pública + carrinho + ClosetAdmin.
  *
@@ -7,7 +10,9 @@
  * bundle durante o build.
  */
 
-const isDev = process.env.NODE_ENV !== 'production';
+// Só o `next dev` (NODE_ENV=development) relaxa a CSP. O build simulado roda com
+// NODE_ENV=test (assim o Next nem abre o .env.local) e precisa da CSP de produção.
+const isDev = process.env.NODE_ENV === 'development';
 
 /**
  * Origens que o NAVEGADOR realmente chama, derivadas das mesmas variáveis
@@ -139,4 +144,15 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Fora do deploy na Vercel, só build com Shopify simulada (ver
+ * scripts/shopify-build-guard.mjs): o `.env.local` tem credenciais reais e o
+ * build consultaria o catálogo. Para antes de gerar qualquer página.
+ */
+export default function config(phase) {
+  if (phase === PHASE_PRODUCTION_BUILD) {
+    const violation = shopifyBuildViolation(process.env);
+    if (violation) throw new Error(violation);
+  }
+  return nextConfig;
+}

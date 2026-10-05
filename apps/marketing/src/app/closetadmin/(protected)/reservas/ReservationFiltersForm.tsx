@@ -50,8 +50,9 @@ export function ReservationFiltersForm({
   });
   const [includeArchived, setIncludeArchived] = useState(initial.includeArchived === 'true');
   const [archivedOnly, setArchivedOnly] = useState(initial.archivedOnly === 'true');
+  const [shopifyDeletedOnly, setShopifyDeletedOnly] = useState(initial.shopifyDeletedOnly === 'true');
 
-  const activeCount = Object.values(values).filter(Boolean).length + (includeArchived ? 1 : 0) + (archivedOnly ? 1 : 0);
+  const activeCount = Object.values(values).filter(Boolean).length + (includeArchived ? 1 : 0) + (archivedOnly ? 1 : 0) + (shopifyDeletedOnly ? 1 : 0);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,6 +62,7 @@ export function ReservationFiltersForm({
     }
     if (archivedOnly) params.set('archivedOnly', 'true');
     else if (includeArchived) params.set('includeArchived', 'true');
+    if (shopifyDeletedOnly) params.set('shopifyDeletedOnly', 'true');
     router.push(`/closetadmin/reservas${params.toString() ? `?${params.toString()}` : ''}`);
   }
 
@@ -68,6 +70,7 @@ export function ReservationFiltersForm({
     setValues({ status: '', source: '', customer: '', phone: '', unitCode: '', code: '', from: '', to: '' });
     setIncludeArchived(false);
     setArchivedOnly(false);
+    setShopifyDeletedOnly(false);
     router.push('/closetadmin/reservas');
   }
 
@@ -204,6 +207,10 @@ export function ReservationFiltersForm({
               }}
             />
             Somente histórico arquivado
+          </label>
+          <label className="flex items-center gap-2 text-ink dark:text-dark-text">
+            <input type="checkbox" checked={shopifyDeletedOnly} onChange={(e) => setShopifyDeletedOnly(e.target.checked)} />
+            Mostrar excluídos da Shopify
           </label>
         </div>
 

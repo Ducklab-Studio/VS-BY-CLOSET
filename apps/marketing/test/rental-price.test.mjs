@@ -12,6 +12,9 @@ const transpile = (path) =>
   ts.transpileModule(readFileSync(new URL(path, root), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
   }).outputText;
+// Trava da Shopify real (sem rede) — importada por shopify.ts e cart.ts.
+const guardLib = {};
+runInNewContext(transpile('src/lib/shopify-network-guard.ts'), { exports: guardLib, URL });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const load = (path, globals = {}) => {
   const exports = {};
@@ -21,7 +24,7 @@ const load = (path, globals = {}) => {
 
 const price = load('src/lib/rental-price.ts');
 const selectionLib = load('src/lib/rental-selection.ts', { Date });
-const shopifyLib = load('src/lib/shopify.ts', { process: { env: {} }, Intl });
+const shopifyLib = load('src/lib/shopify.ts', { require: () => guardLib, process: { env: {} }, Intl });
 const VALE_PASS_VARIANT = 'gid://shopify/ProductVariant/49174518595684';
 const valePassLib = load('src/lib/vale-pass-product.ts', { process: { env: {} }, require: () => shopifyLib });
 const { amountToCents, parseCents, centsToAmount, sumPrices, selectionTotal, reservationSummary } = price;
@@ -189,6 +192,7 @@ function loadCart(shop) {
       if (name === './rental-selection') return selectionLib;
       if (name === './vale-pass-product') return valePassLib;
       if (name === './shopify-stock') return shopifyStockLib;
+      if (name === './shopify-network-guard') return guardLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env: { NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN: 'loja-teste.myshopify.com', NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN: 'token-publico-de-teste' } },

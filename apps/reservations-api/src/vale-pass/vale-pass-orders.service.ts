@@ -13,6 +13,11 @@ const MAX_RECONCILE_WINDOW_DAYS = 60;
 /** 50 páginas × 10 pedidos: bem acima do volume da loja; passou disso, `truncated`. */
 const MAX_PAGES = 50;
 const MAX_OPEN_ORDERS = 500;
+/** Sem `read_all_orders`, o app só enxerga ~60 dias: mais antigo que isso, a
+ *  ausência do pedido não significa exclusão (mesma regra das reservas). */
+const VERIFIABLE_AGE_DAYS = 55;
+/** Se TODOS os pedidos consultados voltarem vazios, é falha de acesso, não exclusão em massa. */
+const MASS_MISSING_GUARD_MIN = 3;
 
 export interface ValePassOrderItem {
   readonly id: string;
@@ -43,9 +48,12 @@ export interface ValePassOrderReconciliationReport {
   readonly unchanged: number;
   readonly stale: number;
   readonly vouchersRecovered: number;
-  /** Pedido em aberto no registro que a Shopify não devolveu (excluído ou fora
-   *  do alcance da leitura): nada é alterado. */
+  /** Pedido do registro que a Shopify não devolveu. */
   readonly notFound: number;
+  /** Desses, os registrados agora como excluídos na Shopify (pedido recente,
+   *  dentro do alcance da leitura, e consulta que não voltou toda vazia). O
+   *  resto (fora do alcance ou falha de acesso) fica como está. */
+  readonly deleted: number;
   readonly failed: number;
   readonly truncated: boolean;
 }
@@ -69,9 +77,11 @@ export class ValePassOrdersService {
     private readonly valePass: ValePassWebhookService,
   ) {}
 
-  async list(filters: { status?: ValePassOrderStatus; limit?: number } = {}): Promise<ValePassOrderItem[]> {
+  /** Pedido excluído na Shopify sai da lista padrão; `includeDeleted` o traz de
+   *  volta (filtro "Mostrar excluídos da Shopify"), com o histórico intacto. */
+  async list(filters: { status?: ValePassOrderStatus; limit?: number; includeDeleted?: boolean } = {}): Promise<ValePassOrderItem[]> {
     const rows = await this.prisma.valePassOrder.findMany({
-      where: filters.status ? { status: filters.status } : {},
+      where: { ...(filters.status ? { status: filters.status } : {}), ...(filters.includeDeleted ? {} : { deletedInShopifyAt: null }) },
       orderBy: [{ orderCreatedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       take: Math.min(Math.max(filters.limit ?? 100, 1), 300),
     });
@@ -96,7 +106,7 @@ export class ValePassOrdersService {
       orderCreatedAt: row.orderCreatedAt?.toISOString() ?? null,
       statusChangedAt: row.statusChangedAt.toISOString(),
       deletedInShopifyAt: row.deletedInShopifyAt?.toISOString() ?? null,
-      needsAttention: needsAttention(row),
+      needsAttention: !row.deletedInShopifyAt && needsAttention(row),
       vouchers: vouchers.filter((v) => v.shopifyOrderId === row.shopifyOrderId).map((v) => ({ code: v.code, status: v.status })),
     }));
   }
@@ -105,6 +115,8 @@ export class ValePassOrdersService {
   private attentionWhere(): Prisma.ValePassOrderWhereInput {
     return {
       status: { in: [...ATTENTION_STATUSES] },
+      // Fora da lista padrão, fora do contador.
+      deletedInShopifyAt: null,
       OR: [{ viewedAt: null }, { viewedAt: { lt: this.prisma.valePassOrder.fields.statusChangedAt } }],
     };
   }
@@ -167,22 +179,52 @@ export class ValePassOrdersService {
     const candidates = new Map<string, ShopifyOrderWithLines>();
     for (const order of recent.orders) if (units(order) > 0) candidates.set(order.orderId, order);
 
-    // Pedido ainda em aberto no registro (pendente, ou pago sem vale processado)
-    // que não mudou dentro da janela: consulta direta, para não ficar pendente
-    // para sempre no painel.
-    const open = await this.prisma.valePassOrder.findMany({
-      where: { deletedInShopifyAt: null, OR: [{ status: 'PENDING' }, { status: 'CONFIRMED', vouchersProcessedAt: null }] },
+    // Fora da janela de pedidos alterados, consulta direta de:
+    //  - pedido ainda em aberto (pendente, ou pago sem vale processado), para
+    //    não ficar pendente para sempre no painel;
+    //  - pedido recente (dentro do alcance de leitura da Shopify), para achar o
+    //    que foi EXCLUÍDO na Shopify com o `orders/delete` perdido.
+    const verifiableSince = new Date(now.getTime() - VERIFIABLE_AGE_DAYS * 86_400_000);
+    const lookups = await this.prisma.valePassOrder.findMany({
+      where: {
+        deletedInShopifyAt: null,
+        OR: [
+          { status: 'PENDING' },
+          { status: 'CONFIRMED', vouchersProcessedAt: null },
+          { orderCreatedAt: { gte: verifiableSince } },
+          { orderCreatedAt: null, createdAt: { gte: verifiableSince } },
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       take: MAX_OPEN_ORDERS,
-      select: { shopifyOrderId: true, shopifyOrderGid: true },
+      select: { shopifyOrderId: true, shopifyOrderGid: true, orderCreatedAt: true, createdAt: true },
     });
-    const outside = open.filter((row) => !candidates.has(row.shopifyOrderId));
+    const outside = lookups.filter((row) => !candidates.has(row.shopifyOrderId));
     let notFound = 0;
+    let deleted = 0;
+    let failed = 0;
     if (outside.length > 0) {
-      const states = await this.shopify.getOrdersWithLinesByGid(outside.map((row) => row.shopifyOrderGid ?? `gid://shopify/Order/${row.shopifyOrderId}`));
-      for (const state of states.values()) {
-        if (state && units(state) > 0) candidates.set(state.orderId, state);
-        else notFound++;
+      const gidOf = (row: { shopifyOrderId: string; shopifyOrderGid: string | null }) => row.shopifyOrderGid ?? `gid://shopify/Order/${row.shopifyOrderId}`;
+      const states = await this.shopify.getOrdersWithLinesByGid(outside.map(gidOf));
+      const missing = outside.filter((row) => !states.get(gidOf(row)));
+      // Todos vazios = falha de acesso, nunca exclusão em massa (mesma trava da
+      // reconciliação das reservas); fora do alcance de leitura também não é exclusão.
+      const massMissing = outside.length >= MASS_MISSING_GUARD_MIN && missing.length === outside.length;
+      for (const row of outside) {
+        const state = states.get(gidOf(row));
+        if (state && units(state) > 0) {
+          candidates.set(state.orderId, state);
+          continue;
+        }
+        notFound++;
+        const createdAt = row.orderCreatedAt ?? row.createdAt;
+        if (state || massMissing || createdAt < verifiableSince) continue;
+        try {
+          if (await this.markDeleted(row.shopifyOrderId, source)) deleted++;
+        } catch (err) {
+          failed++;
+          this.logger.error(`Falha ao registrar a exclusão do pedido de Valle Pass ${row.shopifyOrderId}: ${err instanceof Error ? err.name : 'unknown'}`);
+        }
       }
     }
 
@@ -191,7 +233,6 @@ export class ValePassOrdersService {
     let unchanged = 0;
     let stale = 0;
     let vouchersRecovered = 0;
-    let failed = 0;
     for (const order of candidates.values()) {
       try {
         const outcome = await this.applyOne(order, units(order), source);
@@ -218,9 +259,21 @@ export class ValePassOrdersService {
       stale,
       vouchersRecovered,
       notFound,
+      deleted,
       failed,
       truncated: recent.truncated,
     };
+  }
+
+  /** Mesma regra e mesmo lock do `orders/delete` (ValePassOrderRegistry.markDeleted). */
+  private markDeleted(orderId: string, source: string): Promise<boolean> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await lockShopifyOrder(tx, orderId);
+        return (await this.valePass.orders.markDeleted(tx, orderId, source)).length > 0;
+      },
+      { timeout: 15_000, maxWait: 5_000 },
+    );
   }
 
   /** Uma transação por pedido, com o MESMO lock dos webhooks. */

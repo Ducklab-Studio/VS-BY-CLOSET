@@ -12,6 +12,9 @@ const transpile = (path) =>
   ts.transpileModule(readFileSync(new URL(path, root), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
   }).outputText;
+// Trava da Shopify real (sem rede) — importada por shopify.ts e cart.ts.
+const guardLib = {};
+runInNewContext(transpile('src/lib/shopify-network-guard.ts'), { exports: guardLib, URL });
 
 const selection = {};
 runInNewContext(transpile('src/lib/rental-selection.ts'), { exports: selection, Date, Number, Set });
@@ -111,6 +114,7 @@ function loadCart({ storedCartId = null, responses }) {
       if (name === './rental-selection') return selection;
       if (name === './vale-pass-product') return valePass;
       if (name === './shopify-stock') return shopifyStockLib;
+      if (name === './shopify-network-guard') return guardLib;
       throw new Error(`import inesperado: ${name}`);
     },
     process: { env },

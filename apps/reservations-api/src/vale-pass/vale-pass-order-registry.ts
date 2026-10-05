@@ -69,6 +69,19 @@ export class ValePassOrderRegistry {
       return { order, created: true, statusChanged: false, stale: false, events: [{ type: 'VALE_PASS_ORDER_REGISTERED', detail: { ...base, status: target } }] };
     }
 
+    if (existing.deletedInShopifyAt && (target === 'PENDING' || target === 'CONFIRMED')) {
+      // Pedido já excluído na Shopify: entrega atrasada de criação/pagamento
+      // nunca reabre nem confirma (e, por isso, nunca emite vale). Cancelamento,
+      // expiração e reembolso ainda passam — só encerram.
+      return {
+        order: existing,
+        created: false,
+        statusChanged: false,
+        stale: true,
+        events: [{ type: 'VALE_PASS_ORDER_SYNC_STALE', detail: { ...base, status: existing.status, ignoredStatus: target, reason: 'pedido excluído na Shopify' } }],
+      };
+    }
+
     const freshness = compareFreshness(existing.shopifyUpdatedAt, snapshot.updatedAt);
     if (freshness === 'older') {
       // Webhook atrasado/fora de ordem: nada que já foi aplicado é desfeito.
@@ -126,21 +139,34 @@ export class ValePassOrderRegistry {
     return [{ type: 'VALE_PASS_ORDER_STATUS_CHANGED', detail }];
   }
 
-  /** Pedido excluído na Shopify: a linha e o histórico ficam. Pendente vira
-   *  CANCELLED (não há mais o que pagar); pago/final mantém o status. */
+  /** Pedido excluído na Shopify: a linha e o histórico ficam (sai só da lista
+   *  padrão). Pendente vira CANCELLED (não há mais o que pagar); pago/final
+   *  mantém o status e os vales — excluir não é cancelar nem reembolsar, então
+   *  nada é cancelado aqui; o evento registra para auditoria. Uma vez só:
+   *  exclusão repetida, atrasada ou concorrente não grava de novo. Pedido que
+   *  o ClosetAdmin não importou não é tocado. */
   async markDeleted(tx: Prisma.TransactionClient, orderId: string, source: string): Promise<ValePassOrderEventInput[]> {
     const existing = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: orderId } });
     if (!existing || existing.deletedInShopifyAt) return [];
     const toCancel = existing.status === 'PENDING';
-    await tx.valePassOrder.update({
-      where: { id: existing.id },
+    const now = new Date();
+    const updated = await tx.valePassOrder.updateMany({
+      where: { id: existing.id, deletedInShopifyAt: null },
       data: {
-        deletedInShopifyAt: new Date(),
+        deletedInShopifyAt: now,
         lastSyncSource: source,
-        ...(toCancel ? { status: 'CANCELLED' as const, cancelReason: 'deleted_in_shopify', statusChangedAt: new Date() } : {}),
+        ...(toCancel ? { status: 'CANCELLED' as const, cancelReason: 'deleted_in_shopify', statusChangedAt: now } : {}),
       },
     });
-    const detail = { orderId, source, status: existing.status, ...(toCancel ? { from: 'PENDING', to: 'CANCELLED' } : {}) };
+    if (updated.count !== 1) return [];
+    const activeVouchers = existing.status === 'CONFIRMED' ? await tx.valePass.count({ where: { shopifyOrderId: orderId, status: 'ACTIVE' } }) : 0;
+    const detail = {
+      orderId,
+      source,
+      status: existing.status,
+      ...(toCancel ? { from: 'PENDING', to: 'CANCELLED' } : {}),
+      ...(existing.status === 'CONFIRMED' ? { paid: true, activeVouchers, note: 'pedido pago excluído na Shopify — vales mantidos; cancelamento/reembolso segue pelo próprio evento' } : {}),
+    };
     await this.log(tx, existing.id, 'DELETED_IN_SHOPIFY', detail);
     return [{ type: 'VALE_PASS_ORDER_DELETED_IN_SHOPIFY', detail }];
   }

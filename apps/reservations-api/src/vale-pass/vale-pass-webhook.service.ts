@@ -95,7 +95,11 @@ export class ValePassWebhookService {
     const result = await this.orders.apply(tx, snapshotFromPayload(order, quantity), source);
     const events: EventInput[] = [...result.events];
 
-    if (topic === 'orders/paid' && order.financial_status === 'paid' && (result.order.status === 'EXPIRED' || result.order.status === 'DECLINED')) {
+    if (result.order.deletedInShopifyAt && (topic === 'orders/paid' || topic === 'orders/updated') && order.financial_status === 'paid') {
+      // Pagamento entregue depois da exclusão do pedido na Shopify: registra e
+      // não emite vale (nem para um pedido pago que ainda não tinha emitido).
+      events.push({ type: 'VALE_PASS_PAYMENT_NOT_APPLIED', detail: { orderId: result.order.shopifyOrderId, status: result.order.status, reason: 'pedido excluído na Shopify' } });
+    } else if (topic === 'orders/paid' && order.financial_status === 'paid' && (result.order.status === 'EXPIRED' || result.order.status === 'DECLINED')) {
       // `orders/paid` mais antigo que a expiração/recusa já aplicada (webhook
       // atrasado): pedido expirado não fica confirmado nem ganha vale ativo.
       events.push({ type: 'VALE_PASS_PAYMENT_NOT_APPLIED', detail: { orderId: result.order.shopifyOrderId, status: result.order.status, reason: 'estado mais recente do pedido é expirado/recusado' } });
@@ -113,7 +117,7 @@ export class ValePassWebhookService {
    *  `orders/paid` se perdeu ou ainda não chegou). Idempotente: `handleOrderPaid`
    *  não emite de novo para um pedido que já tem vale. */
   async issueForConfirmedOrder(tx: Prisma.TransactionClient, order: ValePassOrder, payload: ShopifyOrderPayload, source: string): Promise<EventInput[]> {
-    if (order.status !== 'CONFIRMED' || order.vouchersProcessedAt) return [];
+    if (order.status !== 'CONFIRMED' || order.vouchersProcessedAt || order.deletedInShopifyAt) return [];
     const issued = await this.handleOrderPaid(tx, payload);
     await this.orders.markVouchersProcessed(tx, order.id, source, issued);
     return [

@@ -38,6 +38,8 @@ export interface ReservationListItem {
   readonly shopifyOrderId: string | null;
   readonly itemCount: number;
   readonly archivedAt: string | null;
+  /** Pedido vinculado excluído na Shopify (a reserva nunca é apagada). */
+  readonly shopifyOrderDeletedAt: string | null;
   /** Nova para a equipe: reserva da Shopify pendente ou confirmada ainda não vista neste status. */
   readonly needsAttention: boolean;
 }
@@ -53,6 +55,8 @@ export interface ReservationFilters {
   code?: string;
   includeArchived?: boolean;
   archivedOnly?: boolean;
+  /** "Mostrar excluídos da Shopify". */
+  shopifyDeletedOnly?: boolean;
 }
 
 export function listReservations(adminUserId: string, filters: ReservationFilters): Promise<ReservationListItem[]> {
@@ -481,8 +485,14 @@ export interface ValePassOrder {
   readonly vouchers: readonly { readonly code: string; readonly status: ValePassStatus }[];
 }
 
-export function listValePassOrders(adminUserId: string, status?: ValePassOrderStatus): Promise<ValePassOrder[]> {
-  return adminGet(`/admin/vale-pass/orders${status ? `?status=${status}` : ''}`, adminUserId);
+/** Pedido excluído na Shopify fica fora por padrão; `includeDeleted` = filtro
+ *  "Mostrar excluídos da Shopify". */
+export function listValePassOrders(adminUserId: string, options: { status?: ValePassOrderStatus; includeDeleted?: boolean } = {}): Promise<ValePassOrder[]> {
+  const params = new URLSearchParams();
+  if (options.status) params.set('status', options.status);
+  if (options.includeDeleted) params.set('includeDeleted', 'true');
+  const query = params.toString();
+  return adminGet(`/admin/vale-pass/orders${query ? `?${query}` : ''}`, adminUserId);
 }
 
 /** Contador do menu lateral (global para a equipe). */

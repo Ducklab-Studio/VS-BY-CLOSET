@@ -5,7 +5,7 @@ import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/adm
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
-import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, reservationStatusLabel } from '@/components/closetadmin/ui';
+import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, ShopifyDeletedBadge, reservationStatusLabel } from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
 import { OperationalButton } from './OperationalButton';
 import { RestoreButton } from './RestoreButton';
@@ -75,6 +75,7 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               <MarkReservationViewed id={reservation.id} status={reservation.status} needsAttention={reservation.needsAttention} />
               <SourceBadge source={reservation.source} />
               {reservation.archivedAt ? <ArchivedBadge /> : null}
+              {reservation.shopifyOrderDeletedAt ? <ShopifyDeletedBadge /> : null}
             </div>
 
             <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
@@ -91,13 +92,22 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               {reservation.archiveReason ? <Field label="Motivo do arquivamento" value={reservation.archiveReason} /> : null}
             </dl>
 
-            {isOnline && reservation.status === 'confirmed' ? (
+            {reservation.shopifyOrderDeletedAt ? (
+              <div data-testid="shopify-deleted-reason" className="mt-4 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                Pedido excluído na Shopify em {formatDateTimePt(reservation.shopifyOrderDeletedAt)}.{' '}
+                {reservation.archivedAt
+                  ? 'A reserva saiu da lista ativa; o histórico e o vínculo com o pedido foram mantidos.'
+                  : 'A reserva continua na lista para revisão: ela já estava em andamento, então a peça não foi liberada automaticamente.'}
+              </div>
+            ) : null}
+
+            {isOnline && reservation.status === 'confirmed' && !reservation.shopifyOrderDeletedAt ? (
               <div className="mt-4 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/40 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
                 Esta reserva está vinculada a um pedido Shopify. Cancelamentos devem considerar pedido/pagamento — use o Shopify Admin.
               </div>
             ) : null}
 
-            {orderUrl ? (
+            {orderUrl && !reservation.shopifyOrderDeletedAt ? (
               <a href={orderUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-marsala dark:text-gold hover:underline">
                 Abrir pedido no Shopify <ExternalLink size={14} />
               </a>

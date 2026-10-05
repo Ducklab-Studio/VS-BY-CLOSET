@@ -41,6 +41,8 @@ const userIds = [];
 const valePassOrderIds = [];
 let counter = 0;
 let browser;
+/** Requisições do navegador para fora do computador (deve ficar vazio). */
+const externalRequests = [];
 
 function spawnLocal(command, args, cwd, env) {
   const child = spawn(command, args, { cwd, env, stdio: 'ignore', windowsHide: true });
@@ -96,7 +98,12 @@ async function newPage(context, errors) {
 }
 async function newContext(token, options = {}) {
   const context = await browser.newContext(options);
-  await context.route('**/*', (route) => ['localhost', '127.0.0.1'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
+  await context.route('**/*', (route) => {
+    const host = new URL(route.request().url()).hostname;
+    if (['localhost', '127.0.0.1'].includes(host)) return route.continue();
+    externalRequests.push(host); // navegador tentando sair (Shopify real, CDN...): reprova o teste
+    return route.abort();
+  });
   await context.addCookies([{ name: 'closetadmin_session', value: token, url: webUrl, httpOnly: true, sameSite: 'Lax' }]);
   return context;
 }
@@ -152,7 +159,7 @@ try {
   };
   spawnLocal(process.execPath, [path.join(apiDir, 'dist/src/main.js')], apiDir, { ...childEnv, PORT: '3353', NODE_ENV: 'development' });
   spawnLocal(process.execPath, [path.join(marketingDir, 'node_modules/next/dist/bin/next'), 'start', '-p', '3053', '-H', '127.0.0.1'], marketingDir, {
-    ...childEnv, NODE_ENV: 'production', RESERVATIONS_API_ADMIN_URL: apiUrl, RESERVATIONS_API_URL: apiUrl, NEXT_TELEMETRY_DISABLED: '1',
+    ...childEnv, NODE_ENV: 'production', RESERVATIONS_API_ADMIN_URL: apiUrl, RESERVATIONS_API_URL: apiUrl, NEXT_TELEMETRY_DISABLED: '1', __NEXT_PROCESSED_ENV: 'true',
   });
   await waitFor(`${apiUrl}/health`);
   await waitFor(`${webUrl}/closetadmin/login`);
@@ -306,6 +313,7 @@ try {
   pass('quem não tem o módulo de Reservas não vê item, badge nem ponto de reservas');
 
   assert.deepEqual(errors, []);
+  assert.deepEqual(externalRequests, [], 'o navegador tentou acessar a internet (Shopify real?)');
   pass('nenhum erro no console nem erro de página');
   console.log(`Contador de reservas no navegador: ${results.length} verificações passaram.`);
 } finally {
