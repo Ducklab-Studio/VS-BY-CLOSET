@@ -3,7 +3,8 @@ import 'server-only';
 import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { adminPost } from './admin-api';
+import { adminPost, AdminApiError } from './admin-api';
+import { SESSION_NOTICE_PARAM, classifySessionLoss, type SessionNoticeKind } from '@/app/closetadmin/login/login-errors';
 
 import { ADMIN_SESSION_COOKIE } from './admin-cookie';
 import { createSessionMemo } from './session-memo';
@@ -31,11 +32,17 @@ const sessionMemoForRequest = cache(() =>
   createSessionMemo(async (token: string): Promise<AdminSessionUser | null> => {
     try {
       return await adminPost<AdminSessionUser>('/admin/auth/session', { token });
-    } catch {
+    } catch (err) {
+      // Continua sendo "sem sessão" (nunca libera nada), mas guarda POR QUE: sessão
+      // expirada/revogada x painel que não conseguiu confirmar (API fora, 5xx...).
+      sessionLossForRequest().reason = err instanceof AdminApiError ? classifySessionLoss(err.status, err.message) : 'unavailable';
       return null;
     }
   }),
 );
+
+/** Motivo da última sessão recusada NESTA requisição (memória nova por requisição, como a de cima). */
+const sessionLossForRequest = cache((): { reason: SessionNoticeKind | null } => ({ reason: null }));
 
 export async function getAdminSession(): Promise<AdminSessionUser | null> {
   const store = await cookies();
@@ -50,7 +57,10 @@ export async function getAdminSession(): Promise<AdminSessionUser | null> {
  *  renderizar qualquer dado. */
 export async function requireAdminSession(): Promise<AdminSessionUser> {
   const session = await getAdminSession();
-  if (!session) redirect('/closetadmin/login');
+  if (!session) {
+    const reason = sessionLossForRequest().reason;
+    redirect(reason ? `/closetadmin/login?motivo=${SESSION_NOTICE_PARAM[reason]}` : '/closetadmin/login');
+  }
   return session;
 }
 
