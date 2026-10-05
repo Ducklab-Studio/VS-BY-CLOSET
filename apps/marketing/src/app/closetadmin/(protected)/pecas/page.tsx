@@ -44,7 +44,8 @@ export default async function ClosetAdminPiecesPage() {
     return <ErrorState message={err instanceof AdminApiError ? err.message : 'Erro inesperado.'} />;
   }
   const pieces = piecesResult.value;
-  const archivedPieces: PieceListItem[] | null = archivedResult.status === 'fulfilled' ? archivedResult.value : null;
+  const archivedPieces: PieceListItem[] | null =
+    archivedResult.status === 'fulfilled' ? archivedResult.value : null;
   const catalog = catalogResult.status === 'fulfilled' ? catalogResult.value : null;
   const catalogError =
     catalogResult.status === 'rejected'
@@ -67,13 +68,17 @@ export default async function ClosetAdminPiecesPage() {
       <section className="mb-8">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 className="text-base font-semibold text-ink dark:text-dark-text">Catálogo Shopify</h2>
+            <h2 className="text-base font-semibold text-ink dark:text-dark-text">
+              Catálogo Shopify
+            </h2>
             <p className="mt-0.5 text-sm text-ink/55 dark:text-dark-muted">
               Produtos e variantes vêm da Shopify; aqui você só vincula as peças físicas do aluguel.
             </p>
           </div>
           {catalog ? (
-            <span className="text-xs text-ink/45 dark:text-dark-subtle">{catalog.length} variante(s)</span>
+            <span className="text-xs text-ink/45 dark:text-dark-subtle">
+              {catalog.length} variante(s)
+            </span>
           ) : null}
         </div>
 
@@ -95,20 +100,36 @@ export default async function ClosetAdminPiecesPage() {
         </div>
 
         {pieces.length === 0 ? (
-          <EmptyState title="Nenhuma peça física cadastrada" description="Cadastre as unidades pelo catálogo Shopify acima." />
+          <EmptyState
+            title="Nenhuma peça física cadastrada"
+            description="Cadastre as unidades pelo catálogo Shopify acima."
+          />
         ) : (
           <>
             <div className="space-y-3 md:hidden">
               {pieces.map((piece) => {
                 const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
                 return (
-                  <div key={piece.id} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
+                  <div
+                    key={piece.id}
+                    className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
-                        <p className="mt-0.5 font-medium text-ink dark:text-dark-text">{piece.name}</p>
+                        <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">
+                          {piece.code}
+                        </p>
+                        <p className="mt-0.5 font-medium text-ink dark:text-dark-text">
+                          {piece.name}
+                        </p>
                         <p className="mt-0.5 font-mono text-xs text-ink/60 dark:text-dark-muted">
-                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : piece.shopifySku ? <>SKU {piece.shopifySku}</> : <SkuMissingLabel />}
+                          {isSkuUnlinked(piece) ? (
+                            <SkuUnlinkedLabel />
+                          ) : piece.shopifySku ? (
+                            <>SKU {piece.shopifySku}</>
+                          ) : (
+                            <SkuMissingLabel />
+                          )}
                         </p>
                       </div>
                       <StatusBadge piece={piece} />
@@ -117,27 +138,44 @@ export default async function ClosetAdminPiecesPage() {
 
                     <dl className="mt-3.5 grid grid-cols-3 gap-2 border-t border-ink/5 pt-3.5 text-center dark:border-white/5">
                       <div>
-                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Ativa</dt>
+                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">
+                          Ativa
+                        </dt>
                         <dd className="mt-1.5 flex justify-center">
                           {isAdmin ? (
-                            <PieceActiveToggle pieceId={piece.id} pieceName={piece.name} initialValue={piece.active} missingVariantReason={!!piece.shopifyVariantMissingAt} />
+                            <PieceActiveToggle
+                              pieceId={piece.id}
+                              pieceName={piece.name}
+                              initialValue={piece.active}
+                              missingVariantReason={!!piece.shopifyVariantMissingAt}
+                            />
                           ) : (
                             <ReadOnlyDot value={piece.active} />
                           )}
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Online</dt>
+                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">
+                          Online
+                        </dt>
                         <dd className="mt-1.5 flex justify-center">
                           {isAdmin ? (
-                            <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} disabled={!piece.active} disabledTitle="Peça desativada — reative para editar." />
+                            <PieceToggle
+                              pieceId={piece.id}
+                              field="reservableOnline"
+                              initialValue={piece.reservableOnline}
+                              disabled={!piece.active}
+                              disabledTitle="Peça desativada — reative para editar."
+                            />
                           ) : (
                             <ReadOnlyDot value={piece.reservableOnline} />
                           )}
                         </dd>
                       </div>
                       <div>
-                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">Na duração</dt>
+                        <dt className="text-[10px] uppercase tracking-wide text-ink/65 dark:text-dark-subtle">
+                          Na duração
+                        </dt>
                         <dd className="mt-1.5 flex justify-center">
                           {isAdmin ? (
                             <PieceToggle
@@ -157,7 +195,12 @@ export default async function ClosetAdminPiecesPage() {
                     <div className="mt-3.5 flex items-center justify-between border-t border-ink/5 pt-3 text-xs text-ink/70 dark:border-white/5 dark:text-dark-muted">
                       <span>{piece.upcomingReservations} próxima(s) reserva(s)</span>
                       {productUrl ? (
-                        <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium text-marsala hover:underline dark:text-gold">
+                        <a
+                          href={productUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 font-medium text-marsala hover:underline dark:text-gold"
+                        >
                           Shopify <ExternalLink size={12} />
                         </a>
                       ) : null}
@@ -186,28 +229,48 @@ export default async function ClosetAdminPiecesPage() {
                   {pieces.map((piece) => {
                     const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
                     return (
-                      <tr key={piece.id} className="transition hover:bg-ink/5 dark:hover:bg-white/5">
-                        <td className="px-4 py-3 font-mono text-xs font-medium text-ink dark:text-dark-text">{piece.code}</td>
+                      <tr
+                        key={piece.id}
+                        className="transition hover:bg-ink/5 dark:hover:bg-white/5"
+                      >
+                        <td className="px-4 py-3 font-mono text-xs font-medium text-ink dark:text-dark-text">
+                          {piece.code}
+                        </td>
                         <td className="px-4 py-3 text-ink/80 dark:text-dark-text">
                           {piece.name}
                           {piece.shopifyVariantMissingAt ? <MissingVariantBadge /> : null}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-ink/50 dark:text-dark-muted">
-                          {isSkuUnlinked(piece) ? <SkuUnlinkedLabel /> : (piece.shopifySku ?? <SkuMissingLabel />)}
+                          {isSkuUnlinked(piece) ? (
+                            <SkuUnlinkedLabel />
+                          ) : (
+                            (piece.shopifySku ?? <SkuMissingLabel />)
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge piece={piece} />
                         </td>
                         <td className="px-4 py-3 text-center">
                           {isAdmin ? (
-                            <PieceActiveToggle pieceId={piece.id} pieceName={piece.name} initialValue={piece.active} missingVariantReason={!!piece.shopifyVariantMissingAt} />
+                            <PieceActiveToggle
+                              pieceId={piece.id}
+                              pieceName={piece.name}
+                              initialValue={piece.active}
+                              missingVariantReason={!!piece.shopifyVariantMissingAt}
+                            />
                           ) : (
                             <ReadOnlyDot value={piece.active} />
                           )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           {isAdmin ? (
-                            <PieceToggle pieceId={piece.id} field="reservableOnline" initialValue={piece.reservableOnline} disabled={!piece.active} disabledTitle="Peça desativada — reative para editar." />
+                            <PieceToggle
+                              pieceId={piece.id}
+                              field="reservableOnline"
+                              initialValue={piece.reservableOnline}
+                              disabled={!piece.active}
+                              disabledTitle="Peça desativada — reative para editar."
+                            />
                           ) : (
                             <ReadOnlyDot value={piece.reservableOnline} />
                           )}
@@ -225,10 +288,17 @@ export default async function ClosetAdminPiecesPage() {
                             <ReadOnlyDot value={piece.countsTowardRentalDuration} />
                           )}
                         </td>
-                        <td className="px-4 py-3 text-ink/60 dark:text-dark-muted">{piece.upcomingReservations}</td>
+                        <td className="px-4 py-3 text-ink/60 dark:text-dark-muted">
+                          {piece.upcomingReservations}
+                        </td>
                         <td className="px-4 py-3">
                           {productUrl ? (
-                            <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
+                            <a
+                              href={productUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold"
+                            >
                               Shopify <ExternalLink size={12} />
                             </a>
                           ) : null}
@@ -264,18 +334,23 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
           Peças arquivadas {pieces ? `(${pieces.length})` : ''}
         </span>
         <span className="text-xs text-ink/50 group-open:hidden dark:text-dark-subtle">Mostrar</span>
-        <span className="hidden text-xs text-ink/50 group-open:inline dark:text-dark-subtle">Ocultar</span>
+        <span className="hidden text-xs text-ink/50 group-open:inline dark:text-dark-subtle">
+          Ocultar
+        </span>
       </summary>
 
       <div className="border-t border-ink/5 px-4 pb-4 pt-3 dark:border-white/5">
         <p className="text-xs text-ink/60 dark:text-dark-muted">
-          Excluídas, em rascunho ou arquivadas na Shopify. Não aparecem no site, na disponibilidade nem em reservas novas, e nunca são
-          apagadas: reservas, histórico e auditoria continuam guardados. Voltam sozinhas para a lista principal quando a variante volta a
-          ficar ativa na Shopify.
+          Excluídas, em rascunho ou arquivadas na Shopify. Não aparecem no site, na disponibilidade
+          nem em reservas novas, e nunca são apagadas: reservas, histórico e auditoria continuam
+          guardados. Voltam sozinhas para a lista principal quando a variante volta a ficar ativa na
+          Shopify.
         </p>
 
         {!pieces ? (
-          <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Não foi possível carregar as peças arquivadas agora.</p>
+          <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+            Não foi possível carregar as peças arquivadas agora.
+          </p>
         ) : pieces.length === 0 ? (
           <p className="mt-3 text-sm text-ink/55 dark:text-dark-muted">Nenhuma peça arquivada.</p>
         ) : (
@@ -284,14 +359,22 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
                 antigo) nunca é mostrado nem enviado ao navegador. */}
             <div className="mt-3 space-y-2 md:hidden">
               {pieces.map((piece) => (
-                <div key={piece.id} className="rounded-lg border border-ink/10 p-3 dark:border-white/10">
+                <div
+                  key={piece.id}
+                  className="rounded-lg border border-ink/10 p-3 dark:border-white/10"
+                >
                   <p className="font-mono text-xs text-ink/60 dark:text-dark-muted">{piece.code}</p>
                   <p className="mt-0.5 text-sm text-ink/80 dark:text-dark-text">{piece.name}</p>
                   <p className="mt-0.5 font-mono text-xs">
                     <SkuUnlinkedLabel />
                   </p>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink/60 dark:text-dark-muted">
-                    <span>Arquivada em {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}</span>
+                    <span>
+                      Arquivada em{' '}
+                      {piece.shopifyVariantMissingAt
+                        ? formatArchivedAt(piece.shopifyVariantMissingAt)
+                        : '—'}
+                    </span>
                     <ArchivedUpcoming count={piece.upcomingReservations} />
                   </div>
                 </div>
@@ -315,20 +398,31 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
                     const productUrl = shopifyProductAdminUrl(piece.shopifyProductId);
                     return (
                       <tr key={piece.id}>
-                        <td className="py-2.5 pr-4 font-mono text-xs text-ink/70 dark:text-dark-muted">{piece.code}</td>
-                        <td className="py-2.5 pr-4 text-ink/80 dark:text-dark-text">{piece.name}</td>
+                        <td className="py-2.5 pr-4 font-mono text-xs text-ink/70 dark:text-dark-muted">
+                          {piece.code}
+                        </td>
+                        <td className="py-2.5 pr-4 text-ink/80 dark:text-dark-text">
+                          {piece.name}
+                        </td>
                         <td className="py-2.5 pr-4 font-mono text-xs">
                           <SkuUnlinkedLabel />
                         </td>
                         <td className="py-2.5 pr-4 text-xs text-ink/60 dark:text-dark-muted">
-                          {piece.shopifyVariantMissingAt ? formatArchivedAt(piece.shopifyVariantMissingAt) : '—'}
+                          {piece.shopifyVariantMissingAt
+                            ? formatArchivedAt(piece.shopifyVariantMissingAt)
+                            : '—'}
                         </td>
                         <td className="py-2.5 pr-4 text-xs">
                           <ArchivedUpcoming count={piece.upcomingReservations} />
                         </td>
                         <td className="py-2.5">
                           {productUrl ? (
-                            <a href={productUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
+                            <a
+                              href={productUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold"
+                            >
                               Shopify <ExternalLink size={12} />
                             </a>
                           ) : null}
@@ -349,18 +443,28 @@ function ArchivedPieces({ pieces }: { pieces: PieceListItem[] | null }) {
 /** Reserva futura de peça arquivada não é cancelada: fica em destaque para revisão. */
 function ArchivedUpcoming({ count }: { count: number }) {
   return count > 0 ? (
-    <span className="font-medium text-amber-700 dark:text-amber-300">{count} próxima(s) reserva(s) — revisar</span>
+    <span className="font-medium text-amber-700 dark:text-amber-300">
+      {count} próxima(s) reserva(s) — revisar
+    </span>
   ) : (
     <span className="text-ink/60 dark:text-dark-muted">0</span>
   );
 }
 
 function formatArchivedAt(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Santiago' });
+  return new Date(iso).toLocaleString('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Santiago',
+  });
 }
 
 function ReadOnlyDot({ value }: { value: boolean }) {
-  return <span className={`inline-block h-2.5 w-2.5 rounded-full ${value ? 'bg-marsala dark:bg-gold' : 'bg-ink/15 dark:bg-white/15'}`} />;
+  return (
+    <span
+      className={`inline-block h-2.5 w-2.5 rounded-full ${value ? 'bg-marsala dark:bg-gold' : 'bg-ink/15 dark:bg-white/15'}`}
+    />
+  );
 }
 
 /**

@@ -8,9 +8,12 @@ import { formatIsoDatePt } from '@/lib/closetadmin-dates';
 import { createManualReservationAction } from './actions';
 
 const VIOLATION_LABELS: Record<string, string> = {
-  pickup_before_minimum_advance: 'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
-  duration_mismatch_with_engine: 'A duração informada não corresponde ao cálculo automático do motor de regras.',
-  pickup_before_operation_start: 'A data de retirada é anterior ao início da operação configurado nas regras.',
+  pickup_before_minimum_advance:
+    'Esta retirada possui menos antecedência que o mínimo configurado nas regras.',
+  duration_mismatch_with_engine:
+    'A duração informada não corresponde ao cálculo automático do motor de regras.',
+  pickup_before_operation_start:
+    'A data de retirada é anterior ao início da operação configurado nas regras.',
   pickup_is_sunday: 'A retirada não pode ser num domingo.',
   max_pieces_exceeded: 'Quantidade de peças acima do máximo permitido.',
   no_reservable_items: 'Nenhuma peça válida selecionada.',
@@ -60,7 +63,9 @@ export function ManualReservationWizard({
   // Só preenchido quando o navegador bloqueou a nova aba do WhatsApp: a
   // reserva JÁ foi criada, então em vez de voltar ao passo 4 (onde um novo
   // clique em "Confirmar" tentaria criar de novo) mostramos o link.
-  const [created, setCreated] = useState<{ reservationId: string; whatsappUrl: string } | null>(null);
+  const [created, setCreated] = useState<{ reservationId: string; whatsappUrl: string } | null>(
+    null,
+  );
 
   const overridable = useMemo(
     () =>
@@ -95,7 +100,9 @@ export function ManualReservationWizard({
 
   function toggleUnit(id: string) {
     resetServerFeedback();
-    setSelectedUnitIds((prev) => (prev.includes(id) ? prev.filter((u) => u !== id) : [...prev, id]));
+    setSelectedUnitIds((prev) =>
+      prev.includes(id) ? prev.filter((u) => u !== id) : [...prev, id],
+    );
   }
 
   async function submit() {
@@ -159,7 +166,10 @@ export function ManualReservationWizard({
       <div className="max-w-2xl">
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900 shadow-sm dark:border-emerald-800/40 dark:bg-emerald-950/40 dark:text-emerald-200">
           <p className="font-semibold">Reserva criada com sucesso.</p>
-          <p className="mt-1">O navegador bloqueou a abertura automática do WhatsApp. Use o botão abaixo para enviar a confirmação ao cliente.</p>
+          <p className="mt-1">
+            O navegador bloqueou a abertura automática do WhatsApp. Use o botão abaixo para enviar a
+            confirmação ao cliente.
+          </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <a
               href={created.whatsappUrl}
@@ -189,15 +199,27 @@ export function ManualReservationWizard({
       {step === 1 ? (
         <div className="mt-6 flex flex-col gap-4">
           <Field label="Nome do cliente">
-            <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} className={inputClass} />
+            <input
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              className={inputClass}
+            />
           </Field>
           <Field label="Telefone">
             <PhoneInput value={customerPhone} onChange={setCustomerPhone} />
           </Field>
           <Field label="E-mail (opcional)">
-            <input value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} type="email" className={inputClass} />
+            <input
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+              type="email"
+              className={inputClass}
+            />
           </Field>
-          <NavButtons onNext={() => setStep(2)} nextDisabled={!customerName.trim() || !customerPhone.trim()} />
+          <NavButtons
+            onNext={() => setStep(2)}
+            nextDisabled={!customerName.trim() || !customerPhone.trim()}
+          />
         </div>
       ) : null}
 
@@ -225,20 +247,25 @@ export function ManualReservationWizard({
               className={inputClass}
             />
           </Field>
-          <NavButtons onBack={() => setStep(1)} onNext={() => setStep(3)} nextDisabled={!pickupDate} />
+          <NavButtons
+            onBack={() => setStep(1)}
+            onNext={() => setStep(3)}
+            nextDisabled={!pickupDate}
+          />
         </div>
       ) : null}
 
       {step === 3 ? (
         <div className="mt-6">
           <p className="text-sm text-ink/55 dark:text-dark-muted">
-            Selecione as peças físicas. A disponibilidade final é confirmada pelo servidor no momento de salvar — duas reservas nunca podem usar a mesma
-            peça no mesmo período.
+            Selecione as peças físicas. A disponibilidade final é confirmada pelo servidor no
+            momento de salvar — duas reservas nunca podem usar a mesma peça no mesmo período.
           </p>
 
           {activePieces.length === 0 ? (
             <div className="mt-3 rounded-xl border border-dashed border-ink/15 bg-white px-4 py-8 text-center text-sm text-ink/55 dark:border-white/10 dark:bg-dark-card dark:text-dark-muted">
-              Nenhuma peça ativa está disponível para selecionar. Cadastre ou ative uma peça em “Peças”.
+              Nenhuma peça ativa está disponível para selecionar. Cadastre ou ative uma peça em
+              “Peças”.
             </div>
           ) : (
             <ul className="mt-3 max-h-80 divide-y divide-ink/5 dark:divide-white/5 overflow-y-auto rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card">
@@ -265,7 +292,11 @@ export function ManualReservationWizard({
               ))}
             </ul>
           )}
-          <NavButtons onBack={() => setStep(2)} onNext={() => setStep(4)} nextDisabled={selectedUnitIds.length === 0} />
+          <NavButtons
+            onBack={() => setStep(2)}
+            onNext={() => setStep(4)}
+            nextDisabled={selectedUnitIds.length === 0}
+          />
         </div>
       ) : null}
 
@@ -273,16 +304,25 @@ export function ManualReservationWizard({
         <div className="mt-6 flex flex-col gap-4">
           <div className="rounded-xl border border-ink/10 dark:border-white/10 bg-white dark:bg-dark-card p-4 text-sm text-ink dark:text-dark-text shadow-sm">
             <p>
-              <strong className="text-marsala dark:text-gold font-semibold">{customerName}</strong> · {customerPhone}
+              <strong className="text-marsala dark:text-gold font-semibold">{customerName}</strong>{' '}
+              · {customerPhone}
             </p>
             <p className="mt-1 text-ink/60 dark:text-dark-muted">
-              Retirada: {pickupDate ? formatIsoDatePt(pickupDate) : '—'} {returnDate ? `· Devolução: ${formatIsoDatePt(returnDate)}` : ''}
+              Retirada: {pickupDate ? formatIsoDatePt(pickupDate) : '—'}{' '}
+              {returnDate ? `· Devolução: ${formatIsoDatePt(returnDate)}` : ''}
             </p>
-            <p className="mt-1 text-ink/60 dark:text-dark-muted">{selectedUnitIds.length} peça(s) selecionada(s)</p>
+            <p className="mt-1 text-ink/60 dark:text-dark-muted">
+              {selectedUnitIds.length} peça(s) selecionada(s)
+            </p>
           </div>
 
           <Field label="Nota interna (opcional)">
-            <textarea value={internalNote} onChange={(e) => setInternalNote(e.target.value)} rows={2} className={inputClass} />
+            <textarea
+              value={internalNote}
+              onChange={(e) => setInternalNote(e.target.value)}
+              rows={2}
+              className={inputClass}
+            />
           </Field>
 
           {blocking.length > 0 ? (
@@ -293,10 +333,15 @@ export function ManualReservationWizard({
                   <li key={v}>{VIOLATION_LABELS[v] ?? v}</li>
                 ))}
               </ul>
-              {!canOverrideSeason && blocking.some((v) => OVERRIDE_KEY_BY_VIOLATION[v] === 'outsideOnlineSeason') ? (
-                <p className="mt-2 text-xs opacity-80">Exceção de início da operação é exclusiva de usuário ADMIN.</p>
+              {!canOverrideSeason &&
+              blocking.some((v) => OVERRIDE_KEY_BY_VIOLATION[v] === 'outsideOnlineSeason') ? (
+                <p className="mt-2 text-xs opacity-80">
+                  Exceção de início da operação é exclusiva de usuário ADMIN.
+                </p>
               ) : (
-                <p className="mt-2 text-xs opacity-80">Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.</p>
+                <p className="mt-2 text-xs opacity-80">
+                  Volte e ajuste os dados; as validações serão refeitas ao confirmar novamente.
+                </p>
               )}
             </div>
           ) : null}
@@ -312,12 +357,16 @@ export function ManualReservationWizard({
                       <input
                         type="checkbox"
                         checked={Boolean(overrides[key])}
-                        onChange={(e) => setOverrides((prev) => ({ ...prev, [key]: e.target.checked }))}
+                        onChange={(e) =>
+                          setOverrides((prev) => ({ ...prev, [key]: e.target.checked }))
+                        }
                         className="mt-0.5 accent-marsala dark:accent-gold"
                       />
                       <span>
                         {VIOLATION_LABELS[v] ?? v} — permitir mesmo assim.
-                        {key === 'outsideOnlineSeason' ? ' O site público continua bloqueado; esta exceção vale somente para esta reserva manual.' : ''}
+                        {key === 'outsideOnlineSeason'
+                          ? ' O site público continua bloqueado; esta exceção vale somente para esta reserva manual.'
+                          : ''}
                       </span>
                     </label>
                   );
@@ -325,14 +374,25 @@ export function ManualReservationWizard({
               </div>
               {Object.values(overrides).some(Boolean) ? (
                 <label className="mt-3 flex flex-col gap-1">
-                  <span className="font-medium text-ink dark:text-dark-text">Motivo do override (obrigatório)</span>
-                  <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} rows={2} className={inputClass} />
+                  <span className="font-medium text-ink dark:text-dark-text">
+                    Motivo do override (obrigatório)
+                  </span>
+                  <textarea
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    rows={2}
+                    className={inputClass}
+                  />
                 </label>
               ) : null}
             </div>
           ) : null}
 
-          {error ? <p className="rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300">{error}</p> : null}
+          {error ? (
+            <p className="rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-300">
+              {error}
+            </p>
+          ) : null}
 
           <div className="flex justify-between">
             <button
@@ -365,8 +425,15 @@ function StepIndicator({ step }: { step: Step }) {
   return (
     <div className="flex items-center gap-2 text-xs text-ink/50 dark:text-dark-muted">
       {labels.map((label, i) => (
-        <span key={label} className={`flex items-center gap-2 ${i + 1 === step ? 'font-semibold text-marsala dark:text-gold' : ''}`}>
-          <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${i + 1 <= step ? 'bg-marsala dark:bg-gold text-cream dark:text-ink' : 'bg-ink/10 dark:bg-white/10 text-ink/60 dark:text-dark-muted'}`}>{i + 1}</span>
+        <span
+          key={label}
+          className={`flex items-center gap-2 ${i + 1 === step ? 'font-semibold text-marsala dark:text-gold' : ''}`}
+        >
+          <span
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${i + 1 <= step ? 'bg-marsala dark:bg-gold text-cream dark:text-ink' : 'bg-ink/10 dark:bg-white/10 text-ink/60 dark:text-dark-muted'}`}
+          >
+            {i + 1}
+          </span>
           {label}
           {i < labels.length - 1 ? <span className="text-ink/20 dark:text-white/15">—</span> : null}
         </span>
@@ -384,11 +451,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function NavButtons({ onBack, onNext, nextDisabled }: { onBack?: () => void; onNext: () => void; nextDisabled?: boolean }) {
+function NavButtons({
+  onBack,
+  onNext,
+  nextDisabled,
+}: {
+  onBack?: () => void;
+  onNext: () => void;
+  nextDisabled?: boolean;
+}) {
   return (
     <div className="flex justify-between">
       {onBack ? (
-        <button type="button" onClick={onBack} className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg px-4 py-2.5 text-sm font-medium text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 transition"
+        >
           Voltar
         </button>
       ) : (

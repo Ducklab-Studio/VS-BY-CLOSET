@@ -77,7 +77,11 @@ export default async function ClosetAdminAuditPage() {
       <PageHeader
         title="Auditoria"
         description={`${entries.length} evento(s) mais recentes`}
-        action={hasAdminRole(session, 'SUPER_ADMIN') ? <ClearAuditButton disabled={entries.length === 0} /> : null}
+        action={
+          hasAdminRole(session, 'SUPER_ADMIN') ? (
+            <ClearAuditButton disabled={entries.length === 0} />
+          ) : null
+        }
       />
 
       {entries.length === 0 ? (
@@ -88,14 +92,21 @@ export default async function ClosetAdminAuditPage() {
             <li key={`${entry.source}-${entry.id}`} className="px-4 py-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-ink dark:text-dark-text">{ACTION_LABELS[entry.action] ?? entry.action}</span>
+                  <span className="font-semibold text-ink dark:text-dark-text">
+                    {ACTION_LABELS[entry.action] ?? entry.action}
+                  </span>
                   {entry.adminUserName ? (
                     <span className="text-ink/50 dark:text-dark-muted">
-                      por <strong className="font-medium text-ink/70 dark:text-dark-text">{entry.adminUserName}</strong>
+                      por{' '}
+                      <strong className="font-medium text-ink/70 dark:text-dark-text">
+                        {entry.adminUserName}
+                      </strong>
                     </span>
                   ) : null}
                 </div>
-                <span className="font-mono text-xs text-ink/65 dark:text-dark-subtle">{formatDateTimePt(entry.createdAt)}</span>
+                <span className="font-mono text-xs text-ink/65 dark:text-dark-subtle">
+                  {formatDateTimePt(entry.createdAt)}
+                </span>
               </div>
               {entry.entityType ? (
                 <p className="mt-0.5 font-mono text-xs text-ink/65 dark:text-dark-subtle">

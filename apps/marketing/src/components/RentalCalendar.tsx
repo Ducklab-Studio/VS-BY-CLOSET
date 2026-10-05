@@ -4,12 +4,43 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
-import { CartError, addRentalSelectionToCart, fetchVariantStock, getCart, isCartConfigured, removeCartLine, type Cart } from '@/lib/cart';
+import {
+  CartError,
+  addRentalSelectionToCart,
+  fetchVariantStock,
+  getCart,
+  isCartConfigured,
+  removeCartLine,
+  type Cart,
+} from '@/lib/cart';
 import { UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
-import { GENERIC_UNAVAILABLE_MESSAGE, SHOPIFY_UNAVAILABLE_MESSAGE, unavailableExplanation } from '@/lib/unavailable-reason';
-import { resolveRentalSelection, type RentalSelection, type ReturnChoice } from '@/lib/rental-selection';
-import { EMPTY_DRAFT, addPiece, atPieceLimit, removePiece, selectionWith, withDates, withReturn, type DraftPiece } from '@/lib/rental-draft';
-import { centsToAmount, reservationSummary, type ReservationSummary, type SummaryRow, type SummaryTotal } from '@/lib/rental-price';
+import {
+  GENERIC_UNAVAILABLE_MESSAGE,
+  SHOPIFY_UNAVAILABLE_MESSAGE,
+  unavailableExplanation,
+} from '@/lib/unavailable-reason';
+import {
+  resolveRentalSelection,
+  type RentalSelection,
+  type ReturnChoice,
+} from '@/lib/rental-selection';
+import {
+  EMPTY_DRAFT,
+  addPiece,
+  atPieceLimit,
+  removePiece,
+  selectionWith,
+  withDates,
+  withReturn,
+  type DraftPiece,
+} from '@/lib/rental-draft';
+import {
+  centsToAmount,
+  reservationSummary,
+  type ReservationSummary,
+  type SummaryRow,
+  type SummaryTotal,
+} from '@/lib/rental-price';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
 import { isValePassProduct } from '@/lib/vale-pass-product';
 import { RentalAction } from './RentalAction';
@@ -93,7 +124,14 @@ export function RentalCalendar({
   const priceAmount = variant.price?.amount ?? null;
   const priceCurrency = variant.price?.currencyCode ?? null;
   const currentPiece = useMemo<DraftPiece>(
-    () => ({ variantId: variant.id, sku, title: productTitle, handle: productHandle, priceAmount, currencyCode: priceCurrency }),
+    () => ({
+      variantId: variant.id,
+      sku,
+      title: productTitle,
+      handle: productHandle,
+      priceAmount,
+      currencyCode: priceCurrency,
+    }),
     [variant.id, sku, productTitle, productHandle, priceAmount, priceCurrency],
   );
   const selectionPieces = useMemo(() => selectionWith(draft, currentPiece), [draft, currentPiece]);
@@ -136,10 +174,15 @@ export function RentalCalendar({
   // escondia uma 7ª peça). O valor vem do mesmo resumo (lib/rental-price.ts):
   // soma de TODAS as linhas, e o total oficial da Shopify quando tudo já está
   // no carrinho — nunca o preço da peça desta página.
-  const selectionIds = useMemo(() => new Set(selectionPieces.map((piece) => piece.variantId)), [selectionPieces]);
+  const selectionIds = useMemo(
+    () => new Set(selectionPieces.map((piece) => piece.variantId)),
+    [selectionPieces],
+  );
   const rentalCart = useMemo(() => {
     if (!cart) return null;
-    const lines = cart.lines.filter((line) => !isValePassProduct({ variantId: line.merchandise.id }));
+    const lines = cart.lines.filter(
+      (line) => !isValePassProduct({ variantId: line.merchandise.id }),
+    );
     // Se algo que não é aluguel estivesse no carrinho, o total dele não seria o da reserva.
     return { lines, cost: lines.length === cart.lines.length ? cart.cost : null };
   }, [cart]);
@@ -149,7 +192,8 @@ export function RentalCalendar({
   );
   const pieces = summary ? summary.pieces : null;
   const otherPieces = pieces === null ? null : pieces - selectionPieces.length;
-  const limitReached = otherPieces !== null && atPieceLimit(selectionPieces.length, otherPieces, maxPieces);
+  const limitReached =
+    otherPieces !== null && atPieceLimit(selectionPieces.length, otherPieces, maxPieces);
 
   const viewKey = monthKey(view);
   const cacheKey = `${pieces ?? '-'}|${viewKey}`;
@@ -178,7 +222,9 @@ export function RentalCalendar({
     // cache (ISR) e já bloqueou peça com 199 unidades à venda.
     setShopifyStock(null);
     void (async () => {
-      const stock = isCartConfigured ? (await fetchVariantStock([variant.id])).get(variant.id) ?? UNKNOWN_STOCK : UNKNOWN_STOCK;
+      const stock = isCartConfigured
+        ? ((await fetchVariantStock([variant.id])).get(variant.id) ?? UNKNOWN_STOCK)
+        : UNKNOWN_STOCK;
       if (!cancelled) setShopifyStock(stock);
     })();
     return () => {
@@ -201,7 +247,8 @@ export function RentalCalendar({
 
   /** Retirada e devolução valem para TODAS as peças da reserva em montagem. */
   function persistDates(pickup: Date | null, option: ReturnChoice | null) {
-    if (draft.pieces.length > 0) writeDraft(withDates(draft, pickup ? toISO(pickup) : null, option));
+    if (draft.pieces.length > 0)
+      writeDraft(withDates(draft, pickup ? toISO(pickup) : null, option));
   }
 
   // ---- disponibilidade real do mês exibido ----
@@ -215,12 +262,16 @@ export function RentalCalendar({
 
     void (async () => {
       // Mês inteiro fora da janela: nada a consultar, todos os dias ficam indisponíveis.
-      const result = from > to ? { days: [], operationStartDate } : await fetchAvailability(variant.id, pieces, from, to);
+      const result =
+        from > to
+          ? { days: [], operationStartDate }
+          : await fetchAvailability(variant.id, pieces, from, to);
       if (cancelled) return;
       if (result) {
         setMonths((prev) => new Map(prev).set(cacheKey, result.days));
         setOperationStartDate(result.operationStartDate ?? null);
-        if ('maxPieces' in result && typeof result.maxPieces === 'number') setMaxPieces(result.maxPieces);
+        if ('maxPieces' in result && typeof result.maxPieces === 'number')
+          setMaxPieces(result.maxPieces);
         setFailedMonths((prev) => {
           const next = new Set(prev);
           next.delete(cacheKey);
@@ -238,7 +289,8 @@ export function RentalCalendar({
   // Só os dias calculados para a quantidade ATUAL de peças (mudar a seleção muda a devolução).
   const dayMap = useMemo(() => {
     const map = new Map<string, AvailabilityDay>();
-    for (const [key, monthDays] of months) if (key.startsWith(`${pieces ?? '-'}|`)) for (const d of monthDays) map.set(d.date, d);
+    for (const [key, monthDays] of months)
+      if (key.startsWith(`${pieces ?? '-'}|`)) for (const d of monthDays) map.set(d.date, d);
     return map;
   }, [months, pieces]);
 
@@ -278,7 +330,8 @@ export function RentalCalendar({
 
     // Mês inteiro antes da abertura também conta, mesmo que o motivo informado
     // em cada dia seja outro (ex.: antecedência mínima, avaliada antes).
-    const monthBeforeOpening = !!operationStartDate && new Date(y, m, total) < fromISO(operationStartDate);
+    const monthBeforeOpening =
+      !!operationStartDate && new Date(y, m, total) < fromISO(operationStartDate);
 
     return {
       days: out,
@@ -321,22 +374,34 @@ export function RentalCalendar({
     // escolhidas e as do carrinho com a mesma retirada (a devolução delas
     // acompanha a da reserva).
     const sameReservation = (cart?.lines ?? [])
-      .filter((line) => !selectionIds.has(line.merchandise.id) && !isValePassProduct({ variantId: line.merchandise.id }))
-      .filter((line) => line.attributes.some((a) => a.key === '_vsc_pickup' && a.value === selection.pickup))
+      .filter(
+        (line) =>
+          !selectionIds.has(line.merchandise.id) &&
+          !isValePassProduct({ variantId: line.merchandise.id }),
+      )
+      .filter((line) =>
+        line.attributes.some((a) => a.key === '_vsc_pickup' && a.value === selection.pickup),
+      )
       .map((line) => ({ variantId: line.merchandise.id, title: line.merchandise.product.title }));
     const toCheck: { variantId: string; title: string }[] = [
-      ...new Map([...selectionPieces, ...sameReservation].map((piece) => [piece.variantId, piece] as const)).values(),
+      ...new Map(
+        [...selectionPieces, ...sameReservation].map((piece) => [piece.variantId, piece] as const),
+      ).values(),
     ];
     try {
       const unavailable = await unavailablePieces(toCheck, pieces, selection);
       if (unavailable === null) {
-        setError('Não foi possível confirmar a disponibilidade de todas as peças agora. Tente novamente.');
+        setError(
+          'Não foi possível confirmar a disponibilidade de todas as peças agora. Tente novamente.',
+        );
         return;
       }
       if (unavailable.length > 0) {
         // Nada vai ao carrinho; diz qual peça e o motivo real (API do ClosetAdmin).
         const detail = unavailable.map((piece) => `${piece.title}: ${piece.message}`).join(' ');
-        setError(`Indisponível para esta data — ${detail} Nenhuma peça foi adicionada; remova da seleção ou escolha outra data de retirada.`);
+        setError(
+          `Indisponível para esta data — ${detail} Nenhuma peça foi adicionada; remova da seleção ou escolha outra data de retirada.`,
+        );
         return;
       }
       const updated = await addRentalSelectionToCart({
@@ -354,7 +419,9 @@ export function RentalCalendar({
       // Só aqui (Shopify confirmou cada peça com quantidade > 0) a seleção vira
       // carrinho: limpa o rascunho e avisa a gaveta quantas peças entraram.
       writeDraft(EMPTY_DRAFT);
-      window.dispatchEvent(new CustomEvent('closet:cart-added', { detail: { pieces: toCheck.length } }));
+      window.dispatchEvent(
+        new CustomEvent('closet:cart-added', { detail: { pieces: toCheck.length } }),
+      );
     } catch (err) {
       // Falhou: rascunho intacto (nada foi confirmado) e o erro diz quais peças.
       const titles = new Map(toCheck.map((piece) => [piece.variantId, piece.title] as const));
@@ -376,7 +443,11 @@ export function RentalCalendar({
     // Só rascunho (nada vai à Shopify aqui). A devolução exibida no catálogo vale
     // enquanto a quantidade for a mesma do cálculo (sem outras peças no carrinho).
     const dated = withDates(result.draft, selected ? toISO(selected) : null, sundayChoice);
-    writeDraft(otherPieces === 0 && effectiveReturnISO ? withReturn(dated, effectiveReturnISO, dated.pieces.length) : dated);
+    writeDraft(
+      otherPieces === 0 && effectiveReturnISO
+        ? withReturn(dated, effectiveReturnISO, dated.pieces.length)
+        : dated,
+    );
     router.push('/pecas');
   }
 
@@ -395,7 +466,8 @@ export function RentalCalendar({
     setRemoving(row.variantId);
     try {
       let next: Cart | null = cart;
-      for (const line of cart.lines.filter((l) => l.merchandise.id === row.variantId)) next = await removeCartLine(line.id);
+      for (const line of cart.lines.filter((l) => l.merchandise.id === row.variantId))
+        next = await removeCartLine(line.id);
       setCart(next);
     } catch {
       setError('Não foi possível remover a peça do carrinho. Tente novamente.');
@@ -407,11 +479,14 @@ export function RentalCalendar({
 
   const busy = submitting || removing !== null;
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
-  const inspectedExplanation = inspected ? unavailableExplanation(dayMap.get(toISO(inspected))) : null;
+  const inspectedExplanation = inspected
+    ? unavailableExplanation(dayMap.get(toISO(inspected)))
+    : null;
   // Só a Shopify AGORA (consulta fresca) confirmando que a variante não está à
   // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
   const soldOut = shopifyStock?.status === 'sold_out';
-  const canAddAnother = !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading && !soldOut;
+  const canAddAnother =
+    !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading && !soldOut;
   const total = summary?.total ?? null;
   const showSummary = !!summary && (!!effectiveReturnISO || summary.rows.length > 1);
   const actionTotal =
@@ -430,32 +505,39 @@ export function RentalCalendar({
       <div className="rounded-xl border border-dashed border-marsala/30 p-5 text-sm">
         <strong className="font-medium text-marsala">Peça sem código (SKU)</strong>
         <p className="mt-1 text-ink/60">
-          Esta peça ainda não tem código cadastrado. O código é o que identifica a roupa
-          física — sem ele não é possível reservar.
+          Esta peça ainda não tem código cadastrado. O código é o que identifica a roupa física —
+          sem ele não é possível reservar.
         </p>
       </div>
     );
   }
 
   return (
-    <section id="rental-calendar" aria-labelledby="rental-calendar-title" className="rental-calendar rounded-2xl border border-ink/10 bg-cream p-5 sm:p-6">
-      <header className="mb-5">
-        <h2 id="rental-calendar-title" className="text-[0.95rem] font-semibold uppercase tracking-[0.14em] text-marsala">
+    <section
+      id="rental-calendar"
+      aria-labelledby="rental-calendar-title"
+      className="rental-calendar relative rounded-3xl border border-ink/5 bg-white p-6 sm:p-8 shadow-sm"
+    >
+      <header className="mb-6 flex flex-col gap-1.5">
+        <h2 id="rental-calendar-title" className="text-lg font-heading text-marsala leading-none">
           Escolha seu período
         </h2>
-        <p className="mt-2 text-[0.8rem] leading-relaxed text-ink/55">
-          Selecione a data de retirada. A devolução é calculada pela quantidade de peças.
+        <p className="text-[0.8rem] text-ink/50">
+          Selecione a data de retirada. A devolução é calculada de acordo com as peças.
         </p>
       </header>
 
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-4 flex items-center justify-between gap-2 px-1">
         <NavButton
           label="Mês anterior"
           disabled={atFirstMonth}
           onClick={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))}
           d="M15 5l-7 7 7 7"
         />
-        <div className="flex-1 text-center text-[0.9rem] font-semibold first-letter:uppercase" aria-live="polite">
+        <div
+          className="flex-1 text-center text-[0.95rem] font-semibold text-marsala first-letter:uppercase tracking-wide"
+          aria-live="polite"
+        >
           {view.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
         </div>
         <NavButton
@@ -492,13 +574,26 @@ export function RentalCalendar({
         }}
       >
         {loading ? (
-          <div className="col-span-7 flex min-h-[15rem] items-center justify-center gap-2 text-[0.8rem] text-ink/50">
-            <Spinner />
-            Carregando disponibilidade…
-          </div>
+          <>
+            {Array.from({ length: 31 }, (_, i) => (
+              <div
+                key={`skel-${i}`}
+                className="aspect-square min-h-[2.75rem] animate-pulse rounded-xl bg-ink/5 sm:min-h-0"
+                aria-hidden="true"
+              />
+            ))}
+          </>
         ) : loadFailed ? (
-          <div className="col-span-7 flex min-h-[15rem] items-center justify-center px-4 text-center text-[0.8rem] text-ink/50">
-            Não foi possível consultar a disponibilidade no momento.
+          <div className="col-span-7 flex min-h-[15rem] flex-col items-center justify-center p-6 text-center text-[0.82rem] text-ink/60">
+            <span className="mb-2 rounded-full bg-marsala/10 px-3 py-1 text-xs font-semibold text-marsala">
+              Aviso
+            </span>
+            <p className="font-medium text-marsala">
+              Não foi possível consultar a disponibilidade no momento.
+            </p>
+            <p className="mt-1 text-[0.75rem] text-ink/50">
+              Tente atualizar a página ou consulte nosso atendimento via WhatsApp.
+            </p>
           </div>
         ) : (
           <>
@@ -528,9 +623,9 @@ export function RentalCalendar({
         )}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-3.5 border-t border-ink/10 pt-3.5 text-[0.7rem] text-ink/50">
-        <Legend className="border-ink/15 bg-cream">Disponível</Legend>
-        <Legend className="border-transparent bg-ink/20">Ocupado</Legend>
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-[0.7rem] font-medium tracking-wide text-ink/60">
+        <Legend className="border-ink/10 bg-white">Disponível</Legend>
+        <Legend className="border-transparent bg-ink/5">Ocupado</Legend>
         <Legend className="border-marsala bg-marsala">Selecionado</Legend>
       </div>
 
@@ -571,14 +666,15 @@ export function RentalCalendar({
               );
             })}
           </div>
-          <p className="mt-2 text-[0.7rem] text-marsala/70">Nenhuma diária adicional nessas opções.</p>
+          <p className="mt-2 text-[0.7rem] text-marsala/70">
+            Nenhuma diária adicional nessas opções.
+          </p>
         </div>
       )}
 
       {showSummary && summary && total && (
-        <>
+        <div className="mt-8 rounded-2xl bg-cream/40 p-5 sm:p-6 border border-ink/5">
           <dl
-            className="mt-5 rounded-xl bg-ink/[0.03] p-4"
             data-testid="rental-summary"
             data-pickup={selection?.pickup}
             data-return={effectiveReturnISO}
@@ -586,30 +682,48 @@ export function RentalCalendar({
             data-total-source={total.source}
             data-total={total.source === 'unknown' ? undefined : total.amount}
           >
-            <div className="mb-3 border-b border-ink/10 pb-3">
-              <dt className="text-[0.75rem] text-ink/50">
-                {summary.pieces === 1 ? 'Peça da reserva' : `Peças da reserva (${summary.pieces})`}
+            <div className="mb-4 border-b border-ink/5 pb-4">
+              <dt className="text-[0.7rem] uppercase tracking-widest font-semibold text-ink/40 mb-3">
+                {summary.pieces === 1 ? 'Sua reserva' : `Sua reserva (${summary.pieces} peças)`}
               </dt>
               <dd>
-                <ul className="mt-1.5 space-y-1" data-testid="selected-pieces">
+                <ul className="space-y-2.5" data-testid="selected-pieces">
                   {summary.rows.map((row) => (
-                    <li key={row.variantId} data-variant={row.variantId} data-price={row.unitAmount ?? undefined} className="flex items-center justify-between gap-2 text-[0.8rem]">
-                      <span className="min-w-0 truncate">
+                    <li
+                      key={row.variantId}
+                      data-variant={row.variantId}
+                      data-price={row.unitAmount ?? undefined}
+                      className="flex items-start justify-between gap-4 text-[0.85rem]"
+                    >
+                      <span className="min-w-0 flex-1 leading-tight">
                         {row.variantId === variant.id || !row.handle ? (
-                          row.title
+                          <span className="font-medium text-ink/80">{row.title}</span>
                         ) : (
-                          <Link href={`/pecas/${row.handle}`} className="hover:text-marsala focus-visible:underline focus-visible:outline-none">{row.title}</Link>
+                          <Link
+                            href={`/pecas/${row.handle}`}
+                            className="font-medium text-ink/80 hover:text-marsala focus-visible:underline focus-visible:outline-none transition-colors"
+                          >
+                            {row.title}
+                          </Link>
                         )}
-                        {row.quantity > 1 && <span className="text-ink/60"> × {row.quantity}</span>}
-                        {row.variantId === variant.id ? (
-                          <span className="text-ink/45"> · esta peça</span>
-                        ) : row.inCart ? (
-                          <span className="text-ink/45"> · no carrinho</span>
-                        ) : null}
+                        {row.quantity > 1 && (
+                          <span className="text-ink/50 ml-1">× {row.quantity}</span>
+                        )}
+
+                        <span className="block mt-0.5 text-[0.7rem] text-ink/40">
+                          {row.variantId === variant.id
+                            ? 'Esta peça'
+                            : row.inCart
+                              ? 'No carrinho'
+                              : ''}
+                        </span>
                       </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="tabular-nums text-ink/60">
-                          {row.unitAmount !== null && row.currencyCode ? formatPrice(row.unitAmount, row.currencyCode, locale) : 'a confirmar'}
+
+                      <span className="flex shrink-0 flex-col items-end gap-1">
+                        <span className="font-mono text-[0.8rem] font-bold text-marsala tabular-nums">
+                          {row.unitAmount !== null && row.currencyCode
+                            ? formatPrice(row.unitAmount, row.currencyCode, locale)
+                            : 'A confirmar'}
                         </span>
                         {row.variantId !== variant.id && (
                           <button
@@ -617,7 +731,7 @@ export function RentalCalendar({
                             disabled={busy}
                             onClick={() => void handleRemove(row)}
                             aria-label={`Remover ${row.title} da reserva`}
-                            className="rounded px-1 text-[0.72rem] text-marsala underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 disabled:opacity-40"
+                            className="text-[0.65rem] uppercase tracking-wider text-ink/40 transition hover:text-red-600 focus-visible:text-red-600 disabled:opacity-40"
                           >
                             {removing === row.variantId ? 'Removendo…' : 'Remover'}
                           </button>
@@ -628,40 +742,65 @@ export function RentalCalendar({
                 </ul>
               </dd>
             </div>
-            <SumRow label="Retirada">{selected ? selected.toLocaleDateString(locale, LONG_DATE) : 'escolha no calendário'}</SumRow>
-            <SumRow label="Devolução">
-              {effectiveReturnISO
-                ? fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)
-                : needsSundayChoice
-                  ? 'escolha sábado ou segunda'
-                  : 'calculada pela retirada'}
-            </SumRow>
-            <SumRow label="Período">
-              {selectedInfo?.bookable && selectedInfo.durationDays
-                ? `${selectedInfo.durationDays} ${selectedInfo.durationDays === 1 ? 'dia' : 'dias'}`
-                : '—'}
-            </SumRow>
-            <div className="mt-1.5 border-t border-ink/10 pt-3">
-              <SumRow label={total.source === 'shopify' ? 'Total no carrinho' : 'Total estimado'} emphasis>
-                {total.source === 'unknown' ? 'a confirmar' : formatPrice(total.amount, total.currencyCode, locale)}
+
+            <div className="space-y-2">
+              <SumRow label="Retirada">
+                {selected
+                  ? selected.toLocaleDateString(locale, LONG_DATE)
+                  : 'Escolha no calendário'}
+              </SumRow>
+              <SumRow label="Devolução">
+                {effectiveReturnISO
+                  ? fromISO(effectiveReturnISO).toLocaleDateString(locale, LONG_DATE)
+                  : needsSundayChoice
+                    ? 'Escolha sábado ou segunda'
+                    : 'Calculada pela retirada'}
+              </SumRow>
+              <SumRow label="Período">
+                {selectedInfo?.bookable && selectedInfo.durationDays
+                  ? `${selectedInfo.durationDays} ${selectedInfo.durationDays === 1 ? 'dia' : 'dias'}`
+                  : '—'}
+              </SumRow>
+            </div>
+
+            <div className="mt-5 border-t border-ink/10 pt-5">
+              <SumRow
+                label={total.source === 'shopify' ? 'Total da reserva' : 'Total estimado'}
+                emphasis
+              >
+                {total.source === 'unknown'
+                  ? 'A confirmar'
+                  : formatPrice(total.amount, total.currencyCode, locale)}
               </SumRow>
             </div>
           </dl>
+
           <p
-            className="mt-2 text-right text-[0.7rem] leading-relaxed text-ink/50"
+            className="mt-3 text-center text-[0.7rem] leading-relaxed text-ink/40"
             data-testid="total-note"
-            data-total-changed={total.source === 'shopify' && submittedPreview !== null && submittedPreview !== total.cents ? 'true' : undefined}
+            data-total-changed={
+              total.source === 'shopify' &&
+              submittedPreview !== null &&
+              submittedPreview !== total.cents
+                ? 'true'
+                : undefined
+            }
           >
             {totalNote(total, submittedPreview, locale)}
           </p>
 
           {effectiveReturnISO && (
-            <p className="mt-3 text-[0.7rem] leading-relaxed text-ink/50">
-              O período é definido pela quantidade de peças ({pieces} no total). Ao adicionar
-              mais peças, a devolução é recalculada.
+            <p className="mt-4 flex items-start gap-2.5 rounded-lg bg-white/60 p-3 text-[0.7rem] leading-relaxed text-ink/50 border border-ink/5">
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ink/10 text-[10px] font-bold text-ink/70">
+                i
+              </span>
+              <span>
+                O período é definido pela quantidade de peças ({pieces} no total). Ao adicionar mais
+                peças, a devolução pode ser recalculada.
+              </span>
             </p>
           )}
-        </>
+        </div>
       )}
 
       <Status
@@ -683,9 +822,15 @@ export function RentalCalendar({
       </Status>
 
       {inspectedExplanation && (
-        <div data-testid="unavailable-reason" role="status" className="mt-4 rounded-xl bg-marsala/[0.09] px-3.5 py-3 text-[0.8rem] leading-relaxed text-marsala">
+        <div
+          data-testid="unavailable-reason"
+          role="status"
+          className="mt-4 rounded-xl bg-marsala/[0.09] px-3.5 py-3 text-[0.8rem] leading-relaxed text-marsala"
+        >
           <p className="font-medium">{inspectedExplanation.message}</p>
-          {inspectedExplanation.extra ? <p className="mt-1 text-[0.72rem] opacity-80">{inspectedExplanation.extra}</p> : null}
+          {inspectedExplanation.extra ? (
+            <p className="mt-1 text-[0.72rem] opacity-80">{inspectedExplanation.extra}</p>
+          ) : null}
         </div>
       )}
       {selectedUnavailable && (
@@ -693,8 +838,12 @@ export function RentalCalendar({
           {unavailableExplanation(selectedInfo)?.message ?? GENERIC_UNAVAILABLE_MESSAGE}
           {draft.pieces.length > 0 && (
             <>
-              {' '}Escolha outra retirada ou{' '}
-              <Link href="/pecas" className="underline underline-offset-2">volte ao catálogo</Link> sem esta peça.
+              {' '}
+              Escolha outra retirada ou{' '}
+              <Link href="/pecas" className="underline underline-offset-2">
+                volte ao catálogo
+              </Link>{' '}
+              sem esta peça.
             </>
           )}
         </Status>
@@ -703,7 +852,11 @@ export function RentalCalendar({
       {soldOut ? (
         <Status tone="warn">{SHOPIFY_UNAVAILABLE_MESSAGE}</Status>
       ) : (
-        <p data-testid="shopify-stock" data-status={shopifyStock?.status ?? 'checking'} className="mt-3 text-[0.72rem] text-ink/55">
+        <p
+          data-testid="shopify-stock"
+          data-status={shopifyStock?.status ?? 'checking'}
+          className="mt-3 text-[0.72rem] text-ink/55"
+        >
           {shopifyStockText(shopifyStock)}
         </p>
       )}
@@ -711,35 +864,37 @@ export function RentalCalendar({
       {error && <Status tone="error">{error}</Status>}
 
       <RentalAction>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] gap-2">
-        <button
-          type="button"
-          onClick={handleAddAnother}
-          disabled={!canAddAnother}
-          data-testid="add-another-piece"
-          className="flex w-full items-center justify-center rounded-xl border border-marsala bg-cream px-3 py-2 text-[0.7rem] font-semibold uppercase leading-tight tracking-[0.08em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed"
-        >
-          Adicionar outra peça
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!canSubmit || busy || soldOut}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl bg-marsala px-4 ${actionTotal ? 'py-2' : 'py-3.5'} text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35`}
-        >
-          {submitting && <Spinner light />}
-          <span className="flex flex-col items-center leading-tight">
-            Alugar agora
-            {/* No celular a barra fica fixa por cima do fim do resumo: o total
-                vai junto do botão para nunca ficar escondido. */}
-            {actionTotal && (
-              <span data-testid="action-total" aria-hidden className="mt-0.5 text-[0.68rem] font-medium normal-case tracking-normal opacity-85">
-                {actionTotal}
-              </span>
-            )}
-          </span>
-        </button>
-      </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-8">
+          <button
+            type="button"
+            onClick={handleAddAnother}
+            disabled={!canAddAnother}
+            data-testid="add-another-piece"
+            className="flex w-full items-center justify-center rounded-xl bg-white border border-marsala/20 px-6 py-4 text-[0.75rem] font-bold uppercase tracking-[0.12em] text-marsala transition-all hover:bg-marsala/5 hover:border-marsala active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
+          >
+            Mais uma peça
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit || busy || soldOut}
+            className={`flex w-full items-center justify-center gap-3 rounded-xl bg-marsala px-6 py-4 text-[0.75rem] font-bold uppercase tracking-[0.12em] text-cream transition-all hover:bg-marsala-glow hover:shadow-[0_0_20px_rgba(83,19,30,0.3)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 disabled:hover:shadow-none`}
+          >
+            {submitting && <Spinner light />}
+            <span className="flex flex-col items-center leading-none gap-1">
+              <span>Alugar agora</span>
+              {actionTotal && (
+                <span
+                  data-testid="action-total"
+                  aria-hidden
+                  className="text-[0.65rem] font-medium opacity-80"
+                >
+                  {actionTotal}
+                </span>
+              )}
+            </span>
+          </button>
+        </div>
       </RentalAction>
 
       {whatsappHref && (loadFailed || (freeCount === 0 && !loading)) && !isMaxPiecesExceeded && (
@@ -763,14 +918,17 @@ function totalNote(total: SummaryTotal, submittedPreview: number | null, locale:
       ? `Total confirmado pela Shopify (a prévia era ${formatPrice(centsToAmount(submittedPreview), total.currencyCode, locale)}).`
       : 'Valor oficial do carrinho (Shopify).';
   }
-  if (total.source === 'preview') return 'Prévia: soma de todas as peças. O valor oficial é o do carrinho.';
+  if (total.source === 'preview')
+    return 'Prévia: soma de todas as peças. O valor oficial é o do carrinho.';
   return total.reason === 'mixed_currency'
     ? 'Peças em moedas diferentes: o valor é confirmado no carrinho.'
     : 'Uma das peças está sem preço aqui: o valor é confirmado no carrinho.';
 }
 
 function limitMessage(maxPieces: number | null): string {
-  return maxPieces ? `Você atingiu o máximo de ${maxPieces} peças por reserva.` : 'Você atingiu o máximo de peças por reserva.';
+  return maxPieces
+    ? `Você atingiu o máximo de ${maxPieces} peças por reserva.`
+    : 'Você atingiu o máximo de peças por reserva.';
 }
 
 /**
@@ -791,11 +949,17 @@ async function unavailablePieces(
       const day = result.days.find((d) => d.date === selection.pickup);
       const same = resolveRentalSelection(day, selection.returnOption);
       if (same && same.return === selection.return) return { ok: true as const };
-      return { ok: false as const, title: piece.title, message: unavailableExplanation(day)?.message ?? GENERIC_UNAVAILABLE_MESSAGE };
+      return {
+        ok: false as const,
+        title: piece.title,
+        message: unavailableExplanation(day)?.message ?? GENERIC_UNAVAILABLE_MESSAGE,
+      };
     }),
   );
   if (checks.some((check) => check === null)) return null;
-  return checks.flatMap((check) => (check && !check.ok ? [{ title: check.title, message: check.message }] : []));
+  return checks.flatMap((check) =>
+    check && !check.ok ? [{ title: check.title, message: check.message }] : [],
+  );
 }
 
 /**
@@ -803,7 +967,8 @@ async function unavailablePieces(
  * quando a Shopify não manteve a peça). Desenvolvimento: também a causa real.
  */
 function cartErrorMessage(err: unknown, titles: ReadonlyMap<string, string> = new Map()): string {
-  const rejected = err instanceof CartError ? err.variantIds.map((id) => titles.get(id) ?? 'peça').join(', ') : '';
+  const rejected =
+    err instanceof CartError ? err.variantIds.map((id) => titles.get(id) ?? 'peça').join(', ') : '';
   const friendly =
     err instanceof CartError && err.code === 'not_added'
       ? rejected
@@ -876,8 +1041,6 @@ function DayCell({
   const disabled = !bookable;
   const label = disabled ? `${human} — indisponível${known ? ', ver motivo' : ''}` : human;
 
-  // Data indisponível com informação da API continua tocável: mostra o motivo
-  // (sem virar a retirada). Sem informação ainda (carregando), segue desligada.
   return (
     <button
       type="button"
@@ -888,18 +1051,21 @@ function DayCell({
       onClick={bookable ? onSelect : onInspect}
       aria-label={label}
       className={[
-        'grid aspect-square min-h-[2.75rem] place-items-center rounded-lg border text-sm tabular-nums transition-colors sm:min-h-0',
+        'relative grid aspect-square min-h-[2.75rem] place-items-center rounded-xl border text-sm tabular-nums transition-all duration-200 sm:min-h-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala',
         isToday ? 'font-bold' : '',
         isSelected
-          ? 'border-marsala bg-marsala font-semibold text-cream'
+          ? 'border-marsala bg-marsala font-semibold text-cream shadow-md scale-105 z-[1]'
           : !known
-            ? 'cursor-not-allowed border-transparent text-ink/25'
+            ? 'cursor-not-allowed border-transparent text-ink/20'
             : disabled
-              ? `cursor-help border-transparent text-ink/65 line-through ${isInspected ? 'ring-2 ring-marsala/40' : ''}`
-              : 'border-transparent hover:border-marsala/25 hover:bg-marsala/[0.06]',
+              ? `cursor-help border-transparent text-ink/50 bg-ink/[0.03] line-through ${isInspected ? 'ring-2 ring-marsala/60 bg-marsala/10 text-marsala font-medium' : ''}`
+              : 'border-ink/10 bg-cream hover:border-marsala/40 hover:bg-marsala/[0.07] hover:scale-105 hover:shadow-sm text-ink',
       ].join(' ')}
     >
-      {date.getDate()}
+      <span>{date.getDate()}</span>
+      {isToday && !isSelected && (
+        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-marsala" aria-hidden="true" />
+      )}
     </button>
   );
 }
@@ -924,7 +1090,14 @@ function NavButton({
       className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink/12 transition-colors hover:bg-marsala/[0.06] disabled:cursor-not-allowed disabled:opacity-30"
     >
       <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
-        <path d={d} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d={d}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </button>
   );
@@ -976,7 +1149,10 @@ function Status({
     error: 'bg-red-700/10 text-red-800',
   }[tone];
   return (
-    <div role="status" className={`mt-4 rounded-xl px-3.5 py-3 text-[0.8rem] leading-relaxed ${styles}`}>
+    <div
+      role="status"
+      className={`mt-4 rounded-xl px-3.5 py-3 text-[0.8rem] leading-relaxed ${styles}`}
+    >
       {children}
     </div>
   );

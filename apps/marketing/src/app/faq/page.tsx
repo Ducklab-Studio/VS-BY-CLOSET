@@ -56,10 +56,52 @@ const faqs = [
 ];
 
 export default function FaqPage() {
-  return <div className="faq-editorial">
-    <header className="guide-heading"><p className="privacy-eyebrow">Antes de fazer as malas</p><h1>Menos dúvidas.<br /><em>Mais viagem.</em></h1><p>Tudo sobre escolher, reservar e aproveitar suas peças no Chile.</p></header>
-    <div className="faq-layout"><aside className="faq-aside"><span className="faq-label">PERGUNTAS FREQUENTES</span><h2>Vamos deixar<br />tudo claro.</h2><p>Do primeiro look à devolução, encontre aqui os detalhes da sua locação.</p><Link href="/contato" className="editorial-link">Precisa de ajuda? <ArrowUpRight size={18} /></Link></aside>
-    <div className="faq-questions">{faqs.map((faq, index) => <details key={faq.q} name="closet-faq"><summary><span className="faq-number">{String(index + 1).padStart(2, '0')}</span><span>{faq.q}</span><Plus size={20} strokeWidth={1.4} /></summary><p>{faq.a}</p></details>)}</div></div>
-    <div className="guide-cta"><div><p className="privacy-eyebrow">Tudo pronto?</p><h2>Encontre o seu próximo look.</h2></div><Link href="/pecas" className="editorial-button">Explore o closet <ArrowUpRight size={18} /></Link></div>
-  </div>;
+  return (
+    <div className="faq-editorial">
+      <header className="guide-heading">
+        <p className="privacy-eyebrow">Antes de fazer as malas</p>
+        <h1>
+          Menos dúvidas.
+          <br />
+          <em>Mais viagem.</em>
+        </h1>
+        <p>Tudo sobre escolher, reservar e aproveitar suas peças no Chile.</p>
+      </header>
+      <div className="faq-layout">
+        <aside className="faq-aside">
+          <span className="faq-label">PERGUNTAS FREQUENTES</span>
+          <h2>
+            Vamos deixar
+            <br />
+            tudo claro.
+          </h2>
+          <p>Do primeiro look à devolução, encontre aqui os detalhes da sua locação.</p>
+          <Link href="/contato" className="editorial-link">
+            Precisa de ajuda? <ArrowUpRight size={18} />
+          </Link>
+        </aside>
+        <div className="faq-questions">
+          {faqs.map((faq, index) => (
+            <details key={faq.q} name="closet-faq">
+              <summary>
+                <span className="faq-number">{String(index + 1).padStart(2, '0')}</span>
+                <span>{faq.q}</span>
+                <Plus size={20} strokeWidth={1.4} />
+              </summary>
+              <p>{faq.a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+      <div className="guide-cta">
+        <div>
+          <p className="privacy-eyebrow">Tudo pronto?</p>
+          <h2>Encontre o seu próximo look.</h2>
+        </div>
+        <Link href="/pecas" className="editorial-button">
+          Explore o closet <ArrowUpRight size={18} />
+        </Link>
+      </div>
+    </div>
+  );
 }

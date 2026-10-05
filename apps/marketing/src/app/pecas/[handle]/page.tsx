@@ -85,14 +85,21 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     );
   }
 
-  const product = isShopifyConfigured ? await getProductDetail(handle) : getDemoProductDetail(handle);
+  const product = isShopifyConfigured
+    ? await getProductDetail(handle)
+    : getDemoProductDetail(handle);
   if (!product) notFound();
 
   // Uma peça física = uma variante. Se um dia houver mais de uma (tamanho,
   // por exemplo), aqui entra o seletor — hoje seria UI para um caso que
   // não existe.
   const variant = product.variants[0];
-  const gallery = product.images.length > 0 ? product.images : product.featuredImage ? [product.featuredImage] : [];
+  const gallery =
+    product.images.length > 0
+      ? product.images
+      : product.featuredImage
+        ? [product.featuredImage]
+        : [];
   // Shopify rich text can contain spacer-only paragraphs. Keep all written
   // content, but avoid a large blank gap between the price and the calendar.
   // A limpeza é cosmética; quem torna este HTML seguro de renderizar é
@@ -107,49 +114,79 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   const isValePass = isValePassProduct({ productId: product.id, variantId: variant?.id });
 
   return (
-    <div className="product-detail catalog-container">
-      <nav aria-label="Navegação da peça" className="mb-8 text-[0.75rem] uppercase tracking-[0.12em] text-ink/65">
-        <Link href="/" className="transition-colors hover:text-marsala">
+    <div className="max-w-[1360px] mx-auto px-6 py-12 lg:px-10 lg:py-16">
+      <nav
+        aria-label="Navegação da peça"
+        className="mb-10 text-[0.7rem] uppercase tracking-[0.15em] text-ink/50 font-medium flex items-center flex-wrap gap-2"
+      >
+        <Link
+          href="/"
+          className="transition-colors hover:text-marsala focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala rounded"
+        >
           Início
         </Link>
-        <span className="mx-2">/</span>
-        <Link href="/pecas" className="hover:text-marsala">Peças</Link>
-        <span className="mx-2" aria-hidden="true">/</span>
-        <span className="text-ink/70" aria-current="page">{product.title}</span>
+        <span aria-hidden="true" className="text-ink/30">
+          /
+        </span>
+        <Link
+          href="/pecas"
+          className="transition-colors hover:text-marsala focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala rounded"
+        >
+          Peças
+        </Link>
+        <span aria-hidden="true" className="text-ink/30">
+          /
+        </span>
+        <span className="text-marsala/80" aria-current="page">
+          {product.title}
+        </span>
       </nav>
 
-      <div className="product-detail-grid">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] xl:grid-cols-[1.2fr_1fr] gap-10 lg:gap-16 items-start">
         <ProductGallery key={product.id} images={gallery} title={product.title} />
 
-        {/* informação + calendário */}
-        <div className="product-detail-info">
+        {/* Informação + calendário */}
+        <div className="bg-cream/40 rounded-3xl p-6 sm:p-10 border border-ink/5 shadow-sm">
           {!isShopifyConfigured && isDemoCatalogEnabled && (
-            <p className="mb-3 inline-block rounded-full bg-marsala/10 px-3 py-1 text-[0.7rem] font-medium text-marsala">
-              Modo demonstração — peça fictícia, sem loja conectada
+            <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3.5 py-1.5 text-[0.7rem] font-semibold tracking-wide text-amber-800 uppercase">
+              Modo demonstração
             </p>
           )}
-          <h1 className="font-heading text-3xl leading-tight sm:text-4xl">{product.title}</h1>
+          <h1 className="font-heading text-4xl lg:text-5xl leading-tight text-marsala -tracking-[0.03em] mb-4">
+            {product.title}
+          </h1>
 
           {variant && (
-            <p className="mt-3 text-2xl text-marsala">
-              {formatPrice(variant.price.amount, variant.price.currencyCode)}
-            </p>
+            <div className="flex items-end gap-3 mb-6">
+              <p className="text-3xl font-mono text-marsala font-medium tabular-nums leading-none">
+                {formatPrice(variant.price.amount, variant.price.currencyCode)}
+              </p>
+              <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
+                O aluguel
+              </span>
+            </div>
           )}
-
-          {variant?.sku && !isValePass && <a className="product-period-link" href="#rental-calendar">Escolha seu período <span aria-hidden="true">↓</span></a>}
 
           {descriptionHtml && (
             <div
-              className="product-description prose-sm mt-5 text-[0.9rem] leading-relaxed text-ink/70 [&_p]:mb-3"
+              className="prose prose-sm prose-p:text-ink/65 prose-p:leading-relaxed prose-p:text-[0.95rem] prose-strong:text-ink/80 prose-strong:font-semibold border-y border-ink/5 py-6 mb-8"
               dangerouslySetInnerHTML={{ __html: descriptionHtml }}
             />
           )}
 
+          {variant?.sku && !isValePass && (
+            <div className="hidden">
+              <a className="product-period-link" href="#rental-calendar">
+                Escolha seu período <span aria-hidden="true">↓</span>
+              </a>
+            </div>
+          )}
+
           <div className="mt-8">
             {!variant ? (
-              <p className="rounded-xl border border-dashed border-marsala/30 p-5 text-sm text-ink/60">
+              <div className="rounded-2xl border border-dashed border-ink/15 bg-white p-6 text-center text-sm text-ink/60">
                 Esta peça ainda não tem variante cadastrada.
-              </p>
+              </div>
             ) : isValePass ? (
               <ValePassPresentation variant={variant} productTitle={product.title} />
             ) : (
@@ -164,9 +201,14 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
           </div>
 
           {!isValePass && (
-            <p className="mt-6 text-[0.75rem] leading-relaxed text-ink/50">
-              Retirada e devolução presenciais na loja, no Chile. O valor não muda com a
-              quantidade de dias.
+            <p className="mt-8 flex items-start gap-3 rounded-xl bg-ink/5 p-4 text-[0.75rem] leading-relaxed text-ink/60">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ink/10 text-ink/80 text-xs font-bold">
+                i
+              </span>
+              <span>
+                Retirada e devolução presenciais na loja, no Chile. O valor não muda com a
+                quantidade de dias.
+              </span>
             </p>
           )}
         </div>
@@ -174,4 +216,3 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     </div>
   );
 }
-

@@ -1,8 +1,27 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Ban, CheckCircle2, Gift, Plus, Power, PowerOff, RotateCcw, Search, ShieldAlert, ShoppingBag, Ticket, XCircle } from 'lucide-react';
-import type { ValePassCampaign, ValePassOrder, ValePassOrderStatus, ValePassStatus, ValePassVoucher } from '@/lib/admin-data';
+import {
+  Ban,
+  CheckCircle2,
+  Gift,
+  Plus,
+  Power,
+  PowerOff,
+  RotateCcw,
+  Search,
+  ShieldAlert,
+  ShoppingBag,
+  Ticket,
+  XCircle,
+} from 'lucide-react';
+import type {
+  ValePassCampaign,
+  ValePassOrder,
+  ValePassOrderStatus,
+  ValePassStatus,
+  ValePassVoucher,
+} from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { EmptyState } from '@/components/closetadmin/ui';
 import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
@@ -37,18 +56,31 @@ const ORDER_STATUS_STYLES: Record<ValePassOrderStatus, string> = {
   REFUNDED: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
 };
 type OrderFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'CLOSED';
-const ORDER_FILTERS: { value: OrderFilter; label: string; matches: (status: ValePassOrderStatus) => boolean }[] = [
+const ORDER_FILTERS: {
+  value: OrderFilter;
+  label: string;
+  matches: (status: ValePassOrderStatus) => boolean;
+}[] = [
   { value: 'ALL', label: 'Todos', matches: () => true },
   { value: 'PENDING', label: 'Pendentes', matches: (s) => s === 'PENDING' },
   { value: 'CONFIRMED', label: 'Confirmados', matches: (s) => s === 'CONFIRMED' },
   { value: 'EXPIRED', label: 'Expirados', matches: (s) => s === 'EXPIRED' },
-  { value: 'CLOSED', label: 'Cancelados / recusados', matches: (s) => s === 'CANCELLED' || s === 'DECLINED' || s === 'REFUNDED' },
+  {
+    value: 'CLOSED',
+    label: 'Cancelados / recusados',
+    matches: (s) => s === 'CANCELLED' || s === 'DECLINED' || s === 'REFUNDED',
+  },
 ];
 
 const inputClass =
   'w-full rounded-lg border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-marsala focus:ring-2 focus:ring-marsala/20 dark:border-white/15 dark:bg-dark-surface dark:text-dark-text dark:focus:border-gold dark:focus:ring-gold/20';
 
-const STATUS_LABELS: Record<ValePassStatus, string> = { ACTIVE: 'Ativo', USED: 'Utilizado', EXPIRED: 'Expirado', CANCELLED: 'Cancelado' };
+const STATUS_LABELS: Record<ValePassStatus, string> = {
+  ACTIVE: 'Ativo',
+  USED: 'Utilizado',
+  EXPIRED: 'Expirado',
+  CANCELLED: 'Cancelado',
+};
 const STATUS_STYLES: Record<ValePassStatus, string> = {
   ACTIVE: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300',
   USED: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
@@ -63,7 +95,13 @@ function formatDatePt(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR');
 }
 function formatDateTimePt(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export function ValePassSection({
@@ -82,7 +120,9 @@ export function ValePassSection({
   const [orders, setOrders] = useState(initialOrders);
   // Pedidos que estavam "para ver" quando apareceram nesta tela: continuam com
   // a etiqueta "Novo" até sair da página, mesmo depois de marcados como vistos.
-  const [newIds, setNewIds] = useState(() => new Set(initialOrders.filter((order) => order.needsAttention).map((order) => order.id)));
+  const [newIds, setNewIds] = useState(
+    () => new Set(initialOrders.filter((order) => order.needsAttention).map((order) => order.id)),
+  );
   const [orderFilter, setOrderFilter] = useState<OrderFilter>('ALL');
   // "Mostrar excluídos da Shopify": por padrão o pedido excluído sai da lista
   // (o registro e o histórico continuam no banco).
@@ -99,12 +139,21 @@ export function ValePassSection({
   const [vouchersError, setVouchersError] = useState<string | null>(null);
 
   const visibleVouchers = useMemo(
-    () => (restorableOnly ? vouchers.filter((v) => v.status === 'CANCELLED' && v.canBeRestored) : vouchers),
+    () =>
+      restorableOnly
+        ? vouchers.filter((v) => v.status === 'CANCELLED' && v.canBeRestored)
+        : vouchers,
     [vouchers, restorableOnly],
   );
 
-  async function refreshVouchers(nextStatus: ValePassStatus | '' = statusFilter, nextSearch: string = search) {
-    const { vouchers: fresh, error } = await listValePassVouchersAction({ status: nextStatus || undefined, search: nextSearch || undefined });
+  async function refreshVouchers(
+    nextStatus: ValePassStatus | '' = statusFilter,
+    nextSearch: string = search,
+  ) {
+    const { vouchers: fresh, error } = await listValePassVouchersAction({
+      status: nextStatus || undefined,
+      search: nextSearch || undefined,
+    });
     if (error || !fresh) {
       setVouchersError(error ?? 'Não foi possível atualizar os vales.');
       return;
@@ -141,7 +190,13 @@ export function ValePassSection({
       if (!active || includeDeleted !== showDeletedRef.current) return;
       if (fresh) {
         setOrders(fresh);
-        setNewIds((prev) => new Set([...prev, ...fresh.filter((order) => order.needsAttention).map((order) => order.id)]));
+        setNewIds(
+          (prev) =>
+            new Set([
+              ...prev,
+              ...fresh.filter((order) => order.needsAttention).map((order) => order.id),
+            ]),
+        );
         setOrdersError(null);
         setRefreshedAt(new Date());
       } else {
@@ -172,14 +227,18 @@ export function ValePassSection({
   const sentViews = useRef(new Set<string>());
   useEffect(() => {
     const viewKey = (order: ValePassOrder) => `${order.id}@${order.statusChangedAt}`;
-    const shown = visibleOrders.filter((order) => order.needsAttention && !sentViews.current.has(viewKey(order)));
+    const shown = visibleOrders.filter(
+      (order) => order.needsAttention && !sentViews.current.has(viewKey(order)),
+    );
     if (shown.length === 0) return;
     let cancelled = false;
     const mark = async () => {
       if (cancelled || document.visibilityState !== 'visible') return;
       document.removeEventListener('visibilitychange', mark);
       shown.forEach((order) => sentViews.current.add(viewKey(order)));
-      const result = await markValePassOrdersViewedAction(shown.map((order) => ({ id: order.id, statusChangedAt: order.statusChangedAt })));
+      const result = await markValePassOrdersViewedAction(
+        shown.map((order) => ({ id: order.id, statusChangedAt: order.statusChangedAt })),
+      );
       if ('error' in result) shown.forEach((order) => sentViews.current.delete(viewKey(order)));
       else if (result.marked > 0) notifyValePassAttentionChanged();
     };
@@ -197,19 +256,27 @@ export function ValePassSection({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <ShoppingBag size={18} className="text-marsala dark:text-gold" />
-            <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">Pedidos na Shopify</h2>
+            <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">
+              Pedidos na Shopify
+            </h2>
           </div>
           <p className="text-xs text-ink/45 dark:text-dark-subtle">
-            Atualiza sozinho a cada 30 s{refreshedAt ? ` · última atualização ${refreshedAt.toLocaleTimeString('pt-BR')}` : ''}
+            Atualiza sozinho a cada 30 s
+            {refreshedAt ? ` · última atualização ${refreshedAt.toLocaleTimeString('pt-BR')}` : ''}
           </p>
         </div>
         <p className="text-sm text-ink/55 dark:text-dark-muted">
-          Todo pedido de Valle Pass aparece aqui assim que é criado na Shopify, pago ou não. O vale só é emitido quando o pagamento é confirmado.
+          Todo pedido de Valle Pass aparece aqui assim que é criado na Shopify, pago ou não. O vale
+          só é emitido quando o pagamento é confirmado.
         </p>
 
         <div className="flex flex-wrap gap-2">
           {ORDER_FILTERS.map((filter) => (
-            <FilterPill key={filter.value} active={orderFilter === filter.value} onClick={() => setOrderFilter(filter.value)}>
+            <FilterPill
+              key={filter.value}
+              active={orderFilter === filter.value}
+              onClick={() => setOrderFilter(filter.value)}
+            >
               {filter.label} ({orders.filter((order) => filter.matches(order.status)).length})
             </FilterPill>
           ))}
@@ -224,17 +291,32 @@ export function ValePassSection({
           Mostrar excluídos da Shopify
         </label>
 
-        {ordersError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{ordersError}</p> : null}
+        {ordersError ? (
+          <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+            {ordersError}
+          </p>
+        ) : null}
 
         {visibleOrders.length === 0 ? (
-          <EmptyState title="Nenhum pedido de Valle Pass" description={orderFilter === 'ALL' ? 'Quando um cliente fizer um pedido do Valle Pass na Shopify, ele aparece aqui.' : undefined} />
+          <EmptyState
+            title="Nenhum pedido de Valle Pass"
+            description={
+              orderFilter === 'ALL'
+                ? 'Quando um cliente fizer um pedido do Valle Pass na Shopify, ele aparece aqui.'
+                : undefined
+            }
+          />
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {visibleOrders.map((order) => (
               <OrderCard
                 key={order.id}
                 order={order}
-                isNew={order.needsAttention || (newIds.has(order.id) && (order.status === 'PENDING' || order.status === 'CONFIRMED'))}
+                isNew={
+                  order.needsAttention ||
+                  (newIds.has(order.id) &&
+                    (order.status === 'PENDING' || order.status === 'CONFIRMED'))
+                }
               />
             ))}
           </div>
@@ -244,11 +326,20 @@ export function ValePassSection({
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Gift size={18} className="text-marsala dark:text-gold" />
-          <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">Campanhas</h2>
+          <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">
+            Campanhas
+          </h2>
         </div>
-        {canManageCampaigns ? <CreateCampaignForm onCreated={(c) => setCampaigns((prev) => [c, ...prev])} /> : null}
+        {canManageCampaigns ? (
+          <CreateCampaignForm onCreated={(c) => setCampaigns((prev) => [c, ...prev])} />
+        ) : null}
         {campaigns.length === 0 ? (
-          <EmptyState title="Nenhuma campanha cadastrada ainda" description={canManageCampaigns ? 'Use o formulário acima para criar a primeira.' : undefined} />
+          <EmptyState
+            title="Nenhuma campanha cadastrada ainda"
+            description={
+              canManageCampaigns ? 'Use o formulário acima para criar a primeira.' : undefined
+            }
+          />
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {campaigns.map((campaign) => (
@@ -256,7 +347,9 @@ export function ValePassSection({
                 key={campaign.id}
                 campaign={campaign}
                 canManage={canManageCampaigns}
-                onToggled={(updated) => setCampaigns((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))}
+                onToggled={(updated) =>
+                  setCampaigns((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+                }
               />
             ))}
           </div>
@@ -266,12 +359,17 @@ export function ValePassSection({
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Ticket size={18} className="text-marsala dark:text-gold" />
-          <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">Vales — listar, buscar, validar e marcar como utilizado</h2>
+          <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">
+            Vales — listar, buscar, validar e marcar como utilizado
+          </h2>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <div className="relative min-w-[240px] flex-1">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35 dark:text-dark-subtle" />
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/35 dark:text-dark-subtle"
+            />
             <input
               value={search}
               onChange={(event) => {
@@ -291,9 +389,15 @@ export function ValePassSection({
             }}
             className={`${inputClass} w-auto`}
           >
-            <option value="" className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text">Todos os status</option>
+            <option value="" className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text">
+              Todos os status
+            </option>
             {(Object.keys(STATUS_LABELS) as ValePassStatus[]).map((status) => (
-              <option key={status} value={status} className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text">
+              <option
+                key={status}
+                value={status}
+                className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text"
+              >
                 {STATUS_LABELS[status]}
               </option>
             ))}
@@ -337,17 +441,32 @@ export function ValePassSection({
           </FilterPill>
         </div>
 
-        {vouchersError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{vouchersError}</p> : null}
+        {vouchersError ? (
+          <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+            {vouchersError}
+          </p>
+        ) : null}
 
         {visibleVouchers.length === 0 ? (
           <EmptyState
-            title={restorableOnly ? 'Nenhum vale cancelado restaurável agora' : 'Nenhum vale encontrado'}
-            description={restorableOnly ? 'Vales já utilizados, expirados, cancelados pela Shopify ou com o pedido cancelado não aparecem aqui.' : undefined}
+            title={
+              restorableOnly ? 'Nenhum vale cancelado restaurável agora' : 'Nenhum vale encontrado'
+            }
+            description={
+              restorableOnly
+                ? 'Vales já utilizados, expirados, cancelados pela Shopify ou com o pedido cancelado não aparecem aqui.'
+                : undefined
+            }
           />
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
             {visibleVouchers.map((voucher) => (
-              <VoucherCard key={voucher.id} voucher={voucher} canManage={canManageCampaigns} onChanged={() => refreshVouchers()} />
+              <VoucherCard
+                key={voucher.id}
+                voucher={voucher}
+                canManage={canManageCampaigns}
+                onChanged={() => refreshVouchers()}
+              />
             ))}
           </div>
         )}
@@ -371,9 +490,12 @@ function CreateCampaignForm({ onCreated }: { onCreated: (campaign: ValePassCampa
     const amountCents = Math.round(Number(amount.replace(',', '.')) * 100);
     const validity = Number(validityDays);
     if (name.trim().length < 1) return setError('Preencha o nome da campanha.');
-    if (!Number.isFinite(amountCents) || amountCents <= 0) return setError('Informe um valor válido.');
-    if (!Number.isFinite(validity) || validity <= 0) return setError('Informe uma validade (em dias) válida.');
-    if (shopifyVariantId.trim().length < 1) return setError('Informe o ID da variante da Shopify já criada para este produto.');
+    if (!Number.isFinite(amountCents) || amountCents <= 0)
+      return setError('Informe um valor válido.');
+    if (!Number.isFinite(validity) || validity <= 0)
+      return setError('Informe uma validade (em dias) válida.');
+    if (shopifyVariantId.trim().length < 1)
+      return setError('Informe o ID da variante da Shopify já criada para este produto.');
 
     setPending(true);
     setError(null);
@@ -399,12 +521,18 @@ function CreateCampaignForm({ onCreated }: { onCreated: (campaign: ValePassCampa
   }
 
   return (
-    <form onSubmit={submit} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
+    <form
+      onSubmit={submit}
+      className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Criar nova campanha</h3>
+          <h3 className="text-sm font-semibold text-ink dark:text-dark-text">
+            Criar nova campanha
+          </h3>
           <p className="mt-1 text-xs text-ink/45 dark:text-dark-subtle">
-            Referencia uma variante já criada manualmente na Shopify — este painel nunca cria produto lá, só configura valor/validade/quantidade do lado de cá.
+            Referencia uma variante já criada manualmente na Shopify — este painel nunca cria
+            produto lá, só configura valor/validade/quantidade do lado de cá.
           </p>
         </div>
         <div className="rounded-lg bg-marsala/10 p-2 text-marsala dark:bg-gold/10 dark:text-gold">
@@ -414,19 +542,40 @@ function CreateCampaignForm({ onCreated }: { onCreated: (campaign: ValePassCampa
 
       <div className="mt-4 grid gap-3 lg:grid-cols-12">
         <label className="lg:col-span-4">
-          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Nome da campanha</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Valle Pass Verão" className={`${inputClass} mt-1.5`} />
+          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+            Nome da campanha
+          </span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Ex.: Valle Pass Verão"
+            className={`${inputClass} mt-1.5`}
+          />
         </label>
         <label className="lg:col-span-2">
           <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Valor (R$)</span>
-          <input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="150,00" className={`${inputClass} mt-1.5`} />
+          <input
+            value={amount}
+            onChange={(event) => setAmount(event.target.value)}
+            placeholder="150,00"
+            className={`${inputClass} mt-1.5`}
+          />
         </label>
         <label className="lg:col-span-2">
-          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Validade (dias)</span>
-          <input value={validityDays} onChange={(event) => setValidityDays(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className={`${inputClass} mt-1.5`} />
+          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+            Validade (dias)
+          </span>
+          <input
+            value={validityDays}
+            onChange={(event) => setValidityDays(event.target.value.replace(/\D/g, ''))}
+            inputMode="numeric"
+            className={`${inputClass} mt-1.5`}
+          />
         </label>
         <label className="lg:col-span-2">
-          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Limite de vendas (opcional)</span>
+          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+            Limite de vendas (opcional)
+          </span>
           <input
             value={quantityLimit}
             onChange={(event) => setQuantityLimit(event.target.value.replace(/\D/g, ''))}
@@ -436,31 +585,57 @@ function CreateCampaignForm({ onCreated }: { onCreated: (campaign: ValePassCampa
           />
         </label>
         <label className="lg:col-span-2">
-          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Variante Shopify (ID)</span>
-          <input value={shopifyVariantId} onChange={(event) => setShopifyVariantId(event.target.value)} placeholder="447654529" className={`${inputClass} mt-1.5`} />
+          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+            Variante Shopify (ID)
+          </span>
+          <input
+            value={shopifyVariantId}
+            onChange={(event) => setShopifyVariantId(event.target.value)}
+            placeholder="447654529"
+            className={`${inputClass} mt-1.5`}
+          />
         </label>
       </div>
 
       <div className="mt-4 flex justify-end">
-        <button type="submit" disabled={pending} className="inline-flex items-center justify-center gap-2 rounded-lg bg-marsala px-4 py-2.5 text-sm font-medium text-cream shadow-sm transition hover:bg-marsala/90 disabled:opacity-50 dark:bg-marsala-light dark:text-sand dark:hover:bg-marsala-glow">
+        <button
+          type="submit"
+          disabled={pending}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-marsala px-4 py-2.5 text-sm font-medium text-cream shadow-sm transition hover:bg-marsala/90 disabled:opacity-50 dark:bg-marsala-light dark:text-sand dark:hover:bg-marsala-glow"
+        >
           <Plus size={15} />
           {pending ? 'Criando…' : 'Criar campanha'}
         </button>
       </div>
 
-      {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
     </form>
   );
 }
 
-function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCampaign; canManage: boolean; onToggled: (updated: ValePassCampaign) => void }) {
+function CampaignCard({
+  campaign,
+  canManage,
+  onToggled,
+}: {
+  campaign: ValePassCampaign;
+  canManage: boolean;
+  onToggled: (updated: ValePassCampaign) => void;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function toggle() {
     setPending(true);
     setError(null);
-    const { error: toggleError } = await toggleValePassCampaignAction(campaign.id, !campaign.active);
+    const { error: toggleError } = await toggleValePassCampaignAction(
+      campaign.id,
+      !campaign.active,
+    );
     setPending(false);
     if (toggleError) {
       setError(toggleError);
@@ -473,10 +648,16 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
     <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-ink dark:text-dark-text">{campaign.name}</h3>
-          <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">Variante Shopify: {campaign.shopifyVariantId}</p>
+          <h3 className="truncate text-sm font-semibold text-ink dark:text-dark-text">
+            {campaign.name}
+          </h3>
+          <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
+            Variante Shopify: {campaign.shopifyVariantId}
+          </p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${campaign.active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'}`}>
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-medium ${campaign.active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400'}`}
+        >
           {campaign.active ? 'Ativa' : 'Encerrada'}
         </span>
       </div>
@@ -484,7 +665,9 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
         <div>
           <p className="text-ink/40 dark:text-dark-subtle">Valor</p>
-          <p className="font-semibold text-ink dark:text-dark-text">{formatCurrency(campaign.amountCents)}</p>
+          <p className="font-semibold text-ink dark:text-dark-text">
+            {formatCurrency(campaign.amountCents)}
+          </p>
         </div>
         <div>
           <p className="text-ink/40 dark:text-dark-subtle">Validade</p>
@@ -516,7 +699,9 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
                 {campaign.active ? 'Encerrar campanha' : 'Reativar campanha'}
               </button>
             }
-            title={campaign.active ? `Encerrar "${campaign.name}"?` : `Reativar "${campaign.name}"?`}
+            title={
+              campaign.active ? `Encerrar "${campaign.name}"?` : `Reativar "${campaign.name}"?`
+            }
             description={
               campaign.active
                 ? 'A venda fica oculta/desativada (o produto continua na Shopify — desligar a venda de lá também é necessário). Os vales já vendidos continuam válidos e no histórico, nada é apagado.'
@@ -529,7 +714,11 @@ function CampaignCard({ campaign, canManage, onToggled }: { campaign: ValePassCa
         </div>
       ) : null}
 
-      {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
     </article>
   );
 }
@@ -542,36 +731,54 @@ function OrderCard({ order, isNew }: { order: ValePassOrder; isNew: boolean }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">{order.shopifyOrderName ?? `Pedido ${order.shopifyOrderId}`}</p>
+          <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">
+            {order.shopifyOrderName ?? `Pedido ${order.shopifyOrderId}`}
+          </p>
           {isNew ? (
             <span className="mt-1 inline-flex rounded-full border border-marsala/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-marsala dark:border-gold/40 dark:text-gold">
               Novo
             </span>
           ) : null}
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
-            {order.quantity} Valle Pass · {order.orderCreatedAt ? `criado em ${formatDateTimePt(order.orderCreatedAt)}` : 'data de criação não informada'}
+            {order.quantity} Valle Pass ·{' '}
+            {order.orderCreatedAt
+              ? `criado em ${formatDateTimePt(order.orderCreatedAt)}`
+              : 'data de criação não informada'}
           </p>
         </div>
-        <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${ORDER_STATUS_STYLES[order.status]}`}>
+        <span
+          className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${ORDER_STATUS_STYLES[order.status]}`}
+        >
           {ORDER_STATUS_LABELS[order.status]}
         </span>
       </div>
 
       <div className="mt-3.5 space-y-1 border-t border-ink/5 pt-3 text-xs text-ink/60 dark:border-white/5 dark:text-dark-muted">
-        <p>{order.customerName ?? 'Cliente não informado'} {order.customerPhone ? `· ${order.customerPhone}` : ''}</p>
+        <p>
+          {order.customerName ?? 'Cliente não informado'}{' '}
+          {order.customerPhone ? `· ${order.customerPhone}` : ''}
+        </p>
         {order.customerEmail ? <p>{order.customerEmail}</p> : null}
         <p>Status desde {formatDateTimePt(order.statusChangedAt)}</p>
-        {order.status === 'PENDING' ? <p className="text-amber-700 dark:text-amber-300">Aguardando pagamento — nenhum vale emitido.</p> : null}
+        {order.status === 'PENDING' ? (
+          <p className="text-amber-700 dark:text-amber-300">
+            Aguardando pagamento — nenhum vale emitido.
+          </p>
+        ) : null}
         {order.deletedInShopifyAt ? (
           <p data-testid="order-deleted-reason" className="text-red-500 dark:text-red-400">
             Pedido excluído na Shopify em {formatDateTimePt(order.deletedInShopifyAt)}.
-            {order.status === 'CONFIRMED' ? ' O pedido estava pago: os vales não foram alterados.' : ''}
+            {order.status === 'CONFIRMED'
+              ? ' O pedido estava pago: os vales não foram alterados.'
+              : ''}
           </p>
         ) : null}
         {order.vouchers.length > 0 ? (
           <p>
             Vale{order.vouchers.length > 1 ? 's' : ''}:{' '}
-            {order.vouchers.map((voucher) => `${voucher.code} (${STATUS_LABELS[voucher.status].toLowerCase()})`).join(', ')}
+            {order.vouchers
+              .map((voucher) => `${voucher.code} (${STATUS_LABELS[voucher.status].toLowerCase()})`)
+              .join(', ')}
           </p>
         ) : null}
       </div>
@@ -579,7 +786,15 @@ function OrderCard({ order, isNew }: { order: ValePassOrder; isNew: boolean }) {
   );
 }
 
-function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVoucher; canManage: boolean; onChanged: () => void }) {
+function VoucherCard({
+  voucher,
+  canManage,
+  onChanged,
+}: {
+  voucher: ValePassVoucher;
+  canManage: boolean;
+  onChanged: () => void;
+}) {
   const [error, setError] = useState<string | null>(null);
 
   async function handleMarkUsed() {
@@ -616,22 +831,38 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
     <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">{voucher.code}</p>
-          <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{voucher.campaignName} · {formatCurrency(voucher.amountCents)}</p>
+          <p className="font-mono text-sm font-semibold text-ink dark:text-dark-text">
+            {voucher.code}
+          </p>
+          <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
+            {voucher.campaignName} · {formatCurrency(voucher.amountCents)}
+          </p>
         </div>
-        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[voucher.status]}`}>
-          {voucher.status === 'CANCELLED' && voucher.canBeRestored ? <RotateCcw size={11} aria-hidden /> : null}
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[voucher.status]}`}
+        >
+          {voucher.status === 'CANCELLED' && voucher.canBeRestored ? (
+            <RotateCcw size={11} aria-hidden />
+          ) : null}
           {STATUS_LABELS[voucher.status]}
         </span>
       </div>
 
       <div className="mt-3.5 space-y-1 border-t border-ink/5 pt-3 text-xs text-ink/60 dark:border-white/5 dark:text-dark-muted">
-        <p>{voucher.customerName ?? 'Cliente não informado'} {voucher.customerPhone ? `· ${voucher.customerPhone}` : ''}</p>
+        <p>
+          {voucher.customerName ?? 'Cliente não informado'}{' '}
+          {voucher.customerPhone ? `· ${voucher.customerPhone}` : ''}
+        </p>
         {voucher.customerEmail ? <p>{voucher.customerEmail}</p> : null}
         <p>Pedido Shopify: {voucher.shopifyOrderName ?? voucher.shopifyOrderId ?? '—'}</p>
-        <p>Comprado em {formatDatePt(voucher.purchasedAt)} · Válido até {formatDatePt(voucher.expiresAt)}</p>
+        <p>
+          Comprado em {formatDatePt(voucher.purchasedAt)} · Válido até{' '}
+          {formatDatePt(voucher.expiresAt)}
+        </p>
         {voucher.status === 'CANCELLED' && voucher.cancelReason ? (
-          <p className="text-red-500 dark:text-red-400">Motivo do cancelamento: {voucher.cancelReason}</p>
+          <p className="text-red-500 dark:text-red-400">
+            Motivo do cancelamento: {voucher.cancelReason}
+          </p>
         ) : null}
       </div>
 
@@ -640,7 +871,10 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
           <>
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-marsala px-2.5 py-1.5 text-xs font-medium text-cream shadow-sm transition hover:bg-marsala/90 dark:bg-marsala-light dark:text-sand dark:hover:bg-marsala-glow">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-marsala px-2.5 py-1.5 text-xs font-medium text-cream shadow-sm transition hover:bg-marsala/90 dark:bg-marsala-light dark:text-sand dark:hover:bg-marsala-glow"
+                >
                   <CheckCircle2 size={13} /> Marcar como utilizado
                 </button>
               }
@@ -652,7 +886,10 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
             {canManage ? (
               <ConfirmDialog
                 trigger={
-                  <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/10">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/10"
+                  >
                     <Ban size={13} /> Cancelar
                   </button>
                 }
@@ -668,16 +905,20 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
         ) : voucher.status === 'CANCELLED' && canManage && voucher.canBeRestored ? (
           <ConfirmDialog
             trigger={
-              <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/15 dark:text-emerald-300">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/15 dark:text-emerald-300"
+              >
                 <RotateCcw size={13} /> Restaurar vale
               </button>
             }
             title="Restaurar este Valle Pass?"
             description={
               <>
-                O vale volta a ficar <strong>ativo e disponível</strong> para uso — status atual: cancelado
-                {voucher.cancelReason ? <> (motivo: “{voucher.cancelReason}”)</> : null}. Nada do histórico de
-                cancelamento é apagado.
+                O vale volta a ficar <strong>ativo e disponível</strong> para uso — status atual:
+                cancelado
+                {voucher.cancelReason ? <> (motivo: “{voucher.cancelReason}”)</> : null}. Nada do
+                histórico de cancelamento é apagado.
               </>
             }
             confirmLabel="Restaurar"
@@ -687,7 +928,8 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
         ) : voucher.status === 'CANCELLED' && !voucher.canBeRestored ? (
           <span className="inline-flex items-start gap-1.5 text-xs text-ink/40 dark:text-dark-subtle">
             <ShieldAlert size={13} className="mt-0.5 shrink-0" aria-hidden />
-            Não pode ser restaurado{voucher.restoreBlockedReason ? ` — ${voucher.restoreBlockedReason}` : ''}
+            Não pode ser restaurado
+            {voucher.restoreBlockedReason ? ` — ${voucher.restoreBlockedReason}` : ''}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-xs text-ink/40 dark:text-dark-subtle">
@@ -697,12 +939,26 @@ function VoucherCard({ voucher, canManage, onChanged }: { voucher: ValePassVouch
         )}
       </div>
 
-      {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
     </article>
   );
 }
 
-function FilterPill({ active, icon, onClick, children }: { active: boolean; icon?: React.ReactNode; onClick: () => void; children: React.ReactNode }) {
+function FilterPill({
+  active,
+  icon,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"

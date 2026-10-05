@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
+import { GlobalScrollReveal } from '@/components/GlobalScrollReveal';
 
 /**
  * Fase 9 — /closetadmin precisa ficar "isolado estruturalmente das
@@ -33,6 +34,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="storefront">
+      <GlobalScrollReveal />
       <Header />
       <main>{children}</main>
       <Footer />
