@@ -25,22 +25,38 @@ function ImageState({ className = '', alt, originalWidth, ...props }: ProductIma
   const fromShopify = isShopifyCdnUrl(src);
 
   if (status === 'error') {
-    return <span className="product-image-fallback" role="img" aria-label={`${alt} — imagem indisponível`}>Sem foto</span>;
+    return (
+      <span
+        className="product-image-fallback"
+        role="img"
+        aria-label={`${alt} — imagem indisponível`}
+      >
+        Sem foto
+      </span>
+    );
   }
 
   const delivery: Partial<ImageProps> =
-    status === 'retry' ? { unoptimized: true } : fromShopify ? { loader: ({ src: source, width }) => shopifyImageUrl(source, width, originalWidth) } : {};
+    status === 'retry'
+      ? { unoptimized: true }
+      : fromShopify
+        ? { loader: ({ src: source, width }) => shopifyImageUrl(source, width, originalWidth) }
+        : {};
 
-  return <>
-    {status !== 'ready' && props.fill && <span className="product-image-placeholder" aria-hidden="true" />}
-    <Image
-      {...props}
-      {...delivery}
-      alt={alt}
-      className={`product-image ${className}`}
-      data-ready={status === 'ready'}
-      onLoad={() => setStatus('ready')}
-      onError={() => setStatus(fromShopify && status === 'loading' ? 'retry' : 'error')}
-    />
-  </>;
+  return (
+    <>
+      {status !== 'ready' && props.fill && (
+        <span className="product-image-placeholder" aria-hidden="true" />
+      )}
+      <Image
+        {...props}
+        {...delivery}
+        alt={alt}
+        className={`product-image ${className}`}
+        data-ready={status === 'ready'}
+        onLoad={() => setStatus('ready')}
+        onError={() => setStatus(fromShopify && status === 'loading' ? 'retry' : 'error')}
+      />
+    </>
+  );
 }

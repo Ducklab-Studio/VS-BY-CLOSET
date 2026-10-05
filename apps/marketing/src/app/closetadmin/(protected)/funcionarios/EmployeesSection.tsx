@@ -1,10 +1,27 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Ban, Crown, Eye, Flame, Plus, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  Ban,
+  Crown,
+  Eye,
+  Flame,
+  Plus,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  UserCog,
+  UserPlus,
+  Wrench,
+} from 'lucide-react';
 import type { AdminModuleName } from '@/lib/admin-permissions';
 import type { EmployeeListItem } from '@/lib/admin-data';
-import { PRESENCE_POLL_MS, formatLastSeen, type EmployeePresence } from '@/lib/closetadmin-presence';
+import {
+  PRESENCE_POLL_MS,
+  formatLastSeen,
+  type EmployeePresence,
+} from '@/lib/closetadmin-presence';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { PhoneInput } from '@/components/closetadmin/PhoneInput';
 import { EmptyState } from '@/components/closetadmin/ui';
@@ -35,7 +52,11 @@ const MODULES: { value: AdminModuleName; label: string }[] = [
   { value: 'VALLE_PASS', label: 'Valle Pass' },
 ];
 
-const ROLE_LABELS: Record<string, string> = { SUPER_ADMIN: 'Proprietário', ADMIN: 'Administrador', STAFF: 'Equipe' };
+const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'Proprietário',
+  ADMIN: 'Administrador',
+  STAFF: 'Equipe',
+};
 
 /** Texto que precisa ser digitado pra criar/promover SUPER_ADMIN — o backend
  *  confere o mesmo valor (a tela só evita o envio antes da hora). */
@@ -45,7 +66,9 @@ function roleOptions(canGrantSuperAdmin: boolean): { value: EmployeeRole; label:
   return [
     { value: 'STAFF', label: 'Equipe' },
     { value: 'ADMIN', label: 'Administrador' },
-    ...(canGrantSuperAdmin ? [{ value: 'SUPER_ADMIN' as const, label: 'SUPER_ADMIN (Proprietário)' }] : []),
+    ...(canGrantSuperAdmin
+      ? [{ value: 'SUPER_ADMIN' as const, label: 'SUPER_ADMIN (Proprietário)' }]
+      : []),
   ];
 }
 
@@ -129,20 +152,38 @@ export function EmployeesSection({
 
   return (
     <div className="space-y-4">
-      <CreateEmployeeForm canGrantSuperAdmin={canGrantSuperAdmin} onCreated={() => refresh(showRemoved)} />
+      <CreateEmployeeForm
+        canGrantSuperAdmin={canGrantSuperAdmin}
+        onCreated={() => refresh(showRemoved)}
+      />
 
       <label className="flex w-fit cursor-pointer items-center gap-2 text-xs font-medium text-ink/60 dark:text-dark-muted">
-        <input type="checkbox" checked={showRemoved} onChange={(event) => handleToggleShowRemoved(event.target.checked)} className="rounded border-ink/20 dark:border-white/20" />
+        <input
+          type="checkbox"
+          checked={showRemoved}
+          onChange={(event) => handleToggleShowRemoved(event.target.checked)}
+          className="rounded border-ink/20 dark:border-white/20"
+        />
         <Eye size={14} />
         Mostrar removidos
       </label>
 
-      {refreshError ? <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{refreshError}</p> : null}
+      {refreshError ? (
+        <p className="rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {refreshError}
+        </p>
+      ) : null}
 
       {visibleEmployees.length === 0 ? (
         <EmptyState
-          title={showRemoved ? 'Nenhum funcionário encontrado' : 'Nenhum funcionário ativo cadastrado ainda'}
-          description={showRemoved ? undefined : 'Use o formulário acima para criar o primeiro acesso.'}
+          title={
+            showRemoved
+              ? 'Nenhum funcionário encontrado'
+              : 'Nenhum funcionário ativo cadastrado ainda'
+          }
+          description={
+            showRemoved ? undefined : 'Use o formulário acima para criar o primeiro acesso.'
+          }
         />
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
@@ -164,7 +205,13 @@ export function EmployeesSection({
   );
 }
 
-function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAdmin: boolean; onCreated: () => void }) {
+function CreateEmployeeForm({
+  canGrantSuperAdmin,
+  onCreated,
+}: {
+  canGrantSuperAdmin: boolean;
+  onCreated: () => void;
+}) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
@@ -177,7 +224,9 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
   const confirmed = confirmation === SUPER_ADMIN_CONFIRMATION;
 
   function toggleModule(module: AdminModuleName) {
-    setModuleAccess((current) => (current.includes(module) ? current.filter((m) => m !== module) : [...current, module]));
+    setModuleAccess((current) =>
+      current.includes(module) ? current.filter((m) => m !== module) : [...current, module],
+    );
   }
 
   async function submit(event: React.FormEvent) {
@@ -224,11 +273,18 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
   }
 
   return (
-    <form onSubmit={submit} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
+    <form
+      onSubmit={submit}
+      className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-ink dark:text-dark-text">Criar novo funcionário</h3>
-          <p className="mt-1 text-xs text-ink/45 dark:text-dark-subtle">Login próprio (telefone + PIN) — nunca credenciais compartilhadas.</p>
+          <h3 className="text-sm font-semibold text-ink dark:text-dark-text">
+            Criar novo funcionário
+          </h3>
+          <p className="mt-1 text-xs text-ink/45 dark:text-dark-subtle">
+            Login próprio (telefone + PIN) — nunca credenciais compartilhadas.
+          </p>
         </div>
         <div className="rounded-lg bg-marsala/10 p-2 text-marsala dark:bg-gold/10 dark:text-gold">
           <UserPlus size={18} />
@@ -238,7 +294,12 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
       <div className="mt-4 grid gap-3 lg:grid-cols-12">
         <label className="lg:col-span-4">
           <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Nome</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome completo" className={`${inputClass} mt-1.5`} />
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Nome completo"
+            className={`${inputClass} mt-1.5`}
+          />
         </label>
 
         <label className="lg:col-span-3">
@@ -249,7 +310,9 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
         </label>
 
         <label className="lg:col-span-2">
-          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">PIN (4–8 dígitos)</span>
+          <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+            PIN (4–8 dígitos)
+          </span>
           <input
             value={pin}
             onChange={(event) => setPin(event.target.value.replace(/\D/g, ''))}
@@ -270,7 +333,11 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
             className={`${inputClass} mt-1.5`}
           >
             {roleOptions(canGrantSuperAdmin).map((option) => (
-              <option key={option.value} value={option.value} className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text">
+              <option
+                key={option.value}
+                value={option.value}
+                className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text"
+              >
                 {option.label}
               </option>
             ))}
@@ -279,11 +346,24 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
       </div>
 
       <div className="mt-4">
-        <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">Módulos concedidos</span>
-        {isSuperAdmin ? <AllModules /> : <ModuleToggles moduleAccess={moduleAccess} onToggle={toggleModule} />}
+        <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
+          Módulos concedidos
+        </span>
+        {isSuperAdmin ? (
+          <AllModules />
+        ) : (
+          <ModuleToggles moduleAccess={moduleAccess} onToggle={toggleModule} />
+        )}
       </div>
 
-      {isSuperAdmin ? <SuperAdminRisk confirmation={confirmation} onConfirmationChange={setConfirmation} disabled={pending} action="criar" /> : null}
+      {isSuperAdmin ? (
+        <SuperAdminRisk
+          confirmation={confirmation}
+          onConfirmationChange={setConfirmation}
+          disabled={pending}
+          action="criar"
+        />
+      ) : null}
 
       <div className="mt-4 flex justify-end">
         <button
@@ -296,7 +376,11 @@ function CreateEmployeeForm({ canGrantSuperAdmin, onCreated }: { canGrantSuperAd
         </button>
       </div>
 
-      {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
     </form>
   );
 }
@@ -322,7 +406,8 @@ function EmployeeCard({
   const [confirmation, setConfirmation] = useState('');
   const [savingRole, setSavingRole] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dirty = JSON.stringify([...moduleAccess].sort()) !== JSON.stringify([...employee.moduleAccess].sort());
+  const dirty =
+    JSON.stringify([...moduleAccess].sort()) !== JSON.stringify([...employee.moduleAccess].sort());
 
   const removed = Boolean(employee.removedAt);
   const isSelf = employee.id === currentUserId;
@@ -334,7 +419,9 @@ function EmployeeCard({
   const canEditRole = !removed && !isSelf && (canGrantSuperAdmin || !isSuperAdmin);
 
   function toggleModule(module: AdminModuleName) {
-    setModuleAccess((current) => (current.includes(module) ? current.filter((m) => m !== module) : [...current, module]));
+    setModuleAccess((current) =>
+      current.includes(module) ? current.filter((m) => m !== module) : [...current, module],
+    );
   }
 
   function changeRole(next: EmployeeRole) {
@@ -387,7 +474,9 @@ function EmployeeCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-sm font-semibold text-ink dark:text-dark-text">{employee.name}</h3>
+            <h3 className="truncate text-sm font-semibold text-ink dark:text-dark-text">
+              {employee.name}
+            </h3>
             <span className="rounded-full border border-ink/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink/45 dark:border-white/10 dark:text-dark-subtle">
               {ROLE_LABELS[employee.role] ?? employee.role}
             </span>
@@ -414,10 +503,21 @@ function EmployeeCard({
         <div className="mt-4">
           {canEditRole ? (
             <label className="mb-3 block max-w-xs">
-              <span className="text-[11px] uppercase tracking-wide text-ink/35 dark:text-dark-subtle">Papel</span>
-              <select value={role} onChange={(event) => changeRole(event.target.value as EmployeeRole)} disabled={savingRole} className={`${inputClass} mt-1.5`}>
+              <span className="text-[11px] uppercase tracking-wide text-ink/35 dark:text-dark-subtle">
+                Papel
+              </span>
+              <select
+                value={role}
+                onChange={(event) => changeRole(event.target.value as EmployeeRole)}
+                disabled={savingRole}
+                className={`${inputClass} mt-1.5`}
+              >
                 {roleOptions(canGrantSuperAdmin).map((option) => (
-                  <option key={option.value} value={option.value} className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text">
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    className="bg-white text-ink dark:bg-dark-popover dark:text-dark-text"
+                  >
                     {option.label}
                   </option>
                 ))}
@@ -425,15 +525,28 @@ function EmployeeCard({
             </label>
           ) : null}
 
-          <p className="text-[11px] uppercase tracking-wide text-ink/35 dark:text-dark-subtle">Módulos concedidos</p>
-          {role === 'SUPER_ADMIN' ? <AllModules /> : <ModuleToggles moduleAccess={moduleAccess} onToggle={toggleModule} />}
+          <p className="text-[11px] uppercase tracking-wide text-ink/35 dark:text-dark-subtle">
+            Módulos concedidos
+          </p>
+          {role === 'SUPER_ADMIN' ? (
+            <AllModules />
+          ) : (
+            <ModuleToggles moduleAccess={moduleAccess} onToggle={toggleModule} />
+          )}
           {demotingSuperAdmin ? (
-            <p className="mt-2 text-xs text-ink/50 dark:text-dark-muted">Marque os módulos que ele vai manter como {ROLE_LABELS[role]}.</p>
+            <p className="mt-2 text-xs text-ink/50 dark:text-dark-muted">
+              Marque os módulos que ele vai manter como {ROLE_LABELS[role]}.
+            </p>
           ) : null}
 
           {promoting ? (
             <>
-              <SuperAdminRisk confirmation={confirmation} onConfirmationChange={setConfirmation} disabled={savingRole} action="promover" />
+              <SuperAdminRisk
+                confirmation={confirmation}
+                onConfirmationChange={setConfirmation}
+                disabled={savingRole}
+                action="promover"
+              />
               <button
                 type="button"
                 disabled={savingRole || confirmation !== SUPER_ADMIN_CONFIRMATION}
@@ -454,7 +567,11 @@ function EmployeeCard({
                   <UserCog size={13} /> Salvar papel
                 </button>
               }
-              title={demotingSuperAdmin ? `Rebaixar ${employee.name}?` : `Alterar o papel de ${employee.name}?`}
+              title={
+                demotingSuperAdmin
+                  ? `Rebaixar ${employee.name}?`
+                  : `Alterar o papel de ${employee.name}?`
+              }
               description={
                 demotingSuperAdmin
                   ? `${employee.name} deixa de ser SUPER_ADMIN na hora: perde a gestão de funcionários e a auditoria privada, e passa a ${ROLE_LABELS[role]} só com os módulos marcados.`
@@ -479,7 +596,9 @@ function EmployeeCard({
           ) : null}
         </div>
       ) : (
-        <p className="mt-4 text-xs text-ink/45 dark:text-dark-subtle">Removido em {formatDateTimePt(employee.removedAt!)}.</p>
+        <p className="mt-4 text-xs text-ink/45 dark:text-dark-subtle">
+          Removido em {formatDateTimePt(employee.removedAt!)}.
+        </p>
       )}
 
       {/* A própria conta não tem bloquear/remover — o backend também recusa. */}
@@ -488,7 +607,10 @@ function EmployeeCard({
           {!removed && employee.active ? (
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-500/10">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-amber-500 transition hover:bg-amber-500/10"
+                >
                   <Ban size={13} /> Bloquear
                 </button>
               }
@@ -503,7 +625,10 @@ function EmployeeCard({
           {!removed && !employee.active ? (
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-emerald-500 transition hover:bg-emerald-500/10">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-emerald-500 transition hover:bg-emerald-500/10"
+                >
                   <RotateCcw size={13} /> Reativar
                 </button>
               }
@@ -517,7 +642,10 @@ function EmployeeCard({
           {!removed ? (
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/10">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-red-400 transition hover:bg-red-500/10"
+                >
                   <Trash2 size={13} /> Remover
                 </button>
               }
@@ -530,7 +658,10 @@ function EmployeeCard({
           ) : (
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-emerald-500 transition hover:bg-emerald-500/10">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-2.5 py-1.5 text-xs font-medium text-emerald-500 transition hover:bg-emerald-500/10"
+                >
                   <RotateCcw size={13} /> Restaurar
                 </button>
               }
@@ -544,17 +675,21 @@ function EmployeeCard({
           {removed ? (
             <ConfirmDialog
               trigger={
-                <button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-600"
+                >
                   <Flame size={13} /> Excluir permanentemente
                 </button>
               }
               title={`Excluir ${employee.name} permanentemente?`}
               description={
                 <>
-                  <strong>Isso não pode ser desfeito.</strong> O registro deste funcionário é apagado do banco — ele não vai mais
-                  aparecer nem em &quot;Mostrar removidos&quot;. O histórico de auditoria dele é preservado (sem PIN nem telefone
-                  nas ações antigas), e esta exclusão fica registrada com o nome, telefone e papel dele antes de apagar. Digite
-                  qualquer confirmação abaixo pra prosseguir.
+                  <strong>Isso não pode ser desfeito.</strong> O registro deste funcionário é
+                  apagado do banco — ele não vai mais aparecer nem em &quot;Mostrar removidos&quot;.
+                  O histórico de auditoria dele é preservado (sem PIN nem telefone nas ações
+                  antigas), e esta exclusão fica registrada com o nome, telefone e papel dele antes
+                  de apagar. Digite qualquer confirmação abaixo pra prosseguir.
                 </>
               }
               confirmLabel="Excluir permanentemente"
@@ -566,12 +701,22 @@ function EmployeeCard({
         </div>
       ) : null}
 
-      {error ? <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.07] px-3.5 py-2.5 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
     </article>
   );
 }
 
-function ModuleToggles({ moduleAccess, onToggle }: { moduleAccess: AdminModuleName[]; onToggle: (module: AdminModuleName) => void }) {
+function ModuleToggles({
+  moduleAccess,
+  onToggle,
+}: {
+  moduleAccess: AdminModuleName[];
+  onToggle: (module: AdminModuleName) => void;
+}) {
   return (
     <div className="mt-1.5 flex flex-wrap gap-2">
       {MODULES.map((module) => (
@@ -583,7 +728,12 @@ function ModuleToggles({ moduleAccess, onToggle }: { moduleAccess: AdminModuleNa
               : 'border-ink/15 text-ink/55 hover:bg-ink/5 dark:border-white/15 dark:text-dark-muted dark:hover:bg-white/5'
           }`}
         >
-          <input type="checkbox" checked={moduleAccess.includes(module.value)} onChange={() => onToggle(module.value)} className="hidden" />
+          <input
+            type="checkbox"
+            checked={moduleAccess.includes(module.value)}
+            onChange={() => onToggle(module.value)}
+            className="hidden"
+          />
           {module.label}
         </label>
       ))}
@@ -605,7 +755,9 @@ function AllModules() {
           </span>
         ))}
       </div>
-      <p className="mt-1.5 text-xs text-ink/45 dark:text-dark-subtle">Acesso total — SUPER_ADMIN recebe todos os módulos automaticamente.</p>
+      <p className="mt-1.5 text-xs text-ink/45 dark:text-dark-subtle">
+        Acesso total — SUPER_ADMIN recebe todos os módulos automaticamente.
+      </p>
     </div>
   );
 }
@@ -627,9 +779,10 @@ function SuperAdminRisk({
         <AlertTriangle size={15} /> Risco: acesso total e irrestrito
       </p>
       <p className="mt-1.5 text-xs leading-relaxed text-ink/70 dark:text-dark-muted">
-        Um SUPER_ADMIN vê e altera tudo: todos os módulos, a auditoria privada e a gestão de funcionários — pode criar, promover, bloquear,
-        rebaixar e remover qualquer pessoa, inclusive outros SUPER_ADMINs. Só {action === 'criar' ? 'crie' : 'promova'} alguém que precise
-        desse nível de acesso.
+        Um SUPER_ADMIN vê e altera tudo: todos os módulos, a auditoria privada e a gestão de
+        funcionários — pode criar, promover, bloquear, rebaixar e remover qualquer pessoa, inclusive
+        outros SUPER_ADMINs. Só {action === 'criar' ? 'crie' : 'promova'} alguém que precise desse
+        nível de acesso.
       </p>
       <label className="mt-3 block max-w-xs">
         <span className="text-xs font-medium text-ink/60 dark:text-dark-muted">
@@ -654,13 +807,32 @@ function presenceById(list: EmployeePresence[] | null): Map<string, EmployeePres
 }
 
 /** Bolinha verde + "Online" ou cinza + "Offline" (com "visto por último" quando houver). */
-function PresenceIndicator({ presence, now }: { presence: EmployeePresence | undefined; now: number | null }) {
+function PresenceIndicator({
+  presence,
+  now,
+}: {
+  presence: EmployeePresence | undefined;
+  now: number | null;
+}) {
   if (!presence) return null;
-  const lastSeen = !presence.online && now !== null ? formatLastSeen(presence.lastSeenAt, now) : null;
+  const lastSeen =
+    !presence.online && now !== null ? formatLastSeen(presence.lastSeenAt, now) : null;
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs" data-presence={presence.online ? 'online' : 'offline'}>
-      <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${presence.online ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-white/30'}`} aria-hidden />
-      <span className={presence.online ? 'font-medium text-emerald-700 dark:text-emerald-300' : 'text-ink/60 dark:text-dark-muted'}>
+    <p
+      className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs"
+      data-presence={presence.online ? 'online' : 'offline'}
+    >
+      <span
+        className={`inline-block h-2 w-2 shrink-0 rounded-full ${presence.online ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-white/30'}`}
+        aria-hidden
+      />
+      <span
+        className={
+          presence.online
+            ? 'font-medium text-emerald-700 dark:text-emerald-300'
+            : 'text-ink/60 dark:text-dark-muted'
+        }
+      >
         {presence.online ? 'Online' : 'Offline'}
       </span>
       {lastSeen ? <span className="text-ink/45 dark:text-dark-subtle">· {lastSeen}</span> : null}
@@ -670,12 +842,24 @@ function PresenceIndicator({ presence, now }: { presence: EmployeePresence | und
 
 function StatusPill({ employee }: { employee: EmployeeListItem }) {
   if (employee.removedAt) {
-    return <span className="rounded-full bg-neutral-200/70 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:bg-white/5 dark:text-dark-subtle">Removido</span>;
+    return (
+      <span className="rounded-full bg-neutral-200/70 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:bg-white/5 dark:text-dark-subtle">
+        Removido
+      </span>
+    );
   }
   if (!employee.active) {
-    return <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">Bloqueado</span>;
+    return (
+      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+        Bloqueado
+      </span>
+    );
   }
-  return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">Ativo</span>;
+  return (
+    <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+      Ativo
+    </span>
+  );
 }
 
 function formatDateTimePt(iso: string): string {

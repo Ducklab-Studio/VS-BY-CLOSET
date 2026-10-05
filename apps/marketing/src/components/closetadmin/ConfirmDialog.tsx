@@ -57,13 +57,21 @@ export function ConfirmDialog({
       <span onClick={() => setOpen(true)}>{trigger}</span>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <button aria-label="Fechar" className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm" onClick={() => !pending && setOpen(false)} />
+          <button
+            aria-label="Fechar"
+            className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm"
+            onClick={() => !pending && setOpen(false)}
+          />
           <div className="relative w-full max-w-sm rounded-2xl bg-white dark:bg-dark-card border border-ink/10 dark:border-white/10 p-6 shadow-2xl transition-colors">
-            <h2 className="font-heading text-lg font-bold text-ink dark:text-dark-text tracking-wide">{title}</h2>
+            <h2 className="font-heading text-lg font-bold text-ink dark:text-dark-text tracking-wide">
+              {title}
+            </h2>
             {/* div, não <p>: description agora aceita ReactNode (ex.: RulesForm
                 passa uma <ul> com o resumo das mudanças) — <ul> dentro de <p>
                 é HTML inválido e quebra a hidratação. */}
-            {description ? <div className="mt-1.5 text-sm text-ink/60 dark:text-dark-muted">{description}</div> : null}
+            {description ? (
+              <div className="mt-1.5 text-sm text-ink/60 dark:text-dark-muted">{description}</div>
+            ) : null}
 
             {requireReason ? (
               <label className="mt-4 flex flex-col gap-1.5 text-sm">
@@ -78,7 +86,11 @@ export function ConfirmDialog({
               </label>
             ) : null}
 
-            {error ? <p className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">{error}</p> : null}
+            {error ? (
+              <p className="mt-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/40 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+                {error}
+              </p>
+            ) : null}
 
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -94,7 +106,9 @@ export function ConfirmDialog({
                 disabled={pending}
                 onClick={handleConfirm}
                 className={`rounded-lg px-3.5 py-2 text-sm font-medium text-white transition disabled:opacity-60 shadow-sm ${
-                  danger ? 'bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-600' : 'bg-marsala dark:bg-marsala-light hover:bg-marsala/90 dark:hover:bg-marsala-glow text-cream dark:text-sand'
+                  danger
+                    ? 'bg-red-600 dark:bg-red-700 hover:bg-red-700 dark:hover:bg-red-600'
+                    : 'bg-marsala dark:bg-marsala-light hover:bg-marsala/90 dark:hover:bg-marsala-glow text-cream dark:text-sand'
                 }`}
               >
                 {pending ? 'Aguarde…' : confirmLabel}

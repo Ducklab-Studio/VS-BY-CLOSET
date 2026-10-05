@@ -5,7 +5,16 @@ import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/adm
 import { getReservationDetail } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { shopifyOrderAdminUrl } from '@/lib/closetadmin-shopify';
-import { Card, ErrorState, PageHeader, StatusBadge, SourceBadge, ArchivedBadge, ShopifyDeletedBadge, reservationStatusLabel } from '@/components/closetadmin/ui';
+import {
+  Card,
+  ErrorState,
+  PageHeader,
+  StatusBadge,
+  SourceBadge,
+  ArchivedBadge,
+  ShopifyDeletedBadge,
+  reservationStatusLabel,
+} from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
 import { OperationalButton } from './OperationalButton';
 import { RestoreButton } from './RestoreButton';
@@ -20,7 +29,11 @@ const CANCELLABLE_STATUSES = new Set(['confirmed']);
  * de cancelar aqui (item explícito: "NÃO criar cancelamento simples" —
  * mostra o aviso e o link pro pedido Shopify em vez disso).
  */
-export default async function ClosetAdminReservationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ClosetAdminReservationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const session = await requireAdminSession();
   requireAdminModule(session, 'RESERVATIONS');
   const { id } = await params;
@@ -40,7 +53,10 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
   {
     const orderUrl = shopifyOrderAdminUrl(reservation.shopifyOrderId);
     const isOnline = reservation.source === 'online';
-    const canCancel = !reservation.archivedAt && reservation.source === 'manual_admin' && CANCELLABLE_STATUSES.has(reservation.status);
+    const canCancel =
+      !reservation.archivedAt &&
+      reservation.source === 'manual_admin' &&
+      CANCELLABLE_STATUSES.has(reservation.status);
 
     return (
       <div>
@@ -58,7 +74,9 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
                 <FileDown size={16} /> Exportar PDF
               </a>
               {canCancel ? <CancelButton reservationId={reservation.id} /> : null}
-              {reservation.archivedAt && hasAdminRole(session, 'ADMIN') ? <RestoreButton reservationId={reservation.id} /> : null}
+              {reservation.archivedAt && hasAdminRole(session, 'ADMIN') ? (
+                <RestoreButton reservationId={reservation.id} />
+              ) : null}
             </div>
           }
         />
@@ -68,11 +86,18 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={reservation.status} />
               {reservation.needsAttention ? (
-                <span data-testid="reservation-new-tag" className="rounded-full bg-marsala px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream dark:bg-gold dark:text-neutral-950">
+                <span
+                  data-testid="reservation-new-tag"
+                  className="rounded-full bg-marsala px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cream dark:bg-gold dark:text-neutral-950"
+                >
                   Nova
                 </span>
               ) : null}
-              <MarkReservationViewed id={reservation.id} status={reservation.status} needsAttention={reservation.needsAttention} />
+              <MarkReservationViewed
+                id={reservation.id}
+                status={reservation.status}
+                needsAttention={reservation.needsAttention}
+              />
               <SourceBadge source={reservation.source} />
               {reservation.archivedAt ? <ArchivedBadge /> : null}
               {reservation.shopifyOrderDeletedAt ? <ShopifyDeletedBadge /> : null}
@@ -83,17 +108,33 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               <Field label="Telefone" value={reservation.customerPhone ?? '—'} />
               <Field label="E-mail" value={reservation.customerEmail ?? '—'} />
               <Field label="Nota interna" value={reservation.internalNote ?? '—'} />
-              <Field label="Retirada" value={reservation.pickupDate ? formatDatePt(reservation.pickupDate) : '—'} />
-              <Field label="Devolução prevista" value={reservation.returnDate ? formatDatePt(reservation.returnDate) : '—'} />
-              <Field label="Confirmada em" value={reservation.confirmedAt ? formatDateTimePt(reservation.confirmedAt) : '—'} />
+              <Field
+                label="Retirada"
+                value={reservation.pickupDate ? formatDatePt(reservation.pickupDate) : '—'}
+              />
+              <Field
+                label="Devolução prevista"
+                value={reservation.returnDate ? formatDatePt(reservation.returnDate) : '—'}
+              />
+              <Field
+                label="Confirmada em"
+                value={reservation.confirmedAt ? formatDateTimePt(reservation.confirmedAt) : '—'}
+              />
               <Field label="Progresso das peças" value={progressLabel(reservation.items)} />
               <Field label="Atualizada em" value={formatDateTimePt(reservation.updatedAt)} />
-              {reservation.archivedAt ? <Field label="Arquivada em" value={formatDateTimePt(reservation.archivedAt)} /> : null}
-              {reservation.archiveReason ? <Field label="Motivo do arquivamento" value={reservation.archiveReason} /> : null}
+              {reservation.archivedAt ? (
+                <Field label="Arquivada em" value={formatDateTimePt(reservation.archivedAt)} />
+              ) : null}
+              {reservation.archiveReason ? (
+                <Field label="Motivo do arquivamento" value={reservation.archiveReason} />
+              ) : null}
             </dl>
 
             {reservation.shopifyOrderDeletedAt ? (
-              <div data-testid="shopify-deleted-reason" className="mt-4 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              <div
+                data-testid="shopify-deleted-reason"
+                className="mt-4 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-sm text-red-700 dark:text-red-300"
+              >
                 Pedido excluído na Shopify em {formatDateTimePt(reservation.shopifyOrderDeletedAt)}.{' '}
                 {reservation.archivedAt
                   ? 'A reserva saiu da lista ativa; o histórico e o vínculo com o pedido foram mantidos.'
@@ -101,45 +142,83 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
               </div>
             ) : null}
 
-            {isOnline && reservation.status === 'confirmed' && !reservation.shopifyOrderDeletedAt ? (
+            {isOnline &&
+            reservation.status === 'confirmed' &&
+            !reservation.shopifyOrderDeletedAt ? (
               <div className="mt-4 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/40 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
-                Esta reserva está vinculada a um pedido Shopify. Cancelamentos devem considerar pedido/pagamento — use o Shopify Admin.
+                Esta reserva está vinculada a um pedido Shopify. Cancelamentos devem considerar
+                pedido/pagamento — use o Shopify Admin.
               </div>
             ) : null}
 
             {orderUrl && !reservation.shopifyOrderDeletedAt ? (
-              <a href={orderUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-marsala dark:text-gold hover:underline">
+              <a
+                href={orderUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-marsala dark:text-gold hover:underline"
+              >
                 Abrir pedido no Shopify <ExternalLink size={14} />
               </a>
             ) : null}
           </Card>
 
           <Card>
-            <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Peças</h2>
+            <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">
+              Peças
+            </h2>
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
               {reservation.items.map((item) => {
-                const canReceive = !reservation.archivedAt && (item.status === 'confirmed' || item.status === 'picked_up');
+                const canReceive =
+                  !reservation.archivedAt &&
+                  (item.status === 'confirmed' || item.status === 'picked_up');
                 const canStartCleaning = !reservation.archivedAt && item.status === 'returned';
                 const canCompleteCleaning = !reservation.archivedAt && item.status === 'cleaning';
                 return (
-                <li key={item.id} className="py-3 text-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
-                      <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
-                        {formatDatePt(item.blockedFrom)} – {formatDatePt(item.blockedUntilExclusive)} · {reservationStatusLabel(item.status)}
-                      </p>
-                      <p className="text-ink/50 dark:text-dark-muted text-xs mt-1">
-                        Recebida: {item.returnedAt ? formatDateTimePt(item.returnedAt) : '—'} · Higienização: {item.cleaningStartedAt ? formatDateTimePt(item.cleaningStartedAt) : '—'} · Concluída: {item.cleaningCompletedAt ? formatDateTimePt(item.cleaningCompletedAt) : '—'}
-                      </p>
+                  <li key={item.id} className="py-3 text-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
+                        <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
+                          {formatDatePt(item.blockedFrom)} –{' '}
+                          {formatDatePt(item.blockedUntilExclusive)} ·{' '}
+                          {reservationStatusLabel(item.status)}
+                        </p>
+                        <p className="text-ink/50 dark:text-dark-muted text-xs mt-1">
+                          Recebida: {item.returnedAt ? formatDateTimePt(item.returnedAt) : '—'} ·
+                          Higienização:{' '}
+                          {item.cleaningStartedAt ? formatDateTimePt(item.cleaningStartedAt) : '—'}{' '}
+                          · Concluída:{' '}
+                          {item.cleaningCompletedAt
+                            ? formatDateTimePt(item.cleaningCompletedAt)
+                            : '—'}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {canReceive ? (
+                          <OperationalButton
+                            reservationId={reservation.id}
+                            reservationItemId={item.id}
+                            action="receive"
+                          />
+                        ) : null}
+                        {canStartCleaning ? (
+                          <OperationalButton
+                            reservationId={reservation.id}
+                            reservationItemId={item.id}
+                            action="start-cleaning"
+                          />
+                        ) : null}
+                        {canCompleteCleaning ? (
+                          <OperationalButton
+                            reservationId={reservation.id}
+                            reservationItemId={item.id}
+                            action="complete-cleaning"
+                          />
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {canReceive ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="receive" /> : null}
-                      {canStartCleaning ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="start-cleaning" /> : null}
-                      {canCompleteCleaning ? <OperationalButton reservationId={reservation.id} reservationItemId={item.id} action="complete-cleaning" /> : null}
-                    </div>
-                  </div>
-                </li>
+                  </li>
                 );
               })}
             </ul>
@@ -147,22 +226,31 @@ export default async function ClosetAdminReservationDetailPage({ params }: { par
         </div>
 
         <Card className="mt-4">
-          <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">Eventos</h2>
+          <h2 className="font-heading text-base font-semibold text-ink dark:text-dark-text tracking-wide">
+            Eventos
+          </h2>
           {reservation.events.length === 0 ? (
-            <p className="mt-2 text-sm text-ink/65 dark:text-dark-muted">Nenhum evento registrado.</p>
+            <p className="mt-2 text-sm text-ink/65 dark:text-dark-muted">
+              Nenhum evento registrado.
+            </p>
           ) : (
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
               {reservation.events.map((event, i) => (
                 <li key={i} className="flex items-center justify-between gap-4 py-2.5 text-sm">
                   <span className="font-medium text-ink dark:text-dark-text">{event.type}</span>
-                  <span className="text-xs text-ink/65 dark:text-dark-subtle">{formatDateTimePt(event.createdAt)}</span>
+                  <span className="text-xs text-ink/65 dark:text-dark-subtle">
+                    {formatDateTimePt(event.createdAt)}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
         </Card>
 
-        <Link href="/closetadmin/reservas" className="mt-4 inline-block text-sm text-ink/50 dark:text-dark-muted hover:text-ink dark:hover:text-cream transition">
+        <Link
+          href="/closetadmin/reservas"
+          className="mt-4 inline-block text-sm text-ink/50 dark:text-dark-muted hover:text-ink dark:hover:text-cream transition"
+        >
           ← Voltar para reservas
         </Link>
       </div>

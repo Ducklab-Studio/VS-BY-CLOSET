@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ProductImage } from '@/components/ProductImage';
 import Link from 'next/link';
-import { ArrowUpRight, Minus, Plus } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowUpRight,
+  Clock,
+  Minus,
+  Plus,
+  ShieldCheck,
+  ShoppingBag,
+  Trash2,
+} from 'lucide-react';
 import {
   getCart,
   quantityForVariant,
@@ -24,13 +34,11 @@ import {
 } from '@/lib/rental-stock';
 
 /**
- * Carrinho.
+ * Carrinho de Aluguel (Sprint 2 - Frontend Evolution).
  *
- * Shopify continua sendo a autoridade do estoque comercial e do preço.
- * O reservations-api continua sendo a autoridade da agenda das peças
- * físicas. Para a quantidade exibida ao cliente usamos o MENOR limite
- * conhecido entre os dois, e o HOLD transacional do backend revalida tudo
- * novamente antes de seguir para o checkout.
+ * Shopify é a autoridade de preço e carrinho comercial.
+ * O reservations-api é a autoridade da agenda física de aluguel.
+ * O HOLD transacional revalida disponibilidade antes do envio ao checkout.
  */
 export default function CarrinhoPage() {
   const [cart, setCart] = useState<Cart | null>(null);
@@ -48,6 +56,7 @@ export default function CarrinhoPage() {
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [sundayOptions, setSundayOptions] = useState<SundayReturnOptionInfo[] | null>(null);
   const [sundayChoice, setSundayChoice] = useState<'saturday' | 'mondayMorning' | null>(null);
+  const [lineConfirmDelete, setLineConfirmDelete] = useState<string | null>(null);
 
   const checkoutAttemptRef = useRef<ReturnType<typeof createCheckoutAttempt> | null>(null);
   if (checkoutAttemptRef.current === null) checkoutAttemptRef.current = createCheckoutAttempt();
@@ -73,8 +82,6 @@ export default function CarrinhoPage() {
       .then(async (result) => {
         if (cancelled) return;
         setCart(result);
-        // Devolução de domingo já escolhida na página da peça: o HOLD recebe a
-        // MESMA opção (a mesma data do item), sem perguntar de novo.
         setSundayChoice(result ? returnOptionFromLines(result.lines) : null);
         if (result?.lines.length) {
           setStockLoading(true);
@@ -131,6 +138,7 @@ export default function CarrinhoPage() {
   async function handleRemove(lineId: string) {
     if (checkingOut || removing || updatingQuantity) return;
     setRemoving(lineId);
+    setLineConfirmDelete(null);
     setError(null);
     try {
       const nextCart = await removeCartLine(lineId);
@@ -179,7 +187,9 @@ export default function CarrinhoPage() {
   async function handleCheckout() {
     if (!cart || !termsAccepted || checkingOut || removing || updatingQuantity) return;
     if (!pickupDate) {
-      setCheckoutError('Não foi possível identificar a data de retirada deste carrinho. Refaça a seleção pela peça.');
+      setCheckoutError(
+        'Não foi possível identificar a data de retirada deste carrinho. Refaça a seleção pela peça.',
+      );
       return;
     }
 
@@ -187,36 +197,53 @@ export default function CarrinhoPage() {
     setCheckoutError(null);
 
     const items = groupItemsByVariant(cart.lines);
-    const checkoutResult = await checkoutAttemptRef.current!.run({
-      items,
-      pickupDate,
-      termsAccepted,
-      ...(sundayChoice ? { sundayReturnOption: sundayChoice } : {}),
-    }, async () => {
-      let latestStock: RentalStockMap;
-      try {
-        latestStock = await fetchRentalStock(cart);
-        setRentalStock(latestStock);
-      } catch {
-        throw new Error('Não foi possível confirmar o estoque agora. Tente novamente.');
-      }
-      for (const item of items) {
-        const stock = stockForVariant(latestStock, item.shopifyVariantId);
-        if (stock.effective !== null && item.quantity > stock.effective) {
-          throw new Error(`A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`);
+    const checkoutResult = await checkoutAttemptRef.current!.run(
+      {
+        items,
+        pickupDate,
+        termsAccepted,
+        ...(sundayChoice ? { sundayReturnOption: sundayChoice } : {}),
+      },
+      async () => {
+        let latestStock: RentalStockMap;
+        try {
+          latestStock = await fetchRentalStock(cart);
+          setRentalStock(latestStock);
+        } catch {
+          throw new Error('Não foi possível confirmar o estoque agora. Tente novamente.');
         }
-      }
-    });
+        for (const item of items) {
+          const stock = stockForVariant(latestStock, item.shopifyVariantId);
+          if (stock.effective !== null && item.quantity > stock.effective) {
+            throw new Error(
+              `A quantidade de uma das peças mudou. Agora há ${stock.effective} unidade(s) disponível(is) para esta data.`,
+            );
+          }
+        }
+      },
+    );
 
     if (!checkoutResult.ok) {
       if ('reason' in checkoutResult && checkoutResult.reason === 'needs_sunday_choice') {
         setSundayOptions(checkoutResult.returnOptions);
         setCheckoutError(null);
       } else {
-        // HOLD recusado por peça indisponível: diz QUAL peça, com o motivo real da API.
-        const unavailable = 'unavailableVariantIds' in checkoutResult ? checkoutResult.unavailableVariantIds ?? [] : [];
-        const titles = [...new Set(cart.lines.filter((line) => unavailable.includes(line.merchandise.id)).map((line) => line.merchandise.product.title))];
-        setCheckoutError(titles.length > 0 ? `${titles.join(', ')}: ${checkoutResult.message}` : checkoutResult.message);
+        const unavailable =
+          'unavailableVariantIds' in checkoutResult
+            ? (checkoutResult.unavailableVariantIds ?? [])
+            : [];
+        const titles = [
+          ...new Set(
+            cart.lines
+              .filter((line) => unavailable.includes(line.merchandise.id))
+              .map((line) => line.merchandise.product.title),
+          ),
+        ];
+        setCheckoutError(
+          titles.length > 0
+            ? `${titles.join(', ')}: ${checkoutResult.message}`
+            : checkoutResult.message,
+        );
       }
       setCheckingOut(false);
       return;
@@ -227,240 +254,466 @@ export default function CarrinhoPage() {
 
   if (loading) {
     return (
-      <Shell>
-        <p className="flex items-center gap-2.5 text-ink/50">
-          <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-          Carregando…
-        </p>
-      </Shell>
+      <div className="cart-page mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16">
+        <div className="mb-10 flex items-center justify-between">
+          <div>
+            <div className="h-4 w-32 animate-pulse rounded bg-ink/10" />
+            <div className="mt-3 h-8 w-64 animate-pulse rounded bg-ink/10" />
+          </div>
+        </div>
+        <div className="grid gap-10 lg:grid-cols-[1fr_380px]">
+          <div className="space-y-5">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex gap-5 rounded-3xl border border-ink/5 bg-cream/30 p-5 shadow-sm"
+              >
+                <div className="h-32 w-24 animate-pulse rounded-2xl bg-ink/10 shrink-0" />
+                <div className="flex-1 space-y-3 pt-2">
+                  <div className="h-6 w-3/4 animate-pulse rounded bg-ink/10" />
+                  <div className="h-4 w-1/2 animate-pulse rounded bg-ink/10" />
+                  <div className="h-4 w-1/4 animate-pulse rounded bg-ink/10" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="h-80 animate-pulse rounded-3xl border border-ink/5 bg-cream/30 p-6 shadow-sm" />
+        </div>
+      </div>
     );
   }
 
   if (!cart || cart.lines.length === 0) {
     return (
-      <Shell>
-        <p className="text-ink/60">Seu carrinho está vazio.</p>
-        <Link href="/pecas" className="editorial-button mt-6">
-          Ver peças <ArrowUpRight size={18} />
-        </Link>
-      </Shell>
+      <div className="cart-page mx-auto max-w-2xl px-6 py-20 text-center sm:py-32">
+        <div className="mx-auto mb-6 grid h-20 w-20 place-items-center rounded-full bg-marsala/5 text-marsala shadow-sm">
+          <ShoppingBag size={32} strokeWidth={1.5} />
+        </div>
+        <h1 className="font-heading text-3xl text-marsala sm:text-4xl">Seu carrinho está vazio</h1>
+        <p className="mt-4 text-[0.95rem] leading-relaxed text-ink/60">
+          Explore nosso catálogo premium de roupas de neve e selecione as peças para a sua viagem.
+        </p>
+        <div className="mt-10 flex justify-center">
+          <Link
+            href="/pecas"
+            className="group inline-flex items-center gap-2 rounded-xl bg-marsala px-7 py-4 text-[0.8rem] font-semibold uppercase tracking-[0.15em] text-cream transition-all hover:bg-marsala-glow hover:shadow-glow-marsala focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
+          >
+            Ver catálogo de peças
+            <ArrowUpRight
+              size={18}
+              className="transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+            />
+          </Link>
+        </div>
+      </div>
     );
   }
 
   const pieces = cart.totalQuantity;
+  const cartTotalAmount = cart.cost.totalAmount?.amount;
+  const cartTotalCurrency = cart.cost.totalAmount?.currencyCode;
+  const formattedTotal = formatPrice(cartTotalAmount, cartTotalCurrency);
 
   return (
-    <Shell>
-      <ul className="divide-y divide-ink/10 border-y border-ink/10">
-        {cart.lines.map((line) => {
-          const pickup = line.attributes.find((a) => a.key === 'Retirada')?.value;
-          const ret = line.attributes.find((a) => a.key === 'Devolução')?.value;
-          const stock = stockForVariant(rentalStock, line.merchandise.id);
-          const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
-          const canIncrease =
-            line.merchandise.availableForSale &&
-            !stockLoading &&
-            (stock.effective === null || totalSameVariant < stock.effective);
-          const busy = checkingOut || !!updatingQuantity || !!removing;
+    <div className="cart-page mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-16">
+      {/* Navigation & Header */}
+      <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between border-b border-ink/5 pb-8">
+        <div>
+          <Link
+            href="/pecas"
+            className="group mb-3 inline-flex items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-[0.15em] text-ink/50 transition-colors hover:text-marsala"
+          >
+            <ArrowLeft size={14} className="transition-transform group-hover:-translate-x-1" />{' '}
+            Continuar escolhendo
+          </Link>
+          <h1 className="font-heading text-4xl leading-tight sm:text-5xl text-marsala tracking-tight">
+            Seu closet de viagem
+          </h1>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-marsala/5 border border-marsala/10 px-4 py-1.5 font-mono text-[0.8rem] font-semibold text-marsala">
+            {pieces} {pieces === 1 ? 'peça' : 'peças'}
+          </span>
+          {formattedTotal && (
+            <span className="font-mono text-base font-semibold tabular-nums text-ink/80">
+              · {formattedTotal}
+            </span>
+          )}
+        </div>
+      </div>
 
-          return (
-            <li key={line.id} className="flex gap-4 py-5">
-              <div className="relative h-24 w-20 shrink-0 overflow-hidden rounded-lg bg-ink/[0.04]">
-                {line.merchandise.product.featuredImage && (
-                  <ProductImage
-                    src={line.merchandise.product.featuredImage.url}
-                    alt={line.merchandise.product.featuredImage.altText ?? line.merchandise.product.title}
-                    fill
-                    sizes="80px"
-                    className="object-cover"
-                  />
-                )}
-              </div>
+      <div className="grid gap-10 lg:grid-cols-[1fr_380px] lg:items-start">
+        {/* Item List */}
+        <div className="space-y-5">
+          {cart.lines.map((line) => {
+            const pickup = line.attributes.find((a) => a.key === 'Retirada')?.value;
+            const ret = line.attributes.find((a) => a.key === 'Devolução')?.value;
+            const stock = stockForVariant(rentalStock, line.merchandise.id);
+            const totalSameVariant = quantityForVariant(cart, line.merchandise.id);
+            const canIncrease =
+              line.merchandise.availableForSale &&
+              !stockLoading &&
+              (stock.effective === null || totalSameVariant < stock.effective);
+            const busy = checkingOut || !!updatingQuantity || !!removing;
+            const isLineRemoving = removing === line.id;
+            const isLineUpdating = updatingQuantity === line.id;
 
-              <div className="min-w-0 flex-1">
-                <Link
-                  href={`/pecas/${line.merchandise.product.handle}`}
-                  className="font-medium transition-colors hover:text-marsala"
-                >
-                  {line.merchandise.product.title}
-                </Link>
+            const unitPriceStr = formatPrice(
+              line.merchandise.price?.amount,
+              line.merchandise.price?.currencyCode,
+            );
+            const showConfirmDelete = lineConfirmDelete === line.id;
 
-                {line.merchandise.sku && (
-                  <p className="mt-0.5 text-[0.7rem] uppercase tracking-wider text-ink/65">
-                    {line.merchandise.sku}
-                  </p>
-                )}
-
-                <div className="mt-1 space-y-0.5 text-[0.72rem] text-ink/55">
-                  <p>{stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}</p>
-                  <p>
-                    {stockLoading
-                      ? 'Conferindo peças físicas para a data…'
-                      : stock.physical === null
-                        ? 'Estoque físico na data: será validado ao finalizar'
-                        : `Peças físicas livres na data: ${stock.physical}`}
-                  </p>
-                  {stock.effective !== null && !stockLoading ? (
-                    <p className="font-medium text-marsala">
-                      Disponível para esta reserva: {stock.effective}
-                    </p>
-                  ) : null}
+            return (
+              <div
+                key={line.id}
+                className="group relative flex flex-col gap-5 rounded-3xl border border-ink/5 bg-white p-5 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] transition-all hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.1)] sm:flex-row sm:items-center sm:p-6"
+              >
+                {/* Product Image */}
+                <div className="relative h-32 w-24 shrink-0 overflow-hidden rounded-2xl bg-cream/50 border border-ink/5">
+                  {line.merchandise.product.featuredImage ? (
+                    <ProductImage
+                      src={line.merchandise.product.featuredImage.url}
+                      alt={
+                        line.merchandise.product.featuredImage.altText ??
+                        line.merchandise.product.title
+                      }
+                      fill
+                      sizes="96px"
+                      className="object-cover transition-transform duration-700 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="grid h-full place-items-center text-[0.7rem] text-ink/40">
+                      Sem foto
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[0.75rem] text-ink/60">Quantidade</span>
-                  <div className="inline-flex items-center overflow-hidden rounded-lg border border-ink/15">
-                    <button
-                      type="button"
-                      aria-label="Diminuir quantidade"
-                      disabled={busy || line.quantity <= 1}
-                      onClick={() => void handleQuantity(line, line.quantity - 1)}
-                      className="grid h-8 w-8 place-items-center transition hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-30"
+                {/* Info */}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <Link
+                      href={`/pecas/${line.merchandise.product.handle}`}
+                      className="font-heading text-xl leading-tight text-ink/90 transition-colors hover:text-marsala"
                     >
-                      <Minus size={13} />
-                    </button>
-                    <span className="min-w-9 text-center text-sm font-semibold tabular-nums">
-                      {updatingQuantity === line.id ? '…' : line.quantity}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="Aumentar quantidade"
-                      disabled={busy || !canIncrease}
-                      onClick={() => void handleQuantity(line, line.quantity + 1)}
-                      className="grid h-8 w-8 place-items-center transition hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      <Plus size={13} />
-                    </button>
+                      {line.merchandise.product.title}
+                    </Link>
+                    <div className="shrink-0 text-right sm:hidden">
+                      <p className="font-mono text-sm font-semibold tabular-nums text-marsala">
+                        {unitPriceStr || 'Preço a confirmar'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {line.merchandise.sku && (
+                    <p className="font-mono text-[0.7rem] uppercase tracking-wider text-ink/40">
+                      SKU: {line.merchandise.sku}
+                    </p>
+                  )}
+
+                  {/* Stock info pill */}
+                  <div className="space-y-1 text-[0.75rem]">
+                    <p className="font-medium text-ink/60">
+                      {stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}
+                    </p>
+                    {stock.effective !== null && !stockLoading ? (
+                      <p className="inline-block rounded-md bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700">
+                        Disponível para esta reserva: {stock.effective}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {/* Dates Tag */}
+                  {pickup && ret && (
+                    <div className="inline-flex flex-wrap items-center gap-1.5 rounded-lg bg-sand/30 border border-sand/50 px-3 py-1.5 text-[0.75rem] font-medium text-marsala/90 mt-1">
+                      <span>Retirada: {pickup}</span>
+                      <span aria-hidden="true" className="text-marsala/40">
+                        ·
+                      </span>
+                      <span>Devolução: {ret}</span>
+                    </div>
+                  )}
+
+                  {/* Quantity & Delete Controls */}
+                  <div className="mt-4 flex items-center justify-between pt-2 border-t border-ink/5">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[0.75rem] font-medium text-ink/50 uppercase tracking-widest">
+                        Qtd
+                      </span>
+                      <div className="inline-flex items-center overflow-hidden rounded-xl border border-ink/10 bg-cream/30">
+                        <button
+                          type="button"
+                          aria-label="Diminuir quantidade"
+                          disabled={busy || line.quantity <= 1}
+                          onClick={() => void handleQuantity(line, line.quantity - 1)}
+                          className="grid h-8 w-8 place-items-center text-ink/60 transition hover:bg-marsala/5 hover:text-marsala disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline-none"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="min-w-9 text-center font-mono text-[0.8rem] font-semibold tabular-nums text-ink">
+                          {isLineUpdating ? '…' : line.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Aumentar quantidade"
+                          disabled={busy || !canIncrease}
+                          onClick={() => void handleQuantity(line, line.quantity + 1)}
+                          className="grid h-8 w-8 place-items-center text-ink/60 transition hover:bg-marsala/5 hover:text-marsala disabled:cursor-not-allowed disabled:opacity-30 focus-visible:outline-none"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {showConfirmDelete ? (
+                      <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2 duration-200">
+                        <span className="text-[0.7rem] font-medium text-marsala/80">
+                          Remover peça?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemove(line.id)}
+                          disabled={busy}
+                          className="rounded-md bg-red-600/10 px-2.5 py-1 text-[0.7rem] font-semibold text-red-700 transition-colors hover:bg-red-600/20 disabled:opacity-40"
+                        >
+                          Sim
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLineConfirmDelete(null)}
+                          disabled={busy}
+                          className="rounded-md bg-ink/5 px-2.5 py-1 text-[0.7rem] font-medium text-ink/70 transition-colors hover:bg-ink/10 disabled:opacity-40"
+                        >
+                          Não
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setLineConfirmDelete(line.id)}
+                        disabled={busy}
+                        aria-label={`Remover ${line.merchandise.product.title} do carrinho`}
+                        className="inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-ink/40 transition-colors hover:text-red-600 disabled:opacity-40 focus-visible:outline-none"
+                      >
+                        <Trash2 size={14} />
+                        {isLineRemoving ? 'Removendo…' : 'Remover'}
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {pickup && ret && (
-                  <p className="mt-2 text-[0.8rem] text-ink/60">
-                    Retirada {pickup} · Devolução {ret}
+                {/* Desktop Price */}
+                <div className="hidden shrink-0 text-right sm:block ml-4">
+                  <p className="font-mono text-lg font-bold tabular-nums text-marsala">
+                    {unitPriceStr || 'A confirmar'}
                   </p>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => void handleRemove(line.id)}
-                  disabled={busy}
-                  className="mt-2 text-[0.75rem] text-ink/65 underline underline-offset-2 transition-colors hover:text-marsala disabled:opacity-50"
-                >
-                  {removing === line.id ? 'Removendo…' : 'Remover'}
-                </button>
+                  {line.quantity > 1 && (
+                    <p className="mt-1 text-[0.7rem] font-medium text-ink/40 uppercase tracking-wider">
+                      por unidade
+                    </p>
+                  )}
+                </div>
               </div>
+            );
+          })}
+        </div>
 
-              <div className="shrink-0 text-right">
-                <p className="font-semibold tabular-nums">
-                  {formatPrice(line.merchandise.price?.amount, line.merchandise.price?.currencyCode) || 'Preço a confirmar'}
-                </p>
-                {line.quantity > 1 && <p className="mt-1 text-[0.68rem] text-ink/45">cada</p>}
+        {/* Order Summary & Checkout Card */}
+        <div className="rounded-3xl border border-marsala/10 bg-white p-6 sm:p-8 shadow-[0_8px_30px_-12px_rgba(83,19,30,0.1)] space-y-6 lg:sticky lg:top-28">
+          <h2 className="font-heading text-2xl text-marsala border-b border-ink/5 pb-4">
+            Resumo da reserva
+          </h2>
+
+          {/* Period Calculation Info */}
+          <div className="rounded-2xl bg-cream p-4 text-[0.8rem] leading-relaxed text-ink/70 space-y-1.5 border border-ink/5">
+            <p className="font-semibold text-ink/90 flex justify-between items-center">
+              <span>
+                {pieces} {pieces === 1 ? 'peça selecionada' : 'peças selecionadas'}
+              </span>
+              <ShoppingBag size={14} className="text-ink/40" />
+            </p>
+            <p className="text-[0.75rem] text-ink/60">
+              {durationFailed
+                ? 'Não foi possível calcular o período exato agora.'
+                : duration !== null
+                  ? `Período estimado: ${duration} ${duration === 1 ? 'dia' : 'dias'}`
+                  : 'Calculando período…'}
+            </p>
+          </div>
+
+          {/* Total Breakdown */}
+          <div className="space-y-2 border-t border-b border-ink/5 py-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[0.85rem] font-medium text-ink/60 uppercase tracking-widest">
+                Total estimado
+              </span>
+              <span className="font-mono text-3xl font-bold tabular-nums text-marsala">
+                {formattedTotal || 'a confirmar'}
+              </span>
+            </div>
+            <p className="text-[0.7rem] leading-tight text-ink/40 text-right">
+              Valor oficial do carrinho comercial Shopify.
+            </p>
+          </div>
+
+          {/* Error Banner */}
+          {error && (
+            <div
+              role="status"
+              className="flex gap-3 rounded-2xl bg-red-50 p-4 text-[0.8rem] text-red-800 border border-red-100 animate-in fade-in slide-in-from-top-2"
+            >
+              <AlertTriangle size={18} className="shrink-0 mt-0.5 text-red-500" />
+              <p className="font-medium leading-relaxed">{error}</p>
+            </div>
+          )}
+
+          {/* Sunday Return Exception Choice */}
+          {sundayOptions && sundayOptions.length > 0 && (
+            <div className="rounded-2xl bg-marsala/5 p-5 space-y-3 border border-marsala/10 animate-in fade-in">
+              <p className="text-[0.8rem] font-semibold text-marsala">
+                A devolução calculada cai num domingo (loja fechada). Escolha a opção:
+              </p>
+              <div className="flex flex-col gap-2.5">
+                {sundayOptions.map((option) => (
+                  <button
+                    key={option.type}
+                    type="button"
+                    disabled={checkingOut}
+                    onClick={() => {
+                      setSundayChoice(option.type);
+                      setSundayOptions(null);
+                    }}
+                    className="group rounded-xl border border-marsala/10 bg-white p-3 text-left transition-all hover:border-marsala hover:shadow-sm"
+                  >
+                    <span className="block font-semibold text-marsala group-hover:text-marsala-glow text-[0.8rem]">
+                      {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira de manhã'}
+                    </span>
+                    <span className="block text-[0.75rem] text-ink/60 mt-0.5">
+                      {new Date(`${option.date}T00:00:00`).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      })}
+                      {option.window ? ` · ${option.window}` : ''}
+                    </span>
+                  </button>
+                ))}
               </div>
-            </li>
-          );
-        })}
-      </ul>
+            </div>
+          )}
 
-      <p className="mt-4 text-[0.75rem] leading-relaxed text-ink/50">
-        {pieces} {pieces === 1 ? 'peça' : 'peças'}
-        {durationFailed ? (
-          <> · não foi possível calcular o período agora.</>
-        ) : duration !== null ? (
-          <> · período de {duration} {duration === 1 ? 'dia' : 'dias'}</>
-        ) : (
-          <> · calculando período…</>
-        )}
-        . A quantidade respeita o estoque da Shopify e as peças físicas livres para a data escolhida.
-      </p>
-
-      <div className="mt-6 flex items-baseline justify-between border-t border-ink/10 pt-5">
-        <span className="text-[0.8rem] uppercase tracking-[0.12em] text-ink/55">Total</span>
-        <span className="text-2xl font-semibold text-marsala tabular-nums">
-          {formatPrice(cart.cost.totalAmount?.amount, cart.cost.totalAmount?.currencyCode) || 'a confirmar'}
-        </span>
-      </div>
-
-      {error && (
-        <p className="mt-4 rounded-xl bg-red-700/10 px-3.5 py-3 text-[0.8rem] text-red-800">
-          {error}
-        </p>
-      )}
-
-      {sundayOptions && sundayOptions.length > 0 && (
-        <div className="mt-5 rounded-xl bg-marsala/[0.06] p-4">
-          <p className="text-[0.8rem] font-medium text-marsala">
-            A devolução calculada cai num domingo — a loja não abre. Escolha uma opção:
-          </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            {sundayOptions.map((option) => (
+          {sundayChoice && (
+            <div className="flex items-center justify-between rounded-xl bg-ink/5 p-3 text-[0.75rem]">
+              <span className="text-ink/70">
+                Devolução:{' '}
+                <strong className="text-ink/90">
+                  {sundayChoice === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
+                </strong>
+              </span>
               <button
-                key={option.type}
                 type="button"
                 disabled={checkingOut}
                 onClick={() => {
-                  setSundayChoice(option.type);
-                  setSundayOptions(null);
+                  checkoutAttemptRef.current?.reset();
+                  setSundayChoice(null);
                 }}
-                className="flex-1 rounded-lg border border-ink/15 px-3.5 py-2.5 text-left text-[0.8rem] transition-colors hover:border-marsala/40"
+                className="font-medium text-marsala underline underline-offset-2 transition-colors hover:text-marsala-glow"
               >
-                <span className="block font-medium">
-                  {option.type === 'saturday' ? 'Sábado à noite' : 'Segunda-feira'}
-                </span>
-                <span className="block text-[0.72rem] opacity-80">
-                  {new Date(`${option.date}T00:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  {option.window ? ` · ${option.window}` : ''}
-                </span>
+                alterar
               </button>
-            ))}
+            </div>
+          )}
+
+          {/* Mandatory HOLD Info Card */}
+          <div className="flex gap-3 rounded-2xl border border-marsala/10 bg-marsala/5 p-4 text-[0.75rem] leading-relaxed text-marsala">
+            <Clock size={20} className="shrink-0 mt-0.5" strokeWidth={1.5} />
+            <div>
+              <p className="font-bold tracking-wide">Reserva garantida por 30 minutos</p>
+              <p className="mt-1 text-ink/70">
+                Ao finalizar, o estoque físico é bloqueado exclusivamente para você durante o
+                pagamento.
+              </p>
+            </div>
           </div>
-          <p className="mt-2 text-[0.7rem] text-marsala/70">Nenhuma diária adicional nessas opções.</p>
-        </div>
-      )}
 
-      {sundayChoice && (
-        <p className="mt-4 text-[0.75rem] text-ink/55">
-          Devolução escolhida: {sundayChoice === 'saturday' ? 'sábado à noite' : 'segunda-feira de manhã'}.{' '}
-          <button type="button" disabled={checkingOut} onClick={() => { checkoutAttemptRef.current?.reset(); setSundayChoice(null); }} className="underline underline-offset-2 hover:text-marsala">
-            alterar
+          {/* Terms Acceptance */}
+          <label className="group flex items-start gap-3 text-[0.75rem] leading-relaxed text-ink/70 cursor-pointer">
+            <div className="relative flex items-center">
+              <input
+                type="checkbox"
+                checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="peer h-4 w-4 shrink-0 cursor-pointer appearance-none rounded-[4px] border-2 border-ink/20 bg-white transition-all checked:border-marsala checked:bg-marsala focus:outline-none focus:ring-2 focus:ring-marsala/20 focus:ring-offset-1"
+              />
+              <svg
+                className="pointer-events-none absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 transition-opacity peer-checked:opacity-100"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="3"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <span className="mt-[-1px] select-none transition-colors group-hover:text-ink/90">
+              Li e aceito os{' '}
+              <Link
+                href="/termos-de-uso"
+                target="_blank"
+                className="font-semibold text-marsala underline underline-offset-4 hover:text-marsala-glow"
+              >
+                termos de uso
+              </Link>{' '}
+              da reserva.
+            </span>
+          </label>
+
+          {checkoutError && (
+            <div
+              role="status"
+              className="flex gap-3 rounded-2xl bg-red-50 p-4 text-[0.8rem] text-red-800 border border-red-100 animate-in fade-in slide-in-from-top-2"
+            >
+              <AlertTriangle size={18} className="shrink-0 mt-0.5 text-red-500" />
+              <p className="font-medium leading-relaxed">{checkoutError}</p>
+            </div>
+          )}
+
+          {/* Checkout Action */}
+          <button
+            type="button"
+            onClick={handleCheckout}
+            disabled={
+              !termsAccepted ||
+              checkingOut ||
+              !!sundayOptions ||
+              stockLoading ||
+              !!removing ||
+              !!updatingQuantity
+            }
+            className="group relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-2xl bg-marsala px-6 py-5 text-[0.8rem] font-bold uppercase tracking-[0.15em] text-cream transition-all hover:bg-marsala-glow hover:shadow-[0_0_20px_rgba(83,19,30,0.3)] active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-ink/10 disabled:text-ink/40 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala focus-visible:ring-offset-2"
+          >
+            {checkingOut ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-cream border-t-transparent" />
+                Criando reserva (HOLD)…
+              </>
+            ) : stockLoading ? (
+              'Conferindo estoque…'
+            ) : (
+              <>
+                Finalizar reserva
+                <ShieldCheck size={18} className="transition-transform group-hover:scale-110" />
+              </>
+            )}
           </button>
-        </p>
-      )}
 
-      <label className="mt-5 flex items-start gap-2.5 text-[0.78rem] leading-relaxed text-ink/70">
-        <input
-          type="checkbox"
-          checked={termsAccepted}
-          onChange={(e) => setTermsAccepted(e.target.checked)}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-ink/30 text-marsala focus:ring-marsala"
-        />
-        <span>
-          Li e aceito os{' '}
-          <Link href="/termos-de-uso" target="_blank" className="underline underline-offset-2 hover:text-marsala">
-            termos de uso
-          </Link>{' '}
-          da reserva.
-        </span>
-      </label>
-
-      {checkoutError && (
-        <p className="mt-3 rounded-xl bg-red-700/10 px-3.5 py-3 text-[0.8rem] text-red-800">
-          {checkoutError}
-        </p>
-      )}
-
-      <button
-        type="button"
-        onClick={handleCheckout}
-        disabled={!termsAccepted || checkingOut || !!sundayOptions || stockLoading || !!removing || !!updatingQuantity}
-        className="mt-6 flex w-full items-center justify-center rounded-xl bg-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {checkingOut ? 'Preparando…' : stockLoading ? 'Conferindo estoque…' : 'Finalizar reserva'}
-      </button>
-
-      <p className="mt-3 text-center text-[0.7rem] text-ink/65">
-        Pagamento processado com segurança pela Shopify.
-      </p>
-    </Shell>
+          <p className="text-center text-[0.7rem] font-medium text-ink/40 flex items-center justify-center gap-1.5">
+            <ShieldCheck size={14} />
+            Criptografia segura e validação presencial
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -486,20 +739,18 @@ function groupItemsByVariant(lines: CartLine[]): { shopifyVariantId: string; qua
   for (const line of lines) {
     byVariant.set(line.merchandise.id, (byVariant.get(line.merchandise.id) ?? 0) + line.quantity);
   }
-  return Array.from(byVariant.entries()).map(([shopifyVariantId, quantity]) => ({ shopifyVariantId, quantity }));
+  return Array.from(byVariant.entries()).map(([shopifyVariantId, quantity]) => ({
+    shopifyVariantId,
+    quantity,
+  }));
 }
 
 function derivePickupDate(lines: CartLine[]): string | null {
-  const values = new Set(lines.map((l) => l.attributes.find((a) => a.key === '_vsc_pickup')?.value).filter((v): v is string => !!v));
+  const values = new Set(
+    lines
+      .map((l) => l.attributes.find((a) => a.key === '_vsc_pickup')?.value)
+      .filter((v): v is string => !!v),
+  );
   if (values.size !== 1) return null;
   return [...values][0];
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="cart-page mx-auto max-w-2xl px-6 py-12 sm:py-16">
-      <p className="privacy-eyebrow">Seu closet de viagem</p><h1 className="mb-8 font-heading text-3xl">Seu closet,<br /><em>peça por peça.</em></h1>
-      {children}
-    </div>
-  );
 }

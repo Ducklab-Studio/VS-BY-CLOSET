@@ -17,13 +17,24 @@ interface CatalogItem {
     readonly productType: string;
     readonly status: string;
   };
-  readonly mappedUnits: readonly { id: string; code: string; active: boolean; reservableOnline: boolean }[];
+  readonly mappedUnits: readonly {
+    id: string;
+    code: string;
+    active: boolean;
+    reservableOnline: boolean;
+  }[];
   readonly physicalUnitsTotal: number;
   readonly physicalUnitsActive: number;
   readonly physicalUnitsReservableOnline: number;
 }
 
-export function ShopifyCatalog({ items, isAdmin }: { items: readonly CatalogItem[]; isAdmin: boolean }) {
+export function ShopifyCatalog({
+  items,
+  isAdmin,
+}: {
+  items: readonly CatalogItem[];
+  isAdmin: boolean;
+}) {
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-ink/15 bg-white p-6 text-sm text-ink/60 dark:border-white/10 dark:bg-dark-card dark:text-dark-muted">
@@ -72,18 +83,30 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-medium text-ink dark:text-dark-text">{item.product.title}</h3>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-neutral-100 text-neutral-600 dark:bg-white/10 dark:text-dark-muted'}`}>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${isActive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-neutral-100 text-neutral-600 dark:bg-white/10 dark:text-dark-muted'}`}
+            >
               {item.product.status}
             </span>
           </div>
-          {variantLabel ? <p className="mt-0.5 text-sm text-ink/70 dark:text-dark-muted">{variantLabel}</p> : null}
+          {variantLabel ? (
+            <p className="mt-0.5 text-sm text-ink/70 dark:text-dark-muted">{variantLabel}</p>
+          ) : null}
           <SkuLine sku={item.sku} status={item.skuStatus} />
-          {item.product.productType ? <p className="mt-1 text-xs text-ink/50 dark:text-dark-subtle">{item.product.productType}</p> : null}
+          {item.product.productType ? (
+            <p className="mt-1 text-xs text-ink/50 dark:text-dark-subtle">
+              {item.product.productType}
+            </p>
+          ) : null}
         </div>
 
         <div className="shrink-0 text-right">
-          <p className="text-2xl font-semibold text-ink dark:text-dark-text">{item.physicalUnitsTotal}</p>
-          <p className="text-[10px] uppercase tracking-wide text-ink/50 dark:text-dark-subtle">peças físicas</p>
+          <p className="text-2xl font-semibold text-ink dark:text-dark-text">
+            {item.physicalUnitsTotal}
+          </p>
+          <p className="text-[10px] uppercase tracking-wide text-ink/50 dark:text-dark-subtle">
+            peças físicas
+          </p>
         </div>
       </div>
 
@@ -96,19 +119,27 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
       {item.mappedUnits.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {item.mappedUnits.map((unit) => (
-            <span key={unit.id} className="rounded-md border border-ink/10 px-2 py-1 font-mono text-[11px] text-ink/70 dark:border-white/10 dark:text-dark-muted">
+            <span
+              key={unit.id}
+              className="rounded-md border border-ink/10 px-2 py-1 font-mono text-[11px] text-ink/70 dark:border-white/10 dark:text-dark-muted"
+            >
               {unit.code}
               {!unit.active ? ' · inativa' : !unit.reservableOnline ? ' · loja' : ''}
             </span>
           ))}
         </div>
       ) : (
-        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">Ainda não há peça física vinculada a esta variante.</p>
+        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+          Ainda não há peça física vinculada a esta variante.
+        </p>
       )}
 
       {isAdmin ? (
         <div className="mt-4 border-t border-ink/5 pt-4 dark:border-white/5">
-          <label className="text-xs font-medium text-ink/70 dark:text-dark-muted" htmlFor={`codes-${numericId(item.id)}`}>
+          <label
+            className="text-xs font-medium text-ink/70 dark:text-dark-muted"
+            htmlFor={`codes-${numericId(item.id)}`}
+          >
             Códigos das peças físicas
           </label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -155,10 +186,14 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
           ) : null}
 
           <p className="mt-2 text-[11px] text-ink/45 dark:text-dark-subtle">
-            Separe vários códigos por vírgula. Com uma única peça nesta variante, o código passa a ser o SKU da Shopify automaticamente. O SKU e o estoque nunca criam peças físicas sozinhos.
+            Separe vários códigos por vírgula. Com uma única peça nesta variante, o código passa a
+            ser o SKU da Shopify automaticamente. O SKU e o estoque nunca criam peças físicas
+            sozinhos.
           </p>
           {message ? (
-            <p className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+            <p
+              className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}
+            >
               {message.type === 'success' ? <CheckCircle2 size={13} /> : <RefreshCw size={13} />}
               {message.text}
             </p>
@@ -174,16 +209,32 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
 function SkuLine({ sku, status }: { sku: string | null; status: CatalogItem['skuStatus'] }) {
   const badge =
     status === 'synced'
-      ? { icon: <CheckCircle2 size={11} />, text: 'SKU sincronizado', className: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' }
+      ? {
+          icon: <CheckCircle2 size={11} />,
+          text: 'SKU sincronizado',
+          className: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300',
+        }
       : status === 'missing'
-        ? { icon: <AlertTriangle size={11} />, text: 'SKU ausente', className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' }
-        : { icon: <Clock size={11} />, text: 'Sincronizando SKU', className: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300' };
+        ? {
+            icon: <AlertTriangle size={11} />,
+            text: 'SKU ausente',
+            className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
+          }
+        : {
+            icon: <Clock size={11} />,
+            text: 'Sincronizando SKU',
+            className: 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300',
+          };
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2">
       <p className="font-mono text-xs text-ink/50 dark:text-dark-subtle">SKU {sku ?? '—'}</p>
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}
-        title={status === 'pending' ? 'Alguma peça física ainda guarda o SKU anterior; a próxima sincronização corrige sozinha.' : 'O SKU vem da Shopify e é atualizado automaticamente pela variante.'}
+        title={
+          status === 'pending'
+            ? 'Alguma peça física ainda guarda o SKU anterior; a próxima sincronização corrige sozinha.'
+            : 'O SKU vem da Shopify e é atualizado automaticamente pela variante.'
+        }
       >
         {badge.icon}
         {badge.text}
@@ -206,7 +257,9 @@ function OptionToggle({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className={`flex items-start gap-2 rounded-lg border border-ink/10 px-3 py-2.5 text-xs dark:border-white/10 ${disabled ? 'opacity-55' : 'cursor-pointer'}`}>
+    <label
+      className={`flex items-start gap-2 rounded-lg border border-ink/10 px-3 py-2.5 text-xs dark:border-white/10 ${disabled ? 'opacity-55' : 'cursor-pointer'}`}
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -226,7 +279,9 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <p className="font-medium text-ink dark:text-dark-text">{value}</p>
-      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-ink/50 dark:text-dark-subtle">{label}</p>
+      <p className="mt-0.5 text-[10px] uppercase tracking-wide text-ink/50 dark:text-dark-subtle">
+        {label}
+      </p>
     </div>
   );
 }

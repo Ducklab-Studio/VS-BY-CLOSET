@@ -3,8 +3,25 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { CalendarDays, ClipboardList, LayoutDashboard, LogOut, Menu, Scale, Shirt, ShieldCheck, Ticket, Users, X } from 'lucide-react';
-import { hasAdminModule, hasAdminRole, type AdminModuleName, type AdminSessionUser } from '@/lib/admin-permissions';
+import {
+  CalendarDays,
+  ClipboardList,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Scale,
+  Shirt,
+  ShieldCheck,
+  Ticket,
+  Users,
+  X,
+} from 'lucide-react';
+import {
+  hasAdminModule,
+  hasAdminRole,
+  type AdminModuleName,
+  type AdminSessionUser,
+} from '@/lib/admin-permissions';
 import { attentionBadgeText, attentionLabel } from '@/lib/valle-pass-attention';
 import { reservationAttentionLabel } from '@/lib/reservation-attention';
 import { logoutAction } from '@/app/closetadmin/actions';
@@ -51,7 +68,13 @@ const NAV_ITEMS: NavItem[] = [
  * server-side de qualquer forma (ver src/lib/admin-session.ts), e o
  * reservations-api revalida de novo (`AdminRoleGuard`).
  */
-export function AdminShell({ session, children }: { session: AdminSessionUser; children: React.ReactNode }) {
+export function AdminShell({
+  session,
+  children,
+}: {
+  session: AdminSessionUser;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -60,13 +83,18 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
     if (item.module) return hasAdminModule(session, item.module);
     return true;
   });
-  const isActive = (href: string) => (href === '/closetadmin' ? pathname === href : pathname?.startsWith(href));
+  const isActive = (href: string) =>
+    href === '/closetadmin' ? pathname === href : pathname?.startsWith(href);
   // Só quem tem o módulo pergunta pelo contador; os outros nunca recebem o dado.
   const valePass = useValePassAttention(hasAdminModule(session, 'VALLE_PASS'));
   const reservations = useReservationAttention(hasAdminModule(session, 'RESERVATIONS'));
   const badges: Record<string, MenuBadge> = {
     [VALLE_PASS_HREF]: { attention: valePass, label: attentionLabel, testId: 'valle-pass-badge' },
-    [RESERVATIONS_HREF]: { attention: reservations, label: reservationAttentionLabel, testId: 'reservations-badge' },
+    [RESERVATIONS_HREF]: {
+      attention: reservations,
+      label: reservationAttentionLabel,
+      testId: 'reservations-badge',
+    },
   };
   const valePassPending = attentionBadgeText(valePass.count);
   const reservationsPending = attentionBadgeText(reservations.count);
@@ -85,9 +113,19 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
       {/* Nav mobile — overlay */}
       {mobileOpen ? (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <button aria-label="Fechar menu" className="absolute inset-0 bg-black/40 dark:bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <button
+            aria-label="Fechar menu"
+            className="absolute inset-0 bg-black/40 dark:bg-black/70 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
           <aside className="absolute inset-y-0 left-0 flex w-72 flex-col bg-white dark:bg-dark-surface shadow-2xl border-r border-ink/10 dark:border-white/10">
-            <SidebarContent items={items} isActive={isActive} session={session} badges={badges} onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent
+              items={items}
+              isActive={isActive}
+              session={session}
+              badges={badges}
+              onNavigate={() => setMobileOpen(false)}
+            />
           </aside>
         </div>
       ) : null}
@@ -102,10 +140,18 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
             <Menu size={22} />
             {/* Menu fechado no celular/tablet: um ponto avisa que há algo novo (mesmo lugar para os dois contadores). */}
             {valePassPending ? (
-              <span aria-hidden data-testid="valle-pass-menu-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface" />
+              <span
+                aria-hidden
+                data-testid="valle-pass-menu-dot"
+                className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface"
+              />
             ) : null}
             {reservationsPending ? (
-              <span aria-hidden data-testid="reservations-menu-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface" />
+              <span
+                aria-hidden
+                data-testid="reservations-menu-dot"
+                className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-marsala ring-2 ring-white dark:bg-gold dark:ring-dark-surface"
+              />
             ) : null}
           </button>
           <div className="hidden font-heading text-lg text-marsala dark:text-gold tracking-wide lg:block font-bold">
@@ -115,10 +161,14 @@ export function AdminShell({ session, children }: { session: AdminSessionUser; c
             <AdminThemeToggle />
             <div className="h-4 w-[1px] bg-ink/10 dark:bg-white/10" />
             <span className="text-ink/70 dark:text-dark-muted">
-              <strong className="font-medium text-ink dark:text-dark-text">{session.name}</strong> <span className="text-ink/40 dark:text-white/20">·</span> {roleLabel(session)}
+              <strong className="font-medium text-ink dark:text-dark-text">{session.name}</strong>{' '}
+              <span className="text-ink/40 dark:text-white/20">·</span> {roleLabel(session)}
             </span>
             <form action={logoutAction}>
-              <button type="submit" className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 hover:text-ink dark:hover:text-dark-text transition">
+              <button
+                type="submit"
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ink/60 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5 hover:text-ink dark:hover:text-dark-text transition"
+              >
                 <LogOut size={16} /> Sair
               </button>
             </form>
@@ -148,11 +198,19 @@ function SidebarContent({
     <>
       <div className="flex items-center justify-between px-5 py-5 border-b border-ink/5 dark:border-white/5">
         <div className="flex flex-col">
-          <span className="font-heading text-xl font-bold text-marsala dark:text-gold tracking-wide">ClosetAdmin</span>
-          <span className="text-[11px] text-ink/65 dark:text-dark-subtle tracking-wider uppercase">Painel de Operações</span>
+          <span className="font-heading text-xl font-bold text-marsala dark:text-gold tracking-wide">
+            ClosetAdmin
+          </span>
+          <span className="text-[11px] text-ink/65 dark:text-dark-subtle tracking-wider uppercase">
+            Painel de Operações
+          </span>
         </div>
         {onNavigate ? (
-          <button aria-label="Fechar menu" className="rounded-md p-1 text-ink/50 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5" onClick={onNavigate}>
+          <button
+            aria-label="Fechar menu"
+            className="rounded-md p-1 text-ink/50 dark:text-dark-muted hover:bg-ink/5 dark:hover:bg-white/5"
+            onClick={onNavigate}
+          >
             <X size={20} />
           </button>
         ) : null}
@@ -179,7 +237,8 @@ function SidebarContent({
         })}
       </nav>
       <div className="border-t border-ink/10 dark:border-white/10 px-5 py-4 text-xs text-ink/65 dark:text-dark-subtle">
-        Sessão: <span className="font-medium text-ink/60 dark:text-dark-muted">{session.name}</span> ({session.role})
+        Sessão: <span className="font-medium text-ink/60 dark:text-dark-muted">{session.name}</span>{' '}
+        ({session.role})
       </div>
     </>
   );
@@ -201,7 +260,11 @@ function AttentionBadge({ badge }: { badge: MenuBadge }) {
         key={attention.bump}
         aria-hidden
         data-testid={badge.testId}
-        title={attention.stale ? 'Não foi possível atualizar agora — mostrando o último valor.' : undefined}
+        title={
+          attention.stale
+            ? 'Não foi possível atualizar agora — mostrando o último valor.'
+            : undefined
+        }
         className={`ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-marsala px-1.5 text-[11px] font-semibold leading-none tabular-nums text-cream ring-1 ring-marsala/20 dark:bg-gold dark:text-neutral-950 dark:ring-gold/30 ${
           attention.stale ? 'opacity-60' : ''
         } ${attention.bump > 0 ? 'motion-safe:animate-[pulse_1s_ease-in-out_3]' : ''}`}
@@ -218,4 +281,3 @@ function roleLabel(session: AdminSessionUser): string {
   if (session.role === 'ADMIN') return 'Administrador';
   return 'Equipe';
 }
-

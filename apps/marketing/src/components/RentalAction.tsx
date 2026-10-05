@@ -13,12 +13,22 @@ export function RentalAction({ children }: { children: ReactNode }) {
     const measure = () => {
       const panel = section.getBoundingClientRect();
       const placeholder = element.getBoundingClientRect();
+      const actionBlock = element.firstElementChild as HTMLElement;
+
+      // Update placeholder height dynamically to prevent scroll feedback loops
+      if (actionBlock) {
+        element.style.minHeight = `${actionBlock.offsetHeight}px`;
+      }
+
       const visible = panel.top < window.innerHeight - 160 && panel.bottom > 160;
       element.dataset.floating = String(visible && placeholder.bottom > window.innerHeight);
       element.style.setProperty('--action-left', `${panel.left}px`);
       element.style.setProperty('--action-width', `${panel.width}px`);
     };
-    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
     const observer = new ResizeObserver(schedule);
     observer.observe(section);
     window.addEventListener('scroll', schedule, { passive: true });
@@ -31,5 +41,9 @@ export function RentalAction({ children }: { children: ReactNode }) {
       window.removeEventListener('resize', schedule);
     };
   }, []);
-  return <div ref={slot} className="rental-action-slot"><div className="rental-action">{children}</div></div>;
+  return (
+    <div ref={slot} className="rental-action-slot">
+      <div className="rental-action">{children}</div>
+    </div>
+  );
 }

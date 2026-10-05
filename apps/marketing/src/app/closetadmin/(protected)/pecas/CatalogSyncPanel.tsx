@@ -12,7 +12,13 @@ import type { CatalogSyncReport } from '@/lib/shopify-admin-data';
  * página); só ADMIN vê e usa o botão — a ação em si já é recusada pelo
  * servidor pra STAFF de qualquer forma (item "não confiar só no frontend").
  */
-export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: CatalogSyncReport; isAdmin: boolean }) {
+export function CatalogSyncPanel({
+  initialReport,
+  isAdmin,
+}: {
+  initialReport: CatalogSyncReport;
+  isAdmin: boolean;
+}) {
   const [report, setReport] = useState(initialReport);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +35,12 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
     });
   }
 
-  const missing = report.divergences.filter((d) => d.kind === 'variant_missing' || d.kind === 'product_inactive' || d.kind === 'variant_deleted_inactive');
+  const missing = report.divergences.filter(
+    (d) =>
+      d.kind === 'variant_missing' ||
+      d.kind === 'product_inactive' ||
+      d.kind === 'variant_deleted_inactive',
+  );
   const restored = report.divergences.filter((d) => d.kind === 'variant_restored');
   const skuChanged = report.divergences.filter((d) => d.kind === 'sku_changed');
 
@@ -37,9 +48,14 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
     <div className="mb-8 rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition-colors dark:border-white/10 dark:bg-dark-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-ink dark:text-dark-text">Sincronização com a Shopify</h2>
+          <h2 className="text-base font-semibold text-ink dark:text-dark-text">
+            Sincronização com a Shopify
+          </h2>
           <p className="mt-0.5 text-sm text-ink/55 dark:text-dark-muted">
-            Última sincronização: {report.lastSyncedAt ? `${formatDateTimePt(report.lastSyncedAt)}${report.lastSyncedByName ? ` — ${report.lastSyncedByName}` : ''}` : 'nunca sincronizado'}
+            Última sincronização:{' '}
+            {report.lastSyncedAt
+              ? `${formatDateTimePt(report.lastSyncedAt)}${report.lastSyncedByName ? ` — ${report.lastSyncedByName}` : ''}`
+              : 'nunca sincronizado'}
           </p>
         </div>
         {isAdmin ? (
@@ -58,28 +74,50 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
       {error ? <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 
       {report.divergences.length === 0 ? (
-        <p className="mt-3 text-sm text-ink/55 dark:text-dark-muted">Nenhuma divergência — peças físicas e catálogo Shopify batem.</p>
+        <p className="mt-3 text-sm text-ink/55 dark:text-dark-muted">
+          Nenhuma divergência — peças físicas e catálogo Shopify batem.
+        </p>
       ) : (
         <ul className="mt-3 space-y-2">
           {missing.map((d) => (
-            <li key={d.rentalUnitId} className="flex flex-wrap items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800/50 dark:bg-amber-950/30">
-              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300" />
+            <li
+              key={d.rentalUnitId}
+              className="flex flex-wrap items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800/50 dark:bg-amber-950/30"
+            >
+              <AlertTriangle
+                size={16}
+                className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300"
+              />
               <div className="min-w-0">
                 <p className="font-medium text-amber-900 dark:text-amber-200">
-                  {d.code} — {d.name} {d.kind === 'variant_deleted_inactive' ? (d.applied ? '(arquivada)' : '(será arquivada)') : d.applied ? '(desativada)' : '(será desativada)'}
+                  {d.code} — {d.name}{' '}
+                  {d.kind === 'variant_deleted_inactive'
+                    ? d.applied
+                      ? '(arquivada)'
+                      : '(será arquivada)'
+                    : d.applied
+                      ? '(desativada)'
+                      : '(será desativada)'}
                 </p>
                 <p className="mt-0.5 text-amber-800/80 dark:text-amber-300/80">{d.note}</p>
                 {d.upcomingReservations > 0 ? (
                   <p className="mt-0.5 font-medium text-amber-900 dark:text-amber-200">
-                    ⚠ {d.upcomingReservations} reserva(s) futura(s) com esta peça — não foram alteradas, revise manualmente.
+                    ⚠ {d.upcomingReservations} reserva(s) futura(s) com esta peça — não foram
+                    alteradas, revise manualmente.
                   </p>
                 ) : null}
               </div>
             </li>
           ))}
           {restored.map((d) => (
-            <li key={d.rentalUnitId} className="flex flex-wrap items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-800/50 dark:bg-emerald-950/30">
-              <RefreshCw size={16} className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-300" />
+            <li
+              key={d.rentalUnitId}
+              className="flex flex-wrap items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-800/50 dark:bg-emerald-950/30"
+            >
+              <RefreshCw
+                size={16}
+                className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-300"
+              />
               <div className="min-w-0">
                 <p className="font-medium text-emerald-900 dark:text-emerald-200">
                   {d.code} — {d.name} {d.applied ? '(reativada)' : '(pode ser reativada)'}
@@ -89,7 +127,10 @@ export function CatalogSyncPanel({ initialReport, isAdmin }: { initialReport: Ca
             </li>
           ))}
           {skuChanged.map((d) => (
-            <li key={d.rentalUnitId} className="flex flex-wrap items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-800/50 dark:bg-sky-950/30">
+            <li
+              key={d.rentalUnitId}
+              className="flex flex-wrap items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-800/50 dark:bg-sky-950/30"
+            >
               <Tag size={16} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-300" />
               <div className="min-w-0">
                 <p className="font-medium text-sky-900 dark:text-sky-200">

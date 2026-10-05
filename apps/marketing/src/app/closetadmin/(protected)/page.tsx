@@ -15,7 +15,13 @@ import {
 import { requireAdminSession } from '@/lib/admin-session';
 import { getCalendar, listPieces, listReservations, type CalendarItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { Card, ErrorState, PageHeader, SourceBadge, StatusBadge } from '@/components/closetadmin/ui';
+import {
+  Card,
+  ErrorState,
+  PageHeader,
+  SourceBadge,
+  StatusBadge,
+} from '@/components/closetadmin/ui';
 import { civilDateToISOToday, isoAddDays } from '@/lib/closetadmin-dates';
 
 export const metadata: Metadata = { title: 'Dashboard' };
@@ -45,7 +51,9 @@ export default async function ClosetAdminDashboardPage() {
 
   const { calendar, pieces, problems } = data;
   const pickupsToday = uniqueReservationCount(calendar.filter((item) => item.pickupDate === today));
-  const returnsToday = uniqueReservationCount(calendar.filter((item) => item.effectiveReturnDate === today));
+  const returnsToday = uniqueReservationCount(
+    calendar.filter((item) => item.effectiveReturnDate === today),
+  );
   const upcomingPickups = groupEvents(calendar, 'pickup', today).slice(0, 6);
   const upcomingReturns = groupEvents(calendar, 'return', today).slice(0, 6);
 
@@ -85,9 +93,24 @@ export default async function ClosetAdminDashboardPage() {
       />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={ShoppingBag} label="Retiradas hoje" value={pickupsToday} href="/closetadmin/calendario" />
-        <StatCard icon={PackageCheck} label="Devoluções hoje" value={returnsToday} href="/closetadmin/calendario" />
-        <StatCard icon={PackageX} label="Peças ocupadas" value={occupiedPieces} href="/closetadmin/pecas" />
+        <StatCard
+          icon={ShoppingBag}
+          label="Retiradas hoje"
+          value={pickupsToday}
+          href="/closetadmin/calendario"
+        />
+        <StatCard
+          icon={PackageCheck}
+          label="Devoluções hoje"
+          value={returnsToday}
+          href="/closetadmin/calendario"
+        />
+        <StatCard
+          icon={PackageX}
+          label="Peças ocupadas"
+          value={occupiedPieces}
+          href="/closetadmin/pecas"
+        />
         <StatCard
           icon={AlertTriangle}
           label="Alertas"
@@ -98,20 +121,43 @@ export default async function ClosetAdminDashboardPage() {
       </section>
 
       <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MiniMetric label="Reservas no período" value={activeReservationIds.size} detail="próximos 7 dias" />
-        <MiniMetric label="Peças cadastradas" value={pieces.length} detail={`${activePieces} ativas`} />
-        <MiniMetric label="Reserváveis online" value={reservablePieces} detail={`${availablePieces} livres agora`} />
-        <MiniMetric label="Ocupação atual" value={`${occupancyRate}%`} detail={`${occupiedPieces} de ${activePieces || 0} peças ativas`} />
+        <MiniMetric
+          label="Reservas no período"
+          value={activeReservationIds.size}
+          detail="próximos 7 dias"
+        />
+        <MiniMetric
+          label="Peças cadastradas"
+          value={pieces.length}
+          detail={`${activePieces} ativas`}
+        />
+        <MiniMetric
+          label="Reserváveis online"
+          value={reservablePieces}
+          detail={`${availablePieces} livres agora`}
+        />
+        <MiniMetric
+          label="Ocupação atual"
+          value={`${occupancyRate}%`}
+          detail={`${occupiedPieces} de ${activePieces || 0} peças ativas`}
+        />
       </section>
 
       <section className="mt-5 grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
         <Card className="overflow-hidden p-0">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/10 px-5 py-4 dark:border-white/10">
             <div>
-              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">Operação da semana</h2>
-              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">Retiradas e devoluções que já exigem preparação da equipe.</p>
+              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">
+                Operação da semana
+              </h2>
+              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">
+                Retiradas e devoluções que já exigem preparação da equipe.
+              </p>
             </div>
-            <Link href="/closetadmin/calendario" className="inline-flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold">
+            <Link
+              href="/closetadmin/calendario"
+              className="inline-flex items-center gap-1 text-xs font-medium text-marsala hover:underline dark:text-gold"
+            >
               Abrir calendário <ChevronRight size={14} />
             </Link>
           </div>
@@ -127,8 +173,12 @@ export default async function ClosetAdminDashboardPage() {
         <Card>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">Status das peças</h2>
-              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">Visão rápida do inventário físico operacional.</p>
+              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">
+                Status das peças
+              </h2>
+              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">
+                Visão rápida do inventário físico operacional.
+              </p>
             </div>
             <div className="rounded-lg bg-marsala/10 p-2 text-marsala dark:bg-gold/10 dark:text-gold">
               <PackageOpen size={18} />
@@ -159,18 +209,29 @@ export default async function ClosetAdminDashboardPage() {
         <Card>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">Alertas operacionais</h2>
-              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">Reservas em estado que requer conferência manual.</p>
+              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">
+                Alertas operacionais
+              </h2>
+              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">
+                Reservas em estado que requer conferência manual.
+              </p>
             </div>
-            <AlertTriangle size={18} className={problems.length > 0 ? 'text-amber-400' : 'text-emerald-400'} />
+            <AlertTriangle
+              size={18}
+              className={problems.length > 0 ? 'text-amber-400' : 'text-emerald-400'}
+            />
           </div>
 
           {problems.length === 0 ? (
             <div className="mt-5 flex items-center gap-3 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-4 py-3">
               <CircleCheckBig size={19} className="shrink-0 text-emerald-400" />
               <div>
-                <p className="text-sm font-medium text-ink dark:text-dark-text">Operação sem alertas</p>
-                <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">Nenhuma reserva precisa de intervenção agora.</p>
+                <p className="text-sm font-medium text-ink dark:text-dark-text">
+                  Operação sem alertas
+                </p>
+                <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">
+                  Nenhuma reserva precisa de intervenção agora.
+                </p>
               </div>
             </div>
           ) : (
@@ -182,8 +243,12 @@ export default async function ClosetAdminDashboardPage() {
                     className="flex items-center justify-between gap-3 py-3 text-sm transition hover:opacity-80"
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-ink dark:text-dark-text">{reservation.customerName ?? 'Cliente não informado'}</p>
-                      <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{reservation.itemCount} peça(s) · {reservation.source}</p>
+                      <p className="truncate font-medium text-ink dark:text-dark-text">
+                        {reservation.customerName ?? 'Cliente não informado'}
+                      </p>
+                      <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
+                        {reservation.itemCount} peça(s) · {reservation.source}
+                      </p>
                     </div>
                     <StatusBadge status={reservation.status} />
                   </Link>
@@ -196,17 +261,37 @@ export default async function ClosetAdminDashboardPage() {
         <Card>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">Atalhos da operação</h2>
-              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">Acesse os fluxos usados no dia a dia sem procurar no menu.</p>
+              <h2 className="font-heading text-base font-semibold tracking-wide text-ink dark:text-dark-text">
+                Atalhos da operação
+              </h2>
+              <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-subtle">
+                Acesse os fluxos usados no dia a dia sem procurar no menu.
+              </p>
             </div>
             <CalendarDays size={18} className="text-gold" />
           </div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <QuickAction href="/closetadmin/reservas/nova" title="Criar reserva" description="Reserva manual de balcão" />
-            <QuickAction href="/closetadmin/calendario" title="Ver calendário" description="Agenda operacional semanal" />
-            <QuickAction href="/closetadmin/pecas" title="Peças físicas" description="Disponibilidade e Shopify" />
-            <QuickAction href="/closetadmin/regras" title="Regras e bloqueios" description="Datas e regras do aluguel" />
+            <QuickAction
+              href="/closetadmin/reservas/nova"
+              title="Criar reserva"
+              description="Reserva manual de balcão"
+            />
+            <QuickAction
+              href="/closetadmin/calendario"
+              title="Ver calendário"
+              description="Agenda operacional semanal"
+            />
+            <QuickAction
+              href="/closetadmin/pecas"
+              title="Peças físicas"
+              description="Disponibilidade e Shopify"
+            />
+            <QuickAction
+              href="/closetadmin/regras"
+              title="Regras e bloqueios"
+              description="Datas e regras do aluguel"
+            />
           </div>
         </Card>
       </section>
@@ -232,7 +317,11 @@ type DashboardEvent = {
   status: string;
 };
 
-function groupEvents(items: readonly CalendarItem[], kind: 'pickup' | 'return', today: string): DashboardEvent[] {
+function groupEvents(
+  items: readonly CalendarItem[],
+  kind: 'pickup' | 'return',
+  today: string,
+): DashboardEvent[] {
   const grouped = new Map<string, DashboardEvent>();
 
   for (const item of items) {
@@ -242,7 +331,8 @@ function groupEvents(items: readonly CalendarItem[], kind: 'pickup' | 'return', 
     const key = `${item.reservationId}-${date}`;
     const existing = grouped.get(key);
     if (existing) {
-      if (!existing.unitCodes.includes(item.rentalUnitCode)) existing.unitCodes.push(item.rentalUnitCode);
+      if (!existing.unitCodes.includes(item.rentalUnitCode))
+        existing.unitCodes.push(item.rentalUnitCode);
       continue;
     }
 
@@ -286,20 +376,35 @@ function StatCard({
             <Icon size={22} />
           </div>
           <div>
-            <p className="text-2xl font-bold tracking-tight text-ink dark:text-dark-text">{value}</p>
+            <p className="text-2xl font-bold tracking-tight text-ink dark:text-dark-text">
+              {value}
+            </p>
             <p className="mt-0.5 text-xs text-ink/50 dark:text-dark-muted">{label}</p>
           </div>
         </div>
-        <ChevronRight size={16} className="text-ink/25 transition group-hover:translate-x-0.5 group-hover:text-gold dark:text-dark-subtle" />
+        <ChevronRight
+          size={16}
+          className="text-ink/25 transition group-hover:translate-x-0.5 group-hover:text-gold dark:text-dark-subtle"
+        />
       </Card>
     </Link>
   );
 }
 
-function MiniMetric({ label, value, detail }: { label: string; value: number | string; detail: string }) {
+function MiniMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: number | string;
+  detail: string;
+}) {
   return (
     <div className="rounded-xl border border-ink/10 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-dark-card">
-      <p className="text-[11px] uppercase tracking-[0.12em] text-ink/45 dark:text-dark-subtle">{label}</p>
+      <p className="text-[11px] uppercase tracking-[0.12em] text-ink/45 dark:text-dark-subtle">
+        {label}
+      </p>
       <div className="mt-1 flex items-end justify-between gap-2">
         <p className="text-xl font-semibold text-ink dark:text-dark-text">{value}</p>
         <p className="pb-0.5 text-[11px] text-ink/45 dark:text-dark-subtle">{detail}</p>
@@ -308,29 +413,52 @@ function MiniMetric({ label, value, detail }: { label: string; value: number | s
   );
 }
 
-function UpcomingList({ title, kind, events }: { title: string; kind: 'pickup' | 'return'; events: readonly DashboardEvent[] }) {
+function UpcomingList({
+  title,
+  kind,
+  events,
+}: {
+  title: string;
+  kind: 'pickup' | 'return';
+  events: readonly DashboardEvent[];
+}) {
   return (
     <div className="p-5">
       <div className="flex items-center gap-2">
-        {kind === 'pickup' ? <ShoppingBag size={16} className="text-gold" /> : <PackageCheck size={16} className="text-gold" />}
+        {kind === 'pickup' ? (
+          <ShoppingBag size={16} className="text-gold" />
+        ) : (
+          <PackageCheck size={16} className="text-gold" />
+        )}
         <h3 className="text-sm font-semibold text-ink dark:text-dark-text">{title}</h3>
       </div>
 
       {events.length === 0 ? (
         <div className="mt-4 rounded-lg border border-dashed border-ink/10 px-3 py-4 text-center dark:border-white/10">
-          <p className="text-sm text-ink/55 dark:text-dark-muted">Nada agendado nos próximos 7 dias.</p>
+          <p className="text-sm text-ink/55 dark:text-dark-muted">
+            Nada agendado nos próximos 7 dias.
+          </p>
         </div>
       ) : (
         <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
           {events.map((event) => (
             <li key={`${kind}-${event.reservationId}-${event.date}`}>
-              <Link href={`/closetadmin/reservas/${event.reservationId}`} className="block py-3 transition hover:opacity-80">
+              <Link
+                href={`/closetadmin/reservas/${event.reservationId}`}
+                className="block py-3 transition hover:opacity-80"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink dark:text-dark-text">{event.customerName ?? 'Cliente não informado'}</p>
-                    <p className="mt-0.5 truncate text-xs text-ink/50 dark:text-dark-subtle">{event.unitCodes.join(', ')}</p>
+                    <p className="truncate text-sm font-medium text-ink dark:text-dark-text">
+                      {event.customerName ?? 'Cliente não informado'}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-ink/50 dark:text-dark-subtle">
+                      {event.unitCodes.join(', ')}
+                    </p>
                   </div>
-                  <span className="shrink-0 text-xs font-medium text-ink/60 dark:text-dark-muted">{formatDatePt(event.date)}</span>
+                  <span className="shrink-0 text-xs font-medium text-ink/60 dark:text-dark-muted">
+                    {formatDatePt(event.date)}
+                  </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <SourceBadge source={event.source} />
@@ -352,10 +480,15 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
         <span className="text-ink/60 dark:text-dark-muted">{label}</span>
-        <span className="font-medium text-ink dark:text-dark-text">{value}/{total}</span>
+        <span className="font-medium text-ink dark:text-dark-text">
+          {value}/{total}
+        </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-ink/5 dark:bg-white/[0.06]">
-        <div className="h-full rounded-full bg-gold transition-all" style={{ width: `${percentage}%` }} />
+        <div
+          className="h-full rounded-full bg-gold transition-all"
+          style={{ width: `${percentage}%` }}
+        />
       </div>
     </div>
   );
@@ -364,13 +497,23 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
 function SmallState({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-lg bg-ink/[0.025] px-3 py-2.5 dark:bg-white/[0.025]">
-      <p className="text-[10px] uppercase tracking-wide text-ink/45 dark:text-dark-subtle">{label}</p>
+      <p className="text-[10px] uppercase tracking-wide text-ink/45 dark:text-dark-subtle">
+        {label}
+      </p>
       <p className="mt-0.5 text-lg font-semibold text-ink dark:text-dark-text">{value}</p>
     </div>
   );
 }
 
-function QuickAction({ href, title, description }: { href: string; title: string; description: string }) {
+function QuickAction({
+  href,
+  title,
+  description,
+}: {
+  href: string;
+  title: string;
+  description: string;
+}) {
   return (
     <Link
       href={href}
@@ -381,7 +524,10 @@ function QuickAction({ href, title, description }: { href: string; title: string
           <p className="text-sm font-medium text-ink dark:text-dark-text">{title}</p>
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">{description}</p>
         </div>
-        <ChevronRight size={15} className="mt-0.5 text-ink/25 transition group-hover:translate-x-0.5 group-hover:text-gold dark:text-dark-subtle" />
+        <ChevronRight
+          size={15}
+          className="mt-0.5 text-ink/25 transition group-hover:translate-x-0.5 group-hover:text-gold dark:text-dark-subtle"
+        />
       </div>
     </Link>
   );
@@ -398,13 +544,18 @@ function formatDatePt(iso: string): string {
 
 function formatDateLongPt(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
-    new Date(Date.UTC(y, m - 1, d)),
-  );
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
 function weekdayLongPt(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
-  const text = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+  const text = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(y, m - 1, d)),
+  );
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

@@ -94,10 +94,14 @@ export function ClearListButton({ estimatedCount }: { estimatedCount: number }) 
         title="Limpar lista?"
         description={
           <>
-            Isso vai ocultar da listagem as reservas <strong>expiradas</strong> e <strong>canceladas</strong> mais antigas
-            {estimatedCount > 0 ? ` (até ${estimatedCount} candidata${estimatedCount === 1 ? '' : 's'})` : ''}. Reservas ativas,
-            aguardando pagamento ou que precisam de atenção nunca são afetadas. Nenhuma reserva é apagada nem tem o status
-            alterado — elas continuam disponíveis pelo filtro &quot;Mostrar arquivadas&quot; e podem ser restauradas depois.
+            Isso vai ocultar da listagem as reservas <strong>expiradas</strong> e{' '}
+            <strong>canceladas</strong> mais antigas
+            {estimatedCount > 0
+              ? ` (até ${estimatedCount} candidata${estimatedCount === 1 ? '' : 's'})`
+              : ''}
+            . Reservas ativas, aguardando pagamento ou que precisam de atenção nunca são afetadas.
+            Nenhuma reserva é apagada nem tem o status alterado — elas continuam disponíveis pelo
+            filtro &quot;Mostrar arquivadas&quot; e podem ser restauradas depois.
           </>
         }
         confirmLabel="Limpar lista"

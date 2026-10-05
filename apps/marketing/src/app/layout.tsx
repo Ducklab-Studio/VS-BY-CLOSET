@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Script from 'next/script';
 import './globals.css';
 import './catalog.css';
 import { SiteChrome } from '@/components/SiteChrome';
@@ -42,17 +41,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           a maioria dos carimbos de extensão, ficam por conta do script
           abaixo (ver src/lib/extension-attrs.ts). */}
       <body className="font-body antialiased" suppressHydrationWarning>
-        <Script id="theme-init" strategy="beforeInteractive">
-          {THEME_SCRIPT}
-        </Script>
-        {/* next/script em vez de <script> cru: um <script> escrito direto no
-            JSX faz o React avisar "Scripts inside React components are never
-            executed when rendering on the client" — trocaria um erro de
-            console por outro. Precisa vir antes do Header pra instalar o
-            observer antes de esses <div> serem analisados. */}
-        <Script id="extension-attr-scrub" strategy="beforeInteractive">
-          {EXTENSION_ATTR_SCRIPT}
-        </Script>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* Usar <script dangerouslySetInnerHTML> garante execução síncrona real
+            exatamente neste ponto do DOM. next/script (mesmo beforeInteractive)
+            no App Router pode não rodar a tempo de interceptar a extensão antes
+            da hidratação. */}
+        <script dangerouslySetInnerHTML={{ __html: EXTENSION_ATTR_SCRIPT }} />
         <ExtensionAttrGuard />
         <SiteChrome>{children}</SiteChrome>
       </body>
