@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { addDays, fromISO, sameDay, startOfDay, toISO } from '@/lib/rental-rules';
@@ -14,6 +14,13 @@ import {
   type Cart,
 } from '@/lib/cart';
 import { UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
+import {
+  AVAILABILITY_PROXY_PATH,
+  availabilityFailureMessage,
+  fetchAvailability as requestAvailability,
+  type AvailabilityDay,
+  type AvailabilityFailure,
+} from '@/lib/availability-client';
 import {
   GENERIC_UNAVAILABLE_MESSAGE,
   SHOPIFY_UNAVAILABLE_MESSAGE,
@@ -56,8 +63,10 @@ import { useRentalDraft } from './useRentalDraft';
  * NÃO reimplementa nada disso: só lê o que o servidor já calculou.
  *
  * FAIL CLOSED: se a API falhar, o calendário mostra erro e não deixa
- * reservar. O fallback padrão é o proxy same-origin `/api/availability`;
- * nenhuma URL localhost é gravada no bundle de produção.
+ * reservar — nunca marca data como livre nem como ocupada sem resposta válida
+ * (lib/availability-client.ts confere o formato, o prazo e o cancelamento). O
+ * padrão é o proxy same-origin `/api/availability`; nenhuma URL localhost é
+ * gravada no bundle de produção.
  */
 
 const WEEKDAY_BASE = new Date(2024, 0, 7); // um domingo
@@ -67,39 +76,6 @@ const RANGE_DAYS = 120;
 
 const monthIndex = (d: Date) => d.getFullYear() * 12 + d.getMonth();
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
-interface ReturnOption {
-  type: ReturnChoice;
-  date: string;
-  window?: string;
-  /** Disponibilidade da própria data desta opção (API). */
-  available?: boolean;
-}
-
-interface AvailabilityDay {
-  date: string;
-  bookable: boolean;
-  quantityAvailable: number;
-  reason: string | null;
-  durationDays?: number;
-  calculatedReturnDate?: string;
-  hasSundayReturnException?: boolean;
-  returnOptions?: ReturnOption[];
-  /** Motivo real da indisponibilidade (API do ClosetAdmin), do mais prioritário ao menos. Só códigos. */
-  unavailableReason?: string | null;
-  unavailableReasons?: string[] | null;
-}
-
-interface AvailabilityResponse {
-  shopifyVariantId: string;
-  countedPieces: number;
-  unitsTotal: number;
-  /** YYYY-MM-DD da primeira retirada online aceita (configurada no painel), ou null. */
-  operationStartDate?: string | null;
-  /** Máximo de peças por reserva (painel → Regras). Ausente em API antiga. */
-  maxPieces?: number;
-  days: AvailabilityDay[];
-}
 
 export function RentalCalendar({
   variant,
@@ -146,7 +122,10 @@ export function RentalCalendar({
   const [maxPieces, setMaxPieces] = useState<number | null>(null);
   /** Disponibilidade por mês e quantidade de peças (`peças|YYYY-MM`), carregada quando o mês é exibido. */
   const [months, setMonths] = useState<ReadonlyMap<string, AvailabilityDay[]>>(() => new Map());
-  const [failedMonths, setFailedMonths] = useState<ReadonlySet<string>>(() => new Set());
+  /** Meses cuja consulta falhou (e por quê). Falha nunca vira data livre nem ocupada. */
+  const [failures, setFailures] = useState<ReadonlyMap<string, { failure: AvailabilityFailure; status?: number }>>(
+    () => new Map(),
+  );
   const [operationStartDate, setOperationStartDate] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   /** Peça sendo removida do carrinho (variante). */
@@ -159,6 +138,9 @@ export function RentalCalendar({
   // Trava síncrona: dois cliques seguidos nunca viram duas inclusões.
   const submittingRef = useRef(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  /** O cliente pediu "Tentar novamente": se falhar de novo, o foco volta ao botão. */
+  const retriedRef = useRef(false);
 
   // O limite parte da primeira retirada possível, não só de hoje: com a
   // operação começando meses à frente, uma janela fixa a partir de hoje
@@ -196,9 +178,13 @@ export function RentalCalendar({
     otherPieces !== null && atPieceLimit(selectionPieces.length, otherPieces, maxPieces);
 
   const viewKey = monthKey(view);
-  const cacheKey = `${pieces ?? '-'}|${viewKey}`;
-  const loadFailed = failedMonths.has(cacheKey);
-  const loading = pieces === null || (!months.has(cacheKey) && !loadFailed);
+  // Por variante, quantidade de peças e mês: dado de outra peça nunca aparece nesta.
+  const cachePrefix = `${variant.id}|${pieces ?? '-'}|`;
+  const cacheKey = `${cachePrefix}${viewKey}`;
+  const failure = failures.get(cacheKey) ?? null;
+  const loadFailed = failure !== null;
+  const hasMonth = months.has(cacheKey);
+  const loading = pieces === null || (!hasMonth && !loadFailed);
 
   // ---- reserva em montagem: retoma retirada e opção de devolução (uma vez por montagem) ----
   const restoredFor = useRef<string | null>(null);
@@ -209,8 +195,9 @@ export function RentalCalendar({
     setCart(undefined);
     setSubmittedPreview(null);
     setMonths(new Map());
-    setFailedMonths(new Set());
+    setFailures(new Map());
     setSelected(null);
+    setInspected(null);
     setSundayChoice(null);
     setError(null);
 
@@ -252,47 +239,70 @@ export function RentalCalendar({
   }
 
   // ---- disponibilidade real do mês exibido ----
+  // Valores que a consulta lê mas que NÃO devem dispará-la de novo (senão a
+  // resposta de um mês refaria a consulta do outro).
+  const windowRef = useRef({ view, today, rangeEnd });
   useEffect(() => {
-    if (pieces === null || months.has(cacheKey)) return;
-    let cancelled = false;
-    const first = new Date(view.getFullYear(), view.getMonth(), 1);
-    const last = new Date(view.getFullYear(), view.getMonth() + 1, 0);
-    const from = first < today ? today : first;
-    const to = last > rangeEnd ? rangeEnd : last;
+    windowRef.current = { view, today, rangeEnd };
+  }, [view, today, rangeEnd]);
 
+  useEffect(() => {
+    if (pieces === null || hasMonth || loadFailed) return;
+    const { view: month, today: now, rangeEnd: limit } = windowRef.current;
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+    const from = first < now ? now : first;
+    const to = last > limit ? limit : last;
+
+    // Mês inteiro fora da janela: nada a consultar, todos os dias ficam indisponíveis.
+    if (from > to) {
+      setMonths((prev) => new Map(prev).set(cacheKey, []));
+      return;
+    }
+
+    // Trocar de mês/peça cancela a consulta anterior (e o prazo dela).
+    const controller = new AbortController();
     void (async () => {
-      // Mês inteiro fora da janela: nada a consultar, todos os dias ficam indisponíveis.
-      const result =
-        from > to
-          ? { days: [], operationStartDate }
-          : await fetchAvailability(variant.id, pieces, from, to);
-      if (cancelled) return;
-      if (result) {
-        setMonths((prev) => new Map(prev).set(cacheKey, result.days));
-        setOperationStartDate(result.operationStartDate ?? null);
-        if ('maxPieces' in result && typeof result.maxPieces === 'number')
-          setMaxPieces(result.maxPieces);
-        setFailedMonths((prev) => {
-          const next = new Set(prev);
-          next.delete(cacheKey);
-          return next;
-        });
+      const result = await requestAvailability(
+        { variantId: variant.id, countedPieces: pieces, from: toISO(from), to: toISO(to) },
+        availabilityOptions(controller.signal),
+      );
+      if (controller.signal.aborted) return;
+      if (result.ok) {
+        retriedRef.current = false;
+        setMonths((prev) => new Map(prev).set(cacheKey, result.data.days));
+        setOperationStartDate(result.data.operationStartDate ?? null);
+        if (typeof result.data.maxPieces === 'number') setMaxPieces(result.data.maxPieces);
       } else {
-        setFailedMonths((prev) => new Set(prev).add(cacheKey));
+        setFailures((prev) => new Map(prev).set(cacheKey, { failure: result.failure, status: result.status }));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [variant.id, pieces, view, cacheKey, months, today, rangeEnd, operationStartDate]);
+    return () => controller.abort();
+  }, [variant.id, pieces, cacheKey, hasMonth, loadFailed]);
+
+  /** "Tentar novamente": repete a consulta deste mês, sem recarregar a página. */
+  const retryAvailability = useCallback(() => {
+    retriedRef.current = true;
+    setFailures((prev) => {
+      if (!prev.has(cacheKey)) return prev;
+      const next = new Map(prev);
+      next.delete(cacheKey);
+      return next;
+    });
+  }, [cacheKey]);
+
+  // Depois de uma nova tentativa que falha de novo, o foco volta ao botão.
+  useEffect(() => {
+    if (loadFailed && retriedRef.current) retryRef.current?.focus();
+  }, [loadFailed]);
 
   // Só os dias calculados para a quantidade ATUAL de peças (mudar a seleção muda a devolução).
   const dayMap = useMemo(() => {
     const map = new Map<string, AvailabilityDay>();
     for (const [key, monthDays] of months)
-      if (key.startsWith(`${pieces ?? '-'}|`)) for (const d of monthDays) map.set(d.date, d);
+      if (key.startsWith(cachePrefix)) for (const d of monthDays) map.set(d.date, d);
     return map;
-  }, [months, pieces]);
+  }, [months, cachePrefix]);
 
   const weekdays = useMemo(
     () =>
@@ -350,7 +360,8 @@ export function RentalCalendar({
   // Uma só seleção para o resumo E para o carrinho: a data exibida é a enviada.
   const selection = resolveRentalSelection(selectedInfo, sundayChoice);
   const effectiveReturnISO = selection?.return;
-  const canSubmit = !!selection;
+  // Sem consulta válida do mês exibido não há reserva: nada de "Alugar agora" às cegas.
+  const canSubmit = !!selection && !loadFailed;
 
   function moveFocus(iso: string, step: number) {
     const target = addDays(fromISO(iso), step);
@@ -365,7 +376,7 @@ export function RentalCalendar({
 
   async function handleSubmit() {
     // A seleção é lida AGORA, no clique: é exatamente o que o resumo mostra.
-    if (!selection || !sku || pieces === null || !summary || submittingRef.current) return;
+    if (!selection || !sku || pieces === null || !summary || submittingRef.current || loadFailed) return;
     submittingRef.current = true;
     setSubmitting(true);
     setError(null);
@@ -486,7 +497,13 @@ export function RentalCalendar({
   // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
   const soldOut = shopifyStock?.status === 'sold_out';
   const canAddAnother =
-    !busy && otherPieces !== null && !limitReached && !selectedUnavailable && !loading && !soldOut;
+    !busy &&
+    otherPieces !== null &&
+    !limitReached &&
+    !selectedUnavailable &&
+    !loading &&
+    !loadFailed &&
+    !soldOut;
   const total = summary?.total ?? null;
   const showSummary = !!summary && (!!effectiveReturnISO || summary.rows.length > 1);
   const actionTotal =
@@ -562,9 +579,12 @@ export function RentalCalendar({
       <div
         ref={gridRef}
         role="group"
+        tabIndex={-1}
         aria-busy={loading}
         aria-label="Calendário de datas de retirada"
-        className="mt-1.5 grid min-h-[15rem] grid-cols-7 gap-1"
+        data-testid="availability-grid"
+        data-state={loading ? 'loading' : loadFailed ? 'error' : 'ready'}
+        className="mt-1.5 grid min-h-[15rem] grid-cols-7 gap-1 focus:outline-none"
         onKeyDown={(e) => {
           const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
           const iso = (e.target as HTMLElement).dataset?.date;
@@ -575,6 +595,9 @@ export function RentalCalendar({
       >
         {loading ? (
           <>
+            <span className="sr-only" role="status">
+              Carregando a disponibilidade…
+            </span>
             {Array.from({ length: 31 }, (_, i) => (
               <div
                 key={`skel-${i}`}
@@ -584,15 +607,33 @@ export function RentalCalendar({
             ))}
           </>
         ) : loadFailed ? (
-          <div className="col-span-7 flex min-h-[15rem] flex-col items-center justify-center p-6 text-center text-[0.82rem] text-ink/60">
+          <div
+            role="alert"
+            data-testid="availability-error"
+            data-failure={failure.failure}
+            data-status={failure.status}
+            className="col-span-7 flex min-h-[15rem] flex-col items-center justify-center p-6 text-center text-[0.82rem] text-ink/60"
+          >
             <span className="mb-2 rounded-full bg-marsala/10 px-3 py-1 text-xs font-semibold text-marsala">
               Aviso
             </span>
             <p className="font-medium text-marsala">
               Não foi possível consultar a disponibilidade no momento.
             </p>
-            <p className="mt-1 text-[0.75rem] text-ink/50">
-              Tente atualizar a página ou consulte nosso atendimento via WhatsApp.
+            <p className="mt-1 text-[0.75rem] text-ink/60">
+              {availabilityFailureMessage(failure.failure, failure.status)} Isso não significa que as datas estejam ocupadas.
+            </p>
+            <button
+              ref={retryRef}
+              type="button"
+              data-testid="availability-retry"
+              onClick={retryAvailability}
+              className="mt-4 inline-flex min-h-[2.75rem] items-center justify-center rounded-xl border border-marsala px-5 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
+            >
+              Tentar novamente
+            </button>
+            <p className="mt-3 text-[0.72rem] text-ink/50">
+              Se continuar, fale com o atendimento para confirmar a data.
             </p>
           </div>
         ) : (
@@ -803,11 +844,9 @@ export function RentalCalendar({
         </div>
       )}
 
-      <Status
-        tone={loadFailed ? 'error' : freeCount === 0 && !loading ? 'warn' : selected ? 'ok' : null}
-      >
+      <Status tone={loadFailed ? null : freeCount === 0 && !loading ? 'warn' : selected ? 'ok' : null}>
         {loadFailed
-          ? 'Não conseguimos carregar as datas agora. Fale com o atendimento para confirmar a disponibilidade.'
+          ? null
           : isMaxPiecesExceeded
             ? 'Você atingiu o máximo de peças permitido nesta reserva. Finalize o carrinho atual ou remova uma peça antes de adicionar outra.'
             : isBeforeOperationStart
@@ -877,7 +916,7 @@ export function RentalCalendar({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!canSubmit || busy || soldOut}
+            disabled={!canSubmit || busy || soldOut || loading}
             className={`flex w-full items-center justify-center gap-3 rounded-xl bg-marsala px-6 py-4 text-[0.75rem] font-bold uppercase tracking-[0.12em] text-cream transition-all hover:bg-marsala-glow hover:shadow-[0_0_20px_rgba(83,19,30,0.3)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 disabled:hover:shadow-none`}
           >
             {submitting && <Spinner light />}
@@ -941,12 +980,14 @@ async function unavailablePieces(
   countedPieces: number,
   selection: RentalSelection,
 ): Promise<{ title: string; message: string }[] | null> {
-  const pickup = fromISO(selection.pickup);
   const checks = await Promise.all(
     pieces.map(async (piece) => {
-      const result = await fetchAvailability(piece.variantId, countedPieces, pickup, pickup);
-      if (!result) return null;
-      const day = result.days.find((d) => d.date === selection.pickup);
+      const result = await requestAvailability(
+        { variantId: piece.variantId, countedPieces, from: selection.pickup, to: selection.pickup },
+        availabilityOptions(),
+      );
+      if (!result.ok) return null;
+      const day = result.data.days.find((d) => d.date === selection.pickup);
       const same = resolveRentalSelection(day, selection.returnOption);
       if (same && same.return === selection.return) return { ok: true as const };
       return {
@@ -986,34 +1027,19 @@ const LONG_DATE: Intl.DateTimeFormatOptions = {
 };
 
 /**
- * Consulta a disponibilidade real. Sem fallback inventado: por padrão usa
- * o proxy same-origin do Next; uma URL pública explícita continua aceita.
- * `new URL(base, window.location.origin)` suporta os dois formatos e evita
- * o crash que ocorria com `new URL('/api/availability')`.
+ * Opções da consulta no navegador: o padrão é o proxy same-origin do Next; uma
+ * URL pública explícita (NEXT_PUBLIC_AVAILABILITY_URL) continua aceita e, se
+ * falhar por rede/CORS, cai no proxy do próprio site. URL inválida vira falha
+ * de configuração (nunca um calendário carregando para sempre).
  */
-async function fetchAvailability(
-  shopifyVariantId: string,
-  countedPieces: number,
-  from: Date,
-  to: Date,
-): Promise<AvailabilityResponse | null> {
-  const base = process.env.NEXT_PUBLIC_AVAILABILITY_URL?.trim() || '/api/availability';
-  const url = new URL(base, window.location.origin);
-  url.searchParams.set('shopifyVariantId', shopifyVariantId);
-  url.searchParams.set('countedPieces', String(countedPieces));
-  url.searchParams.set('from', toISO(from));
-  url.searchParams.set('to', toISO(to));
-
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as AvailabilityResponse;
-  } catch {
-    return null;
-  }
+function availabilityOptions(signal?: AbortSignal) {
+  const configured = process.env.NEXT_PUBLIC_AVAILABILITY_URL?.trim() || AVAILABILITY_PROXY_PATH;
+  return {
+    base: configured,
+    fallbackBase: AVAILABILITY_PROXY_PATH,
+    origin: window.location.origin,
+    signal,
+  };
 }
 
 function DayCell({
