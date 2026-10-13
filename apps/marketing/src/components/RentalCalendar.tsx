@@ -617,24 +617,35 @@ export function RentalCalendar({
             <span className="mb-2 rounded-full bg-marsala/10 px-3 py-1 text-xs font-semibold text-marsala">
               Aviso
             </span>
-            <p className="font-medium text-marsala">
-              Não foi possível consultar a disponibilidade no momento.
-            </p>
-            <p className="mt-1 text-[0.75rem] text-ink/60">
-              {availabilityFailureMessage(failure.failure, failure.status)} Isso não significa que as datas estejam ocupadas.
-            </p>
-            <button
-              ref={retryRef}
-              type="button"
-              data-testid="availability-retry"
-              onClick={retryAvailability}
-              className="mt-4 inline-flex min-h-[2.75rem] items-center justify-center rounded-xl border border-marsala px-5 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
-            >
-              Tentar novamente
-            </button>
-            <p className="mt-3 text-[0.72rem] text-ink/50">
-              Se continuar, fale com o atendimento para confirmar a data.
-            </p>
+            {failure.failure === 'not_rentable' ? (
+              <>
+                <p className="font-medium text-marsala">{availabilityFailureMessage('not_rentable')}</p>
+                <p className="mt-1 text-[0.75rem] text-ink/60">
+                  Ainda não há uma peça disponível para aluguel online nesta opção. Fale com o atendimento para saber quando ela chega.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-marsala">
+                  Não foi possível consultar a disponibilidade no momento.
+                </p>
+                <p className="mt-1 text-[0.75rem] text-ink/60">
+                  {availabilityFailureMessage(failure.failure, failure.status)} Isso não significa que as datas estejam ocupadas.
+                </p>
+                <button
+                  ref={retryRef}
+                  type="button"
+                  data-testid="availability-retry"
+                  onClick={retryAvailability}
+                  className="mt-4 inline-flex min-h-[2.75rem] items-center justify-center rounded-xl border border-marsala px-5 py-2.5 text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-marsala transition-colors hover:bg-marsala/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
+                >
+                  Tentar novamente
+                </button>
+                <p className="mt-3 text-[0.72rem] text-ink/50">
+                  Se continuar, fale com o atendimento para confirmar a data.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <>

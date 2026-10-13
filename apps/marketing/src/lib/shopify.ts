@@ -18,6 +18,7 @@
  */
 
 import { assertShopifyNetworkAllowed } from './shopify-network-guard';
+import { filterRentableProducts, parseRentableVariantIds } from './catalog-eligibility';
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
@@ -108,16 +109,25 @@ const PRODUCT_FIELDS = `
 
 const CATALOG_VARIANT_IDS_FIELD = 'variants(first: 250) { nodes { id } }';
 
+/**
+ * Destaques. Mesma regra da listagem (lib/catalog-eligibility.ts): só entra peça
+ * que tem peça física reservável cadastrada no ClosetAdmin. Antes os destaques
+ * liam a Shopify crua e mostravam produtos que a listagem e os filtros
+ * escondiam (ex.: produto com SKU sincronizado mas sem peça física).
+ * Busca mais do que `first` porque parte dos mais vendidos pode ser filtrada.
+ */
 export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct[]> {
   const data = await storefrontFetch<{ products: { nodes: StorefrontProduct[] } }>(
     `query FeaturedProducts($first: Int!) {
       products(first: $first, sortKey: BEST_SELLING) {
-        nodes { ${PRODUCT_FIELDS} images(first: 2) { nodes { url altText width height } } }
+        nodes { ${PRODUCT_FIELDS} ${CATALOG_VARIANT_IDS_FIELD} images(first: 2) { nodes { url altText width height } } }
       }
     }`,
-    { first },
+    { first: Math.min(Math.max(first * 4, 24), 50) },
   );
-  return dedupeProducts(data.products.nodes);
+  // ISR de 60 s como o resto da home; o ClosetAdmin revalida a home ao cadastrar/alterar peça.
+  const eligible = await filterPublicCatalogProducts(dedupeProducts(data.products.nodes), { revalidate: 60 });
+  return eligible.slice(0, first);
 }
 
 export interface CatalogCategory {
@@ -225,7 +235,7 @@ export async function listCatalog(first = 250): Promise<Catalog> {
     after = data.products.pageInfo.endCursor;
   }
 
-  const uniqueProducts = await filterPublicCatalogProducts(dedupeProducts(products));
+  const uniqueProducts = await filterPublicCatalogProducts(dedupeProducts(products), { cache: 'no-store' });
   const categories = categoriesFromCollections(
     collections.map((collection) => ({
       handle: collection.handle,
@@ -243,26 +253,30 @@ export async function listCatalog(first = 250): Promise<Catalog> {
  * a resposta da Shopify para não transformar uma falha transitória em
  * catálogo vazio. O Valle Pass é sempre preservado por ser compra direta.
  */
-async function filterPublicCatalogProducts(products: StorefrontProduct[]): Promise<StorefrontProduct[]> {
+async function filterPublicCatalogProducts(
+  products: StorefrontProduct[],
+  cacheMode: { cache: 'no-store' } | { revalidate: number },
+): Promise<StorefrontProduct[]> {
   const base =
     process.env.RESERVATIONS_API_URL ??
     process.env.RESERVATIONS_API_ADMIN_URL ??
     process.env.NEXT_PUBLIC_RESERVATIONS_API_URL;
   if (!base) return products;
 
+  let rentable: Set<string> | null = null;
   try {
     const response = await fetch(`${base.replace(/\/+$/, '')}/availability/catalog-variants`, {
-      cache: 'no-store',
+      ...('cache' in cacheMode ? { cache: cacheMode.cache } : { next: { revalidate: cacheMode.revalidate } }),
       headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(8_000),
     });
-    if (!response.ok) return products;
-    const payload = (await response.json()) as { variantIds?: unknown };
-    if (!Array.isArray(payload.variantIds)) return products;
-    const allowed = new Set(payload.variantIds.filter((id): id is string => typeof id === 'string'));
-    return products.filter((product) => isDirectPurchaseProduct(product) || product.variants?.nodes.some((variant) => allowed.has(variant.id)));
+    if (response.ok) rentable = parseRentableVariantIds(await response.json());
   } catch {
-    return products;
+    rentable = null;
   }
+  // Falha aberta (ver catalog-eligibility.ts), mas nunca em silêncio: fica no log do servidor.
+  if (rentable === null) console.warn('[catalogo] lista de peças reserváveis indisponível — exibindo o catálogo da Shopify sem esse filtro.');
+  return filterRentableProducts(products, rentable, isDirectPurchaseProduct);
 }
 
 function isDirectPurchaseProduct(product: StorefrontProduct): boolean {

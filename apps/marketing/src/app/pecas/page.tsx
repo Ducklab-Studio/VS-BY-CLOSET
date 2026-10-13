@@ -8,6 +8,7 @@ import {
   listCatalog,
 } from '@/lib/shopify';
 import { DEMO_PRODUCTS, isDemoCatalogEnabled } from '@/lib/demo-catalog';
+import { productsInCategory } from '@/lib/catalog-eligibility';
 import { CategorySelect } from '@/components/CategorySelect';
 import { RentalSelectionBar } from '@/components/RentalSelectionBar';
 import { RENTAL_DRAFT_COOKIE, draftRawFromCookie } from '@/lib/rental-draft';
@@ -66,11 +67,7 @@ export default async function PecasPage({
 
   const activeCategory = categories.find((category) => category.slug === categoria);
   if (categoria && activeCategory) {
-    products = products.filter(
-      (product) => activeCategory.productIds
-        ? activeCategory.productIds.includes(product.id)
-        : product.productType.trim().toLocaleLowerCase() === activeCategory.productType?.toLocaleLowerCase(),
-    );
+    products = productsInCategory(products, activeCategory);
   } else if (categoria) {
     products = [];
   }

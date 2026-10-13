@@ -16,7 +16,7 @@ const lib = {};
 runInNewContext(source, {
   exports: lib, Object, Number, String, Array, Map, Set, Date, JSON, Math, Promise, RegExp, URL, AbortController, setTimeout, clearTimeout, fetch: undefined,
 });
-const { parseAvailability, fetchAvailability, datesBetween, isIsoDate, availabilityFailureMessage } = lib;
+const { parseAvailability, fetchAvailability, datesBetween, isIsoDate, availabilityFailureMessage, isNotRentableResponse } = lib;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const VARIANT = 'gid://shopify/ProductVariant/1';
@@ -288,4 +288,28 @@ test('mensagem por status: 502/503 = não conectou, 504 = demorou, o resto = res
   assert.equal(availabilityFailureMessage('http', 503), availabilityFailureMessage('network'));
   assert.equal(availabilityFailureMessage('http', 504), availabilityFailureMessage('timeout'));
   for (const status of [400, 401, 403, 404, 422, 429, 500]) assert.equal(availabilityFailureMessage('http', status), availabilityFailureMessage('invalid'), String(status));
+});
+
+test('peça sem peça física reservável (404/422 DA API): "not_rentable", sem nova tentativa e com texto próprio', async () => {
+  const noUnit = '{"statusCode":404,"error":"Not Found","message":"Nenhuma unidade cadastrada para esta variante."}';
+  const offline = '{"statusCode":422,"error":"Unprocessable Entity","message":"Este item não está disponível para reserva online."}';
+  for (const [status, body] of [[404, noUnit], [422, offline]]) {
+    let calls = 0;
+    const impl = async () => { calls++; return { ok: false, status, text: async () => body }; };
+    const result = await run(impl, { retries: 3 });
+    assert.deepEqual(plain(result), { ok: false, failure: 'not_rentable', status });
+    assert.equal(calls, 1, 'repetir não resolve');
+  }
+  assert.match(availabilityFailureMessage('not_rentable'), /ainda não está habilitada para reserva online/);
+  assert.equal(/ocupad|conectar|inesperada/i.test(availabilityFailureMessage('not_rentable')), false);
+});
+
+test('404 que NÃO é "peça sem unidade" continua erro de serviço: hospedagem sem aplicação, rota inexistente, corpo vazio ou HTML', () => {
+  assert.equal(isNotRentableResponse(404, '{"status":"error","code":404,"message":"Application not found"}'), false);
+  assert.equal(isNotRentableResponse(404, '{"statusCode":404,"message":"Cannot GET /availability","error":"Not Found"}'), false);
+  assert.equal(isNotRentableResponse(404, ''), false);
+  assert.equal(isNotRentableResponse(404, '<html>404</html>'), false);
+  assert.equal(isNotRentableResponse(500, '{"message":"Nenhuma unidade cadastrada para esta variante."}'), false);
+  assert.equal(isNotRentableResponse(422, '{"message":"\"to\" não pode ser anterior a \"from\"."}'), false);
+  assert.equal(isNotRentableResponse(404, '{"message":"Nenhuma unidade cadastrada para esta variante."}'), true);
 });

@@ -60,6 +60,8 @@ export type AvailabilityFailure =
   | 'invalid'
   /** O endereço configurado não é uma URL válida. */
   | 'config'
+  /** A API respondeu, mas a peça não tem peça física reservável cadastrada (404/422 da própria API). Repetir não resolve. */
+  | 'not_rentable'
   /** A consulta foi cancelada de propósito (troca de mês/peça). Não é erro para o cliente. */
   | 'aborted';
 
@@ -245,6 +247,24 @@ export function parseAvailability(json: unknown, query: AvailabilityQuery): Avai
 }
 
 /**
+ * 404/422 da PRÓPRIA API de reservas para "esta variante não tem peça física
+ * reservável online" (ver availability.service.ts). Diferente de 404 de
+ * hospedagem sem aplicação e de rota inexistente: aqui o serviço está de pé e
+ * diz que a peça não está habilitada — repetir a consulta não adianta.
+ */
+export function isNotRentableResponse(status: number, text: string): boolean {
+  try {
+    const json: unknown = JSON.parse(text);
+    if (!isRecord(json) || typeof json.message !== 'string') return false;
+    if (status === 404) return /^Nenhuma unidade cadastrada/i.test(json.message);
+    if (status === 422) return /não está disponível para reserva online/i.test(json.message);
+  } catch {
+    /* corpo não é JSON */
+  }
+  return false;
+}
+
+/**
  * Falhas que valem uma segunda tentativa (a API pode ter acabado de subir).
  * `retryNetwork` é falso na URL pública quando há o proxy do site como saída:
  * CORS/DNS não melhoram em meio segundo, e o proxy resolve na hora.
@@ -306,7 +326,11 @@ async function attemptOnce(url: URL, query: AvailabilityQuery, options: FetchAva
       cache: 'no-store',
       signal: controller.signal,
     });
-    if (!res.ok) return { ok: false, failure: 'http', status: res.status };
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (isNotRentableResponse(res.status, body)) return { ok: false, failure: 'not_rentable', status: res.status };
+      return { ok: false, failure: 'http', status: res.status };
+    }
     const text = await res.text();
     if (text.trim() === '') return { ok: false, failure: 'invalid', status: res.status };
     let json: unknown;
@@ -368,6 +392,8 @@ export function availabilityFailureMessage(failure: AvailabilityFailure, status?
   if (failure === 'http' && status === 504) failure = 'timeout';
   else if (failure === 'http' && (status === 502 || status === 503)) failure = 'network';
   switch (failure) {
+    case 'not_rentable':
+      return 'Esta peça ainda não está habilitada para reserva online.';
     case 'timeout':
       return 'O serviço de reservas demorou demais para responder.';
     case 'network':
