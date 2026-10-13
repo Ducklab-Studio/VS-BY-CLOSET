@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Headers, HttpCode, HttpStatus, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Controller, Headers, HttpCode, HttpStatus, Logger, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { verifyShopifyHmac } from './shopify-hmac';
 import { resolveShopifyClientSecret } from './shopify-webhook-config';
 import { WebhooksService } from './webhooks.service';
@@ -23,6 +23,8 @@ interface RawBodyCapableRequest {
  */
 @Controller('webhooks/shopify')
 export class WebhooksController {
+  private readonly logger = new Logger(WebhooksController.name);
+
   constructor(private readonly webhooks: WebhooksService) {}
 
   @Post()
@@ -38,13 +40,18 @@ export class WebhooksController {
     // fail closed, nunca cai pro body já parseado como substituto.
     const rawBody = req.rawBody;
     if (!rawBody) {
+      this.logger.warn('Webhook rejeitado: requisição sem corpo verificável.');
       throw new UnauthorizedException('Requisição sem corpo verificável.');
     }
 
     const secret = resolveShopifyClientSecret();
     if (!verifyShopifyHmac(rawBody, hmacHeader, secret)) {
       // Nunca loga o secret, nunca loga o corpo, nunca devolve stack
-      // trace — só o suficiente pra saber que algo tentou e falhou.
+      // trace — só o suficiente pra saber que algo tentou e falhou. O aviso
+      // aparece nos logs da aplicação (as requisições HTTP do Railway só
+      // ficam para o deploy atual): assinatura inválida em massa costuma ser
+      // o Client Secret do ambiente diferente do app que assina os eventos.
+      this.logger.warn(`Webhook rejeitado: assinatura inválida (tópico ${safeLabel(topic)}).`);
       throw new UnauthorizedException('Assinatura inválida.');
     }
 
@@ -52,6 +59,7 @@ export class WebhooksController {
     // tópico/id ou corpo malformado são erros de FORMATO, não de
     // autenticação (400, não 401).
     if (!topic || !webhookId || !shopDomain) {
+      this.logger.warn('Webhook rejeitado: cabeçalhos obrigatórios ausentes.');
       throw new BadRequestException('Cabeçalhos obrigatórios ausentes (X-Shopify-Topic / X-Shopify-Webhook-Id / X-Shopify-Shop-Domain).');
     }
 
@@ -59,6 +67,7 @@ export class WebhooksController {
     // as lojas onde ele estiver instalado. Nunca aceite um evento de outra
     // loja como se pertencesse ao estoque configurado neste ambiente.
     if (normalizeShopDomain(shopDomain) !== normalizeShopDomain(resolveStoreConfig().shopifyDomain)) {
+      this.logger.warn(`Webhook rejeitado: loja de origem diferente da configurada (tópico ${safeLabel(topic)}).`);
       throw new UnauthorizedException('Loja de origem inválida.');
     }
 
@@ -66,12 +75,21 @@ export class WebhooksController {
     try {
       payload = JSON.parse(rawBody.toString('utf8'));
     } catch {
+      this.logger.warn(`Webhook rejeitado: corpo malformado (tópico ${safeLabel(topic)}).`);
       throw new BadRequestException('Corpo malformado.');
     }
 
-    await this.webhooks.handleIncoming({ topic, shopifyWebhookId: webhookId, payload });
+    const { outcome } = await this.webhooks.handleIncoming({ topic, shopifyWebhookId: webhookId, payload });
+    // Uma linha por entrega, sem corpo, sem dados do cliente: permite ver nos
+    // logs da aplicação que a Shopify está entregando (e o que foi feito).
+    this.logger.log(`Webhook ${safeLabel(topic)} → ${outcome}`);
     return { ok: true };
   }
+}
+
+/** Rótulo curto e seguro do tópico para log (cabeçalho vem de fora, já autenticado, mas nunca vira texto livre). */
+function safeLabel(topic: string | undefined): string {
+  return /^[a-z_]+\/[a-z_]+$/.test(topic ?? '') ? (topic as string) : 'desconhecido';
 }
 
 function normalizeShopDomain(value: string): string {

@@ -1,7 +1,9 @@
 import { ShopifyOrderSyncService } from './shopify-order-sync.service';
 import { createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
@@ -284,4 +286,73 @@ describe('POST /webhooks/shopify — e2e real (HMAC + corpo cru, servidor HTTP d
     const res = await fetch(baseUrl, { method: 'POST', headers, body });
     expect(res.status).toBe(400);
   });
+});
+
+describe('POST /webhooks/shopify — observabilidade e indisponibilidade', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const post = (body: string, headers: Record<string, string>) => fetch(baseUrl, { method: 'POST', headers, body });
+
+  test('assinatura inválida: 401 e UM aviso nos logs da aplicação — sem o corpo, sem o segredo, sem a assinatura', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const body = JSON.stringify({ id: 999101, note_attributes: [], customer: { email: 'cliente@example.com' } });
+    const res = await post(body, { ...signedHeaders(body, `e2e-${Date.now()}-badsig`), 'X-Shopify-Hmac-Sha256': 'assinatura-invalida' });
+    expect(res.status).toBe(401);
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => /Webhook rejeitado: assinatura inválida \(tópico orders\/paid\)/.test(line))).toBe(true);
+    for (const line of lines) {
+      expect(line).not.toContain(SECRET);
+      expect(line).not.toContain('assinatura-invalida');
+      expect(line).not.toContain('cliente@example.com');
+    }
+  }, 15_000);
+
+  test('loja de origem diferente: 401 e aviso (sem o domínio recebido)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const body = JSON.stringify({ id: 999102, note_attributes: [] });
+    const res = await post(body, signedHeaders(body, `e2e-${Date.now()}-otherstore`, { 'X-Shopify-Shop-Domain': 'outra-loja.myshopify.com' }));
+    expect(res.status).toBe(401);
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => /loja de origem diferente da configurada/.test(line))).toBe(true);
+    expect(lines.join('\n')).not.toContain('outra-loja');
+  }, 15_000);
+
+  test('entrega processada: uma linha de log com o tópico e o resultado — e nada do corpo', async () => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const webhookId = `e2e-${Date.now()}-logged`;
+    const body = JSON.stringify({ id: 999103, note_attributes: [], customer: { email: 'cliente@example.com' } });
+    try {
+      const res = await post(body, signedHeaders(body, webhookId));
+      expect(res.status).toBe(200);
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => /^Webhook orders\/paid → (processed|ignored|duplicate)$/.test(line))).toBe(true);
+      expect(lines.join('\n')).not.toContain('cliente@example.com');
+    } finally {
+      // Mesmo se uma expectativa falhar: sem resíduo que quebre o afterAll (FK do webhook_events com a loja).
+      await cleanupEvent(webhookId);
+    }
+  }, 15_000);
+
+  test('cabeçalho de tópico com texto estranho nunca vira texto livre no log', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const body = JSON.stringify({ id: 999104 });
+    await expect(controller.receive({ rawBody: Buffer.from(body, 'utf8') }, 'assinatura-errada', 'orders/paid\nINJETADO', `e2e-${Date.now()}-weird`, STORE_DOMAIN)).rejects.toMatchObject({ status: 401 });
+    const text = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(text).toContain('tópico desconhecido');
+    expect(text).not.toContain('INJETADO');
+  }, 15_000);
+
+  test('banco inacessível: HTTP 503 (a Shopify reentrega em até ~4 h), nunca 200 — e nada fica gravado como processado', async () => {
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const broken = new PrismaClient({ datasources: { db: { url: 'postgresql://postgres@127.0.0.1:1/inexistente?connect_timeout=2' } } });
+    try {
+      const down = new WebhooksController(new WebhooksService(broken as unknown as PrismaService, new ValePassWebhookService(), new ShopifyOrderSyncService()));
+      const body = JSON.stringify({ id: 999105, note_attributes: [] });
+      await expect(down.receive({ rawBody: Buffer.from(body, 'utf8') }, sign(body), 'orders/paid', `e2e-${Date.now()}-dbdown`, STORE_DOMAIN)).rejects.toMatchObject({ status: 503 });
+    } finally {
+      await broken.$disconnect().catch(() => undefined);
+    }
+  }, 30_000);
 });

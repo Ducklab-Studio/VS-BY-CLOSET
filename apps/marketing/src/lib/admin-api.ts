@@ -81,6 +81,17 @@ export function adminGet<T>(path: string, adminUserId: string): Promise<T> {
   return request<T>(withAdminUserId(path, adminUserId), { method: 'GET' });
 }
 
+/**
+ * GET SEM `adminUserId` na query. Rotas cujo DTO de query recusa campos extras
+ * (ValidationPipe com forbidNonWhitelisted — ex.: o relatório de reconciliação,
+ * que só aceita `days`) respondem 400 "property adminUserId should not exist"
+ * se receberem o parâmetro. A identidade continua vindo da sessão
+ * (`X-Admin-Session` + Bearer), que a API valida do mesmo jeito.
+ */
+export function adminGetPlain<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'GET' });
+}
+
 export function adminPost<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}) });
 }
