@@ -86,6 +86,11 @@ export async function syncCatalogAction(): Promise<{ error: string | null; repor
 }
 
 function revalidatePieceDependentViews() {
+  // Vitrine pública: destaques (home), listagem e página da peça passam a refletir
+  // a peça cadastrada/desativada na hora, sem esperar o ciclo de cache.
+  revalidatePath('/');
+  revalidatePath('/pecas');
+  revalidatePath('/pecas/[handle]', 'page');
   revalidatePath('/closetadmin/pecas');
   revalidatePath('/closetadmin');
   revalidatePath('/closetadmin/calendario');

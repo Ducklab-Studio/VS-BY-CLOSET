@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Loader2, PackagePlus, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Loader2, PackagePlus } from 'lucide-react';
 import { importShopifyUnitsAction } from './actions';
 
 interface CatalogItem {
@@ -73,7 +73,7 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
         return;
       }
       setCodes('');
-      setMessage({ type: 'success', text: 'Peça(s) física(s) cadastrada(s).' });
+      setMessage({ type: 'success', text: 'Peça(s) física(s) cadastrada(s) e ativa(s).' });
     });
   }
 
@@ -129,10 +129,16 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
           ))}
         </div>
       ) : (
-        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
-          Ainda não há peça física vinculada a esta variante.
+        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300" data-testid="no-physical-unit">
+          Ainda não há peça física vinculada a esta variante. SKU e estoque da Shopify não bastam: sem peça física
+          cadastrada, o produto não aparece para aluguel no site.
         </p>
       )}
+      {item.physicalUnitsTotal > 0 && item.physicalUnitsReservableOnline === 0 ? (
+        <p className="mt-3 text-xs text-amber-700 dark:text-amber-300" data-testid="no-online-unit">
+          Nenhuma peça desta variante está ativa e reservável online — o produto não aparece para aluguel no site.
+        </p>
+      ) : null}
 
       {isAdmin ? (
         <div className="mt-4 border-t border-ink/5 pt-4 dark:border-white/5">
@@ -192,10 +198,17 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
           </p>
           {message ? (
             <p
-              className={`mt-2 flex items-center gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}
+              role={message.type === 'error' ? 'alert' : 'status'}
+              data-testid="register-message"
+              data-type={message.type}
+              className={`mt-2 flex items-start gap-1.5 text-xs ${message.type === 'error' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}
             >
-              {message.type === 'success' ? <CheckCircle2 size={13} /> : <RefreshCw size={13} />}
-              {message.text}
+              {message.type === 'success' ? (
+                <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+              ) : (
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              )}
+              <span>{message.text}</span>
             </p>
           ) : null}
         </div>

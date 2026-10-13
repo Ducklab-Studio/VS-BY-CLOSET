@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { AvailabilityService, type AvailabilityResponse } from './availability.service';
 import { AvailabilityQueryDto } from './dto/availability-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { KNOWN_VALE_PASS_VARIANT_ID, numericShopifyId } from '../vale-pass/vale-pass-order-status';
 
 @Controller('availability')
 export class AvailabilityController {
@@ -28,6 +29,10 @@ export class AvailabilityController {
       select: { shopifyVariantId: true },
       distinct: ['shopifyVariantId'],
     });
-    return { variantIds: units.flatMap((unit) => (unit.shopifyVariantId ? [unit.shopifyVariantId] : [])) };
+    // O Valle Pass é compra direta: mesmo que alguém tenha cadastrado peça para a variante dele (ou de uma campanha),
+    // ela nunca entra no aluguel.
+    const campaigns = await this.prisma.valePassCampaign.findMany({ select: { shopifyVariantId: true } });
+    const valePass = new Set([KNOWN_VALE_PASS_VARIANT_ID, ...campaigns.flatMap((c) => numericShopifyId(c.shopifyVariantId) ?? [])]);
+    return { variantIds: units.flatMap((unit) => (unit.shopifyVariantId && !valePass.has(numericShopifyId(unit.shopifyVariantId) ?? '') ? [unit.shopifyVariantId] : [])) };
   }
 }
