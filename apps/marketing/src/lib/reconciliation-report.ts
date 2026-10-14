@@ -9,6 +9,7 @@
 
 export type DivergenceKind =
   | 'paid_in_shopify_not_confirmed'
+  | 'payment_received_availability_conflict'
   | 'shopify_order_without_reservation'
   | 'cancelled_in_shopify'
   | 'payment_failed_in_shopify'
@@ -53,6 +54,11 @@ export const KIND_INFO: Record<DivergenceKind, KindInfo> = {
     label: 'Pago na Shopify, reserva não confirmada',
     severity: 'alta',
     guidance: 'O pedido consta como pago, mas a reserva está aguardando pagamento ou expirada. Confira a peça e as datas e trate manualmente.',
+  },
+  payment_received_availability_conflict: {
+    label: 'Pagamento recebido — conflito de disponibilidade',
+    severity: 'alta',
+    guidance: 'A cliente pagou, mas a peça já estava ocupada e a reserva não pôde ser confirmada. Exige ação humana: confira o pagamento na Shopify e decida entre atendimento alternativo ou reembolso.',
   },
   shopify_order_without_reservation: {
     label: 'Pedido na Shopify sem reserva vinculada',

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { HeldPieceAlerts } from '../HeldPieceAlerts';
+import { PaymentConflictAlert } from '@/components/closetadmin/PaymentConflictAlert';
+import { attentionTotal, isPaymentConflict, paymentConflictCount } from '@/lib/payment-conflict';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge, ShopifyDeletedBadge } from '@/components/closetadmin/ui';
@@ -71,7 +73,9 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
   const pendingCount = allReservations.filter((reservation) =>
     ['hold', 'pending_payment'].includes(reservation.status),
   ).length;
-  const attentionCount = allReservations.filter((reservation) => reservation.status === 'problem').length;
+  // "Requer atenção" = reserva em revisão OU pagamento recebido sem peça (conflito). Nunca reserva normal.
+  const attentionCount = attentionTotal(allReservations);
+  const conflictCount = paymentConflictCount(allReservations);
   const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && key !== 'shopifyDeletedOnly' && Boolean(value)).length;
   // Estimativa pro texto de confirmação do "Limpar lista" — `allReservations`
   // já exclui arquivadas por padrão (ver ReservationListFilters), então isto
@@ -109,6 +113,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
         }
       />
 
+      <PaymentConflictAlert count={conflictCount} compact />
       <HeldPieceAlerts adminUserId={session.id} />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -204,7 +209,12 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
               </thead>
               <tbody className="divide-y divide-ink/5 dark:divide-white/5">
                 {reservations.map((reservation) => (
-                  <tr key={reservation.id} data-reservation-id={reservation.id} className="transition hover:bg-ink/[0.035] dark:hover:bg-white/[0.035]">
+                  <tr
+                    key={reservation.id}
+                    data-reservation-id={reservation.id}
+                    data-payment-conflict={isPaymentConflict(reservation.status) ? 'true' : undefined}
+                    className={`transition hover:bg-ink/[0.035] dark:hover:bg-white/[0.035] ${isPaymentConflict(reservation.status) ? 'bg-orange-50/70 shadow-[inset_3px_0_0_0_#fb923c] dark:bg-orange-950/15' : ''}`}
+                  >
                     <td className="px-4 py-3.5">
                       <Link href={`/closetadmin/reservas/${reservation.id}`} className="block">
                         <span className="font-mono text-xs font-medium text-ink/65 dark:text-dark-muted">#{shortId(reservation.id)}</span>

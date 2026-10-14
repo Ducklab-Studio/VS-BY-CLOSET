@@ -41,6 +41,8 @@ const STATUS_STYLES: Record<string, string> = {
     'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400 dark:border dark:border-neutral-700/50',
   problem:
     'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300 dark:border dark:border-red-700/40',
+  late_payment_conflict:
+    'bg-orange-100 text-orange-900 dark:bg-orange-950/60 dark:text-orange-200 dark:border dark:border-orange-700/40',
   preparing:
     'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 dark:border dark:border-amber-700/40',
   ready_for_pickup:
@@ -76,6 +78,7 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelada',
   expired: 'Expirada',
   problem: 'Requer atenção',
+  late_payment_conflict: 'Pagamento recebido — conflito de disponibilidade',
   completed: 'Concluída',
   pending: 'Pendente',
 };
