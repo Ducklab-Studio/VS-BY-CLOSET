@@ -13,6 +13,7 @@ import { lockShopifyOrder } from './shopify-order-lock';
 import { isRangeBlockedStoreWide, loadActiveStoreWideBlocks, loadActiveUnitBlocks, lockOperationalBlocks } from '../admin/operational-blocks';
 import { blockedRangesOverlap } from '../rental-rules/rental-engine';
 import { ShopifyCatalogSyncService } from '../admin-panel/shopify-catalog-sync.service';
+import { CatalogRevalidationService } from '../admin-panel/catalog-revalidation.service';
 import {
   extractCustomerEmail,
   extractCustomerName,
@@ -50,11 +51,21 @@ export class WebhooksService {
     private readonly valePass: ValePassWebhookService,
     private readonly sync: ShopifyOrderSyncService,
     @Optional() private readonly catalogSync?: ShopifyCatalogSyncService,
+    @Optional() private readonly catalogRevalidation?: CatalogRevalidationService,
   ) {}
 
   async handleIncoming(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
     try {
-      return await this.processWebhook(input);
+      const result = await this.processWebhook(input);
+      // Só depois do commit: a vitrine, ao revalidar, já enxerga o catálogo e as peças atualizados.
+      if (input.topic.startsWith('products/') && result.outcome === 'processed') {
+        const handle = (input.payload as { handle?: unknown } | null)?.handle;
+        // Atalho opcional: qualquer falha do aviso (inclusive de um colaborador) nunca afeta o webhook já gravado.
+        void Promise.resolve()
+          .then(() => this.catalogRevalidation?.notify(typeof handle === 'string' ? handle : null))
+          .catch(() => undefined);
+      }
+      return result;
     } catch (err) {
       this.logger.error(`Falha ao processar webhook ${input.topic}: ${errorCode(err)}`);
       await this.bestEffortRecordFailure(input, err);

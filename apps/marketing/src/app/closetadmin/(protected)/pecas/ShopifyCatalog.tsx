@@ -130,13 +130,15 @@ function CatalogCard({ item, isAdmin }: { item: CatalogItem; isAdmin: boolean })
         </div>
       ) : (
         <p className="mt-3 text-xs text-amber-700 dark:text-amber-300" data-testid="no-physical-unit">
-          Ainda não há peça física vinculada a esta variante. SKU e estoque da Shopify não bastam: sem peça física
-          cadastrada, o produto não aparece para aluguel no site.
+          Aguardando configuração do inventário físico: nenhuma peça física vinculada a esta variante. O produto já aparece
+          no site como indisponível, mas só pode ser reservado depois que as peças forem cadastradas (SKU e estoque da
+          Shopify não bastam).
         </p>
       )}
       {item.physicalUnitsTotal > 0 && item.physicalUnitsReservableOnline === 0 ? (
         <p className="mt-3 text-xs text-amber-700 dark:text-amber-300" data-testid="no-online-unit">
-          Nenhuma peça desta variante está ativa e reservável online — o produto não aparece para aluguel no site.
+          Nenhuma peça desta variante está ativa e reservável online — a variante não pode ser reservada e, se todas as
+          variantes do produto estiverem assim, o produto sai do site.
         </p>
       ) : null}
 

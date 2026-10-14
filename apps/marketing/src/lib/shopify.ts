@@ -18,7 +18,7 @@
  */
 
 import { assertShopifyNetworkAllowed } from './shopify-network-guard';
-import { filterRentableProducts, parseRentableVariantIds } from './catalog-eligibility';
+import { catalogWithStatus, parseCatalogVariantState, type RentalCatalogStatus } from './catalog-eligibility';
 
 const STORE_DOMAIN = process.env.NEXT_PUBLIC_SHOPIFY_STORE_DOMAIN ?? '';
 const STOREFRONT_TOKEN = process.env.NEXT_PUBLIC_SHOPIFY_STOREFRONT_TOKEN ?? '';
@@ -95,6 +95,8 @@ export interface StorefrontProduct {
     minVariantPrice: { amount: string; currencyCode: string };
   };
   variants?: { nodes: { id: string }[] };
+  /** Só na listagem: `awaiting` = sem peça física cadastrada, aparece como indisponível. */
+  rentalStatus?: RentalCatalogStatus;
 }
 
 const PRODUCT_FIELDS = `
@@ -126,7 +128,7 @@ export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct
     { first: Math.min(Math.max(first * 4, 24), 50) },
   );
   // ISR de 60 s como o resto da home; o ClosetAdmin revalida a home ao cadastrar/alterar peça.
-  const eligible = await filterPublicCatalogProducts(dedupeProducts(data.products.nodes), { revalidate: 60 });
+  const eligible = await filterPublicCatalogProducts(dedupeProducts(data.products.nodes), { revalidate: 60 }, { includeAwaiting: false });
   return eligible.slice(0, first);
 }
 
@@ -235,7 +237,7 @@ export async function listCatalog(first = 250): Promise<Catalog> {
     after = data.products.pageInfo.endCursor;
   }
 
-  const uniqueProducts = await filterPublicCatalogProducts(dedupeProducts(products), { cache: 'no-store' });
+  const uniqueProducts = await filterPublicCatalogProducts(dedupeProducts(products), { cache: 'no-store' }, { includeAwaiting: true });
   const categories = categoriesFromCollections(
     collections.map((collection) => ({
       handle: collection.handle,
@@ -247,15 +249,18 @@ export async function listCatalog(first = 250): Promise<Catalog> {
 }
 
 /**
- * O catálogo comercial vem da Storefront API, mas produtos de aluguel só
- * podem aparecer quando ainda existe uma peça ativa e reservável no sistema
- * de reservas. Em caso de indisponibilidade do endpoint auxiliar, mantém-se
+ * O catálogo comercial vem da Storefront API (a Shopify é a fonte de título,
+ * preço, fotos e descrição). Estado de aluguel por produto (ver
+ * catalog-eligibility.ts): com peça reservável → normal; NUNCA cadastrado →
+ * `awaiting` ("indisponível"), só na listagem; peça cadastrada e fora de
+ * operação → some. Em caso de indisponibilidade do endpoint auxiliar, mantém-se
  * a resposta da Shopify para não transformar uma falha transitória em
  * catálogo vazio. O Valle Pass é sempre preservado por ser compra direta.
  */
 async function filterPublicCatalogProducts(
   products: StorefrontProduct[],
   cacheMode: { cache: 'no-store' } | { revalidate: number },
+  options: { includeAwaiting: boolean },
 ): Promise<StorefrontProduct[]> {
   const base =
     process.env.RESERVATIONS_API_URL ??
@@ -263,20 +268,20 @@ async function filterPublicCatalogProducts(
     process.env.NEXT_PUBLIC_RESERVATIONS_API_URL;
   if (!base) return products;
 
-  let rentable: Set<string> | null = null;
+  let state: ReturnType<typeof parseCatalogVariantState> = null;
   try {
     const response = await fetch(`${base.replace(/\/+$/, '')}/availability/catalog-variants`, {
       ...('cache' in cacheMode ? { cache: cacheMode.cache } : { next: { revalidate: cacheMode.revalidate } }),
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(8_000),
     });
-    if (response.ok) rentable = parseRentableVariantIds(await response.json());
+    if (response.ok) state = parseCatalogVariantState(await response.json());
   } catch {
-    rentable = null;
+    state = null;
   }
   // Falha aberta (ver catalog-eligibility.ts), mas nunca em silêncio: fica no log do servidor.
-  if (rentable === null) console.warn('[catalogo] lista de peças reserváveis indisponível — exibindo o catálogo da Shopify sem esse filtro.');
-  return filterRentableProducts(products, rentable, isDirectPurchaseProduct);
+  if (state === null) console.warn('[catalogo] lista de peças reserváveis indisponível — exibindo o catálogo da Shopify sem esse filtro.');
+  return catalogWithStatus(products, state, isDirectPurchaseProduct, options);
 }
 
 function isDirectPurchaseProduct(product: StorefrontProduct): boolean {

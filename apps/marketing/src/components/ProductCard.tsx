@@ -22,6 +22,7 @@ export function ProductCard({
   draftRaw?: string | null;
 }) {
   const Heading = catalog ? 'h2' : 'h3';
+  const awaiting = product.rentalStatus === 'awaiting';
   return (
     <Link
       href={productUrl(product.handle)}
@@ -46,7 +47,15 @@ export function ProductCard({
             Ver peça <ArrowUpRight size={16} />
           </span>
         )}
-        {catalog && <SelectionFlag handle={product.handle} initialRaw={draftRaw} />}
+        {awaiting && (
+          <span
+            data-rental-status="awaiting"
+            className="absolute left-3 top-3 rounded-full bg-cream/95 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-ink/70 shadow-sm"
+          >
+            Indisponível por enquanto
+          </span>
+        )}
+        {catalog && !awaiting && <SelectionFlag handle={product.handle} initialRaw={draftRaw} />}
       </div>
       <p className="product-category">
         {product.productType || (catalog ? '' : 'Seleção do closet')}

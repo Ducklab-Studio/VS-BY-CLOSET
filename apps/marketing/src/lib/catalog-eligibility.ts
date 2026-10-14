@@ -37,6 +37,72 @@ export function parseRentableVariantIds(payload: unknown): Set<string> | null {
   return new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0));
 }
 
+/** Estado de aluguel de um produto na vitrine. */
+export type RentalCatalogStatus = 'available' | 'awaiting';
+
+export interface CatalogVariantState {
+  /** Variantes com ao menos uma peça ativa e reservável online. */
+  readonly rentable: ReadonlySet<string>;
+  /**
+   * Variantes que JÁ tiveram alguma peça cadastrada (ativa ou não). `null` = API
+   * antiga, que não informa isto: o catálogo volta a esconder tudo que não é reservável.
+   */
+  readonly registered: ReadonlySet<string> | null;
+}
+
+/**
+ * Lê a resposta COMPLETA de /availability/catalog-variants. Mesma regra de
+ * `parseRentableVariantIds` (resposta inútil → `null`, o chamador falha aberto);
+ * `registeredVariantIds` é opcional e ausente em APIs antigas.
+ */
+export function parseCatalogVariantState(payload: unknown): CatalogVariantState | null {
+  const rentable = parseRentableVariantIds(payload);
+  if (rentable === null) return null;
+  const ids = (payload as { registeredVariantIds?: unknown }).registeredVariantIds;
+  if (!Array.isArray(ids)) return { rentable, registered: null };
+  return { rentable, registered: new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0)) };
+}
+
+/**
+ * Três destinos para um produto de aluguel:
+ *  - `available`: alguma variante tem peça física reservável → aparece normal;
+ *  - `awaiting`: ao menos uma variante nunca teve peça cadastrada e nenhuma está em
+ *    operação → aparece como indisponível até o inventário físico existir (o estoque
+ *    da Shopify NUNCA vira peça);
+ *  - `null`: todas as variantes já tiveram peça e ela saiu de operação
+ *    (desativada/arquivada) → some da vitrine, como antes.
+ * Compra direta (Valle Pass) é sempre `available`.
+ */
+export function rentalCatalogStatus(
+  product: EligibleProduct,
+  state: CatalogVariantState,
+  directPurchase: boolean,
+): RentalCatalogStatus | null {
+  if (directPurchase) return 'available';
+  const variants = product.variants?.nodes ?? [];
+  if (variants.some((variant) => state.rentable.has(variant.id))) return 'available';
+  if (state.registered === null) return null;
+  const registered = state.registered;
+  // Some só quando TODAS as variantes já tiveram peça (e nenhuma está em operação); uma variante nova, ainda sem peça, mantém o produto visível.
+  return variants.every((variant) => registered.has(variant.id)) ? null : 'awaiting';
+}
+
+/** Produtos visíveis, cada um com o seu estado. `state === null` (API fora) devolve tudo como disponível. */
+export function catalogWithStatus<T extends EligibleProduct>(
+  products: readonly T[],
+  state: CatalogVariantState | null,
+  isDirectPurchase: (product: T) => boolean,
+  options: { readonly includeAwaiting: boolean },
+): (T & { rentalStatus: RentalCatalogStatus })[] {
+  if (state === null) return products.map((product) => ({ ...product, rentalStatus: 'available' as const }));
+  const out: (T & { rentalStatus: RentalCatalogStatus })[] = [];
+  for (const product of products) {
+    const status = rentalCatalogStatus(product, state, isDirectPurchase(product));
+    if (status === 'available' || (status === 'awaiting' && options.includeAwaiting)) out.push({ ...product, rentalStatus: status });
+  }
+  return out;
+}
+
 /** O produto tem alguma variante com peça reservável (ou é de compra direta)? */
 export function isRentableProduct(product: EligibleProduct, rentable: ReadonlySet<string>, directPurchase: boolean): boolean {
   if (directPurchase) return true;
