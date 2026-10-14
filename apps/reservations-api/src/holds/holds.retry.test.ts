@@ -136,6 +136,8 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
       }),
       $queryRaw: vi
         .fn()
+        // A expiração de HOLD/pagamento vencidos (expireDueReservations) é a primeira consulta da transação: nada vencido.
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ shopifyVariantId: variant, reservableOnline: true, countsTowardRentalDuration: true, unitCount: 2 }])
         .mockResolvedValueOnce([
           { id: 'unit-1', shopifyVariantId: variant },

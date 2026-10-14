@@ -43,6 +43,8 @@ async function cleanup() {
   const reservationIds = rows.map((r) => r.id);
   if (reservationIds.length) {
     await prisma.$executeRaw`DELETE FROM hold_idempotency_keys WHERE reservation_id = ANY(${reservationIds}::uuid[])`;
+    // A expiração de pagamento agora registra o evento RESERVATION_EXPIRED (FK para a reserva).
+    await prisma.$executeRaw`DELETE FROM reservation_events WHERE reservation_id = ANY(${reservationIds}::uuid[])`;
     await prisma.$executeRaw`DELETE FROM reservation_items WHERE reservation_id = ANY(${reservationIds}::uuid[])`;
     await prisma.$executeRaw`DELETE FROM reservations WHERE id = ANY(${reservationIds}::uuid[])`;
   }

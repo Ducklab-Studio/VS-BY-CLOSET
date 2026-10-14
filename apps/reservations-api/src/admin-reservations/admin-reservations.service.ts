@@ -18,6 +18,7 @@ import {
   validateMinimumAdvance,
 } from '../rental-rules/rental-engine';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { expireDueReservations } from '../reservation-expiry/reservation-expiry';
 import { reservationAttentionSql, reservationNeedsAttention } from './reservation-attention';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { canTransition, type ReservationStatusValue } from '../webhooks/reservation-state-machine';
@@ -397,8 +398,7 @@ export class AdminReservationsService {
     // Mesmo mecanismo lazy de expiração do HOLD público — reserva manual
     // não cria HOLD, mas pode competir por unidades com HOLDs vencidos de
     // outros clientes.
-    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE status = 'hold' AND expires_at <= now()`;
-    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE status = 'pending_payment' AND payment_expires_at <= now()`;
+    await expireDueReservations(tx);
 
     // Lock por ID, em ordem fixa (ascendente) — UM lock por vez, não um
     // único `WHERE id = ANY(...) ORDER BY ... FOR UPDATE` (não garante

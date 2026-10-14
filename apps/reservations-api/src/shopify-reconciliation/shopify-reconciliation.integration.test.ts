@@ -139,6 +139,62 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     expect(await snapshot(ids.map((r) => r.id))).toEqual(before);
   });
 
+  test('conferência de pagamento: expirado, pendente, anulado e pago contra cada estado da reserva — sem esconder divergência real e sem escrever', async () => {
+    // pedido #1010 do mundo real: Shopify "expirado", reserva ainda aguardando pagamento
+    const expiredWaiting = await createReservation('pending_payment');
+    const expiredAlready = await createReservation('expired');       // já coerente: não é divergência
+    const expiredButConfirmed = await createReservation('confirmed'); // paga + "expirada" na Shopify: revisão
+    const pendingWaiting = await createReservation('pending_payment'); // em andamento: não é divergência
+    const pendingAlready = await createReservation('expired');         // Shopify ainda pendente: sem divergência até pagar
+    const voidedWaiting = await createReservation('pending_payment');
+    const paidWaiting = await createReservation('pending_payment');
+    const paidExpired = await createReservation('expired');           // pago + reserva expirada: urgente
+    const paidConfirmed = await createReservation('confirmed');       // coerente
+    setState(expiredWaiting.orderId, { financialStatus: 'expired' });
+    setState(expiredAlready.orderId, { financialStatus: 'expired' });
+    setState(expiredButConfirmed.orderId, { financialStatus: 'expired' });
+    setState(pendingWaiting.orderId, { financialStatus: 'pending' });
+    setState(pendingAlready.orderId, { financialStatus: 'pending' });
+    setState(voidedWaiting.orderId, { financialStatus: 'voided' });
+    setState(paidWaiting.orderId, { financialStatus: 'paid' });
+    setState(paidExpired.orderId, { financialStatus: 'paid' });
+    setState(paidConfirmed.orderId, { financialStatus: 'paid' });
+    const all = [expiredWaiting, expiredAlready, expiredButConfirmed, pendingWaiting, pendingAlready, voidedWaiting, paidWaiting, paidExpired, paidConfirmed];
+    const before = await snapshot(all.map((r) => r.id));
+    const eventsBefore = await prisma.reservationEvent.count({ where: { reservationId: { in: all.map((r) => r.id) } } });
+
+    const report = await service.reconcile({ days: 30, apply: false, orderIds: all.map((r) => r.orderId) });
+
+    expect(report.mode).toBe('report');
+    expect(kindOf(report, expiredWaiting.orderId)).toMatchObject({ kind: 'payment_failed_in_shopify', action: 'expire', applied: false, reservationStatus: 'pending_payment' });
+    expect(kindOf(report, expiredAlready.orderId)).toBeUndefined();
+    expect(kindOf(report, expiredButConfirmed.orderId)).toMatchObject({ kind: 'payment_failed_in_shopify', reservationStatus: 'confirmed' });
+    expect(kindOf(report, pendingWaiting.orderId)).toBeUndefined();
+    expect(kindOf(report, pendingAlready.orderId)).toBeUndefined();
+    expect(kindOf(report, voidedWaiting.orderId)?.kind).toBe('payment_failed_in_shopify');
+    expect(kindOf(report, paidWaiting.orderId)).toMatchObject({ kind: 'paid_in_shopify_not_confirmed', action: 'none' });
+    expect(kindOf(report, paidExpired.orderId)).toMatchObject({ kind: 'paid_in_shopify_not_confirmed', action: 'none', reservationStatus: 'expired' });
+    expect(kindOf(report, paidConfirmed.orderId)).toBeUndefined();
+    // somente leitura: nenhuma reserva nem evento mudou
+    expect(await snapshot(all.map((r) => r.id))).toEqual(before);
+    expect(await prisma.reservationEvent.count({ where: { reservationId: { in: all.map((r) => r.id) } } })).toBe(eventsBefore);
+  });
+
+  test('apply sobre pagamento expirado: aguardando pagamento expira; paga vai para revisão; pago-mas-expirado NUNCA é confirmado sozinho', async () => {
+    const waiting = await createReservation('pending_payment');
+    const confirmed = await createReservation('confirmed');
+    const paidExpired = await createReservation('expired');
+    setState(waiting.orderId, { financialStatus: 'expired' });
+    setState(confirmed.orderId, { financialStatus: 'expired' });
+    setState(paidExpired.orderId, { financialStatus: 'paid' });
+
+    await service.reconcile({ days: 30, apply: true, actor: ACTOR, orderIds: [waiting.orderId, confirmed.orderId, paidExpired.orderId] });
+
+    expect((await reservation(waiting.id)).status).toBe('expired');
+    expect((await reservation(confirmed.id)).status).toBe('problem'); // revisão humana; a peça continua ocupada
+    expect((await reservation(paidExpired.id)).status).toBe('expired'); // confirmação só pelo fluxo seguro de pagamento tardio
+  });
+
   test('apply aplica só o subconjunto seguro, audita com origem e ator, e é idempotente', async () => {
     const missing = await createReservation('confirmed');
     const gone = await createReservation('completed');
