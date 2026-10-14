@@ -25,6 +25,7 @@ import {
 import { formatPrice } from '@/lib/shopify';
 import { type SundayReturnOptionInfo } from '@/lib/checkout';
 import { returnOptionFromLines } from '@/lib/rental-selection';
+import { PAYMENT_WINDOW_MINUTES_LABEL } from '@/lib/payment-window';
 import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
@@ -628,7 +629,7 @@ export default function CarrinhoPage() {
           <div className="flex gap-3 rounded-2xl border border-marsala/10 bg-marsala/5 p-4 text-[0.75rem] leading-relaxed text-marsala">
             <Clock size={20} className="shrink-0 mt-0.5" strokeWidth={1.5} />
             <div>
-              <p className="font-bold tracking-wide">Reserva garantida por 30 minutos</p>
+              <p className="font-bold tracking-wide">Reserva garantida por {PAYMENT_WINDOW_MINUTES_LABEL} minutos</p>
               <p className="mt-1 text-ink/70">
                 Ao finalizar, o estoque físico é bloqueado exclusivamente para você durante o
                 pagamento.

@@ -23,8 +23,9 @@ export class ReservationExpirySchedulerService implements OnModuleInit, OnModule
 
   constructor(private readonly prisma: PrismaService) {}
 
-  onModuleInit(): void {
-    const seconds = reservationExpiryIntervalSeconds(process.env);
+  /** `env` só existe para testar o boot; o Nest chama sem argumento (usa o ambiente do processo). */
+  onModuleInit(env: Record<string, string | undefined> = process.env): void {
+    const seconds = reservationExpiryIntervalSeconds(env);
     if (seconds === null) {
       this.logger.log('Expiração automática de reservas vencidas desativada.');
       return;

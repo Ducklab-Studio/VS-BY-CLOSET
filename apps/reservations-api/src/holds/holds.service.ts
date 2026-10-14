@@ -25,6 +25,7 @@ import { TECHNICAL_MAX_PIECES } from '../rental-rules/rental-limits';
 import { loadOccupations } from '../availability/occupations';
 import { reasonMessage, reasonsFor, type OccupationKind } from '../availability/unavailable-reason';
 import { HOLD_BUSY_MESSAGE, HOLD_CLIENT_LIMIT_MESSAGE, HOLD_LIMITS, type HoldClient, maxHeldPieces } from './hold-client';
+import { HOLD_WINDOW_MINUTES } from '../checkout/checkout.config';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
 
@@ -381,7 +382,7 @@ export class HoldsService {
         gen_random_uuid(), 'hold', ${store.id},
         ${civilDateToISO(pickupDate)}::date, ${civilDateToISO(effectiveReturnDate)}::date,
         ${civilDateToISO(plan.calculatedReturnDate)}::date, ${plan.durationDays},
-        now() + interval '30 minutes', now(), ${termsVersion}, ${holdTokenHash}
+        now() + ${HOLD_WINDOW_MINUTES} * interval '1 minute', now(), ${termsVersion}, ${holdTokenHash}
       )
       RETURNING id, expires_at AS "expiresAt"
     `;
