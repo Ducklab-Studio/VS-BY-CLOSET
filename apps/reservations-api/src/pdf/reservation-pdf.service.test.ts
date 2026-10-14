@@ -51,7 +51,11 @@ function baseReservation(overrides: Partial<ReservationDetailResponse> = {}): Re
       returnedAt: null,
       cleaningStartedAt: null,
       cleaningCompletedAt: null,
+      overdueDays: 0,
+      inspection: null,
+      occurrences: [],
     }],
+    overdueDays: 0,
     events: [],
     ...overrides,
   };

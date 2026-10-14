@@ -3,8 +3,11 @@ import { ListReservationsQueryDto } from './dto/list-reservations-query.dto';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireModule } from '../admin/require-module.decorator';
+import { RequireRole } from '../admin/require-role.decorator';
 import {
   AdminReservationsService,
+  type ItemHoldReleaseResponse,
+  type ItemOccurrenceResponse,
   type ManualReservationCancelResponse,
   type OperationalReservationResponse,
   type ManualReservationResponse,
@@ -17,6 +20,7 @@ import { MarkReservationsViewedDto } from './dto/mark-reservations-viewed.dto';
 import { ReservationAttentionService } from './reservation-attention.service';
 import { CancelManualReservationDto } from './dto/cancel-manual-reservation.dto';
 import { OperationalReservationDto } from './dto/operational-reservation.dto';
+import { RecordOccurrenceDto, ReceiveItemDto, ReleaseHoldDto } from './dto/receive-item.dto';
 
 /**
  * Every read/write requires the server bearer and a live user session.
@@ -72,8 +76,28 @@ export class AdminReservationsController {
   @UseGuards(AdminRoleGuard)
   @RequireModule('RESERVATIONS')
   @HttpCode(HttpStatus.OK)
-  receive(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: OperationalReservationDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
-    return this.adminReservations.advanceOperational(id, itemId, 'receive', request.adminUser, dto.note);
+  receive(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: ReceiveItemDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<OperationalReservationResponse> {
+    // Conferência obrigatória: sem `condition` válida o DTO recusa (400) e nada é gravado.
+    return this.adminReservations.advanceOperational(id, itemId, 'receive', request.adminUser, undefined, { condition: dto.condition, notes: dto.notes });
+  }
+
+  /** Libera peça retida por manutenção/avaria. Só ADMIN (o guard revalida no banco). */
+  @Post(':id/items/:itemId/release-hold')
+  @UseGuards(AdminRoleGuard)
+  @RequireRole('ADMIN')
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.OK)
+  releaseHold(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: ReleaseHoldDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ItemHoldReleaseResponse> {
+    return this.adminReservations.releaseHold(id, itemId, request.adminUser, dto.note);
+  }
+
+  /** Peça não devolvida / observação — histórico acrescentado, sem mudar o status da peça. */
+  @Post(':id/items/:itemId/occurrences')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  @HttpCode(HttpStatus.CREATED)
+  recordOccurrence(@Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: RecordOccurrenceDto, @Req() request: { adminUser: { id: string; name: string } }): Promise<ItemOccurrenceResponse> {
+    return this.adminReservations.recordOccurrence(id, itemId, dto.kind, dto.notes, request.adminUser);
   }
 
   @Post(':id/items/:itemId/start-cleaning')

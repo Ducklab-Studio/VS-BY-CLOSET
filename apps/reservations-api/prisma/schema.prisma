@@ -552,10 +552,86 @@ model ReservationItem {
 
   reservation Reservation @relation(fields: [reservationId], references: [id])
   rentalUnit  RentalUnit  @relation(fields: [rentalUnitId], references: [id])
+  /// Conferência do recebimento (no máximo uma por peça) e ocorrências
+  /// (histórico acrescentado, nunca editado nem apagado).
+  returnRecord ReservationItemReturn?
+  occurrences  ReservationItemOccurrence[]
 
   @@index([reservationId])
   @@index([rentalUnitId, status])
   @@map("reservation_items")
+}
+
+/// Condição constatada pelo operador no recebimento da peça. `good` e
+/// `needs_cleaning` seguem o ciclo normal (higienização → liberada);
+/// `needs_maintenance` e `damaged` seguram a peça: ela continua ocupando a
+/// unidade (status returned/cleaning) e só é liberada por um ADMIN.
+enum ReturnCondition {
+  good
+  needs_cleaning
+  needs_maintenance
+  damaged
+
+  @@map("return_condition")
+}
+
+/// Conferência individual do recebimento de uma peça. Uma linha por
+/// ReservationItem (UNIQUE): o próprio banco impede devolução duplicada, mesmo
+/// que a checagem de status da aplicação falhe. Gravada na MESMA transação que
+/// move o item para `returned`. `expectedReturnDate`/`daysLate` guardam o que
+/// valia no recebimento (fatos para regras comerciais futuras); nada aqui gera
+/// cobrança. Nunca apagada.
+model ReservationItemReturn {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationItemId  String          @unique @map("reservation_item_id") @db.Uuid
+  reservationId      String          @map("reservation_id") @db.Uuid
+  condition          ReturnCondition
+  notes              String?
+  receivedAt         DateTime        @default(now()) @map("received_at") @db.Timestamptz(6)
+  receivedBy         String          @map("received_by") @db.Uuid
+  receivedByName     String          @map("received_by_name")
+  expectedReturnDate DateTime?       @map("expected_return_date") @db.Date
+  daysLate           Int             @default(0) @map("days_late")
+  /// Só para needs_maintenance/damaged: liberação explícita (ADMIN) para a
+  /// peça poder concluir a higienização e voltar ao estoque.
+  holdReleasedAt     DateTime?       @map("hold_released_at") @db.Timestamptz(6)
+  holdReleasedBy     String?         @map("hold_released_by") @db.Uuid
+  holdReleasedByName String?         @map("hold_released_by_name")
+  holdReleaseNote    String?         @map("hold_release_note")
+
+  reservationItem ReservationItem @relation(fields: [reservationItemId], references: [id])
+
+  @@index([reservationId])
+  @@index([condition])
+  @@map("reservation_item_returns")
+}
+
+enum ItemOccurrenceKind {
+  /// Peça que deveria ter voltado e não voltou — registro sem mudar o status
+  /// (a unidade continua ocupada).
+  not_returned
+  /// Observação livre da equipe sobre a peça.
+  note
+
+  @@map("item_occurrence_kind")
+}
+
+/// Histórico acrescentado (append-only) de ocorrências por peça.
+model ReservationItemOccurrence {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationItemId String             @map("reservation_item_id") @db.Uuid
+  reservationId     String             @map("reservation_id") @db.Uuid
+  kind              ItemOccurrenceKind
+  notes             String
+  recordedAt        DateTime           @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedBy        String             @map("recorded_by") @db.Uuid
+  recordedByName    String             @map("recorded_by_name")
+
+  reservationItem ReservationItem @relation(fields: [reservationItemId], references: [id])
+
+  @@index([reservationItemId])
+  @@index([reservationId])
+  @@map("reservation_item_occurrences")
 }
 
 /// Configuração das regras de aluguel — singleton (uma linha só, id

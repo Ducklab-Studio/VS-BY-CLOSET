@@ -26,6 +26,7 @@ const prefix = `OPER-${Date.now()}`;
 const storeId = `${prefix}-store`;
 const actor = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Operador sintético' };
 const ids: string[] = [];
+const good = { condition: 'good' as const };
 const unitIds: string[] = [];
 let pickup: string;
 let nextDay: string;
@@ -114,6 +115,9 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
   afterAll(async () => {
     if (!localDatabase) return;
     if (ids.length) {
+      // O histórico de conferência tem FK para a peça (nunca é apagado pelo sistema): só a limpeza do teste o remove.
+      await prisma.reservationItemOccurrence.deleteMany({ where: { reservationId: { in: ids } } });
+      await prisma.reservationItemReturn.deleteMany({ where: { reservationId: { in: ids } } });
       await prisma.reservationEvent.deleteMany({ where: { reservationId: { in: ids } } });
       await prisma.$executeRaw`DELETE FROM reservation_items WHERE reservation_id = ANY(${ids}::uuid[])`;
       await prisma.reservation.deleteMany({ where: { id: { in: ids } } });
@@ -127,14 +131,14 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
     const r = await fixture('confirmed');
     expect(await available(r.code)).toBe(0);
     expect(await calendarContains(r.id)).toBe(true);
-    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor)).resolves.toMatchObject({ itemStatus: 'returned' });
+    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good)).resolves.toMatchObject({ itemStatus: 'returned' });
     expect(await itemStatus(r.itemId)).toBe('returned');
     expect(await available(r.code)).toBe(0);
     expect(await calendarContains(r.id)).toBe(true);
     const returnedDetail = await service.getReservationDetail(r.id);
     expect(returnedDetail.items[0].returnedAt).not.toBeNull();
     expect((await pdfParse(await pdf.generate(returnedDetail))).text).toContain('Devolvida');
-    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor)).rejects.toMatchObject({ status: 409 });
+    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good)).rejects.toMatchObject({ status: 409 });
     await expect(bookSameUnit(r.unitId)).rejects.toBeDefined();
 
     await service.advanceOperational(r.id, r.itemId, 'start-cleaning', actor);
@@ -166,7 +170,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
 
   test('cancelamento é recusado quando uma das peças já foi recebida', async () => {
     const r = await multiItemFixture();
-    await service.advanceOperational(r.id, r.items[0].itemId, 'receive', actor);
+    await service.advanceOperational(r.id, r.items[0].itemId, 'receive', actor, undefined, good);
     await expect(service.cancelManual(r.id, {})).rejects.toMatchObject({ status: 409 });
     expect(await itemStatus(r.items[0].itemId)).toBe('returned');
     expect(await itemStatus(r.items[1].itemId)).toBe('confirmed');
@@ -178,7 +182,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
     const first = r.items[0];
     const second = r.items[1];
 
-    await service.advanceOperational(r.id, first.itemId, 'receive', actor);
+    await service.advanceOperational(r.id, first.itemId, 'receive', actor, undefined, good);
     expect(await itemStatus(first.itemId)).toBe('returned');
     expect(await itemStatus(second.itemId)).toBe('confirmed');
     expect((await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('confirmed');
@@ -192,7 +196,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
     expect(await available(first.code)).toBe(1);
     expect(await available(second.code)).toBe(0);
 
-    await service.advanceOperational(r.id, second.itemId, 'receive', actor);
+    await service.advanceOperational(r.id, second.itemId, 'receive', actor, undefined, good);
     expect((await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('returned');
     await service.advanceOperational(r.id, second.itemId, 'start-cleaning', actor);
     expect((await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('cleaning');
@@ -205,7 +209,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
     const r = await fixture('confirmed');
     const afterPlannedWindow = civilDateToISO(addDays(civilDateFromISO(blockedUntil), 1));
 
-    await service.advanceOperational(r.id, r.itemId, 'receive', actor);
+    await service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good);
     expect(await available(r.code, afterPlannedWindow)).toBe(0);
     await service.advanceOperational(r.id, r.itemId, 'start-cleaning', actor);
     expect(await available(r.code, afterPlannedWindow)).toBe(0);
@@ -215,14 +219,14 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
 
   test.each(['cancelled', 'expired', 'returned', 'cleaning', 'hold'] as const)('não recebe reserva %s', async (status) => {
     const r = await fixture(status);
-    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor)).rejects.toMatchObject({ status: 409 });
+    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good)).rejects.toMatchObject({ status: 409 });
     expect((await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } })).status).toBe(status);
     expect(await eventCount(r.id, 'RESERVATION_ITEM_RETURNED')).toBe(0);
   });
 
   test('reserva online confirmada pode ser recebida sem alterar pedido ou pagamento', async () => {
     const r = await fixture('confirmed', 'online');
-    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor)).resolves.toMatchObject({ itemStatus: 'returned' });
+    await expect(service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good)).resolves.toMatchObject({ itemStatus: 'returned' });
     const row = await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } });
     expect(row.shopifyOrderId).toBeNull();
     expect(row.checkoutState).toBe('none');
@@ -256,7 +260,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
 
   test('duas devoluções concorrentes geram um evento e um conflito', async () => {
     const r = await fixture('confirmed');
-    const outcomes = await Promise.allSettled([service.advanceOperational(r.id, r.itemId, 'receive', actor), service.advanceOperational(r.id, r.itemId, 'receive', actor)]);
+    const outcomes = await Promise.allSettled([service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good), service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good)]);
     expect(outcomes.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     expect(outcomes.filter((x) => x.status === 'rejected')).toHaveLength(1);
     expect(await eventCount(r.id, 'RESERVATION_ITEM_RETURNED')).toBe(1);
@@ -265,7 +269,7 @@ localDescribe('ciclo operacional de reservas (PostgreSQL isolado)', () => {
 
   test('cancelamento e devolução concorrentes nunca liberam recebimento pendente', async () => {
     const r = await fixture('confirmed');
-    const outcomes = await Promise.allSettled([service.advanceOperational(r.id, r.itemId, 'receive', actor), service.cancelManual(r.id, {})]);
+    const outcomes = await Promise.allSettled([service.advanceOperational(r.id, r.itemId, 'receive', actor, undefined, good), service.cancelManual(r.id, {})]);
     expect(outcomes.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     const row = await prisma.reservation.findUniqueOrThrow({ where: { id: r.id } });
     expect(['returned', 'cancelled']).toContain(row.status);

@@ -2,8 +2,16 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
-import { advanceReservationItem, cancelManualReservation, restoreReservation } from '@/lib/admin-data';
+import {
+  advanceReservationItem,
+  cancelManualReservation,
+  receiveReservationItem,
+  recordReservationItemOccurrence,
+  releaseReservationItemHold,
+  restoreReservation,
+} from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
+import { MAX_TEXT, MIN_TEXT, validateInspection, type InspectionInput } from '@/lib/return-inspection';
 
 /**
  * Item 8 — cancelamento manual só quando o state machine permite E a
@@ -30,10 +38,17 @@ export async function cancelReservationAction(reservationId: string, reason: str
   return { error: null };
 }
 
+function revalidateOperational(reservationId: string): void {
+  for (const path of [
+    `/closetadmin/reservas/${reservationId}`, '/closetadmin/reservas',
+    '/closetadmin/calendario', '/closetadmin/pecas', '/closetadmin/auditoria',
+  ]) revalidatePath(path);
+}
+
 export async function operationalReservationAction(
   reservationId: string,
   reservationItemId: string,
-  action: 'receive' | 'start-cleaning' | 'complete-cleaning',
+  action: 'start-cleaning' | 'complete-cleaning',
 ): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'RESERVATIONS');
@@ -42,10 +57,69 @@ export async function operationalReservationAction(
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a reserva.' };
   }
-  for (const path of [
-    `/closetadmin/reservas/${reservationId}`, '/closetadmin/reservas',
-    '/closetadmin/calendario', '/closetadmin/pecas', '/closetadmin/auditoria',
-  ]) revalidatePath(path);
+  revalidateOperational(reservationId);
+  return { error: null };
+}
+
+/**
+ * Recebimento com conferência individual. O corpo vem do navegador: a condição e a
+ * observação são revalidadas aqui e de novo na API; o operador vem da sessão.
+ */
+export async function receiveItemAction(
+  reservationId: string,
+  reservationItemId: string,
+  inspection: InspectionInput,
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
+  const invalid = validateInspection(inspection);
+  if (invalid) return { error: invalid };
+  try {
+    await receiveReservationItem(reservationId, reservationItemId, inspection);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a devolução.' };
+  }
+  revalidateOperational(reservationId);
+  return { error: null };
+}
+
+/** Liberar peça retida (manutenção/avaria): exclusivo de ADMIN, também validado na API. */
+export async function releaseHoldAction(
+  reservationId: string,
+  reservationItemId: string,
+  note: string,
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
+  requireAdminRole(session, 'ADMIN');
+  const text = typeof note === 'string' ? note.trim() : '';
+  if (text.length < MIN_TEXT || text.length > MAX_TEXT) return { error: 'Informe o motivo da liberação (mínimo 3 caracteres).' };
+  try {
+    await releaseReservationItemHold(reservationId, reservationItemId, text);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível liberar a peça.' };
+  }
+  revalidateOperational(reservationId);
+  return { error: null };
+}
+
+export async function recordOccurrenceAction(
+  reservationId: string,
+  reservationItemId: string,
+  kind: 'not_returned' | 'note',
+  notes: string,
+): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'RESERVATIONS');
+  if (kind !== 'not_returned' && kind !== 'note') return { error: 'Tipo de ocorrência inválido.' };
+  const text = typeof notes === 'string' ? notes.trim() : '';
+  if (text.length < MIN_TEXT || text.length > MAX_TEXT) return { error: 'Descreva a ocorrência (mínimo 3 caracteres).' };
+  try {
+    await recordReservationItemOccurrence(reservationId, reservationItemId, kind, text);
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a ocorrência.' };
+  }
+  revalidateOperational(reservationId);
   return { error: null };
 }
 
