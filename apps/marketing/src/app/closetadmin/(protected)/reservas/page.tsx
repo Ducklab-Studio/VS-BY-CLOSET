@@ -13,7 +13,7 @@ import {
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { HeldPieceAlerts } from '../HeldPieceAlerts';
 import { PaymentConflictAlert } from '@/components/closetadmin/PaymentConflictAlert';
-import { attentionTotal, isPaymentConflict, paymentConflictCount } from '@/lib/payment-conflict';
+import { PAYMENT_CONFLICT_STATUS, attentionTotal, isPaymentConflict, paymentConflictCount } from '@/lib/payment-conflict';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge, ShopifyDeletedBadge } from '@/components/closetadmin/ui';
@@ -54,18 +54,24 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
 
   let reservations: ReservationListItem[] | null = null;
   let allReservations: ReservationListItem[] | null = null;
+  let reviewReservations: ReservationListItem[] | null = null;
+  let conflictReservations: ReservationListItem[] | null = null;
   let errorMessage: string | null = null;
 
   try {
-    [reservations, allReservations] = await Promise.all([
+    [reservations, allReservations, reviewReservations, conflictReservations] = await Promise.all([
       listReservations(session.id, filters),
       listReservations(session.id, {}),
+      // "Requer atenção" e o alerta de conflito NUNCA saem da lista geral: ela traz só as 300 mais recentes e um
+      // conflito antigo ainda não resolvido sumiria do contador. Consultas filtradas por status não têm esse corte.
+      listReservations(session.id, { status: 'problem' }),
+      listReservations(session.id, { status: PAYMENT_CONFLICT_STATUS }),
     ]);
   } catch (err) {
     errorMessage = err instanceof AdminApiError ? err.message : 'Erro inesperado.';
   }
 
-  if (!reservations || !allReservations) {
+  if (!reservations || !allReservations || !reviewReservations || !conflictReservations) {
     return <ErrorState message={errorMessage ?? 'Erro inesperado.'} />;
   }
 
@@ -74,8 +80,8 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
     ['hold', 'pending_payment'].includes(reservation.status),
   ).length;
   // "Requer atenção" = reserva em revisão OU pagamento recebido sem peça (conflito). Nunca reserva normal.
-  const attentionCount = attentionTotal(allReservations);
-  const conflictCount = paymentConflictCount(allReservations);
+  const attentionCount = attentionTotal([...reviewReservations, ...conflictReservations]);
+  const conflictCount = paymentConflictCount(conflictReservations);
   const activeFilterCount = Object.entries(rawFilters).filter(([key, value]) => key !== 'includeArchived' && key !== 'archivedOnly' && key !== 'shopifyDeletedOnly' && Boolean(value)).length;
   // Estimativa pro texto de confirmação do "Limpar lista" — `allReservations`
   // já exclui arquivadas por padrão (ver ReservationListFilters), então isto

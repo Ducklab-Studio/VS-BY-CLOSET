@@ -92,7 +92,9 @@ test('rótulo e cor próprios: o painel não imprime mais o identificador cru', 
 test('lista: filtro próprio, "Requer atenção" soma os dois, linha destacada, alerta discreto', () => {
   assert.match(read(`${dir}reservas/ReservationFiltersForm.tsx`), /value: 'late_payment_conflict', label: 'Pagamento recebido — conflito de disponibilidade'/);
   const list = read(`${dir}reservas/page.tsx`);
-  assert.match(list, /attentionTotal\(allReservations\)/);
+  assert.match(list, /attentionTotal\(\[\.\.\.reviewReservations, \.\.\.conflictReservations\]\)/);
+  assert.match(list, /listReservations\(session\.id, \{ status: PAYMENT_CONFLICT_STATUS \}\)/);
+  assert.doesNotMatch(list, /(attentionTotal|paymentConflictCount)\(allReservations\)/, 'contador de atenção não pode depender da lista geral (corte de 300)');
   assert.match(list, /<PaymentConflictAlert count=\{conflictCount\} compact \/>/);
   assert.match(list, /data-payment-conflict=/);
   assert.doesNotMatch(list, /reservation\.status === 'problem'\)\.length/);

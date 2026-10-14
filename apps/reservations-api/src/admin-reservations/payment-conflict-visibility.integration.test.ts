@@ -143,6 +143,24 @@ localDescribe('pagamento recebido com conflito de disponibilidade — visibilida
     expect(row.shopifyOrderId).not.toBeNull();
   });
 
+  test('um conflito ANTIGO continua na consulta filtrada mesmo com mais de 300 reservas mais novas (a lista geral corta em 300)', async () => {
+    const { late } = await conflict();
+    // 305 reservas mais novas, só para empurrar o conflito para fora da lista geral (sem itens: não ocupam peça)
+    await prisma.$executeRaw`
+      INSERT INTO reservations (id, status, origin_store_id, pickup_date, return_date, checkout_state, terms_accepted_at, terms_version, created_at)
+      SELECT gen_random_uuid(), 'cancelled'::"reservation_status", 'dev-store', '2028-07-01'::date, '2028-07-03'::date, 'none'::"checkout_state", now(), ${PREFIX}, now() + (g || ' seconds')::interval
+      FROM generate_series(1, 305) g`;
+    try {
+      const general = (await admin.listReservations({})).map((r) => r.id);
+      expect(general.length).toBe(300);
+      expect(general).not.toContain(late.id); // o corte de 300 esconde o conflito na lista geral
+      const filtered = (await admin.listReservations({ status: 'late_payment_conflict' })).map((r) => r.id);
+      expect(filtered).toContain(late.id); // a consulta filtrada (usada pelos contadores) não perde o conflito
+    } finally {
+      await prisma.$executeRaw`DELETE FROM reservations WHERE terms_version = ${PREFIX}`;
+    }
+  });
+
   test('o filtro da API aceita o status e continua recusando status inválido', async () => {
     const ok = plainToInstance(ListReservationsQueryDto, { status: 'late_payment_conflict' });
     expect(await validate(ok)).toHaveLength(0);
