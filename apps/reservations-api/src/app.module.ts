@@ -20,6 +20,7 @@ import { ValePassModule } from './vale-pass/vale-pass.module';
 import { PdfModule } from './pdf/pdf.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { ShopifyReconciliationModule } from './shopify-reconciliation/shopify-reconciliation.module';
+import { ReservationExpiryModule } from './reservation-expiry/reservation-expiry.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -38,6 +39,7 @@ import { AppController } from './app.controller';
     CheckoutModule,
     WebhooksModule,
     ShopifyReconciliationModule,
+    ReservationExpiryModule,
     ReservationsModule,
     AdminReservationsModule,
     ReservationArchiveModule,

@@ -12,6 +12,7 @@ import {
 } from '../rental-rules/rental-engine';
 import { type CivilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO, diffDays } from '../rental-rules/civil-date';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { expireDueReservations } from '../reservation-expiry/reservation-expiry';
 import { ensureStoreConfig, type StoreConfig, resolveStoreConfig } from './store-config';
 import { currentTermsVersion } from './terms';
 import { generateHoldToken, hashHoldToken } from './hold-token';
@@ -24,6 +25,7 @@ import { TECHNICAL_MAX_PIECES } from '../rental-rules/rental-limits';
 import { loadOccupations } from '../availability/occupations';
 import { reasonMessage, reasonsFor, type OccupationKind } from '../availability/unavailable-reason';
 import { HOLD_BUSY_MESSAGE, HOLD_CLIENT_LIMIT_MESSAGE, HOLD_LIMITS, type HoldClient, maxHeldPieces } from './hold-client';
+import { HOLD_WINDOW_MINUTES } from '../checkout/checkout.config';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
 
@@ -232,14 +234,11 @@ export class HoldsService {
     // Item 8/9 da Fase 5: expira ANTES de checar ocupação, na mesma
     // transação — sem isso, um HOLD vencido continuaria "ocupando" a
     // unidade pro resto desta tentativa.
-    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE status = 'hold' AND expires_at <= now()`;
-    // Item 13 da Fase 7: mesmo mecanismo, pra reservas que já passaram
-    // do checkout mas venceram a janela de pagamento sem confirmação —
-    // sem isso, `pending_payment` (que está em OCCUPYING_RESERVATION_STATUSES)
-    // continuaria bloqueando a unidade pra sempre depois de vencida.
-    // Nunca deleta a linha (item 13: "nunca delete" — um pagamento
-    // tardio ainda precisa achar esta Reservation depois).
-    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE status = 'pending_payment' AND payment_expires_at <= now()`;
+    // Item 13 da Fase 7: o mesmo vale para reservas que já passaram do checkout mas
+    // venceram a janela de pagamento sem confirmação. Regra única em
+    // `expireDueReservations` (também rodada por agendador): nunca deleta a linha — um
+    // pagamento tardio ainda precisa achar esta Reservation depois.
+    await expireDueReservations(tx);
 
     // Limites por quem pede (hold-client.ts) — depois de expirar os vencidos
     // (que não contam) e depois da idempotência (reenvio da mesma chave devolve
@@ -383,7 +382,7 @@ export class HoldsService {
         gen_random_uuid(), 'hold', ${store.id},
         ${civilDateToISO(pickupDate)}::date, ${civilDateToISO(effectiveReturnDate)}::date,
         ${civilDateToISO(plan.calculatedReturnDate)}::date, ${plan.durationDays},
-        now() + interval '30 minutes', now(), ${termsVersion}, ${holdTokenHash}
+        now() + ${HOLD_WINDOW_MINUTES} * interval '1 minute', now(), ${termsVersion}, ${holdTokenHash}
       )
       RETURNING id, expires_at AS "expiresAt"
     `;

@@ -142,8 +142,14 @@ export class WebhooksService {
       // pedido de Valle Pass (qualquer status, desde `orders/create`) e os
       // vales emitidos (só com pagamento confirmado) ao mesmo log de eventos.
       case 'orders/create':
-      case 'orders/paid':
-        return this.withValePass(tx, topic, payload, await this.handleOrderPaidOrCreated(tx, payload as ShopifyOrderPayload, topic));
+      case 'orders/paid': {
+        const handled = await this.handleOrderPaidOrCreated(tx, payload as ShopifyOrderPayload, topic);
+        // O pagamento também conta como "estado mais novo do pedido": sem isto, um
+        // `orders/updated` (voided/expired) ATRASADO, anterior ao pagamento, não era
+        // reconhecido como antigo e jogava a reserva já paga em revisão.
+        if (handled.reservationId) await advanceOrderWatermark(tx, handled.reservationId, (payload as ShopifyOrderPayload).updated_at);
+        return this.withValePass(tx, topic, payload, handled);
+      }
       case 'orders/cancelled':
         return this.withValePass(tx, topic, payload, await this.handleOrderCancelled(tx, payload as ShopifyOrderPayload));
       case 'orders/updated':
@@ -209,7 +215,10 @@ export class WebhooksService {
     }
 
     await tx.$queryRaw`SELECT id FROM reservations WHERE id = ${reservationId}::uuid FOR UPDATE`;
-    await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE id = ${reservationId}::uuid AND status = 'pending_payment' AND payment_expires_at <= now()`;
+    const expiredNow = await tx.$executeRaw`UPDATE reservations SET status = 'expired' WHERE id = ${reservationId}::uuid AND status = 'pending_payment' AND payment_expires_at <= now()`;
+    if (expiredNow === 1) {
+      events.push({ type: 'RESERVATION_EXPIRED', reservationId, detail: { source: 'SYSTEM', reason: 'payment_window_elapsed', from: 'pending_payment', to: 'expired', trigger: topic } });
+    }
     const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: { items: { include: { rentalUnit: true } } } });
     if (!reservation) {
       // NÃO passa `reservationId` pro evento aqui — esse id veio do
@@ -758,6 +767,17 @@ interface DispatchResult {
   readonly reservationId?: string;
   readonly orderId?: string;
   readonly events: EventInput[];
+}
+
+/** Marcador de "estado mais recente já aplicado" do pedido: só avança, nunca recua. */
+async function advanceOrderWatermark(tx: Prisma.TransactionClient, reservationId: string, updatedAt: string | null | undefined): Promise<void> {
+  if (!updatedAt) return;
+  const at = new Date(updatedAt);
+  if (Number.isNaN(at.getTime())) return;
+  await tx.$executeRaw`
+    UPDATE reservations SET shopify_order_updated_at = ${at}
+    WHERE id = ${reservationId}::uuid AND (shopify_order_updated_at IS NULL OR shopify_order_updated_at < ${at})
+  `;
 }
 
 function isStaleOrderUpdate(applied: Date | null, incoming: string | null | undefined): boolean {

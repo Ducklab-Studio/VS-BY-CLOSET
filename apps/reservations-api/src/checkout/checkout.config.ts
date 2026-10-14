@@ -1,23 +1,37 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 
 /**
- * Duração operacional do bloqueio durante pagamento — item 11 da Fase 6.
- * NÃO é uma regra comercial (não existe "multa" ou "cobrança" aqui, só
- * até quando a unidade física continua reservada esperando o pagamento
- * confirmar). Sem confirmação do Anderson sobre um valor definitivo,
- * 30 minutos é o padrão conservador escolhido — igual à duração do HOLD
- * em si, documentado explicitamente como PLACEHOLDER, nunca inventado
- * como se fosse definitivo. Configurável por variável de ambiente pra
- * não exigir deploy quando o valor real for confirmado.
+ * PRAZOS DA RESERVA ONLINE — duas fases, dois relógios, cada um gravado UMA vez:
+ *
+ *  1. HOLD (`HOLD_WINDOW_MINUTES`, 30 min): começa quando o HOLD é criado
+ *     (`reservations.expires_at`). É o intervalo entre "Finalizar reserva" e a criação
+ *     do checkout — na prática, segundos. Só vale enquanto o status é `hold`.
+ *  2. Janela de pagamento (`PAYMENT_WINDOW_MINUTES`, padrão 60 min): começa quando o
+ *     checkout Shopify é criado, na transição `hold → pending_payment`
+ *     (`reservations.payment_expires_at = now() + janela`, ver CheckoutService). Vale só
+ *     enquanto o status é `pending_payment`.
+ *
+ * O prazo NUNCA é renovado: webhooks repetidos, `orders/updated` e novo POST /checkout
+ * (que devolve o checkout existente) não mexem em `payment_expires_at`. Cada reserva
+ * guarda o prazo com que nasceu; mudar a variável só vale para checkouts novos.
+ * Vencido o prazo, `expireDueReservations` (também rodada por agendador) expira a reserva e
+ * libera a peça; pagamento aprovado depois disso segue a recuperação de pagamento tardio.
+ *
+ * A janela NÃO é regra comercial de multa/cobrança: só até quando a unidade física
+ * continua reservada esperando o pagamento. 60 min foi decidido pelo proprietário; o prazo
+ * do Pix é configurado do lado da Shopify e do meio de pagamento da loja, e NÃO é lido nem
+ * garantido por este código. Configurável por `PAYMENT_WINDOW_MINUTES` (máx. 24 h).
  */
-const DEFAULT_PAYMENT_WINDOW_MINUTES = 30;
+export const HOLD_WINDOW_MINUTES = 30;
+const DEFAULT_PAYMENT_WINDOW_MINUTES = 60;
+const MAX_PAYMENT_WINDOW_MINUTES = 24 * 60;
 
 export function paymentWindowMinutes(): number {
-  const raw = process.env.PAYMENT_WINDOW_MINUTES;
+  const raw = process.env.PAYMENT_WINDOW_MINUTES?.trim();
   if (!raw) return DEFAULT_PAYMENT_WINDOW_MINUTES;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`PAYMENT_WINDOW_MINUTES inválido: "${raw}". Deve ser um número positivo.`);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_PAYMENT_WINDOW_MINUTES) {
+    throw new Error(`PAYMENT_WINDOW_MINUTES inválido: "${raw}". Deve ser um número entre 1 e ${MAX_PAYMENT_WINDOW_MINUTES}.`);
   }
   return parsed;
 }
