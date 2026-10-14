@@ -130,3 +130,25 @@ test('a página mostra condição, retenção e ocorrências, e esconde a libera
   assert.doesNotMatch(page, /R\$|toFixed|Intl\.NumberFormat|currency/i);
   assert.match(page, /nenhuma multa ou diária é calculada/);
 });
+
+test('compatibilidade de deploy: o painel novo não quebra com a resposta da API anterior', () => {
+  const data = read('src/lib/admin-data.ts');
+  const start = data.indexOf('export function withReturnDefaults');
+  const fnSource = data.slice(start, data.indexOf('\n}\n', start) + 3).replace('export function', 'function').replace(/\(raw: ReservationDetail\): ReservationDetail/, '(raw)');
+  const withReturnDefaults = runInNewContext(`${ts.transpileModule(fnSource, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText}; withReturnDefaults`);
+  // resposta da API ANTERIOR: sem overdueDays, inspection nem occurrences
+  const legacy = { id: 'r1', status: 'confirmed', items: [{ id: 'i1', code: 'VS-001', status: 'confirmed' }] };
+  const out = plain(withReturnDefaults(legacy));
+  assert.equal(out.overdueDays, 0);
+  assert.deepEqual(out.items[0].occurrences, []);
+  assert.equal(out.items[0].inspection, null);
+  assert.equal(out.items[0].overdueDays, 0);
+  // com a API nova nada é sobrescrito
+  const fresh = { id: 'r2', overdueDays: 4, items: [{ id: 'i2', overdueDays: 4, inspection: { condition: 'damaged', awaitingRelease: true }, occurrences: [{ id: 'o1', kind: 'note' }] }] };
+  const kept = plain(withReturnDefaults(fresh));
+  assert.equal(kept.overdueDays, 4);
+  assert.equal(kept.items[0].inspection.awaitingRelease, true);
+  assert.equal(kept.items[0].occurrences.length, 1);
+  // a página só lê a reserva por aqui
+  assert.match(data, /withReturnDefaults\(await adminGet<ReservationDetail>/);
+});

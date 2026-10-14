@@ -125,8 +125,27 @@ export interface ReservationDetailItem {
   }[];
 }
 
-export function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {
-  return adminGet(`/admin/reservations/${pathSegment(id)}`, adminUserId);
+/**
+ * Painel e API publicam em momentos diferentes (Vercel × Railway). Durante essa janela
+ * o painel novo pode falar com a API anterior, que ainda não envia atraso, conferência
+ * e ocorrências: campos ausentes viram "sem atraso / sem conferência / sem ocorrências"
+ * em vez de derrubar a tela. Nada é inventado: ausente nunca vira "devolvida" nem "liberada".
+ */
+export function withReturnDefaults(raw: ReservationDetail): ReservationDetail {
+  return {
+    ...raw,
+    overdueDays: raw.overdueDays ?? 0,
+    items: (raw.items ?? []).map((item) => ({
+      ...item,
+      overdueDays: item.overdueDays ?? 0,
+      inspection: item.inspection ?? null,
+      occurrences: item.occurrences ?? [],
+    })),
+  };
+}
+
+export async function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {
+  return withReturnDefaults(await adminGet<ReservationDetail>(`/admin/reservations/${pathSegment(id)}`, adminUserId));
 }
 
 export interface CreateManualReservationInput {
