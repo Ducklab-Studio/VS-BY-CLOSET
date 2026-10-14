@@ -195,6 +195,54 @@ localDescribe('reconciliação de pedidos Shopify (PostgreSQL isolado, Shopify s
     expect((await reservation(paidExpired.id)).status).toBe('expired'); // confirmação só pelo fluxo seguro de pagamento tardio
   });
 
+  test('pagamento recebido com conflito de disponibilidade: reconhecido explicitamente, gravidade alta, só relatório', async () => {
+    const conflictPaid = await createReservation('late_payment_conflict');
+    const conflictVoided = await createReservation('late_payment_conflict'); // pedido não pago: não há dinheiro a decidir
+    const conflictCancelled = await createReservation('late_payment_conflict');
+    const pendingPaid = await createReservation('pending_payment');
+    const confirmedPaid = await createReservation('confirmed');
+    setState(conflictPaid.orderId, { financialStatus: 'paid' });
+    setState(conflictVoided.orderId, { financialStatus: 'voided' });
+    setState(conflictCancelled.orderId, { financialStatus: 'paid', cancelledAt: '2029-01-02T00:00:00Z' });
+    setState(pendingPaid.orderId, { financialStatus: 'paid' });
+    setState(confirmedPaid.orderId, { financialStatus: 'paid' });
+    const all = [conflictPaid, conflictVoided, conflictCancelled, pendingPaid, confirmedPaid];
+    const before = await snapshot(all.map((r) => r.id));
+    const eventsBefore = await prisma.reservationEvent.count({ where: { reservationId: { in: all.map((r) => r.id) } } });
+
+    const report = await service.reconcile({ days: 30, apply: false, orderIds: all.map((r) => r.orderId) });
+
+    expect(kindOf(report, conflictPaid.orderId)).toMatchObject({
+      kind: 'payment_received_availability_conflict',
+      action: 'none',
+      applied: false,
+      reservationStatus: 'late_payment_conflict',
+    });
+    expect(kindOf(report, conflictPaid.orderId)?.note).toMatch(/indisponibilidade da peça/);
+    // não é tratado como pendente nem como confirmado
+    expect(kindOf(report, conflictPaid.orderId)?.kind).not.toBe('paid_in_shopify_not_confirmed');
+    expect(kindOf(report, conflictVoided.orderId)).toBeUndefined();
+    expect(kindOf(report, conflictCancelled.orderId)).toBeUndefined();
+    expect(kindOf(report, pendingPaid.orderId)?.kind).toBe('paid_in_shopify_not_confirmed'); // regressão: segue como antes
+    expect(kindOf(report, confirmedPaid.orderId)).toBeUndefined();
+    expect(report.summary.payment_received_availability_conflict).toBe(1);
+    // somente leitura
+    expect(await snapshot(all.map((r) => r.id))).toEqual(before);
+    expect(await prisma.reservationEvent.count({ where: { reservationId: { in: all.map((r) => r.id) } } })).toBe(eventsBefore);
+  });
+
+  test('apply nunca confirma, cancela nem libera uma reserva em conflito de pagamento', async () => {
+    const conflict = await createReservation('late_payment_conflict');
+    setState(conflict.orderId, { financialStatus: 'paid' });
+    const before = await snapshot([conflict.id]);
+
+    const report = await service.reconcile({ days: 30, apply: true, actor: ACTOR, orderIds: [conflict.orderId] });
+
+    expect(kindOf(report, conflict.orderId)).toMatchObject({ kind: 'payment_received_availability_conflict', applied: false });
+    expect(await snapshot([conflict.id])).toEqual(before);
+    expect((await reservation(conflict.id)).status).toBe('late_payment_conflict');
+  });
+
   test('apply aplica só o subconjunto seguro, audita com origem e ator, e é idempotente', async () => {
     const missing = await createReservation('confirmed');
     const gone = await createReservation('completed');

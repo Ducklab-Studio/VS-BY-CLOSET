@@ -14,6 +14,7 @@ export type DivergenceKind =
   | 'closed_in_shopify'
   | 'payment_failed_in_shopify'
   | 'paid_in_shopify_not_confirmed'
+  | 'payment_received_availability_conflict'
   | 'shopify_order_without_reservation';
 
 export interface Divergence {
@@ -212,6 +213,16 @@ export class ShopifyReconciliationService {
         kind: 'payment_failed_in_shopify',
         action: 'expire',
         note: status === 'pending_payment' ? 'pagamento falho/expirado; a reserva expira e libera a peça' : 'pagamento anulado com reserva confirmada; vai para revisão',
+      };
+    }
+    // Pagamento tardio que NÃO pôde ser recuperado (a peça já estava ocupada): a cliente pagou e ficou
+    // sem a peça. Não é pendente nem confirmada; exige decisão humana. Nunca é aplicado automaticamente.
+    if (state.financialStatus === 'paid' && !state.cancelledAt && status === 'late_payment_conflict') {
+      return {
+        ...base,
+        kind: 'payment_received_availability_conflict',
+        action: 'none',
+        note: 'pagamento recebido, mas a reserva não pôde ser confirmada por indisponibilidade da peça; exige atendimento alternativo ou reembolso pela Shopify (nada é feito automaticamente)',
       };
     }
     if (state.financialStatus === 'paid' && !state.cancelledAt && (status === 'pending_payment' || status === 'expired')) {

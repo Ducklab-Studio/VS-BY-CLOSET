@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { hasAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { HeldPieceAlerts } from './HeldPieceAlerts';
+import { PaymentConflictAlert } from '@/components/closetadmin/PaymentConflictAlert';
+import { PAYMENT_CONFLICT_LIST_HREF, PAYMENT_CONFLICT_STATUS } from '@/lib/payment-conflict';
 import { getCalendar, listPieces, listReservations, type CalendarItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import {
@@ -50,7 +52,9 @@ export default async function ClosetAdminDashboardPage() {
     return <ErrorState message={errorMessage ?? 'Erro inesperado.'} />;
   }
 
-  const { calendar, pieces, problems } = data;
+  const { calendar, pieces, problems, conflicts } = data;
+  // Conflito de pagamento (cliente pagou e ficou sem a peça) vem primeiro; depois as reservas em revisão.
+  const attention = [...conflicts, ...problems];
   const pickupsToday = uniqueReservationCount(calendar.filter((item) => item.pickupDate === today));
   const returnsToday = uniqueReservationCount(
     calendar.filter((item) => item.effectiveReturnDate === today),
@@ -93,6 +97,7 @@ export default async function ClosetAdminDashboardPage() {
         }
       />
 
+      <PaymentConflictAlert count={conflicts.length} />
       {hasAdminModule(session, 'RESERVATIONS') ? <HeldPieceAlerts adminUserId={session.id} /> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -117,9 +122,9 @@ export default async function ClosetAdminDashboardPage() {
         <StatCard
           icon={AlertTriangle}
           label="Alertas"
-          value={problems.length}
-          href="/closetadmin/reservas"
-          tone={problems.length > 0 ? 'warning' : 'default'}
+          value={attention.length}
+          href={conflicts.length > 0 ? PAYMENT_CONFLICT_LIST_HREF : '/closetadmin/reservas'}
+          tone={attention.length > 0 ? 'warning' : 'default'}
         />
       </section>
 
@@ -221,11 +226,11 @@ export default async function ClosetAdminDashboardPage() {
             </div>
             <AlertTriangle
               size={18}
-              className={problems.length > 0 ? 'text-amber-400' : 'text-emerald-400'}
+              className={attention.length > 0 ? 'text-amber-400' : 'text-emerald-400'}
             />
           </div>
 
-          {problems.length === 0 ? (
+          {attention.length === 0 ? (
             <div className="mt-5 flex items-center gap-3 rounded-xl border border-emerald-500/15 bg-emerald-500/[0.06] px-4 py-3">
               <CircleCheckBig size={19} className="shrink-0 text-emerald-400" />
               <div>
@@ -239,7 +244,7 @@ export default async function ClosetAdminDashboardPage() {
             </div>
           ) : (
             <ul className="mt-4 divide-y divide-ink/5 dark:divide-white/5">
-              {problems.slice(0, 6).map((reservation) => (
+              {attention.slice(0, 6).map((reservation) => (
                 <li key={reservation.id}>
                   <Link
                     href={`/closetadmin/reservas/${reservation.id}`}
@@ -303,12 +308,13 @@ export default async function ClosetAdminDashboardPage() {
 }
 
 async function loadDashboardData(adminUserId: string, today: string, in7Days: string) {
-  const [calendar, pieces, problems] = await Promise.all([
+  const [calendar, pieces, problems, conflicts] = await Promise.all([
     getCalendar(adminUserId, today, in7Days),
     listPieces(adminUserId),
     listReservations(adminUserId, { status: 'problem' }),
+    listReservations(adminUserId, { status: PAYMENT_CONFLICT_STATUS }),
   ]);
-  return { calendar, pieces, problems };
+  return { calendar, pieces, problems, conflicts };
 }
 
 type DashboardEvent = {

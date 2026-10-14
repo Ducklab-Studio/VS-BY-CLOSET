@@ -28,6 +28,14 @@ import {
   lateLabel,
 } from '@/lib/return-inspection';
 import { RestoreButton } from './RestoreButton';
+import {
+  PAYMENT_CONFLICT_LABEL,
+  PAYMENT_CONFLICT_STEPS,
+  PAYMENT_CONFLICT_SUMMARY,
+  conflictReason,
+  eventLabel,
+  isPaymentConflict,
+} from '@/lib/payment-conflict';
 import { MarkReservationViewed } from './MarkReservationViewed';
 
 export const metadata: Metadata = { title: 'Detalhe da reserva' };
@@ -140,6 +148,33 @@ export default async function ClosetAdminReservationDetailPage({
                 <Field label="Motivo do arquivamento" value={reservation.archiveReason} />
               ) : null}
             </dl>
+
+            {isPaymentConflict(reservation.status) ? (
+              <div
+                data-testid="conflito-pagamento"
+                className="mt-4 rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-900 dark:border-orange-900/60 dark:bg-orange-950/25 dark:text-orange-200"
+              >
+                <p className="font-semibold">{PAYMENT_CONFLICT_LABEL}</p>
+                <p className="mt-1">{PAYMENT_CONFLICT_SUMMARY}</p>
+                <p className="mt-2 font-medium">
+                  Pedido Shopify: <span data-testid="conflito-pedido">{reservation.shopifyOrderId ?? 'não vinculado'}</span>
+                  {orderUrl ? (
+                    <>
+                      {' '}
+                      <a href={orderUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                        abrir no Shopify
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+                <p className="mt-2 font-medium">O que fazer:</p>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+                  {PAYMENT_CONFLICT_STEPS.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
 
             {reservation.overdueDays > 0 && !reservation.archivedAt ? (
               <div
@@ -327,7 +362,12 @@ export default async function ClosetAdminReservationDetailPage({
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
               {reservation.events.map((event, i) => (
                 <li key={i} className="flex items-center justify-between gap-4 py-2.5 text-sm">
-                  <span className="font-medium text-ink dark:text-dark-text">{event.type}</span>
+                  <span className="font-medium text-ink dark:text-dark-text">
+                    {eventLabel(event.type)}
+                    {conflictReason(event.type, event.detail) ? (
+                      <span className="mt-0.5 block text-xs font-normal text-ink/60 dark:text-dark-muted">Motivo: {conflictReason(event.type, event.detail)}</span>
+                    ) : null}
+                  </span>
                   <span className="text-xs text-ink/65 dark:text-dark-subtle">
                     {formatDateTimePt(event.createdAt)}
                   </span>
