@@ -1,3 +1,4 @@
+import { toInspectionBody, type InspectionInput, type ReturnCondition } from './return-inspection';
 import 'server-only';
 import { pathSegment } from './admin-path';
 
@@ -87,22 +88,76 @@ export interface ReservationDetail extends Omit<ReservationListItem, 'itemCount'
   readonly updatedAt: string;
   readonly archivedBy: string | null;
   readonly archiveReason: string | null;
-  readonly items: readonly {
-    id: string;
-    rentalUnitId: string;
-    code: string;
-    status: string;
-    blockedFrom: string;
-    blockedUntilExclusive: string;
-    returnedAt: string | null;
-    cleaningStartedAt: string | null;
-    cleaningCompletedAt: string | null;
-  }[];
+  /** Maior atraso (dias) entre as peças ainda não recebidas; 0 = sem atraso. */
+  readonly overdueDays: number;
+  readonly items: readonly ReservationDetailItem[];
   readonly events: readonly { type: string; detail: unknown; createdAt: string }[];
 }
 
-export function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {
-  return adminGet(`/admin/reservations/${pathSegment(id)}`, adminUserId);
+export interface ReservationDetailItem {
+  readonly id: string;
+  readonly rentalUnitId: string;
+  readonly code: string;
+  readonly status: string;
+  readonly blockedFrom: string;
+  readonly blockedUntilExclusive: string;
+  readonly returnedAt: string | null;
+  readonly cleaningStartedAt: string | null;
+  readonly cleaningCompletedAt: string | null;
+  readonly overdueDays: number;
+  readonly inspection: {
+    readonly condition: ReturnCondition;
+    readonly notes: string | null;
+    readonly receivedAt: string;
+    readonly receivedByName: string;
+    readonly daysLate: number;
+    readonly awaitingRelease: boolean;
+    readonly releasedAt: string | null;
+    readonly releasedByName: string | null;
+    readonly releaseNote: string | null;
+  } | null;
+  readonly occurrences: readonly {
+    id: string;
+    kind: 'not_returned' | 'note';
+    notes: string;
+    recordedAt: string;
+    recordedByName: string;
+  }[];
+  /** Esta peça está retida (manutenção/avaria) em OUTRA reserva e esta ainda não foi retirada. */
+  readonly unitHold: {
+    readonly reservationId: string;
+    readonly condition: 'needs_maintenance' | 'damaged';
+    readonly heldSince: string;
+  } | null;
+}
+
+/**
+ * Painel e API publicam em momentos diferentes (Vercel × Railway). Durante essa janela
+ * o painel novo pode falar com a API anterior, que ainda não envia atraso, conferência
+ * e ocorrências: campos ausentes viram "sem atraso / sem conferência / sem ocorrências"
+ * em vez de derrubar a tela. Nada é inventado: ausente nunca vira "devolvida" nem "liberada".
+ */
+export function withReturnDefaults(raw: ReservationDetail): ReservationDetail {
+  return {
+    ...raw,
+    overdueDays: raw.overdueDays ?? 0,
+    items: (raw.items ?? []).map((item) => ({
+      ...item,
+      overdueDays: item.overdueDays ?? 0,
+      inspection: item.inspection ?? null,
+      occurrences: item.occurrences ?? [],
+      unitHold: item.unitHold ?? null,
+    })),
+  };
+}
+
+/** Peças retidas por manutenção/avaria com reserva futura. Só leitura; a API exige o módulo Reservas. */
+export function getHeldPieceAlerts(adminUserId: string): Promise<unknown> {
+  return adminGet('/admin/reservations/held-piece-alerts', adminUserId);
+}
+
+export async function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {
+  return withReturnDefaults(await adminGet<ReservationDetail>(`/admin/reservations/${pathSegment(id)}`, adminUserId));
 }
 
 export interface CreateManualReservationInput {
@@ -129,16 +184,34 @@ export function cancelManualReservation(id: string, reason?: string) {
   return adminPost(`/admin/reservations/${pathSegment(id)}/cancel`, { reason });
 }
 
-const ITEM_ACTIONS = ['receive', 'start-cleaning', 'complete-cleaning'] as const;
+// O recebimento NÃO está aqui: exige a conferência da peça (`receiveReservationItem`).
+const ITEM_ACTIONS = ['start-cleaning', 'complete-cleaning'] as const;
 
 export function advanceReservationItem(id: string, itemId: string, action: (typeof ITEM_ACTIONS)[number], note?: string) {
   // `action` chega de server action (valor do navegador): o tipo não vale em
-  // tempo de execução, então só as três ações conhecidas viram caminho.
+  // tempo de execução, então só as ações conhecidas viram caminho.
   if (!ITEM_ACTIONS.includes(action)) return Promise.reject(new AdminApiError(400, 'Ação inválida.'));
   return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string }>(
     `/admin/reservations/${pathSegment(id)}/items/${pathSegment(itemId)}/${action}`,
     { note },
   );
+}
+
+/** Recebimento COM conferência individual da peça. Sem adminUserId: o operador vem da sessão. */
+export function receiveReservationItem(id: string, itemId: string, inspection: InspectionInput) {
+  return adminPost<{ reservationId: string; reservationItemId: string; reservationStatus: string; itemStatus: string; condition?: string; daysLate?: number; awaitingRelease?: boolean }>(
+    `/admin/reservations/${pathSegment(id)}/items/${pathSegment(itemId)}/receive`,
+    toInspectionBody(inspection),
+  );
+}
+
+/** Só ADMIN (a API revalida no banco). */
+export function releaseReservationItemHold(id: string, itemId: string, note: string) {
+  return adminPost<{ released: true }>(`/admin/reservations/${pathSegment(id)}/items/${pathSegment(itemId)}/release-hold`, { note });
+}
+
+export function recordReservationItemOccurrence(id: string, itemId: string, kind: 'not_returned' | 'note', notes: string) {
+  return adminPost<{ occurrenceId: string; kind: string }>(`/admin/reservations/${pathSegment(id)}/items/${pathSegment(itemId)}/occurrences`, { kind, notes });
 }
 
 export interface PieceListItem {

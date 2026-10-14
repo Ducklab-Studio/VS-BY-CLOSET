@@ -124,12 +124,25 @@ async function clickAction(page, label, double = false, reason) {
   else await confirm.click();
 }
 
+// O recebimento exige a conferência da peça: condição → continuar → confirmar (duplo clique no último passo).
+async function receivePiece(page, double = false) {
+  await page.getByRole('button', { name: 'Registrar devolução', exact: true }).first().click();
+  await page.getByTestId('condicao-good').check();
+  await page.getByTestId('continuar-devolucao').click();
+  const confirm = page.getByTestId('confirmar-devolucao');
+  if (double) await confirm.dblclick();
+  else await confirm.click();
+}
+
 async function clean() {
   for (const child of childProcesses) child.kill();
   await browser?.close();
   const ids = Object.values(fixtures).map((x) => x.id);
   const unitIds = Object.values(fixtures).map((x) => x.unitId);
   if (ids.length) {
+    // O histórico de conferência/ocorrências referencia a peça (o sistema nunca o apaga): só a limpeza do teste.
+    await db.reservationItemOccurrence.deleteMany({ where: { reservationId: { in: ids } } });
+    await db.reservationItemReturn.deleteMany({ where: { reservationId: { in: ids } } });
     await db.reservationEvent.deleteMany({ where: { reservationId: { in: ids } } });
     await db.$executeRaw`DELETE FROM reservation_items WHERE reservation_id = ANY(${ids}::uuid[])`;
     await db.reservation.deleteMany({ where: { id: { in: ids } } });
@@ -175,7 +188,7 @@ try {
   await page.goto(detail('cycle'));
   assert.equal(await availability(), 0);
   assert.equal(await calendarContains(token), true);
-  await clickAction(page, 'Registrar devolução');
+  await receivePiece(page);
   await page.getByRole('button', { name: 'Iniciar higienização', exact: true }).waitFor();
   assert.equal(await status('cycle'), 'returned');
   assert.equal(await availability(), 0);
@@ -210,7 +223,7 @@ try {
   // Só as ações sobre ESTA reserva (o id vai no corpo). O contador de novas reservas do menu também
   // faz POST de server action na URL da página, mas sem argumento — não é a devolução.
   page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes(fixtures.returnDouble.id) && (request.postData() ?? '').includes(fixtures.returnDouble.id)) posts++; });
-  await clickAction(page, 'Registrar devolução', true);
+  await receivePiece(page, true);
   await page.getByRole('button', { name: 'Iniciar higienização', exact: true }).waitFor();
   assert.equal(posts, 1);
   assert.equal(await eventCount('returnDouble', 'RESERVATION_ITEM_RETURNED'), 1);

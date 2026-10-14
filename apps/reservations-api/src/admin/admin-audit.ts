@@ -25,6 +25,8 @@ const CRITICAL_ACTIONS = new Set([
   'RESERVATIONS_ARCHIVED',
   'RESERVATION_RESTORED',
   'RESERVATION_MANUAL_STATUS_CORRECTION',
+  // Liberar peça retida por manutenção/avaria devolve a unidade ao estoque.
+  'RETURN_HOLD_RELEASED',
   'AUDIT_CLEARED',
   'EMPLOYEE_CREATED',
   'EMPLOYEE_BLOCKED',

@@ -17,6 +17,16 @@ import {
 } from '@/components/closetadmin/ui';
 import { CancelButton } from './CancelButton';
 import { OperationalButton } from './OperationalButton';
+import { ReturnDialog } from './ReturnDialog';
+import { ItemActionButton } from './ItemActionButton';
+import {
+  CONDITION_INFO,
+  canCompleteCleaning,
+  canRecordNotReturned,
+  canReceiveItem,
+  canReleaseHold,
+  lateLabel,
+} from '@/lib/return-inspection';
 import { RestoreButton } from './RestoreButton';
 import { MarkReservationViewed } from './MarkReservationViewed';
 
@@ -52,6 +62,7 @@ export default async function ClosetAdminReservationDetailPage({
 
   {
     const orderUrl = shopifyOrderAdminUrl(reservation.shopifyOrderId);
+    const isAdmin = hasAdminRole(session, 'ADMIN');
     const isOnline = reservation.source === 'online';
     const canCancel =
       !reservation.archivedAt &&
@@ -130,6 +141,17 @@ export default async function ClosetAdminReservationDetailPage({
               ) : null}
             </dl>
 
+            {reservation.overdueDays > 0 && !reservation.archivedAt ? (
+              <div
+                data-testid="aviso-atraso-reserva"
+                className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+              >
+                Devolução em atraso: {lateLabel(reservation.overdueDays)}. Há peça(s) prevista(s) para{' '}
+                {reservation.returnDate ? formatDatePt(reservation.returnDate) : 'uma data anterior'} ainda não recebida(s).
+                O atraso é só informativo: nenhuma multa ou diária é calculada.
+              </div>
+            ) : null}
+
             {reservation.shopifyOrderDeletedAt ? (
               <div
                 data-testid="shopify-deleted-reason"
@@ -169,21 +191,51 @@ export default async function ClosetAdminReservationDetailPage({
             </h2>
             <ul className="mt-3 divide-y divide-ink/5 dark:divide-white/5">
               {reservation.items.map((item) => {
-                const canReceive =
-                  !reservation.archivedAt &&
-                  (item.status === 'confirmed' || item.status === 'picked_up');
-                const canStartCleaning = !reservation.archivedAt && item.status === 'returned';
-                const canCompleteCleaning = !reservation.archivedAt && item.status === 'cleaning';
+                const archived = Boolean(reservation.archivedAt);
+                const canReceive = canReceiveItem(item, archived);
+                const canNotReturned = canRecordNotReturned(item, archived);
+                const canStartCleaning = !archived && item.status === 'returned';
+                const canComplete = canCompleteCleaning(item.inspection, item.status, archived);
+                const canRelease = canReleaseHold(item.inspection, item.status, isAdmin, archived);
+                const canNote = !archived && ['confirmed', 'picked_up', 'returned', 'cleaning', 'completed'].includes(item.status);
+                const condition = item.inspection ? CONDITION_INFO[item.inspection.condition] : null;
                 return (
-                  <li key={item.id} className="py-3 text-sm">
+                  <li key={item.id} data-testid="peca-item" data-code={item.code} data-status={item.status} className="py-3 text-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium text-ink dark:text-dark-text">{item.code}</p>
+                          <span data-testid="peca-situacao" className="rounded-full bg-ink/5 px-2 py-0.5 text-xs text-ink/70 dark:bg-white/10 dark:text-dark-muted">
+                            {item.status === 'confirmed' || item.status === 'picked_up' ? 'Pendente de devolução' : reservationStatusLabel(item.status)}
+                          </span>
+                          {item.overdueDays > 0 ? (
+                            <span data-testid="peca-atrasada" className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                              {lateLabel(item.overdueDays)}
+                            </span>
+                          ) : null}
+                          {item.inspection?.awaitingRelease ? (
+                            <span data-testid="peca-retida" className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950/40 dark:text-red-300">
+                              Retida — aguardando liberação
+                            </span>
+                          ) : null}
+                          {item.occurrences.some((o) => o.kind === 'not_returned') && (item.status === 'confirmed' || item.status === 'picked_up') ? (
+                            <span data-testid="peca-nao-devolvida" className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950/40 dark:text-red-300">
+                              Não devolvida
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="text-ink/50 dark:text-dark-muted text-xs mt-0.5">
                           {formatDatePt(item.blockedFrom)} –{' '}
-                          {formatDatePt(item.blockedUntilExclusive)} ·{' '}
-                          {reservationStatusLabel(item.status)}
+                          {formatDatePt(item.blockedUntilExclusive)}
                         </p>
+
+                        {item.unitHold ? (
+                          <p data-testid="peca-retida-em-outra-reserva" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-300">
+                            Esta peça está retida ({item.unitHold.condition === 'damaged' ? 'danificada' : 'em manutenção'}) desde {formatDatePt(item.unitHold.heldSince.slice(0, 10))} na{' '}
+                            <Link href={`/closetadmin/reservas/${item.unitHold.reservationId}`} className="font-medium underline">reserva {item.unitHold.reservationId.slice(0, 8)}</Link>.
+                            {reservation.pickupDate ? ` A retirada desta reserva é em ${formatDatePt(reservation.pickupDate)}.` : ''} Providencie reposição ou fale com a cliente. Nada foi alterado automaticamente.
+                          </p>
+                        ) : null}
                         <p className="text-ink/50 dark:text-dark-muted text-xs mt-1">
                           Recebida: {item.returnedAt ? formatDateTimePt(item.returnedAt) : '—'} ·
                           Higienização:{' '}
@@ -193,14 +245,46 @@ export default async function ClosetAdminReservationDetailPage({
                             ? formatDateTimePt(item.cleaningCompletedAt)
                             : '—'}
                         </p>
+
+                        {item.inspection && condition ? (
+                          <div data-testid="peca-conferencia" data-condition={item.inspection.condition} className="mt-2 rounded-lg border border-ink/10 bg-ink/[0.02] px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.03]">
+                            <p className="font-medium text-ink dark:text-dark-text">
+                              Conferência: {condition.label}
+                              <span className="ml-2 font-normal text-ink/55 dark:text-dark-subtle">
+                                por {item.inspection.receivedByName} em {formatDateTimePt(item.inspection.receivedAt)}
+                                {item.inspection.daysLate > 0 ? ` · ${lateLabel(item.inspection.daysLate)}` : ''}
+                              </span>
+                            </p>
+                            {item.inspection.notes ? <p className="mt-1 whitespace-pre-wrap text-ink/70 dark:text-dark-muted">{item.inspection.notes}</p> : null}
+                            {item.inspection.releasedAt ? (
+                              <p className="mt-1 text-ink/70 dark:text-dark-muted">
+                                Liberada por {item.inspection.releasedByName} em {formatDateTimePt(item.inspection.releasedAt)}: {item.inspection.releaseNote}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {item.occurrences.length > 0 ? (
+                          <ul data-testid="peca-ocorrencias" className="mt-2 space-y-1 text-xs text-ink/70 dark:text-dark-muted">
+                            {item.occurrences.map((o) => (
+                              <li key={o.id}>
+                                <strong>{o.kind === 'not_returned' ? 'Não devolvida' : 'Observação'}</strong> · {o.recordedByName} · {formatDateTimePt(o.recordedAt)} — {o.notes}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {canReceive ? (
-                          <OperationalButton
+                          <ReturnDialog
                             reservationId={reservation.id}
                             reservationItemId={item.id}
-                            action="receive"
+                            code={item.code}
+                            overdueDays={item.overdueDays}
                           />
+                        ) : null}
+                        {canNotReturned ? (
+                          <ItemActionButton reservationId={reservation.id} reservationItemId={item.id} action="not-returned" code={item.code} />
                         ) : null}
                         {canStartCleaning ? (
                           <OperationalButton
@@ -209,12 +293,18 @@ export default async function ClosetAdminReservationDetailPage({
                             action="start-cleaning"
                           />
                         ) : null}
-                        {canCompleteCleaning ? (
+                        {canComplete ? (
                           <OperationalButton
                             reservationId={reservation.id}
                             reservationItemId={item.id}
                             action="complete-cleaning"
                           />
+                        ) : null}
+                        {canRelease ? (
+                          <ItemActionButton reservationId={reservation.id} reservationItemId={item.id} action="release-hold" code={item.code} />
+                        ) : null}
+                        {canNote ? (
+                          <ItemActionButton reservationId={reservation.id} reservationItemId={item.id} action="note" code={item.code} />
                         ) : null}
                       </div>
                     </div>

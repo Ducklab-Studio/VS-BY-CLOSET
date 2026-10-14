@@ -4,14 +4,10 @@ import { useRouter } from 'next/navigation';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { operationalReservationAction } from './actions';
 
-type Action = 'receive' | 'start-cleaning' | 'complete-cleaning';
+/** O recebimento tem diálogo próprio com a conferência (ReturnDialog). */
+type Action = 'start-cleaning' | 'complete-cleaning';
 
 const CONTENT: Record<Action, { label: string; title: string; description: string }> = {
-  receive: {
-    label: 'Registrar devolução',
-    title: 'Confirmar recebimento da peça?',
-    description: 'A peça continuará indisponível até a higienização ser concluída.',
-  },
   'start-cleaning': {
     label: 'Iniciar higienização',
     title: 'Iniciar higienização?',
