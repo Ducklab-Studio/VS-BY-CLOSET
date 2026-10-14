@@ -143,6 +143,12 @@ export interface ReservationDetailItem {
     readonly releaseNote: string | null;
   } | null;
   readonly occurrences: readonly { id: string; kind: 'not_returned' | 'note'; notes: string; recordedAt: string; recordedByName: string }[];
+  /** Esta peça está retida (manutenção/avaria) em OUTRA reserva e esta ainda não foi retirada. */
+  readonly unitHold: {
+    readonly reservationId: string;
+    readonly condition: 'needs_maintenance' | 'damaged';
+    readonly heldSince: string;
+  } | null;
 }
 
 export interface ManualReservationCancelResponse {
@@ -159,6 +165,35 @@ export interface OperationalReservationResponse {
   readonly condition?: ReturnConditionValue;
   readonly daysLate?: number;
   readonly awaitingRelease?: boolean;
+}
+
+/** Reservas ainda não retiradas, que dependem de uma peça que pode estar retida em outra reserva. */
+export const AFFECTED_RESERVATION_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'pending_payment'] as const;
+
+export interface HeldPieceAlert {
+  readonly reservationItemId: string;
+  readonly heldReservationId: string;
+  readonly unitId: string;
+  readonly code: string;
+  readonly name: string;
+  readonly condition: 'needs_maintenance' | 'damaged';
+  readonly heldSince: string;
+  /** Próxima reserva (pela data de retirada) que depende desta peça. */
+  readonly nextReservation: {
+    readonly id: string;
+    readonly status: string;
+    readonly pickupDate: string;
+    readonly returnDate: string | null;
+    readonly customerName: string | null;
+    readonly daysUntilPickup: number;
+  };
+  /** Total de reservas futuras afetadas (inclui a próxima). */
+  readonly affectedCount: number;
+}
+
+export interface HeldPieceAlertsResponse {
+  readonly generatedAt: string;
+  readonly alerts: readonly HeldPieceAlert[];
 }
 
 export interface ItemHoldReleaseResponse {
@@ -1015,6 +1050,17 @@ export class AdminReservationsService {
       take: 100,
     });
     const returns = await this.prisma.reservationItemReturn.findMany({ where: { reservationId: id } });
+    // Peças desta reserva que estão retidas (manutenção/avaria, sem liberação) em OUTRA reserva.
+    const heldElsewhere = ['confirmed', 'preparing', 'ready_for_pickup', 'pending_payment'].some((s) => items.some((i) => i.status === s))
+      ? await this.prisma.$queryRaw<{ unitId: string; reservationId: string; condition: 'needs_maintenance' | 'damaged'; heldSince: Date }[]>`
+          SELECT ri.rental_unit_id AS "unitId", ri.reservation_id AS "reservationId", r.condition::text AS "condition", r.received_at AS "heldSince"
+          FROM reservation_item_returns r
+          JOIN reservation_items ri ON ri.id = r.reservation_item_id
+          WHERE r.condition IN ('needs_maintenance', 'damaged') AND r.hold_released_at IS NULL
+            AND ri.status IN ('returned', 'cleaning') AND ri.reservation_id <> ${id}::uuid
+            AND ri.rental_unit_id = ANY(${items.map((i) => i.rentalUnitId)}::uuid[])
+        `
+      : [];
     const occurrences = await this.prisma.reservationItemOccurrence.findMany({ where: { reservationId: id }, orderBy: { recordedAt: 'asc' } });
     const expectedReturn = reservation.returnDate ? civilDateFromPgDate(reservation.returnDate) : null;
     const todayCivil = await this.civilToday();
@@ -1074,10 +1120,97 @@ export class AdminReservationsService {
           occurrences: occurrences
             .filter((o) => o.reservationItemId === i.id)
             .map((o) => ({ id: o.id, kind: o.kind, notes: o.notes, recordedAt: o.recordedAt.toISOString(), recordedByName: o.recordedByName })),
+          unitHold: (() => {
+            if (!['confirmed', 'preparing', 'ready_for_pickup', 'pending_payment'].includes(i.status)) return null;
+            const hold = heldElsewhere.find((h) => h.unitId === i.rentalUnitId);
+            return hold ? { reservationId: hold.reservationId, condition: hold.condition, heldSince: hold.heldSince.toISOString() } : null;
+          })(),
         };
       }),
       events: events.map((e) => ({ type: e.type, detail: e.detail, createdAt: e.createdAt.toISOString() })),
     };
+  }
+
+  /**
+   * Alerta operacional: peças retidas por manutenção/avaria (ainda sem liberação) que têm
+   * reserva futura dependendo delas. SOMENTE LEITURA: não cancela, não libera, não altera
+   * pagamento nem cria registro. Roda numa transação de snapshot (REPEATABLE READ): as duas
+   * consultas enxergam o mesmo instante, mesmo com devolução/liberação acontecendo ao lado.
+   * Sem telefone nem e-mail do cliente: a equipe abre a reserva para isso.
+   */
+  async listHeldPieceAlerts(): Promise<HeldPieceAlertsResponse> {
+    const todayCivil = await this.civilToday();
+    const todayIso = civilDateToISO(todayCivil);
+    try {
+      const alerts = await this.prisma.$transaction(async (tx) => {
+        const held = await tx.$queryRaw<{
+          itemId: string; heldReservationId: string; unitId: string; code: string; name: string;
+          condition: 'needs_maintenance' | 'damaged'; heldSince: Date;
+        }[]>`
+          SELECT ri.id AS "itemId", ri.reservation_id AS "heldReservationId", ru.id AS "unitId", ru.code, ru.name,
+                 r.condition::text AS "condition", r.received_at AS "heldSince"
+          FROM reservation_item_returns r
+          JOIN reservation_items ri ON ri.id = r.reservation_item_id
+          JOIN rental_units ru ON ru.id = ri.rental_unit_id
+          JOIN reservations hr ON hr.id = ri.reservation_id
+          WHERE r.condition IN ('needs_maintenance', 'damaged')
+            AND r.hold_released_at IS NULL
+            AND ri.status IN ('returned', 'cleaning')
+            AND hr.archived_at IS NULL
+          ORDER BY r.received_at ASC
+          LIMIT 200
+        `;
+        if (held.length === 0) return [];
+
+        const affected = await tx.$queryRaw<{
+          unitId: string; reservationId: string; status: string; pickup: Date; ret: Date | null; customerName: string | null;
+        }[]>`
+          SELECT ri.rental_unit_id AS "unitId", rs.id AS "reservationId", rs.status::text AS "status",
+                 rs.pickup_date AS "pickup", rs.return_date AS "ret", rs.customer_name AS "customerName"
+          FROM reservation_items ri
+          JOIN reservations rs ON rs.id = ri.reservation_id
+          WHERE ri.rental_unit_id = ANY(${held.map((h) => h.unitId)}::uuid[])
+            AND ri.id <> ALL(${held.map((h) => h.itemId)}::uuid[])
+            AND ri.status::text = ANY(${[...AFFECTED_RESERVATION_STATUSES]}::text[])
+            AND rs.archived_at IS NULL
+            AND rs.pickup_date >= ${todayIso}::date
+          ORDER BY rs.pickup_date ASC, rs.created_at ASC
+        `;
+
+        const out: HeldPieceAlert[] = [];
+        for (const h of held) {
+          const mine = affected.filter((a) => a.unitId === h.unitId);
+          if (mine.length === 0) continue; // retida, mas ninguém depende dela: não é alerta
+          const next = mine[0];
+          const pickup = civilDateFromPgDate(next.pickup);
+          out.push({
+            reservationItemId: h.itemId,
+            heldReservationId: h.heldReservationId,
+            unitId: h.unitId,
+            code: h.code,
+            name: h.name,
+            condition: h.condition,
+            heldSince: h.heldSince.toISOString(),
+            nextReservation: {
+              id: next.reservationId,
+              status: next.status,
+              pickupDate: civilDateToISO(pickup),
+              returnDate: next.ret ? civilDateToISO(civilDateFromPgDate(next.ret)) : null,
+              customerName: next.customerName,
+              daysUntilPickup: Math.max(0, diffDays(pickup, todayCivil)),
+            },
+            affectedCount: new Set(mine.map((a) => a.reservationId)).size,
+          });
+        }
+        // Mais urgente primeiro: retirada mais próxima.
+        return out.sort((a, b) => a.nextReservation.daysUntilPickup - b.nextReservation.daysUntilPickup || a.code.localeCompare(b.code));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 10_000, maxWait: 5_000 });
+      return { generatedAt: new Date().toISOString(), alerts };
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      this.logger.error(`Falha ao listar alertas de peças retidas: ${errorCode(err)}`);
+      throw new ServiceUnavailableException('Não foi possível verificar as peças retidas agora.');
+    }
   }
 
   /** "Hoje" no fuso das regras. Só informativo (atraso na tela): se a configuração não

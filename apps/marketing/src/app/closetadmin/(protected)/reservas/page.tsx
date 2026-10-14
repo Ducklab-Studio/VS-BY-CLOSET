@@ -11,6 +11,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
+import { HeldPieceAlerts } from '../HeldPieceAlerts';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader, SourceBadge, StatusBadge, ArchivedBadge, ShopifyDeletedBadge } from '@/components/closetadmin/ui';
@@ -107,6 +108,8 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
           </div>
         }
       />
+
+      <HeldPieceAlerts adminUserId={session.id} />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard

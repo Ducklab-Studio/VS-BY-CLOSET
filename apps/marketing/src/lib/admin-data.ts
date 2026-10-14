@@ -123,6 +123,12 @@ export interface ReservationDetailItem {
     recordedAt: string;
     recordedByName: string;
   }[];
+  /** Esta peça está retida (manutenção/avaria) em OUTRA reserva e esta ainda não foi retirada. */
+  readonly unitHold: {
+    readonly reservationId: string;
+    readonly condition: 'needs_maintenance' | 'damaged';
+    readonly heldSince: string;
+  } | null;
 }
 
 /**
@@ -140,8 +146,14 @@ export function withReturnDefaults(raw: ReservationDetail): ReservationDetail {
       overdueDays: item.overdueDays ?? 0,
       inspection: item.inspection ?? null,
       occurrences: item.occurrences ?? [],
+      unitHold: item.unitHold ?? null,
     })),
   };
+}
+
+/** Peças retidas por manutenção/avaria com reserva futura. Só leitura; a API exige o módulo Reservas. */
+export function getHeldPieceAlerts(adminUserId: string): Promise<unknown> {
+  return adminGet('/admin/reservations/held-piece-alerts', adminUserId);
 }
 
 export async function getReservationDetail(adminUserId: string, id: string): Promise<ReservationDetail> {

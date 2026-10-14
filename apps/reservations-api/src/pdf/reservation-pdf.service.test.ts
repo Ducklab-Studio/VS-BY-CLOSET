@@ -54,6 +54,7 @@ function baseReservation(overrides: Partial<ReservationDetailResponse> = {}): Re
       overdueDays: 0,
       inspection: null,
       occurrences: [],
+      unitHold: null,
     }],
     overdueDays: 0,
     events: [],

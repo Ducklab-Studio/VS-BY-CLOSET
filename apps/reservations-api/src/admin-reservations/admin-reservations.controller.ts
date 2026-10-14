@@ -6,6 +6,7 @@ import { RequireModule } from '../admin/require-module.decorator';
 import { RequireRole } from '../admin/require-role.decorator';
 import {
   AdminReservationsService,
+  type HeldPieceAlertsResponse,
   type ItemHoldReleaseResponse,
   type ItemOccurrenceResponse,
   type ManualReservationCancelResponse,
@@ -41,6 +42,15 @@ export class AdminReservationsController {
   @RequireModule('RESERVATIONS')
   attentionCount(): Promise<{ count: number }> {
     return this.attention.attentionCount();
+  }
+
+  /** Peças retidas por manutenção/avaria com reserva futura dependendo delas. Só leitura.
+   *  Antes de `:id` (rota fixa). */
+  @Get('held-piece-alerts')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  heldPieceAlerts(): Promise<HeldPieceAlertsResponse> {
+    return this.adminReservations.listHeldPieceAlerts();
   }
 
   /** A tela de Reservas (lista ou detalhe) marca como vistas as reservas que exibiu. */

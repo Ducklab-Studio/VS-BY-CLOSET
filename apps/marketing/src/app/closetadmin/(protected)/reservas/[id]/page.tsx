@@ -228,6 +228,14 @@ export default async function ClosetAdminReservationDetailPage({
                           {formatDatePt(item.blockedFrom)} –{' '}
                           {formatDatePt(item.blockedUntilExclusive)}
                         </p>
+
+                        {item.unitHold ? (
+                          <p data-testid="peca-retida-em-outra-reserva" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-300">
+                            Esta peça está retida ({item.unitHold.condition === 'damaged' ? 'danificada' : 'em manutenção'}) desde {formatDatePt(item.unitHold.heldSince.slice(0, 10))} na{' '}
+                            <Link href={`/closetadmin/reservas/${item.unitHold.reservationId}`} className="font-medium underline">reserva {item.unitHold.reservationId.slice(0, 8)}</Link>.
+                            {reservation.pickupDate ? ` A retirada desta reserva é em ${formatDatePt(reservation.pickupDate)}.` : ''} Providencie reposição ou fale com a cliente. Nada foi alterado automaticamente.
+                          </p>
+                        ) : null}
                         <p className="text-ink/50 dark:text-dark-muted text-xs mt-1">
                           Recebida: {item.returnedAt ? formatDateTimePt(item.returnedAt) : '—'} ·
                           Higienização:{' '}
