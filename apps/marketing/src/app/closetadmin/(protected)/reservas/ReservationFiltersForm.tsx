@@ -21,6 +21,7 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelada' },
   { value: 'expired', label: 'Expirada' },
   { value: 'problem', label: 'Requer atenção' },
+  { value: 'late_payment_conflict', label: 'Pagamento recebido — conflito de disponibilidade' },
 ];
 
 const inputClass =
