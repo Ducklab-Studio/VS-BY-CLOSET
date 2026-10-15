@@ -18,6 +18,7 @@ import {
   AVAILABILITY_PROXY_PATH,
   availabilityFailureMessage,
   fetchAvailability as requestAvailability,
+  hasNotRentableFailure,
   type AvailabilityDay,
   type AvailabilityFailure,
 } from '@/lib/availability-client';
@@ -497,7 +498,7 @@ export function RentalCalendar({
   // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
   const soldOut = shopifyStock?.status === 'sold_out';
   // A API de reservas disse que não há peça física reservável: o estoque da Shopify não conta para aluguel.
-  const notRentable = [...failures.values()].some((entry) => entry.failure === 'not_rentable');
+  const notRentable = hasNotRentableFailure(failures.values());
   const canAddAnother =
     !busy &&
     otherPieces !== null &&

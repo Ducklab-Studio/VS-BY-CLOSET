@@ -218,7 +218,7 @@ test('sem peça física reservável: a linha de estoque vira "Indisponível para
 
 test('calendário: "not_rentable" da API troca a linha de estoque pelo aviso, bloqueia o envio e some o "Disponível na Shopify"', () => {
   const src = readFileSync(new URL('src/components/RentalCalendar.tsx', root), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(src, /const notRentable = \[\.\.\.failures\.values\(\)\]\.some\(\(entry\) => entry\.failure === 'not_rentable'\)/);
+  assert.match(src, /const notRentable = hasNotRentableFailure\(failures\.values\(\)\);/);
   // o aviso vem ANTES do esgotado e da linha de estoque; esta só existe no ramo final
   const block = src.slice(src.indexOf('{notRentable ? ('), src.indexOf('{limitReached &&'));
   assert.match(block, /data-testid="rental-unavailable"/);

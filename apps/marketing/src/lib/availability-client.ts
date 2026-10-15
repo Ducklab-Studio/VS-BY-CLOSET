@@ -247,6 +247,17 @@ export function parseAvailability(json: unknown, query: AvailabilityQuery): Avai
 }
 
 /**
+ * Alguma consulta desta peça voltou "not_rentable"? Só essa falha prova que não
+ * existe peça física reservável: erro de rede, timeout, resposta inválida e datas
+ * sem vaga NUNCA contam (a página não pode dizer "indisponível para aluguel" por
+ * instabilidade ou por falta de datas).
+ */
+export function hasNotRentableFailure(failures: Iterable<{ readonly failure: AvailabilityFailure }>): boolean {
+  for (const entry of failures) if (entry.failure === 'not_rentable') return true;
+  return false;
+}
+
+/**
  * 404/422 da PRÓPRIA API de reservas para "esta variante não tem peça física
  * reservável online" (ver availability.service.ts). Diferente de 404 de
  * hospedagem sem aplicação e de rota inexistente: aqui o serviço está de pé e
