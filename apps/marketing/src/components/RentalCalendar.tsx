@@ -13,7 +13,7 @@ import {
   removeCartLine,
   type Cart,
 } from '@/lib/cart';
-import { UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
+import { RENTAL_UNAVAILABLE_TEXT, UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
 import {
   AVAILABILITY_PROXY_PATH,
   availabilityFailureMessage,
@@ -376,7 +376,7 @@ export function RentalCalendar({
 
   async function handleSubmit() {
     // A seleção é lida AGORA, no clique: é exatamente o que o resumo mostra.
-    if (!selection || !sku || pieces === null || !summary || submittingRef.current || loadFailed) return;
+    if (!selection || !sku || pieces === null || !summary || submittingRef.current || loadFailed || notRentable) return;
     submittingRef.current = true;
     setSubmitting(true);
     setError(null);
@@ -496,6 +496,8 @@ export function RentalCalendar({
   // Só a Shopify AGORA (consulta fresca) confirmando que a variante não está à
   // venda bloqueia; dado do cache da página, erro, timeout ou falta de número, não.
   const soldOut = shopifyStock?.status === 'sold_out';
+  // A API de reservas disse que não há peça física reservável: o estoque da Shopify não conta para aluguel.
+  const notRentable = [...failures.values()].some((entry) => entry.failure === 'not_rentable');
   const canAddAnother =
     !busy &&
     otherPieces !== null &&
@@ -899,7 +901,11 @@ export function RentalCalendar({
         </Status>
       )}
       {/* Estoque comercial (Shopify) é separado da disponibilidade da data (agenda do ClosetAdmin). */}
-      {soldOut ? (
+      {notRentable ? (
+        <p data-testid="rental-unavailable" data-status="not_rentable" role="status" className="mt-3 text-[0.8rem] font-medium text-marsala">
+          {RENTAL_UNAVAILABLE_TEXT}
+        </p>
+      ) : soldOut ? (
         <Status tone="warn">{SHOPIFY_UNAVAILABLE_MESSAGE}</Status>
       ) : (
         <p
@@ -927,7 +933,7 @@ export function RentalCalendar({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!canSubmit || busy || soldOut || loading}
+            disabled={!canSubmit || busy || soldOut || loading || notRentable}
             className={`flex w-full items-center justify-center gap-3 rounded-xl bg-marsala px-6 py-4 text-[0.75rem] font-bold uppercase tracking-[0.12em] text-cream transition-all hover:bg-marsala-glow hover:shadow-[0_0_20px_rgba(83,19,30,0.3)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 disabled:hover:shadow-none`}
           >
             {submitting && <Spinner light />}

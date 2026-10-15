@@ -300,7 +300,7 @@ test('peça sem peça física reservável (404/422 DA API): "not_rentable", sem 
     assert.deepEqual(plain(result), { ok: false, failure: 'not_rentable', status });
     assert.equal(calls, 1, 'repetir não resolve');
   }
-  assert.match(availabilityFailureMessage('not_rentable'), /ainda não está habilitada para reserva online/);
+  assert.match(availabilityFailureMessage('not_rentable'), /Indisponível para aluguel no momento/);
   assert.equal(/ocupad|conectar|inesperada/i.test(availabilityFailureMessage('not_rentable')), false);
 });
 

@@ -393,7 +393,7 @@ export function availabilityFailureMessage(failure: AvailabilityFailure, status?
   else if (failure === 'http' && (status === 502 || status === 503)) failure = 'network';
   switch (failure) {
     case 'not_rentable':
-      return 'Esta peça ainda não está habilitada para reserva online.';
+      return 'Indisponível para aluguel no momento.';
     case 'timeout':
       return 'O serviço de reservas demorou demais para responder.';
     case 'network':

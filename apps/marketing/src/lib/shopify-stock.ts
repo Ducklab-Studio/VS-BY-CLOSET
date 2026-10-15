@@ -42,8 +42,17 @@ export function classifyShopifyStock(raw: RawVariantStock | null | undefined): S
   return { status: 'available', quantity: counted ? (quantity as number) : null };
 }
 
+/**
+ * Estoque da Shopify NÃO é disponibilidade de aluguel: quem manda é a peça física
+ * reservável do ClosetAdmin. Quando o reservations-api informa que não existe peça
+ * reservável (404/422 de "not_rentable"), a página mostra só este texto e nunca a
+ * linha "Disponível na Shopify para o carrinho (N em estoque)".
+ */
+export const RENTAL_UNAVAILABLE_TEXT = 'Indisponível para aluguel no momento.';
+
 /** Texto para o cliente — "Esgotada" só com confirmação explícita da Shopify. */
-export function shopifyStockText(stock: ShopifyStock | null): string {
+export function shopifyStockText(stock: ShopifyStock | null, rentable = true): string {
+  if (!rentable) return RENTAL_UNAVAILABLE_TEXT;
   if (stock === null) return 'Conferindo estoque na Shopify…';
   if (stock.status === 'sold_out') return 'Esgotada na Shopify.';
   if (stock.status === 'unknown') return 'Estoque será validado ao finalizar a reserva.';

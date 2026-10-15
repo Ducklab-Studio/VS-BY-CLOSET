@@ -390,6 +390,29 @@ localDescribe('Shopify → ClosetAdmin → vitrine: sincronização automática 
     expect((await prisma.webhookEvent.findMany({ where: { shopifyWebhookId: id } }))[0]?.status).toBe('processed');
   });
 
+  test('14) bloqueio no BACKEND quando não há peça física reservável: peça inativa (404) e peça só "loja" (422) recusam disponibilidade e hold; estoque da Shopify não muda isso', async () => {
+    const number = newNumber();
+    const inactive = shopifyVariant(number, 0, `SKU-IN-${RUN}`, { inventoryQuantity: 200 });
+    const storeOnly = shopifyVariant(number, 1, `SKU-LJ-${RUN}`, { inventoryQuantity: 200 });
+    fake.variants = [inactive, storeOnly];
+    await registerUnit(inactive, `${number}-in`, { active: false });
+    await registerUnit(storeOnly, `${number}-lj`, { reservableOnline: false });
+    const range = { from: pickupISO(), to: pickupISO() };
+
+    await expect(availability.getAvailability({ shopifyVariantId: inactive.id, countedPieces: 1, ...range })).rejects.toMatchObject({ status: 404 });
+    await expect(availability.getAvailability({ shopifyVariantId: storeOnly.id, countedPieces: 1, ...range })).rejects.toMatchObject({ status: 422 });
+    for (const v of [inactive, storeOnly]) {
+      await expect(holds.createHold({ items: [{ shopifyVariantId: v.id, quantity: 1 }], pickupDate: pickupISO(), termsAccepted: true })).rejects.toBeInstanceOf(HttpException);
+      expect(await prisma.reservationItem.count({ where: { rentalUnit: { shopifyVariantId: v.id } } })).toBe(0);
+    }
+    const state = await publicState();
+    expect(state.variantIds).not.toContain(inactive.id);
+    expect(state.variantIds).not.toContain(storeOnly.id);
+    // o painel continua mostrando o estoque da Shopify como informação, sem torná-lo reservável
+    const entry = (await catalog.list()).find((e) => e.id === inactive.id)!;
+    expect([entry.inventoryQuantity, entry.physicalUnitsReservableOnline]).toEqual([200, 0]);
+  });
+
   test('13) webhooks que NÃO são de produto (pedido/pagamento) não disparam aviso de catálogo', async () => {
     await webhooks.handleIncoming({ topic: 'orders/updated', shopifyWebhookId: nextWebhookId(), payload: { id: 1, financial_status: 'pending' } });
     expect(notifier.calls).toEqual([]);

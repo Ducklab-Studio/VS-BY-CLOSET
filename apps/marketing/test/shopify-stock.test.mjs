@@ -199,3 +199,40 @@ test('12) linha devolvida com quantidade 0 nunca é sucesso, mesmo com a pré-ch
   const shop = shopWith({ [V(1)]: { availableForSale: null } }); // pré-checagem: inconclusivo
   await assert.rejects(loadCart(shop.fetchImpl).addRentalSelectionToCart(SELECTION([V(1)])), (err) => err.code === 'not_added' && plain(err.variantIds).join() === V(1));
 });
+
+// ── estoque comercial da Shopify × disponibilidade física de aluguel ──────────────────────
+test('sem peça física reservável: a linha de estoque vira "Indisponível para aluguel no momento", mesmo com 200 em estoque na Shopify', () => {
+  const comEstoque = classifyShopifyStock({ availableForSale: true, quantityAvailable: 200, currentlyNotInStock: false });
+  assert.equal(shopifyStockText(comEstoque), 'Disponível na Shopify para o carrinho (200 em estoque).'); // comportamento de sempre
+  assert.equal(shopifyStockText(comEstoque, false), 'Indisponível para aluguel no momento.');
+  assert.equal(stock.RENTAL_UNAVAILABLE_TEXT, 'Indisponível para aluguel no momento.');
+  for (const s of [null, plain(comEstoque), { status: 'sold_out' }, { status: 'unknown' }]) {
+    const text = shopifyStockText(s, false);
+    assert.equal(text, 'Indisponível para aluguel no momento.');
+    assert.equal(/Shopify|estoque|carrinho/i.test(text), false, 'nunca mistura o estoque comercial no aviso de aluguel');
+  }
+  // com peça reservável (padrão) nada muda
+  assert.equal(shopifyStockText(null, true), 'Conferindo estoque na Shopify…');
+  assert.equal(shopifyStockText({ status: 'sold_out' }, true), 'Esgotada na Shopify.');
+});
+
+test('calendário: "not_rentable" da API troca a linha de estoque pelo aviso, bloqueia o envio e some o "Disponível na Shopify"', () => {
+  const src = readFileSync(new URL('src/components/RentalCalendar.tsx', root), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /const notRentable = \[\.\.\.failures\.values\(\)\]\.some\(\(entry\) => entry\.failure === 'not_rentable'\)/);
+  // o aviso vem ANTES do esgotado e da linha de estoque; esta só existe no ramo final
+  const block = src.slice(src.indexOf('{notRentable ? ('), src.indexOf('{limitReached &&'));
+  assert.match(block, /data-testid="rental-unavailable"/);
+  assert.match(block, /RENTAL_UNAVAILABLE_TEXT/);
+  assert.ok(block.indexOf('notRentable ?') < block.indexOf('soldOut ?') && block.indexOf('soldOut ?') < block.indexOf('shopifyStockText('));
+  assert.equal((block.match(/shopifyStockText\(/g) ?? []).length, 1, 'a linha de estoque só no ramo "com peça reservável"');
+  // reserva bloqueada no frontend: botão desabilitado e envio recusado
+  assert.match(src, /disabled=\{!canSubmit \|\| busy \|\| soldOut \|\| loading \|\| notRentable\}/);
+  assert.match(src, /submittingRef\.current \|\| loadFailed \|\| notRentable\) return;/);
+});
+
+test('Valle Pass (compra direta) não passa pelo calendário de aluguel nem pelo aviso de indisponibilidade', () => {
+  const page = readFileSync(new URL('src/app/pecas/[handle]/page.tsx', root), 'utf8');
+  const presentation = readFileSync(new URL('src/components/ValePassPresentation.tsx', root), 'utf8');
+  assert.match(page, /isValePass \?\s*\(\s*<ValePassPresentation/);
+  assert.equal(/RENTAL_UNAVAILABLE_TEXT|not_rentable|RentalCalendar/.test(presentation), false);
+});
