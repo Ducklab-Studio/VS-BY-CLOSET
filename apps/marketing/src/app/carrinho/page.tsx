@@ -26,10 +26,11 @@ import { formatPrice } from '@/lib/shopify';
 import { type SundayReturnOptionInfo } from '@/lib/checkout';
 import { returnOptionFromLines } from '@/lib/rental-selection';
 import { PAYMENT_WINDOW_MINUTES_LABEL } from '@/lib/payment-window';
+import { customerFacingCartError } from '@/lib/customer-messages';
 import { createCheckoutAttempt } from '@/lib/checkout-attempt';
 import {
   fetchRentalStock,
-  shopifyStockLabel,
+  rentalStockNotice,
   stockForVariant,
   type RentalStockMap,
 } from '@/lib/rental-stock';
@@ -164,9 +165,7 @@ export default function CarrinhoPage() {
 
     if (maxForThisLine !== null && nextQuantity > maxForThisLine) {
       setError(
-        stock.physical !== null && stock.shopify !== null
-          ? `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is), considerando Shopify e estoque físico.`
-          : `Há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
+        `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
       );
       return;
     }
@@ -179,7 +178,7 @@ export default function CarrinhoPage() {
       await loadStock(nextCart);
       resetCheckoutStateAfterCartChange();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível alterar a quantidade.');
+      setError(customerFacingCartError(err, 'Não foi possível alterar a quantidade.'));
     } finally {
       setUpdatingQuantity(null);
     }
@@ -211,7 +210,7 @@ export default function CarrinhoPage() {
           latestStock = await fetchRentalStock(cart);
           setRentalStock(latestStock);
         } catch {
-          throw new Error('Não foi possível confirmar o estoque agora. Tente novamente.');
+          throw new Error('Não foi possível confirmar a disponibilidade agora. Tente novamente.');
         }
         for (const item of items) {
           const stock = stockForVariant(latestStock, item.shopifyVariantId);
@@ -414,9 +413,11 @@ export default function CarrinhoPage() {
 
                   {/* Stock info pill */}
                   <div className="space-y-1 text-[0.75rem]">
-                    <p className="font-medium text-ink/60">
-                      {stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}
-                    </p>
+                    {!stockLoading && rentalStockNotice(stock) ? (
+                      <p className="font-medium text-ink/60" data-testid="rental-unavailable-notice">
+                        {rentalStockNotice(stock)}
+                      </p>
+                    ) : null}
                     {stock.effective !== null && !stockLoading ? (
                       <p className="inline-block rounded-md bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700">
                         Disponível para esta reserva: {stock.effective}
@@ -699,7 +700,7 @@ export default function CarrinhoPage() {
                 Criando reserva (HOLD)…
               </>
             ) : stockLoading ? (
-              'Conferindo estoque…'
+              'Conferindo disponibilidade…'
             ) : (
               <>
                 Finalizar reserva

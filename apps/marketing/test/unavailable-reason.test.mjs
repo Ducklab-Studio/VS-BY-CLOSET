@@ -24,7 +24,7 @@ test('reserva confirmada, HOLD, limpeza e bloqueio: a frase de cada motivo', () 
   assert.equal(unavailableExplanation(day({ unavailableReason: 'held' })).message, 'Esta peça está temporariamente reservada. Tente outra data.');
   assert.equal(unavailableExplanation(day({ unavailableReason: 'preparation' })).message, 'Esta peça está indisponível para esta data devido ao período de preparação/limpeza.');
   assert.equal(unavailableExplanation(day({ unavailableReason: 'operational_block' })).message, 'Esta peça está indisponível para esta data devido ao período de preparação/limpeza.');
-  assert.equal(SHOPIFY_UNAVAILABLE_MESSAGE, 'Esta peça está indisponível na Shopify.');
+  assert.equal(SHOPIFY_UNAVAILABLE_MESSAGE, 'Esta peça está temporariamente indisponível para aluguel.');
 });
 
 test('mais de um motivo: o prioritário + explicação curta (sem repetir a mesma frase)', () => {

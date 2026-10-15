@@ -964,8 +964,8 @@ export function RentalCalendar({
 function totalNote(total: SummaryTotal, submittedPreview: number | null, locale: string): string {
   if (total.source === 'shopify') {
     return submittedPreview !== null && submittedPreview !== total.cents
-      ? `Total confirmado pela Shopify (a prévia era ${formatPrice(centsToAmount(submittedPreview), total.currencyCode, locale)}).`
-      : 'Valor oficial do carrinho (Shopify).';
+      ? `Total confirmado (a prévia era ${formatPrice(centsToAmount(submittedPreview), total.currencyCode, locale)}).`
+      : 'Valor oficial do carrinho.';
   }
   if (total.source === 'preview')
     return 'Prévia: soma de todas as peças. O valor oficial é o do carrinho.';

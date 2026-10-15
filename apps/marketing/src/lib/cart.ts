@@ -269,7 +269,7 @@ function missingLines(cart: Cart, lines: readonly RentalLineInput[]): string[] {
 }
 
 function notAdded(variantIds: readonly string[]): CartError {
-  return new CartError('not_added', `A Shopify não manteve estas peças no carrinho (sem estoque vendável): ${variantIds.join(', ')}.`, variantIds);
+  return new CartError('not_added', 'Estas peças não puderam ser mantidas no carrinho agora (indisponíveis para aluguel).', variantIds);
 }
 
 export async function getCart(): Promise<Cart | null> {
@@ -322,7 +322,7 @@ async function linesUpdate(cartId: string, lines: LineUpdate[]): Promise<Cart> {
     { cartId, lines },
   );
   throwOnUserErrors(data.cartLinesUpdate.userErrors);
-  if (!data.cartLinesUpdate.cart) throw new CartError('shopify', 'A Shopify não devolveu o carrinho atualizado.');
+  if (!data.cartLinesUpdate.cart) throw new CartError('shopify', 'O carrinho não pôde ser atualizado agora.');
   return flatten(data.cartLinesUpdate.cart);
 }
 
