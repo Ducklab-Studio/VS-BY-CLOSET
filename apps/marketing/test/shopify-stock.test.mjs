@@ -26,7 +26,7 @@ const stock = load('src/lib/shopify-stock.ts');
 const selectionLib = load('src/lib/rental-selection.ts', { Date });
 const shopifyLib = load('src/lib/shopify.ts', { require: () => guardLib, process: { env: {} }, Intl });
 const valePassLib = load('src/lib/vale-pass-product.ts', { process: { env: {} }, require: () => shopifyLib });
-const { classifyShopifyStock, shopifyStockText } = stock;
+const { classifyShopifyStock } = stock;
 const classify = (raw) => plain(classifyShopifyStock(raw));
 
 // Valores brutos como a Storefront API devolve (ProductVariant). `quantityAvailable`
@@ -43,7 +43,6 @@ const RAW = {
 
 test('1) estoque 200, comprometido 1, disponível 199: alugável, com a quantidade real', () => {
   assert.deepEqual(classify(RAW.disponivel199), { status: 'available', quantity: 199 });
-  assert.equal(shopifyStockText(classifyShopifyStock(RAW.disponivel199)), 'Disponível na Shopify para o carrinho (199 em estoque).');
 });
 
 test('2) estoque comprometido: o comprometido já sai do disponível; todo comprometido = não vendável', () => {
@@ -54,13 +53,11 @@ test('2) estoque comprometido: o comprometido já sai do disponível; todo compr
 test('3–4) estoque zero rastreado e variante não vendável: "Esgotada na Shopify"', () => {
   assert.deepEqual(classify(RAW.zeroRastreado), { status: 'sold_out' });
   assert.deepEqual(classify(RAW.naoVendavel), { status: 'sold_out' });
-  assert.equal(shopifyStockText(classifyShopifyStock(RAW.zeroRastreado)), 'Esgotada na Shopify.');
 });
 
 test('5) estoque não rastreado ou venda sem estoque: vendável, sem número (nunca "esgotada" nem 0)', () => {
   assert.deepEqual(classify(RAW.naoRastreado), { status: 'available', quantity: null });
   assert.deepEqual(classify(RAW.vendeSemEstoque), { status: 'available', quantity: null });
-  assert.equal(shopifyStockText(classifyShopifyStock(RAW.naoRastreado)), 'Disponível na Shopify para o carrinho.');
 });
 
 test('6) availableForSale falso com estoque informado: vale a Shopify (o canal não vende; o carrinho zeraria a linha)', () => {
@@ -74,8 +71,6 @@ test('7) campos ausentes, nulos ou de tipo errado: "Estoque será validado", nun
   assert.deepEqual(classify({ availableForSale: true }), { status: 'available', quantity: null });
   assert.deepEqual(classify({ availableForSale: true, quantityAvailable: null }), { status: 'available', quantity: null });
   assert.deepEqual(classify({ availableForSale: true, quantityAvailable: 2.5 }), { status: 'available', quantity: null });
-  assert.equal(shopifyStockText(classifyShopifyStock(undefined)), 'Estoque será validado ao finalizar a reserva.');
-  assert.equal(shopifyStockText(null), 'Conferindo estoque na Shopify…');
 });
 
 // ── consulta fresca da Storefront (cart.ts) ───────────────────────────────
@@ -200,34 +195,44 @@ test('12) linha devolvida com quantidade 0 nunca é sucesso, mesmo com a pré-ch
   await assert.rejects(loadCart(shop.fetchImpl).addRentalSelectionToCart(SELECTION([V(1)])), (err) => err.code === 'not_added' && plain(err.variantIds).join() === V(1));
 });
 
-// ── estoque comercial da Shopify × disponibilidade física de aluguel ──────────────────────
-test('sem peça física reservável: a linha de estoque vira "Indisponível para aluguel no momento", mesmo com 200 em estoque na Shopify', () => {
-  const comEstoque = classifyShopifyStock({ availableForSale: true, quantityAvailable: 200, currentlyNotInStock: false });
-  assert.equal(shopifyStockText(comEstoque), 'Disponível na Shopify para o carrinho (200 em estoque).'); // comportamento de sempre
-  assert.equal(shopifyStockText(comEstoque, false), 'Indisponível para aluguel no momento.');
+// ── página de aluguel: disponibilidade = peça física + calendário, sem estoque da Shopify ──
+const calendarSrc = () => readFileSync(new URL('src/components/RentalCalendar.tsx', root), 'utf8').replace(/\r\n/g, '\n');
+
+test('produto de aluguel: nenhuma informação de estoque da Shopify na página (nem número, nem "disponível na Shopify")', () => {
+  const src = calendarSrc();
+  assert.equal(/shopifyStockText|data-testid="shopify-stock"/.test(src), false);
+  for (const text of ['em estoque', 'Disponível na Shopify', 'Conferindo estoque', 'Estoque será validado', 'Estoque Shopify']) assert.equal(src.includes(text), false, text);
+  assert.equal(typeof stock.shopifyStockText, 'undefined', 'a função de texto de estoque não existe mais');
   assert.equal(stock.RENTAL_UNAVAILABLE_TEXT, 'Indisponível para aluguel no momento.');
-  for (const s of [null, plain(comEstoque), { status: 'sold_out' }, { status: 'unknown' }]) {
-    const text = shopifyStockText(s, false);
-    assert.equal(text, 'Indisponível para aluguel no momento.');
-    assert.equal(/Shopify|estoque|carrinho/i.test(text), false, 'nunca mistura o estoque comercial no aviso de aluguel');
-  }
-  // com peça reservável (padrão) nada muda
-  assert.equal(shopifyStockText(null, true), 'Conferindo estoque na Shopify…');
-  assert.equal(shopifyStockText({ status: 'sold_out' }, true), 'Esgotada na Shopify.');
 });
 
-test('calendário: "not_rentable" da API troca a linha de estoque pelo aviso, bloqueia o envio e some o "Disponível na Shopify"', () => {
-  const src = readFileSync(new URL('src/components/RentalCalendar.tsx', root), 'utf8').replace(/\r\n/g, '\n');
+test('sem peça física reservável ("not_rentable" da API): "Indisponível para aluguel no momento", botão e envio bloqueados', () => {
+  const src = calendarSrc();
   assert.match(src, /const notRentable = hasNotRentableFailure\(failures\.values\(\)\);/);
-  // o aviso vem ANTES do esgotado e da linha de estoque; esta só existe no ramo final
   const block = src.slice(src.indexOf('{notRentable ? ('), src.indexOf('{limitReached &&'));
   assert.match(block, /data-testid="rental-unavailable"/);
   assert.match(block, /RENTAL_UNAVAILABLE_TEXT/);
-  assert.ok(block.indexOf('notRentable ?') < block.indexOf('soldOut ?') && block.indexOf('soldOut ?') < block.indexOf('shopifyStockText('));
-  assert.equal((block.match(/shopifyStockText\(/g) ?? []).length, 1, 'a linha de estoque só no ramo "com peça reservável"');
-  // reserva bloqueada no frontend: botão desabilitado e envio recusado
+  assert.ok(block.indexOf('notRentable ?') < block.indexOf('soldOut ?'));
   assert.match(src, /disabled=\{!canSubmit \|\| busy \|\| soldOut \|\| loading \|\| notRentable\}/);
   assert.match(src, /submittingRef\.current \|\| loadFailed \|\| notRentable\) return;/);
+});
+
+test('com peça reservável e sem vaga nas datas: mensagem de período sem disponibilidade (não "sem peça")', () => {
+  const src = calendarSrc();
+  assert.match(src, /Não há disponibilidade neste período\. Escolha outro mês ou fale com o atendimento/);
+  assert.equal(src.includes('Não há datas disponíveis neste mês'), false);
+  // a mensagem de período vem do calendário (freeCount), nunca do ramo "not_rentable"
+  const periodo = src.indexOf('Não há disponibilidade neste período');
+  assert.ok(src.lastIndexOf('freeCount === 0', periodo) > src.lastIndexOf('notRentable', periodo) || !src.slice(src.lastIndexOf('freeCount === 0', periodo), periodo).includes('notRentable'));
+});
+
+test('a lógica de estoque da Shopify continua: classificação, consulta fresca e bloqueio do carrinho quando a Shopify confirma "não vendável"', () => {
+  const src = calendarSrc();
+  assert.match(src, /const soldOut = shopifyStock\?\.status === 'sold_out';/);
+  assert.match(src, /fetchVariantStock\(\[variant\.id\]\)/);
+  assert.match(src, /soldOut \? \(\s*<Status tone="warn">\{SHOPIFY_UNAVAILABLE_MESSAGE\}<\/Status>/);
+  assert.deepEqual(plain(classifyShopifyStock(RAW.zeroRastreado)), { status: 'sold_out' });
+  assert.deepEqual(plain(classifyShopifyStock(RAW.disponivel199)), { status: 'available', quantity: 199 });
 });
 
 test('Valle Pass (compra direta) não passa pelo calendário de aluguel nem pelo aviso de indisponibilidade', () => {

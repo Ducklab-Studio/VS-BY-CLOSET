@@ -13,7 +13,7 @@ import {
   removeCartLine,
   type Cart,
 } from '@/lib/cart';
-import { RENTAL_UNAVAILABLE_TEXT, UNKNOWN_STOCK, shopifyStockText, type ShopifyStock } from '@/lib/shopify-stock';
+import { RENTAL_UNAVAILABLE_TEXT, UNKNOWN_STOCK, type ShopifyStock } from '@/lib/shopify-stock';
 import {
   AVAILABILITY_PROXY_PATH,
   availabilityFailureMessage,
@@ -868,7 +868,7 @@ export function RentalCalendar({
                 ? `Reservas online disponíveis a partir de ${fromISO(operationStartDate).toLocaleDateString(locale, LONG_DATE)}.`
                 : 'Reservas online ainda não disponíveis para estas datas.'
               : freeCount === 0 && !loading
-                ? 'Não há datas disponíveis neste mês. Fale com o atendimento para verificar outras opções.'
+                ? 'Não há disponibilidade neste período. Escolha outro mês ou fale com o atendimento para verificar outras opções.'
                 : selected && selectedInfo?.bookable
                   ? 'Disponível para retirada nesta data.'
                   : null}
@@ -901,22 +901,14 @@ export function RentalCalendar({
           )}
         </Status>
       )}
-      {/* Estoque comercial (Shopify) é separado da disponibilidade da data (agenda do ClosetAdmin). */}
+      {/* Disponibilidade de ALUGUEL = peça física reservável + calendário. Nenhum número de estoque da Shopify aparece aqui. */}
       {notRentable ? (
         <p data-testid="rental-unavailable" data-status="not_rentable" role="status" className="mt-3 text-[0.8rem] font-medium text-marsala">
           {RENTAL_UNAVAILABLE_TEXT}
         </p>
       ) : soldOut ? (
         <Status tone="warn">{SHOPIFY_UNAVAILABLE_MESSAGE}</Status>
-      ) : (
-        <p
-          data-testid="shopify-stock"
-          data-status={shopifyStock?.status ?? 'checking'}
-          className="mt-3 text-[0.72rem] text-ink/55"
-        >
-          {shopifyStockText(shopifyStock)}
-        </p>
-      )}
+      ) : null}
       {limitReached && <Status tone="warn">{limitMessage(maxPieces)}</Status>}
       {error && <Status tone="error">{error}</Status>}
 
