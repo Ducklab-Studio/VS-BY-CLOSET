@@ -40,7 +40,7 @@ const PLAN_MESSAGES: Record<string, string> = {
   max_pieces_exceeded: 'Esta reserva passou do máximo de peças permitido.',
 };
 
-export const SHOPIFY_UNAVAILABLE_MESSAGE = 'Esta peça está indisponível na Shopify.';
+export const SHOPIFY_UNAVAILABLE_MESSAGE = 'Esta peça está temporariamente indisponível para aluguel.';
 export const GENERIC_UNAVAILABLE_MESSAGE = 'Indisponível para esta data.';
 
 const isOccupation = (value: unknown): value is OccupationReason => typeof value === 'string' && (PRIORITY as readonly string[]).includes(value);

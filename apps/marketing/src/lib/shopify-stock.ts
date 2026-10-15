@@ -42,12 +42,12 @@ export function classifyShopifyStock(raw: RawVariantStock | null | undefined): S
   return { status: 'available', quantity: counted ? (quantity as number) : null };
 }
 
-/** Texto para o cliente — "Esgotada" só com confirmação explícita da Shopify. */
-export function shopifyStockText(stock: ShopifyStock | null): string {
-  if (stock === null) return 'Conferindo estoque na Shopify…';
-  if (stock.status === 'sold_out') return 'Esgotada na Shopify.';
-  if (stock.status === 'unknown') return 'Estoque será validado ao finalizar a reserva.';
-  return stock.quantity === null
-    ? 'Disponível na Shopify para o carrinho.'
-    : `Disponível na Shopify para o carrinho (${stock.quantity} em estoque).`;
-}
+/**
+ * Estoque da Shopify NÃO é disponibilidade de aluguel: quem manda é a peça física
+ * reservável do ClosetAdmin + o calendário. A página do produto de aluguel NÃO mostra
+ * quantidade nem "disponível na Shopify"; esta classificação segue existindo só para
+ * a lógica do carrinho (variante que a Shopify confirma não vendável bloqueia o envio).
+ * Quando o reservations-api informa que não existe peça reservável (404/422 de
+ * "not_rentable"), a página mostra este texto.
+ */
+export const RENTAL_UNAVAILABLE_TEXT = 'Indisponível para aluguel no momento.';

@@ -14,11 +14,12 @@ import {
 } from '@/lib/cart';
 import {
   fetchRentalStock,
-  shopifyStockLabel,
+  rentalStockNotice,
   stockForVariant,
   type RentalStockMap,
 } from '@/lib/rental-stock';
 import { formatPrice } from '@/lib/shopify';
+import { customerFacingCartError } from '@/lib/customer-messages';
 
 export default function CartDrawerDialog({
   open,
@@ -108,9 +109,7 @@ export default function CartDrawerDialog({
     if (nextQuantity < 1) return;
     if (maxForThisLine !== null && nextQuantity > maxForThisLine) {
       setError(
-        stock.physical !== null && stock.shopify !== null
-          ? `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is), considerando Shopify e estoque físico.`
-          : `Há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
+        `Para esta data há no máximo ${stock.effective} unidade(s) disponível(is) desta peça.`,
       );
       return;
     }
@@ -122,7 +121,7 @@ export default function CartDrawerDialog({
       setCart(nextCart);
       await loadStock(nextCart);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível alterar a quantidade.');
+      setError(customerFacingCartError(err, 'Não foi possível alterar a quantidade.'));
     } finally {
       setUpdatingLine(null);
     }
@@ -302,14 +301,16 @@ export default function CartDrawerDialog({
                       </p>
 
                       <div className="space-y-0.5">
-                        <p className="font-medium text-ink/70">
-                          {stockLoading ? 'Conferindo estoque…' : shopifyStockLabel(stock)}
-                        </p>
+                        {!stockLoading && rentalStockNotice(stock) ? (
+                          <p className="font-medium text-ink/70" data-testid="rental-unavailable-notice">
+                            {rentalStockNotice(stock)}
+                          </p>
+                        ) : null}
                         <p className="text-[0.65rem]">
                           {stockLoading
                             ? 'Conferindo peças físicas…'
                             : stock.physical === null
-                              ? 'Estoque físico: verificado no checkout'
+                              ? 'Disponibilidade: confirmada ao finalizar a reserva'
                               : `Peças físicas livres na data: ${stock.physical}`}
                         </p>
                         {stock.effective !== null && !stockLoading ? (

@@ -16,7 +16,7 @@ const lib = {};
 runInNewContext(source, {
   exports: lib, Object, Number, String, Array, Map, Set, Date, JSON, Math, Promise, RegExp, URL, AbortController, setTimeout, clearTimeout, fetch: undefined,
 });
-const { parseAvailability, fetchAvailability, datesBetween, isIsoDate, availabilityFailureMessage, isNotRentableResponse } = lib;
+const { parseAvailability, fetchAvailability, datesBetween, isIsoDate, availabilityFailureMessage, isNotRentableResponse, hasNotRentableFailure } = lib;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const VARIANT = 'gid://shopify/ProductVariant/1';
@@ -300,7 +300,7 @@ test('peça sem peça física reservável (404/422 DA API): "not_rentable", sem 
     assert.deepEqual(plain(result), { ok: false, failure: 'not_rentable', status });
     assert.equal(calls, 1, 'repetir não resolve');
   }
-  assert.match(availabilityFailureMessage('not_rentable'), /ainda não está habilitada para reserva online/);
+  assert.match(availabilityFailureMessage('not_rentable'), /Indisponível para aluguel no momento/);
   assert.equal(/ocupad|conectar|inesperada/i.test(availabilityFailureMessage('not_rentable')), false);
 });
 
@@ -312,4 +312,51 @@ test('404 que NÃO é "peça sem unidade" continua erro de serviço: hospedagem 
   assert.equal(isNotRentableResponse(500, '{"message":"Nenhuma unidade cadastrada para esta variante."}'), false);
   assert.equal(isNotRentableResponse(422, '{"message":"\"to\" não pode ser anterior a \"from\"."}'), false);
   assert.equal(isNotRentableResponse(404, '{"message":"Nenhuma unidade cadastrada para esta variante."}'), true);
+});
+
+// ── respostas REAIS da API de produção (capturadas em 14/10/2026) ─────────────────────────
+// Variante sem peça física → 404 do NestJS; variante com peça (Jaqueta Saint-Tropez, hoje cadastrada) → 200 com unitsTotal 1.
+const REAL_NO_UNIT = '{"message":"Nenhuma unidade cadastrada para esta variante.","error":"Not Found","statusCode":404}';
+const REAL_WITH_UNIT = JSON.stringify({
+  shopifyVariantId: 'gid://shopify/ProductVariant/67701470855268', countedPieces: 1, unitsTotal: 1, operationStartDate: '2026-08-30', maxPieces: 6,
+  days: [
+    { date: '2026-11-01', bookable: false, quantityAvailable: 0, reason: 'pickup_is_sunday' },
+    { date: '2026-11-02', bookable: true, quantityAvailable: 1, reason: null, durationDays: 4, calculatedReturnDate: '2026-11-06', hasSundayReturnException: false, returnOptions: [] },
+  ],
+});
+const runQ = (q, fetchImpl, extra = {}) => fetchAvailability(q, { base: '/api/availability', origin: ORIGIN, fetchImpl, retryDelayMs: 1, ...extra });
+const realQuery = { variantId: 'gid://shopify/ProductVariant/67701470855268', countedPieces: 1, from: '2026-11-01', to: '2026-11-02' };
+
+test('API real SEM peça: a resposta 404 de produção vira "not_rentable" e o calendário passa a dizer "Indisponível para aluguel"', async () => {
+  const impl = async () => ({ ok: false, status: 404, text: async () => REAL_NO_UNIT });
+  const result = await runQ({ ...realQuery, variantId: 'gid://shopify/ProductVariant/1' }, impl, { retries: 2 });
+  assert.deepEqual(plain(result), { ok: false, failure: 'not_rentable', status: 404 });
+  assert.equal(hasNotRentableFailure([result]), true);
+});
+
+test('API real COM peça (200, unitsTotal 1): NÃO é "not_rentable" — a linha de estoque da Shopify é o comportamento correto de peça reservável', async () => {
+  const impl = async () => ({ ok: true, status: 200, text: async () => REAL_WITH_UNIT });
+  const result = await runQ(realQuery, impl);
+  assert.equal(result.ok, true);
+  assert.equal(hasNotRentableFailure([result]), false);
+});
+
+test('falta de DATAS livres, erro de rede, timeout e resposta inválida NUNCA contam como "sem peça física"', async () => {
+  // todas as datas ocupadas: a peça existe, só não há vaga
+  const allBusy = JSON.stringify({ shopifyVariantId: VARIANT, countedPieces: 1, unitsTotal: 1, days: week.map((d) => busyDay(d)) });
+  const busy = await run(async () => ({ ok: true, status: 200, text: async () => allBusy }));
+  assert.equal(busy.ok, true);
+  assert.equal(hasNotRentableFailure([busy]), false);
+  for (const impl of [
+    async () => { throw new TypeError('fetch failed'); },
+    async () => ({ ok: false, status: 503, text: async () => '{"message":"Service Unavailable"}' }),
+    async () => ({ ok: false, status: 404, text: async () => '{"status":"error","code":404,"message":"Application not found"}' }),
+    async () => ({ ok: true, status: 200, text: async () => '<html>Bad gateway</html>' }),
+  ]) {
+    const failed = await run(impl);
+    assert.equal(failed.ok, false);
+    assert.equal(hasNotRentableFailure([failed]), false, JSON.stringify(plain(failed)));
+  }
+  assert.equal(hasNotRentableFailure([]), false);
+  assert.equal(hasNotRentableFailure([{ failure: 'network' }, { failure: 'not_rentable' }]), true);
 });

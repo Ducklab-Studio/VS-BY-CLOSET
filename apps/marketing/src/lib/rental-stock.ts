@@ -131,11 +131,14 @@ export async function fetchRentalStock(
   return Object.fromEntries(entries);
 }
 
-/** Texto do estoque comercial: "Esgotada" só com confirmação explícita da Shopify. */
-export function shopifyStockLabel(entry: RentalStockEntry): string {
-  if (entry.shopify === 0) return 'Esgotada na Shopify';
-  if (entry.shopify === null) return 'Estoque será validado ao finalizar a reserva.';
-  return `Estoque Shopify: ${entry.shopify}`;
+/**
+ * Aviso ao cliente sobre o estoque comercial. A quantidade da Shopify NUNCA é exibida:
+ * só se a Shopify confirmou que a variante não está à venda (0) o cliente vê que a
+ * peça está temporariamente indisponível para aluguel; nos demais casos, nada.
+ * (O bloqueio em si usa `entry.shopify` e `effective`, inalterados.)
+ */
+export function rentalStockNotice(entry: RentalStockEntry): string | null {
+  return entry.shopify === 0 ? 'Esta peça está temporariamente indisponível para aluguel.' : null;
 }
 
 export function stockForVariant(stock: RentalStockMap, variantId: string): RentalStockEntry {

@@ -445,7 +445,9 @@ test('3) produto de aluguel comum continua mostrando o calendário', () => {
   );
 
   const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
-  assert.match(page, /\)\s*:\s*\(\s*<RentalCalendar/);
+  // o calendário agora vem pelo seletor de tamanho (com uma variante só, é o calendário de sempre)
+  assert.match(page, /\)\s*:\s*\(\s*<RentalVariantPicker/);
+  assert.match(read('apps/marketing/src/components/RentalVariantPicker.tsx'), /<RentalCalendar key=\{selected\.id\}/);
 });
 
 test('4) o checkout do Valle Pass continua funcionando — link direto pro carrinho oficial da Shopify', () => {

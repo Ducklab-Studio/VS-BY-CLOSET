@@ -3,7 +3,7 @@ import { OFFICIAL_WHATSAPP } from '@/lib/contact';
 import { ProductGallery } from '@/components/ProductGallery';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { RentalCalendar } from '@/components/RentalCalendar';
+import { RentalVariantPicker } from '@/components/RentalVariantPicker';
 import { ValePassPresentation } from '@/components/ValePassPresentation';
 import {
   formatPrice,
@@ -14,6 +14,7 @@ import {
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { isValePassProduct } from '@/lib/vale-pass-product';
 import { sanitizeProductDescription } from '@/lib/product-description';
+import { needsVariantPicker } from '@/lib/variant-selection';
 
 /**
  * Página da peça — onde o cliente escolhe a data e aluga.
@@ -90,10 +91,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     : getDemoProductDetail(handle);
   if (!product) notFound();
 
-  // Uma peça física = uma variante. Se um dia houver mais de uma (tamanho,
-  // por exemplo), aqui entra o seletor — hoje seria UI para um caso que
-  // não existe.
+  // Cada variante (tamanho) tem as próprias peças físicas, ligadas pelo ID da
+  // variante. Com mais de uma, o seletor (RentalVariantPicker) escolhe a variante
+  // e mostra o preço dela; com uma só, nada muda na tela.
   const variant = product.variants[0];
+  const multipleVariants = needsVariantPicker(product.variants);
   const gallery =
     product.images.length > 0
       ? product.images
@@ -156,7 +158,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             {product.title}
           </h1>
 
-          {variant && (
+          {variant && !multipleVariants && (
             <div className="flex items-end gap-3 mb-6">
               <p className="text-3xl font-mono text-marsala font-medium tabular-nums leading-none">
                 {formatPrice(variant.price.amount, variant.price.currencyCode)}
@@ -190,9 +192,8 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             ) : isValePass ? (
               <ValePassPresentation variant={variant} productTitle={product.title} />
             ) : (
-              <RentalCalendar
-                key={variant.id}
-                variant={variant}
+              <RentalVariantPicker
+                variants={product.variants}
                 productTitle={product.title}
                 productHandle={product.handle}
                 whatsapp={OFFICIAL_WHATSAPP}

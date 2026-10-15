@@ -235,19 +235,19 @@ const availabilityOk = (quantityAvailable) => async (url) => {
   return { ok: true, json: async () => ({ shopifyVariantId: q.get('shopifyVariantId'), days: [{ date: q.get('from'), quantityAvailable }] }) };
 };
 
-test('14) estoque zero CONFIRMADO pela Shopify (não está à venda) → "Esgotada na Shopify"', async () => {
+test('14) estoque zero CONFIRMADO pela Shopify (não está à venda) → aviso "temporariamente indisponível para aluguel" (sem citar a Shopify) e disponível 0', async () => {
   const stock = loadStock(availabilityOk(1));
   const map = await stock.fetchRentalStock(cartWith([cartLine(3, { availableForSale: false, quantityAvailable: 0 })]));
   assert.equal(map[gid(3)].shopify, 0);
-  assert.equal(stock.shopifyStockLabel(map[gid(3)]), 'Esgotada na Shopify');
+  assert.equal(stock.rentalStockNotice(map[gid(3)]), 'Esta peça está temporariamente indisponível para aluguel.');
   assert.equal(map[gid(3)].effective, 0);
 });
 
-test('15) inventário não rastreado (à venda, quantityAvailable 0) → não é "Esgotada"; vale a disponibilidade da data', async () => {
+test('15) inventário não rastreado (à venda, quantityAvailable 0) → sem aviso; vale a disponibilidade da data', async () => {
   const stock = loadStock(availabilityOk(2));
   const map = await stock.fetchRentalStock(cartWith([cartLine(4, { quantityAvailable: 0 })]));
   assert.equal(map[gid(4)].shopify, null);
-  assert.equal(stock.shopifyStockLabel(map[gid(4)]), 'Estoque será validado ao finalizar a reserva.');
+  assert.equal(stock.rentalStockNotice(map[gid(4)]), null);
   assert.equal(map[gid(4)].effective, 2); // não "Disponível para esta reserva: 0"
 });
 
