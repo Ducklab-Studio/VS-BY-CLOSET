@@ -20,6 +20,9 @@ export const metadata: Metadata = { title: 'Peças' };
  * A seção de catálogo lê a Admin API e permite ao ADMIN criar RentalUnits
  * explícitas. Nunca converte inventoryQuantity automaticamente em peças.
  */
+// A sincronização manual lê a Shopify inteira: dá folga à server action (o prazo do servidor da API é menor que isto).
+export const maxDuration = 30;
+
 export default async function ClosetAdminPiecesPage() {
   const session = await requireAdminSession();
   requireAdminModule(session, 'PIECES');
@@ -54,6 +57,12 @@ export default async function ClosetAdminPiecesPage() {
         : 'Não foi possível consultar a Shopify.'
       : null;
   const syncReport = syncResult.status === 'fulfilled' ? syncResult.value : null;
+  const syncError =
+    syncResult.status === 'rejected'
+      ? syncResult.reason instanceof AdminApiError
+        ? syncResult.reason.message
+        : 'Não foi possível consultar a sincronização agora.'
+      : null;
 
   return (
     <div>
@@ -63,7 +72,8 @@ export default async function ClosetAdminPiecesPage() {
       />
 
       <RefreshOnFocus />
-      {syncReport ? <CatalogSyncPanel initialReport={syncReport} isAdmin={isAdmin} /> : null}
+      {/* O painel nunca some: sem relatório, ele mostra o erro com "Tentar novamente". */}
+      <CatalogSyncPanel initialReport={syncReport} initialError={syncError} catalog={catalog} isAdmin={isAdmin} />
 
       <section className="mb-8">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">

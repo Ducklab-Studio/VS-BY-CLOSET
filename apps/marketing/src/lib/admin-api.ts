@@ -43,7 +43,12 @@ function token(): string {
   return t;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Opções por chamada. `timeoutMs` customizado também faz um estouro de prazo virar 504 ("pode ter concluído"). */
+export interface AdminRequestOptions {
+  readonly timeoutMs?: number;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, options: AdminRequestOptions = {}): Promise<T> {
   const target = safePath(path); // fora do try: caminho inválido é 400, não "sem conexão"
   const sessionToken = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
   let res: Response;
@@ -51,7 +56,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(`${baseUrl()}${target}`, {
       ...init,
       cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
       redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
@@ -60,7 +65,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         ...(sessionToken ? { 'X-Admin-Session': sessionToken } : {}),
       },
     });
-  } catch {
+  } catch (err) {
+    // Só quando a chamada pediu um prazo próprio: o servidor pode ter concluído a ação mesmo sem responder a tempo.
+    if (options.timeoutMs !== undefined && err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new AdminApiError(504, 'O servidor do ClosetAdmin demorou demais para responder.');
+    }
     throw new AdminApiError(503, 'Não foi possível conectar ao servidor do ClosetAdmin.');
   }
 
@@ -92,8 +101,8 @@ export function adminGetPlain<T>(path: string): Promise<T> {
   return request<T>(path, { method: 'GET' });
 }
 
-export function adminPost<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
-  return request<T>(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}) });
+export function adminPost<T>(path: string, body: unknown, headers?: Record<string, string>, options?: AdminRequestOptions): Promise<T> {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}) }, options);
 }
 
 export function adminPatch<T>(path: string, body: unknown): Promise<T> {

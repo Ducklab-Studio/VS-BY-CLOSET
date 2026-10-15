@@ -1,9 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireAdminSession, requireAdminRole } from '@/lib/admin-session';
+import { requireAdminSession, requireAdminRole, requireAdminModule } from '@/lib/admin-session';
 import { updatePiece } from '@/lib/admin-data';
-import { importShopifyUnits, syncCatalog, type CatalogSyncReport } from '@/lib/shopify-admin-data';
+import { importShopifyUnits, syncCatalog, getCatalogReconciliation, type CatalogSyncReport } from '@/lib/shopify-admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 
 /** Item 11 — só campos operacionais, e só ADMIN ("gestão operacional de
@@ -70,7 +70,12 @@ export async function importShopifyUnitsAction(
  * de `updatePieceAction`/`importShopifyUnitsAction` — "gestão operacional de
  * RentalUnits"). Nenhum dado vem do cliente: o servidor decide tudo.
  */
-export async function syncCatalogAction(): Promise<{ error: string | null; report: CatalogSyncReport | null }> {
+export type SyncCatalogActionResult =
+  | { error: null; report: CatalogSyncReport; timedOut: false }
+  /** `timedOut`: sem resposta a tempo — a rodada PODE ter concluído no servidor; a tela confere o estado em vez de declarar falha. */
+  | { error: string; report: null; timedOut: boolean };
+
+export async function syncCatalogAction(): Promise<SyncCatalogActionResult> {
   const session = await requireAdminSession();
   requireAdminRole(session, 'ADMIN');
 
@@ -78,11 +83,34 @@ export async function syncCatalogAction(): Promise<{ error: string | null; repor
   try {
     report = await syncCatalog();
   } catch (err) {
-    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível sincronizar o catálogo.', report: null };
+    if (err instanceof AdminApiError && err.status === 504) {
+      return {
+        error: 'A resposta demorou mais que o esperado. A sincronização pode ter sido concluída no servidor.',
+        report: null,
+        timedOut: true,
+      };
+    }
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível sincronizar o catálogo.', report: null, timedOut: false };
   }
 
   revalidatePieceDependentViews();
-  return { error: null, report };
+  return { error: null, report, timedOut: false };
+}
+
+/**
+ * Releitura SOMENTE LEITURA do relatório de divergências e da última sincronização. Mesma
+ * regra de acesso da página de Peças (módulo PIECES, sem exigir ADMIN); nada é aplicado.
+ * Serve ao "Tentar novamente" do relatório inicial e à conferência depois de um timeout.
+ */
+export async function fetchCatalogSyncReportAction(): Promise<{ error: string | null; report: CatalogSyncReport | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'PIECES');
+
+  try {
+    return { error: null, report: await getCatalogReconciliation(session.id) };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível consultar a sincronização agora.', report: null };
+  }
 }
 
 function revalidatePieceDependentViews() {

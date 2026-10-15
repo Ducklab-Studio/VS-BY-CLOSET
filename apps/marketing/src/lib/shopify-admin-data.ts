@@ -87,5 +87,9 @@ export function getCatalogReconciliation(adminUserId: string): Promise<CatalogSy
 /** Item 10 — ação administrativa protegida (ADMIN). Nenhum dado vem do cliente:
  *  o corpo é sempre vazio, o servidor decide tudo comparando banco × Shopify. */
 export function syncCatalog(): Promise<CatalogSyncReport> {
-  return adminPost('/admin/catalog/sync', {});
+  // Prazo maior que o padrão (10 s): a rodada lê a Shopify inteira. Estouro vira 504 ("pode ter concluído").
+  return adminPost('/admin/catalog/sync', {}, undefined, { timeoutMs: SYNC_TIMEOUT_MS });
 }
+
+/** Abaixo do `maxDuration` da página de Peças (30 s), para o erro chegar à tela antes de a plataforma encerrar a função. */
+export const SYNC_TIMEOUT_MS = 25_000;

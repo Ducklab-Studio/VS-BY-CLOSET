@@ -15,6 +15,7 @@
     "test:valle-pass-badge": "node ../../scripts/no-real-network.mjs node test/valle-pass-badge.mjs",
     "test:reservations-badge": "node ../../scripts/no-real-network.mjs node test/reservations-badge.mjs",
     "test:shopify-deleted-orders": "node ../../scripts/no-real-network.mjs node test/shopify-deleted-orders.mjs",
+    "test:sync-panel": "node ../../scripts/no-real-network.mjs node test/sync-panel-browser.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
