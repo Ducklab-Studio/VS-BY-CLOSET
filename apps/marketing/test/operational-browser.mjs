@@ -134,6 +134,41 @@ async function receivePiece(page, double = false) {
   else await confirm.click();
 }
 
+// Estado observável da página, para a mensagem de erro dizer QUAL reserva falhou e o que a tela mostrava.
+async function describePage(page, label) {
+  const url = page.url();
+  const dbStatus = await status(label).catch((error) => `indisponível (${error.message})`);
+  const itemStatuses = await page.locator('[data-testid="peca-item"]').evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-status'))).catch(() => []);
+  const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+  return `reserva "${label}" (${fixtures[label].id}) — url: ${url} — status no banco: ${dbStatus} — peças na tela: [${itemStatuses.join(', ')}] — texto: "${text}"`;
+}
+
+// Confere se um botão existe na página de detalhe. O `count()` puro lê o DOM no instante da chamada e não espera nada;
+// aqui a página só é avaliada depois de a peça aparecer (prova de que o detalhe da reserva renderizou), e a presença
+// do botão espera no máximo `PRESENCE_TIMEOUT_MS`. A AUSÊNCIA nunca é "esperada": é checada de uma vez, depois que a
+// página provou estar pronta — assim um botão que NÃO deveria existir continua reprovando o teste imediatamente.
+const PAGE_READY_TIMEOUT_MS = 15_000;
+const PRESENCE_TIMEOUT_MS = 10_000;
+async function expectButton(page, label, name, shouldExist) {
+  const fail = async (reason) => assert.fail(`${reason}: botão "${name}" ${shouldExist ? 'esperado e ausente' : 'não esperado e presente'} em ${await describePage(page, label)}`);
+  try {
+    await page.locator('[data-testid="peca-item"]').first().waitFor({ state: 'visible', timeout: PAGE_READY_TIMEOUT_MS });
+  } catch {
+    return fail(`detalhe da reserva não renderizou em ${PAGE_READY_TIMEOUT_MS} ms`);
+  }
+  const button = page.getByRole('button', { name, exact: true });
+  if (shouldExist) {
+    try {
+      await button.first().waitFor({ state: 'visible', timeout: PRESENCE_TIMEOUT_MS });
+    } catch {
+      return fail(`botão não apareceu em ${PRESENCE_TIMEOUT_MS} ms`);
+    }
+    return undefined;
+  }
+  if ((await button.count()) > 0) return fail('botão indevido');
+  return undefined;
+}
+
 async function clean() {
   for (const child of childProcesses) child.kill();
   await browser?.close();
@@ -181,8 +216,8 @@ try {
 
   for (const [label, cancel, receive] of [['hold', false, false], ['online', false, true], ['cycle', true, true]]) {
     await page.goto(detail(label));
-    assert.equal(await page.getByRole('button', { name: 'Cancelar reserva', exact: true }).count() > 0, cancel);
-    assert.equal(await page.getByRole('button', { name: 'Registrar devolução', exact: true }).count() > 0, receive);
+    await expectButton(page, label, 'Cancelar reserva', cancel);
+    await expectButton(page, label, 'Registrar devolução', receive);
   }
 
   await page.goto(detail('cycle'));
