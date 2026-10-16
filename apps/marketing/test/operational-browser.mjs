@@ -49,6 +49,47 @@ let browser;
 const externalRequests = [];
 let userId;
 
+// Regras de operação do banco de teste. O teste NÃO herda o que outras suítes deixaram na linha `default` de
+// `rental_rule_config` (a migração semeia `operation_start_date = 2027-04-01`; `operation-calendar.integration.test.ts`
+// a zera): ele grava as regras que o seu cenário exige, guarda o estado anterior e o restaura no `finally`. Só roda em
+// banco local de teste (guardas no topo do arquivo). Nunca toca em dado de produção nem apaga dado de terceiros.
+let savedRules = null;
+let savedBlocks = [];
+
+async function prepareRules() {
+  const [row] = await db.$queryRaw`SELECT min_advance_days, prep_days, cleaning_days, operation_start_date::text AS operation_start_date,
+    max_pieces, pieces_to_days_table::text AS pieces_to_days_table, timezone, updated_at FROM rental_rule_config WHERE id = 'default'`;
+  assert.ok(row, 'rental_rule_config sem a linha "default": banco de teste não migrado');
+  savedRules = row;
+  const rules = DEFAULT_RENTAL_RULE_CONFIG;
+  const updated = await db.$executeRaw`UPDATE rental_rule_config SET min_advance_days = ${rules.minAdvanceDays}, prep_days = ${rules.prepDays},
+    cleaning_days = ${rules.cleaningDays}, operation_start_date = NULL, max_pieces = ${rules.maxPieces},
+    pieces_to_days_table = ${JSON.stringify(rules.piecesToDaysTable)}::jsonb, timezone = ${rules.timezone} WHERE id = 'default'`;
+  assert.equal(updated, 1);
+  // Períodos fechados ativos que cruzam a janela do cenário (deixados por outra suíte) são desativados só durante o
+  // teste; os ids e o estado anterior ficam guardados e são restaurados exatamente.
+  savedBlocks = await db.$queryRaw`SELECT id::text AS id, active FROM operational_blocks
+    WHERE removed_at IS NULL AND active = true AND start_date < ${blockedUntil}::date AND end_date >= ${blockedFrom}::date`;
+  if (savedBlocks.length) {
+    const blockIds = savedBlocks.map((b) => b.id);
+    await db.$executeRaw`UPDATE operational_blocks SET active = false WHERE id = ANY(${blockIds}::uuid[])`;
+  }
+}
+
+async function restoreRules() {
+  if (savedBlocks.length) {
+    const blockIds = savedBlocks.map((b) => b.id);
+    await db.$executeRaw`UPDATE operational_blocks SET active = true WHERE id = ANY(${blockIds}::uuid[])`;
+    savedBlocks = [];
+  }
+  if (!savedRules) return;
+  const r = savedRules;
+  await db.$executeRaw`UPDATE rental_rule_config SET min_advance_days = ${r.min_advance_days}, prep_days = ${r.prep_days},
+    cleaning_days = ${r.cleaning_days}, operation_start_date = ${r.operation_start_date}::date, max_pieces = ${r.max_pieces},
+    pieces_to_days_table = ${r.pieces_to_days_table}::jsonb, timezone = ${r.timezone}, updated_at = ${r.updated_at} WHERE id = 'default'`;
+  savedRules = null;
+}
+
 function spawnLocal(command, args, cwd, env) {
   const child = spawn(command, args, { cwd, env, stdio: 'ignore', windowsHide: true });
   childProcesses.push(child);
@@ -65,6 +106,7 @@ async function waitFor(url) {
 }
 
 async function seed() {
+  await prepareRules();
   await db.store.create({ data: { id: storeId, shopifyDomain: `${prefix.toLowerCase()}.invalid`, currency: 'BRL' } });
   const user = await db.adminUser.create({ data: {
     name: 'Operador sintético', phone: `${Date.now()}999`, pinHash: 'synthetic',
@@ -170,6 +212,15 @@ async function expectButton(page, label, name, shouldExist) {
 }
 
 async function clean() {
+  try {
+    await cleanFixtures();
+  } finally {
+    // As regras do banco de teste voltam ao estado anterior mesmo se a limpeza dos dados falhar.
+    try { await restoreRules(); } finally { await db.$disconnect(); }
+  }
+}
+
+async function cleanFixtures() {
   for (const child of childProcesses) child.kill();
   await browser?.close();
   const ids = Object.values(fixtures).map((x) => x.id);
@@ -188,7 +239,6 @@ async function clean() {
     await db.adminUser.delete({ where: { id: userId } });
   }
   await db.store.deleteMany({ where: { id: storeId } });
-  await db.$disconnect();
 }
 
 try {
