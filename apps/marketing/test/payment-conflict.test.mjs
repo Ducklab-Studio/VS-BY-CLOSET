@@ -95,7 +95,9 @@ test('lista: filtro próprio, "Requer atenção" soma os dois, linha destacada, 
   assert.match(list, /attentionTotal\(\[\.\.\.reviewReservations, \.\.\.conflictReservations\]\)/);
   assert.match(list, /listReservations\(session\.id, \{ status: PAYMENT_CONFLICT_STATUS \}\)/);
   assert.doesNotMatch(list, /(attentionTotal|paymentConflictCount)\(allReservations\)/, 'contador de atenção não pode depender da lista geral (corte de 300)');
-  assert.match(list, /<PaymentConflictAlert count=\{conflictCount\} compact \/>/);
+  // O alerta discreto agora vive dentro do cartão "Pagamentos a tratar" (que o usa como alternativa e nunca junto com ele).
+  assert.match(list, /<PaymentAlerts adminUserId=\{session\.id\} conflictCount=\{conflictCount\} compactConflict \/>/);
+  assert.match(read(`${dir}PaymentAlerts.tsx`), /<PaymentConflictAlert count=\{conflictCount\} compact=\{compactConflict\} \/>/);
   assert.match(list, /data-payment-conflict=/);
   assert.doesNotMatch(list, /reservation\.status === 'problem'\)\.length/);
 });

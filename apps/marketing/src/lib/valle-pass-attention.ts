@@ -25,11 +25,14 @@ export function attentionLabel(count: number | null): string {
   return count === 1 ? '1 pedido para ver' : `${count > 99 ? 'mais de 99' : count} pedidos para ver`;
 }
 
-export type AttentionFetchResult = { readonly count: number } | { readonly forbidden: true } | { readonly error: true };
+/** `alerts` (opcional) = parte de `count` que são pagamentos a tratar (só o menu de Reservas usa). */
+export type AttentionFetchResult = { readonly count: number; readonly alerts?: number } | { readonly forbidden: true } | { readonly error: true };
 
 export interface AttentionState {
   /** Último valor conhecido; `null` enquanto nada carregou. */
   readonly count: number | null;
+  /** Parte de `count` que são pagamentos a tratar (ausente = nenhuma ou contador que não usa isto). */
+  readonly alerts?: number;
   /** A última tentativa falhou: mostra o último valor conhecido, esmaecido. */
   readonly stale: boolean;
   /** Sem permissão ou sessão encerrada: parou de perguntar. */
@@ -65,7 +68,7 @@ export function startAttentionPoller(deps: AttentionPollerDeps): AttentionPoller
   let stopped = false;
 
   const publish = (next: AttentionState) => {
-    if (next.count === state.count && next.stale === state.stale && next.stopped === state.stopped) return;
+    if (next.count === state.count && next.alerts === state.alerts && next.stale === state.stale && next.stopped === state.stopped) return;
     state = next;
     deps.onChange(state);
   };
@@ -78,7 +81,7 @@ export function startAttentionPoller(deps: AttentionPollerDeps): AttentionPoller
       result = { error: true };
     }
     if (stopped) return;
-    if ('count' in result) publish({ count: result.count, stale: false, stopped: false });
+    if ('count' in result) publish({ count: result.count, ...(result.alerts !== undefined ? { alerts: result.alerts } : {}), stale: false, stopped: false });
     else if ('forbidden' in result) {
       stop();
       publish({ count: null, stale: false, stopped: true });

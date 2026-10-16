@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { hasAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { HeldPieceAlerts } from './HeldPieceAlerts';
+import { PaymentAlerts } from './PaymentAlerts';
 import { PaymentConflictAlert } from '@/components/closetadmin/PaymentConflictAlert';
 import { PAYMENT_CONFLICT_LIST_HREF, PAYMENT_CONFLICT_STATUS } from '@/lib/payment-conflict';
 import { getCalendar, listPieces, listReservations, type CalendarItem } from '@/lib/admin-data';
@@ -97,7 +98,12 @@ export default async function ClosetAdminDashboardPage() {
         }
       />
 
-      <PaymentConflictAlert count={conflicts.length} />
+      {/* Com o módulo Reservas o cartão "Pagamentos a tratar" já inclui os conflitos (e usa o banner antigo só se não puder carregar). */}
+      {hasAdminModule(session, 'RESERVATIONS') ? (
+        <PaymentAlerts adminUserId={session.id} conflictCount={conflicts.length} />
+      ) : (
+        <PaymentConflictAlert count={conflicts.length} />
+      )}
       {hasAdminModule(session, 'RESERVATIONS') ? <HeldPieceAlerts adminUserId={session.id} /> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

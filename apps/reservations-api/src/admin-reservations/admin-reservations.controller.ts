@@ -19,6 +19,8 @@ import {
 import { CreateManualReservationDto } from './dto/create-manual-reservation.dto';
 import { MarkReservationsViewedDto } from './dto/mark-reservations-viewed.dto';
 import { ReservationAttentionService } from './reservation-attention.service';
+import { PaymentAlertsService } from './payment-alerts.service';
+import type { PaymentAlertsResult } from './payment-alerts';
 import { CancelManualReservationDto } from './dto/cancel-manual-reservation.dto';
 import { OperationalReservationDto } from './dto/operational-reservation.dto';
 import { RecordOccurrenceDto, ReceiveItemDto, ReleaseHoldDto } from './dto/receive-item.dto';
@@ -33,7 +35,17 @@ export class AdminReservationsController {
   constructor(
     private readonly adminReservations: AdminReservationsService,
     private readonly attention: ReservationAttentionService,
+    private readonly paymentAlerts: PaymentAlertsService,
   ) {}
+
+  /** "Pagamentos a tratar": pedidos pagos sem reserva válida e reservas em revisão/conflito de pagamento.
+   *  Só leitura, sem dados pessoais. Antes de `:id` (rota fixa). */
+  @Get('payment-alerts')
+  @UseGuards(AdminRoleGuard)
+  @RequireModule('RESERVATIONS')
+  async listPaymentAlerts(): Promise<PaymentAlertsResult> {
+    return this.paymentAlerts.list();
+  }
 
   /** Contador do menu lateral: reservas da Shopify pendentes ou confirmadas
    *  que ninguém da equipe viu neste status. Antes de `:id` (rota fixa). */

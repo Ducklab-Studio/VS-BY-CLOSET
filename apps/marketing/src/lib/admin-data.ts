@@ -74,6 +74,12 @@ export function getReservationAttention(adminUserId: string): Promise<{ count: n
   return adminGet('/admin/reservations/attention', adminUserId);
 }
 
+/** "Pagamentos a tratar": pedidos pagos sem reserva válida e reservas em revisão/conflito. Só leitura, sem dados pessoais.
+ *  Devolve `unknown` de propósito: quem usa passa por `parsePaymentAlerts` (lib/payment-alerts.ts). */
+export function getPaymentAlerts(adminUserId: string): Promise<unknown> {
+  return adminGet('/admin/reservations/payment-alerts', adminUserId);
+}
+
 /** Sem `adminUserId` no corpo: quem viu vem da sessão validada. Só visualização. */
 export function markReservationsViewed(reservations: readonly { id: string; status: string }[]): Promise<{ marked: number }> {
   return adminPost('/admin/reservations/viewed', { reservations });
