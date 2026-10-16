@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
 import { HeldPieceAlerts } from '../HeldPieceAlerts';
+import { PaymentAlerts } from '../PaymentAlerts';
 import { PaymentConflictAlert } from '@/components/closetadmin/PaymentConflictAlert';
 import { PAYMENT_CONFLICT_STATUS, attentionTotal, isPaymentConflict, paymentConflictCount } from '@/lib/payment-conflict';
 import { listReservations, type ReservationListItem } from '@/lib/admin-data';
@@ -120,6 +121,7 @@ export default async function ClosetAdminReservationsPage({ searchParams }: { se
       />
 
       <PaymentConflictAlert count={conflictCount} compact />
+      <PaymentAlerts adminUserId={session.id} />
       <HeldPieceAlerts adminUserId={session.id} />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

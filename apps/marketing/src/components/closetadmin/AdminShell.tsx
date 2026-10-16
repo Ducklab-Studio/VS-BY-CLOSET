@@ -36,7 +36,8 @@ const RESERVATIONS_HREF = '/closetadmin/reservas';
 /** Contador de um item do menu (Valle Pass, Reservas). */
 interface MenuBadge {
   readonly attention: AdminAttention;
-  readonly label: (count: number | null) => string;
+  /** `alerts` = parte de `count` que são pagamentos a tratar (só Reservas usa). */
+  readonly label: (count: number | null, alerts?: number) => string;
   readonly testId: string;
 }
 
@@ -99,7 +100,7 @@ export function AdminShell({
   const valePassPending = attentionBadgeText(valePass.count);
   const reservationsPending = attentionBadgeText(reservations.count);
   const menuLabel = [
-    reservationsPending ? `Reservas: ${reservationAttentionLabel(reservations.count)}` : null,
+    reservationsPending ? `Reservas: ${reservationAttentionLabel(reservations.count, reservations.alerts)}` : null,
     valePassPending ? `Valle Pass: ${attentionLabel(valePass.count)}` : null,
   ].filter(Boolean);
 
@@ -271,7 +272,7 @@ function AttentionBadge({ badge }: { badge: MenuBadge }) {
       >
         {text}
       </span>
-      <span className="sr-only">{` — ${badge.label(attention.count)}`}</span>
+      <span className="sr-only">{` — ${badge.label(attention.count, attention.alerts)}`}</span>
     </>
   );
 }

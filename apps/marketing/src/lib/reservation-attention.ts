@@ -17,8 +17,18 @@ export const RESERVATION_ATTENTION_CHANNEL = 'closetadmin-reservation-attention'
 export const RESERVATIONS_REFRESH_MS = 30_000;
 
 /** Texto para leitor de tela, anexado ao nome do link "Reservas". */
-export function reservationAttentionLabel(count: number | null): string {
+export function reservationAttentionLabel(count: number | null, paymentAlerts = 0): string {
   if (!count || count <= 0) return 'nenhuma reserva nova';
+  if (paymentAlerts > 0) {
+    // `count` já inclui os pagamentos a tratar: separa os dois, sem contar nada duas vezes.
+    const alerts = Math.min(paymentAlerts, count);
+    const fresh = count - alerts;
+    const parts = [
+      fresh > 0 ? (fresh === 1 ? '1 reserva nova' : `${fresh > 99 ? 'mais de 99' : fresh} reservas novas`) : null,
+      alerts === 1 ? '1 pagamento a tratar' : `${alerts > 99 ? 'mais de 99' : alerts} pagamentos a tratar`,
+    ].filter(Boolean);
+    return parts.join(' e ');
+  }
   return count === 1 ? '1 reserva nova' : `${count > 99 ? 'mais de 99' : count} reservas novas`;
 }
 
