@@ -98,8 +98,12 @@ export default async function ClosetAdminDashboardPage() {
         }
       />
 
-      <PaymentConflictAlert count={conflicts.length} />
-      {hasAdminModule(session, 'RESERVATIONS') ? <PaymentAlerts adminUserId={session.id} /> : null}
+      {/* Com o módulo Reservas o cartão "Pagamentos a tratar" já inclui os conflitos (e usa o banner antigo só se não puder carregar). */}
+      {hasAdminModule(session, 'RESERVATIONS') ? (
+        <PaymentAlerts adminUserId={session.id} conflictCount={conflicts.length} />
+      ) : (
+        <PaymentConflictAlert count={conflicts.length} />
+      )}
       {hasAdminModule(session, 'RESERVATIONS') ? <HeldPieceAlerts adminUserId={session.id} /> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

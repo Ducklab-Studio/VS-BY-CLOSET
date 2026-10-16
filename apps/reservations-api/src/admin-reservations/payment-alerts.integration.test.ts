@@ -115,7 +115,7 @@ describe('Pagamentos a tratar — pedidos pagos sem reserva válida', () => {
     const [alert] = await byOrder(id);
     expect(alert).toMatchObject({ kind: 'PAID_ORDER_WITHOUT_RESERVATION', orderName: `#${id}`, amount: '120.00', currency: 'BRL', reservationId: null });
     // sem dados pessoais: só estes campos
-    expect(Object.keys(alert).sort()).toEqual(['amount', 'currency', 'key', 'kind', 'orderId', 'orderName', 'reservationId', 'reservationStatus', 'since']);
+    expect(Object.keys(alert).sort()).toEqual(['amount', 'currency', 'key', 'kind', 'orderDeleted', 'orderId', 'orderName', 'orderSettled', 'reservationId', 'reservationStatus', 'since']);
 
     await send('orders/cancelled', paid(id, { source_name: 'channel:27099236', cancelled_at: new Date().toISOString(), cancel_reason: 'customer', updated_at: new Date(Date.now() + 1000).toISOString() }));
     expect(await byOrder(id)).toHaveLength(0);
@@ -129,13 +129,31 @@ describe('Pagamentos a tratar — pedidos pagos sem reserva válida', () => {
     expect(await byOrder(id)).toHaveLength(0);
   }, 30_000);
 
-  test('pedido excluído na Shopify (orders/delete) limpa o alerta do pedido', async () => {
+  test('pedido EXCLUÍDO na Shopify (orders/delete) mas ainda pago NÃO resolve o alerta (avisa que foi excluído); cancelado ou reembolsado, resolve', async () => {
     const id = nextOrderId();
     await send('orders/paid', paid(id));
     expect(await byOrder(id)).toHaveLength(1);
     await send('orders/delete', { id });
-    expect(await byOrder(id)).toHaveLength(0);
-  }, 30_000);
+    const [stillThere] = await byOrder(id);
+    expect(stillThere).toMatchObject({ kind: 'PAID_ORDER_WITHOUT_RESERVATION', orderDeleted: true });
+
+    const refunded = nextOrderId();
+    await send('orders/paid', paid(refunded));
+    await send('orders/delete', { id: refunded });
+    await send('refunds/create', { id: refunded + 1, order_id: refunded, transactions: [] });
+    expect(await byOrder(refunded)).toHaveLength(0);
+  }, 40_000);
+
+  test('pedido pago com reserva em pending_payment: recente não alerta; sem confirmação há mais de 30 min alerta', async () => {
+    const recent = nextOrderId();
+    const stale = nextOrderId();
+    await createReservation('pending_payment', { orderId: recent });
+    await createReservation('pending_payment', { orderId: stale });
+    await send('orders/paid', paid(recent));
+    await send('orders/paid', paid(stale, { updated_at: new Date(Date.now() - 45 * 60_000).toISOString() }));
+    expect(await byOrder(recent)).toHaveLength(0);
+    expect((await byOrder(stale))[0]).toMatchObject({ kind: 'PAID_ORDER_INACTIVE_RESERVATION', reservationStatus: 'pending_payment' });
+  }, 40_000);
 
   test('financial_status refunded/partially_refunded em atualização posterior também resolve', async () => {
     const a = nextOrderId();
@@ -207,22 +225,31 @@ describe('Pagamentos a tratar — reservas em revisão e conflito de pagamento',
     expect(found.find((a) => a.reservationId === problem)).toMatchObject({ kind: 'RESERVATION_PROBLEM' });
   }, 60_000);
 
-  test('pedido cancelado ou reembolsado resolve o alerta da reserva em revisão', async () => {
+  test('conflito de pagamento some quando o pedido é reembolsado; reserva em problem continua sinalizada mesmo com o pedido cancelado', async () => {
     const cancelledOrder = nextOrderId();
     const refundedOrder = nextOrderId();
     const a = await createReservation('problem', { orderId: cancelledOrder });
     const b = await createReservation('late_payment_conflict', { orderId: refundedOrder });
     await send('orders/paid', paid(cancelledOrder));
     await send('orders/paid', paid(refundedOrder));
-    let keys = (await alerts()).map((x) => x.key);
-    expect(keys).toEqual(expect.arrayContaining([`reservation:${a}`, `reservation:${b}`]));
+    let found = await alerts();
+    expect(found.map((x) => x.key)).toEqual(expect.arrayContaining([`reservation:${a}`, `reservation:${b}`]));
+    expect(found.find((x) => x.reservationId === a)?.orderSettled).toBe(false);
 
     await send('orders/cancelled', paid(cancelledOrder, { cancelled_at: new Date().toISOString(), updated_at: new Date(Date.now() + 1000).toISOString() }));
     await send('refunds/create', { id: refundedOrder + 1, order_id: refundedOrder, transactions: [] });
-    keys = (await alerts()).map((x) => x.key);
-    expect(keys).not.toContain(`reservation:${a}`);
-    expect(keys).not.toContain(`reservation:${b}`);
+    found = await alerts();
+    const problem = found.find((x) => x.reservationId === a);
+    expect(problem).toMatchObject({ kind: 'RESERVATION_PROBLEM', orderSettled: true }); // segue pedindo revisão: a peça continua presa
+    expect(found.map((x) => x.key)).not.toContain(`reservation:${b}`);
   }, 60_000);
+
+  test('reserva em problem de pedido de TESTE não alerta', async () => {
+    const id = nextOrderId();
+    const r = await createReservation('problem', { orderId: id });
+    await send('orders/paid', paid(id, { test: true }));
+    expect((await alerts()).map((x) => x.reservationId)).not.toContain(r);
+  }, 40_000);
 });
 
 describe('Leitura apenas e contagem', () => {

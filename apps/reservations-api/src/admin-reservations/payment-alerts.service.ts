@@ -39,6 +39,8 @@ interface OrderEventRow {
  *
  * Origem dos dados: os webhooks de pedido já gravados (`webhook_events`, só campos não pessoais extraídos do
  * JSON), as reservas, `vale_pass_orders` (para excluir Valle Pass). Sem migração, sem tabela nova.
+ * Webhooks que FALHARAM no nosso processamento também contam como evidência do que a Shopify enviou: um pagamento
+ * cujo webhook falhou não pode ficar invisível.
  */
 @Injectable()
 export class PaymentAlertsService {
@@ -86,7 +88,6 @@ export class PaymentAlertsService {
              processed_at AS "processedAt"
       FROM webhook_events
       WHERE topic IN ('orders/create', 'orders/paid', 'orders/updated', 'orders/cancelled')
-        AND status <> 'failed'
         AND order_id IS NOT NULL
         AND processed_at > now() - make_interval(days => ${days}::int)
       ORDER BY processed_at DESC
@@ -99,7 +100,6 @@ export class PaymentAlertsService {
       SELECT DISTINCT order_id AS "orderId", topic
       FROM webhook_events
       WHERE topic IN ('refunds/create', 'orders/delete')
-        AND status <> 'failed'
         AND order_id IS NOT NULL
         AND processed_at > now() - make_interval(days => ${days}::int)
     `;
@@ -142,14 +142,14 @@ export class PaymentAlertsService {
                CASE WHEN jsonb_typeof(payload->'refunds') = 'array' THEN jsonb_array_length(payload->'refunds') ELSE 0 END AS "refundsCount",
                payload->>'updated_at' AS "updatedAt", payload->>'created_at' AS "createdAt", processed_at AS "processedAt"
         FROM webhook_events
-        WHERE topic IN ('orders/create', 'orders/paid', 'orders/updated', 'orders/cancelled') AND status <> 'failed' AND order_id = ANY(${missing}::text[])
+        WHERE topic IN ('orders/create', 'orders/paid', 'orders/updated', 'orders/cancelled') AND order_id = ANY(${missing}::text[])
         ORDER BY processed_at DESC
         LIMIT 200
       `;
       for (const [id, state] of latestOrderStates(extra.map(toOrderState))) orders.set(id, state);
       const extraSettled = await this.prisma.$queryRaw<{ orderId: string; topic: string }[]>`
         SELECT DISTINCT order_id AS "orderId", topic FROM webhook_events
-        WHERE topic IN ('refunds/create', 'orders/delete') AND status <> 'failed' AND order_id = ANY(${missing}::text[])
+        WHERE topic IN ('refunds/create', 'orders/delete') AND order_id = ANY(${missing}::text[])
       `;
       for (const row of extraSettled) (row.topic === 'refunds/create' ? settledOrderIds : deletedOrderIds).add(row.orderId);
     }

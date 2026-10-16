@@ -16,6 +16,17 @@ export const RESERVATION_ATTENTION_CHANNEL = 'closetadmin-reservation-attention'
 /** A tela de Reservas se atualiza sozinha neste intervalo (aba visível). */
 export const RESERVATIONS_REFRESH_MS = 30_000;
 
+/**
+ * Número do menu de Reservas = reservas novas (pendentes/confirmadas que ninguém viu) + pagamentos a tratar.
+ * São conjuntos disjuntos por construção (status e pedidos diferentes no servidor), então a soma não duplica nada;
+ * `alerts` leva a parte financeira separada, para o texto de acessibilidade e para quem quiser distinguir.
+ */
+export function combineReservationAttention(newReservations: number, paymentAlerts: number): { count: number; alerts?: number } {
+  const fresh = Number.isFinite(newReservations) && newReservations > 0 ? Math.floor(newReservations) : 0;
+  const alerts = Number.isFinite(paymentAlerts) && paymentAlerts > 0 ? Math.floor(paymentAlerts) : 0;
+  return alerts > 0 ? { count: fresh + alerts, alerts } : { count: fresh };
+}
+
 /** Texto para leitor de tela, anexado ao nome do link "Reservas". */
 export function reservationAttentionLabel(count: number | null, paymentAlerts = 0): string {
   if (!count || count <= 0) return 'nenhuma reserva nova';

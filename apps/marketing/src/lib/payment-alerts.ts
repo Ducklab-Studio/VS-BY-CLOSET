@@ -21,6 +21,10 @@ export interface PaymentAlert {
   readonly reservationId: string | null;
   readonly reservationStatus: string | null;
   readonly since: string;
+  /** O pedido foi excluído na Shopify (o pagamento não foi estornado por isso). */
+  readonly orderDeleted: boolean;
+  /** O pedido já foi cancelado/reembolsado, mas a reserva em revisão segue ocupando a peça. */
+  readonly orderSettled: boolean;
 }
 
 export interface PaymentAlerts {
@@ -60,6 +64,8 @@ export function parsePaymentAlerts(raw: unknown): PaymentAlerts | null {
       reservationId: reservationId && UUID.test(reservationId) ? reservationId : null,
       reservationStatus: str(a.reservationStatus),
       since,
+      orderDeleted: a.orderDeleted === true,
+      orderSettled: a.orderSettled === true,
     });
   }
   return { count, alerts: parsed };
@@ -79,16 +85,19 @@ export function paymentAlertTitle(kind: PaymentAlertKind): string {
 }
 
 /** O que a equipe precisa entender e fazer — sempre manual: o sistema não cancela, libera nem reembolsa nada. */
-export function paymentAlertHint(kind: PaymentAlertKind): string {
+export function paymentAlertHint(kind: PaymentAlertKind, flags: { readonly orderDeleted?: boolean; readonly orderSettled?: boolean } = {}): string {
+  const deleted = flags.orderDeleted ? ' O pedido foi excluído na Shopify, mas o pagamento NÃO foi estornado: excluir não devolve o dinheiro.' : '';
   switch (kind) {
     case 'LATE_PAYMENT_CONFLICT':
-      return 'A cliente pagou depois do prazo e a peça já era de outra reserva. Ofereça outra data/peça ou reembolse na Shopify.';
+      return `A cliente pagou depois do prazo e a peça já era de outra reserva. Ofereça outra data/peça ou reembolse na Shopify.${deleted}`;
     case 'PAID_ORDER_WITHOUT_RESERVATION':
-      return 'Há dinheiro recebido e nenhuma reserva ligada ao pedido. Confira o pedido na Shopify: reembolse ou crie a reserva manualmente.';
+      return `Há dinheiro recebido e nenhuma reserva ligada ao pedido. Confira o pedido na Shopify: reembolse ou crie a reserva manualmente.${deleted}`;
     case 'PAID_ORDER_INACTIVE_RESERVATION':
-      return 'O pedido foi pago, mas a reserva dele está cancelada, expirada ou sem confirmação. Reembolse ou reative com a cliente.';
+      return `O pedido foi pago, mas a reserva dele está cancelada, expirada ou sem confirmação. Reembolse ou reative com a cliente.${deleted}`;
     case 'RESERVATION_PROBLEM':
-      return 'A reserva foi marcada para revisão manual (divergência no pedido ou reembolso). Veja o histórico dela.';
+      return flags.orderSettled
+        ? `O pedido já foi cancelado ou reembolsado, mas a reserva continua em revisão e segurando a peça até a equipe encerrá-la.${deleted}`
+        : `A reserva foi marcada para revisão manual (divergência no pedido ou reembolso). Veja o histórico dela.${deleted}`;
   }
 }
 

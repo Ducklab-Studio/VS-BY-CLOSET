@@ -3,7 +3,7 @@
 import { getAdminSession, hasAdminModule } from '@/lib/admin-session';
 import { getPaymentAlerts, getReservationAttention, markReservationsViewed } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { RESERVATION_ATTENTION_STATUSES } from '@/lib/reservation-attention';
+import { RESERVATION_ATTENTION_STATUSES, combineReservationAttention } from '@/lib/reservation-attention';
 import { parsePaymentAlerts } from '@/lib/payment-alerts';
 
 /**
@@ -27,7 +27,7 @@ export async function getReservationAttentionAction(): Promise<{ count: number; 
     } catch {
       alerts = 0;
     }
-    return alerts > 0 ? { count: base + alerts, alerts } : { count: base };
+    return combineReservationAttention(base, alerts);
   } catch (err) {
     return err instanceof AdminApiError && (err.status === 401 || err.status === 403) ? { forbidden: true } : { error: true };
   }

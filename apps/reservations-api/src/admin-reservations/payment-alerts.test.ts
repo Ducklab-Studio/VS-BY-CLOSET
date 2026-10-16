@@ -38,9 +38,12 @@ const run = (
     linked?: Record<string, LinkedReservation>;
     flagged?: FlaggedReservation[];
     limit?: number;
+    now?: string;
   } = {},
 ) =>
   buildPaymentAlerts({
+    // 5 min depois do `updated_at` padrão dos pedidos: pedidos pagos com reserva em pending_payment ainda são "recentes".
+    now: at(extra.now ?? '2026-10-16T10:05:00Z'),
     orders: latestOrderStates(orders),
     settledOrderIds: new Set(extra.settled ?? []),
     deletedOrderIds: new Set(extra.deleted ?? []),
@@ -99,7 +102,7 @@ describe('pedidos pagos sem reserva válida', () => {
     const { count, alerts } = run([order('10')]);
     expect(count).toBe(1);
     expect(alerts[0]).toMatchObject({ kind: 'PAID_ORDER_WITHOUT_RESERVATION', key: 'order:10', orderName: '#10', amount: '120.00', currency: 'BRL', reservationId: null });
-    expect(Object.keys(alerts[0]).sort()).toEqual(['amount', 'currency', 'key', 'kind', 'orderId', 'orderName', 'reservationId', 'reservationStatus', 'since']);
+    expect(Object.keys(alerts[0]).sort()).toEqual(['amount', 'currency', 'key', 'kind', 'orderDeleted', 'orderId', 'orderName', 'orderSettled', 'reservationId', 'reservationStatus', 'since']);
   });
 
   test('não alerta: pendente, de teste, rascunho, PDV, app, Valle Pass', () => {
@@ -117,12 +120,28 @@ describe('pedidos pagos sem reserva válida', () => {
     expect(count).toBe(0);
   });
 
-  test('resolve sozinho: cancelado, reembolsado ou excluído', () => {
+  test('resolve sozinho SÓ por cancelamento financeiro ou reembolso', () => {
     const { count } = run(
       [order('20', { cancelledAt: '2026-10-16T11:00:00Z' }), order('21', { financialStatus: 'refunded' }), order('22'), order('23', { refundsCount: 1 })],
       { settled: ['22'] },
     );
     expect(count).toBe(0);
+  });
+
+  test('pedido EXCLUÍDO na Shopify mas ainda pago, sem cancelamento nem reembolso, continua alertando (e avisa que foi excluído)', () => {
+    const { alerts } = run([order('24'), order('25', { cancelledAt: '2026-10-16T11:00:00Z' }), order('26', { refundsCount: 1 })], { deleted: ['24', '25', '26'] });
+    expect(alerts.map((a) => a.key)).toEqual(['order:24']);
+    expect(alerts[0].orderDeleted).toBe(true);
+    // excluído E reembolsado/cancelado: o dinheiro foi tratado, alerta resolvido
+  });
+
+  test('pedido pago com reserva ainda em pending_payment: recente não alerta; passou de 30 min sem confirmação alerta (webhook pode ter falhado)', () => {
+    const linked = { '27': { id: 'res-27', status: 'pending_payment', shopifyOrderId: '27' } };
+    expect(run([order('27')], { linked }).count).toBe(0);
+    const late = run([order('27')], { linked, now: '2026-10-16T10:45:00Z' });
+    expect(late.alerts.map((a) => [a.key, a.kind])).toEqual([['order:27', 'PAID_ORDER_INACTIVE_RESERVATION']]);
+    // sem updated_at do pedido: vale a hora em que o webhook foi processado
+    expect(run([order('28', { updatedAt: null })], { linked: { '28': { id: 'res-28', status: 'pending_payment', shopifyOrderId: '28' } }, now: '2026-10-16T10:45:00Z' }).count).toBe(1);
   });
 
   test('reserva vinculada cancelada, expirada ou em HOLD → alerta; confirmada, em andamento e pending_payment → não', () => {
@@ -173,24 +192,35 @@ describe('reservas em revisão e conflito de pagamento', () => {
     expect(alerts.map((a) => a.key)).toEqual(['reservation:c-1', 'order:50', 'reservation:p-old', 'reservation:p-new']);
   });
 
-  test('reserva sem pedido continua como alerta; com pedido cancelado, reembolsado ou excluído, some', () => {
+  test('reserva em problem fica sinalizada até a reserva ser efetivamente encerrada, mesmo com o pedido já cancelado/reembolsado; conflito de pagamento some quando o pedido é tratado', () => {
     const link = (id: string, status: string): LinkedReservation => ({ id: `r-${id}`, status, shopifyOrderId: id });
     const { alerts } = run([order('60', { cancelledAt: '2026-10-16T14:00:00Z' }), order('61', { refundsCount: 1 }), order('62'), order('63')], {
       settled: ['62'],
       linked: { '60': link('60', 'problem'), '61': link('61', 'late_payment_conflict'), '62': link('62', 'problem'), '63': link('63', 'problem') },
       flagged: [flagged('r-none', 'problem', null), flagged('r-60', 'problem', '60'), flagged('r-61', 'late_payment_conflict', '61'), flagged('r-62', 'problem', '62'), flagged('r-63', 'problem', '63')],
     });
-    expect(alerts.map((a) => a.key).sort()).toEqual(['reservation:r-63', 'reservation:r-none']);
-    expect(alerts.find((a) => a.key === 'reservation:r-63')).toMatchObject({ orderName: '#63', amount: '120.00', kind: 'RESERVATION_PROBLEM' });
+    // r-61 (conflito + reembolso) some; os `problem` ficam, com `orderSettled` informando que o pedido já foi tratado
+    expect(alerts.map((a) => a.key).sort()).toEqual(['reservation:r-60', 'reservation:r-62', 'reservation:r-63', 'reservation:r-none']);
+    expect(alerts.find((a) => a.key === 'reservation:r-63')).toMatchObject({ orderName: '#63', amount: '120.00', kind: 'RESERVATION_PROBLEM', orderSettled: false });
+    expect(alerts.find((a) => a.key === 'reservation:r-60')?.orderSettled).toBe(true);
+    expect(alerts.find((a) => a.key === 'reservation:r-62')?.orderSettled).toBe(true);
   });
 
-  test('pedido excluído na Shopify limpa o alerta do pedido, mas NÃO o da reserva (excluir não devolve o dinheiro)', () => {
+  test('reserva em revisão de pedido de TESTE não alerta (não é dinheiro real)', () => {
+    const { count } = run([order('64', { test: true })], {
+      linked: { '64': { id: 'r-64', status: 'problem', shopifyOrderId: '64' } },
+      flagged: [flagged('r-64', 'problem', '64')],
+    });
+    expect(count).toBe(0);
+  });
+
+  test('pedido excluído na Shopify NÃO resolve nada: o alerta da reserva continua e avisa que o pedido foi excluído', () => {
     const { alerts } = run([order('80'), order('81')], {
       deleted: ['80', '81'],
       linked: { '81': { id: 'r-81', status: 'problem', shopifyOrderId: '81' } },
       flagged: [flagged('r-81', 'problem', '81')],
     });
-    expect(alerts.map((a) => a.key)).toEqual(['reservation:r-81']);
+    expect(alerts.map((a) => [a.key, a.orderDeleted])).toEqual([['order:80', true], ['reservation:r-81', true]].sort());
   });
 
   test('o limite corta a lista, mas count é o total', () => {

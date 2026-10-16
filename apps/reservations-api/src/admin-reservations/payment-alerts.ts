@@ -39,6 +39,10 @@ export interface PaymentAlert {
   readonly reservationStatus: string | null;
   /** ISO-8601 de quando o fato aconteceu (pedido criado / reserva alterada). */
   readonly since: string;
+  /** O pedido foi excluído na Shopify (o pagamento NÃO foi estornado por isso). Informativo. */
+  readonly orderDeleted: boolean;
+  /** O pedido já foi cancelado/reembolsado, mas a reserva segue em revisão (só vale para `RESERVATION_PROBLEM`). Informativo. */
+  readonly orderSettled: boolean;
 }
 
 export interface PaymentAlertsResult {
@@ -119,8 +123,15 @@ export interface BuildPaymentAlertsInput {
   readonly orders: ReadonlyMap<string, OrderState>;
   /** Pedidos com `refunds/create` registrado (o dinheiro foi devolvido): resolvem qualquer alerta do pedido. */
   readonly settledOrderIds: ReadonlySet<string>;
-  /** Pedidos excluídos na Shopify (`orders/delete`): limpam o alerta do PEDIDO, mas NÃO o da reserva (excluir não devolve o dinheiro). */
+  /**
+   * Pedidos excluídos na Shopify (`orders/delete`). Só INFORMATIVO (`orderDeleted` no alerta): excluir um pedido NÃO
+   * devolve o dinheiro, então a exclusão sozinha nunca resolve um alerta — só cancelamento financeiro ou reembolso.
+   */
   readonly deletedOrderIds?: ReadonlySet<string>;
+  /** "Agora" (injetável nos testes). */
+  readonly now?: Date;
+  /** Pedido pago com a reserva ainda em `pending_payment` há mais que isto: a confirmação não veio (webhook pode ter falhado). */
+  readonly pendingConfirmationMinutes?: number;
   /** Pedidos de Valle Pass (tabela própria): nunca geram alerta de aluguel. */
   readonly valePassOrderIds: ReadonlySet<string>;
   /** Reserva vinculada a cada pedido (por `shopify_order_id`). */
@@ -130,20 +141,31 @@ export interface BuildPaymentAlertsInput {
   readonly limit?: number;
 }
 
+export const DEFAULT_PENDING_CONFIRMATION_MINUTES = 30;
+
+function isStalePendingConfirmation(order: OrderState, now: Date, thresholdMs: number): boolean {
+  const reference = (order.updatedAt ?? order.processedAt).getTime();
+  return now.getTime() - reference > thresholdMs;
+}
+
 export function buildPaymentAlerts(input: BuildPaymentAlertsInput): PaymentAlertsResult {
   const byKey = new Map<string, PaymentAlert>();
+  const now = input.now ?? new Date();
+  const pendingMs = (input.pendingConfirmationMinutes ?? DEFAULT_PENDING_CONFIRMATION_MINUTES) * 60_000;
 
   for (const order of input.orders.values()) {
     if ((order.financialStatus ?? '').toLowerCase() !== 'paid') continue;
     if (order.test || !isCustomerOrderSource(order.sourceName)) continue;
-    if (isOrderSettled(order.orderId, order, input.settledOrderIds) || input.deletedOrderIds?.has(order.orderId)) continue;
+    // Resolvido só por cancelamento financeiro ou reembolso. Pedido EXCLUÍDO mas ainda pago, sem estorno, continua alertando.
+    if (isOrderSettled(order.orderId, order, input.settledOrderIds)) continue;
     if (input.valePassOrderIds.has(order.orderId)) continue;
 
     const reservation = input.reservationsByOrder.get(order.orderId);
     let kind: PaymentAlertKind | null = null;
     if (!reservation) kind = 'PAID_ORDER_WITHOUT_RESERVATION';
     else if (INACTIVE_RESERVATION_STATUSES.includes(reservation.status)) kind = 'PAID_ORDER_INACTIVE_RESERVATION';
-    // pending_payment (confirmação a caminho), confirmed/em andamento e problem/late_payment_conflict (alerta próprio): sem alerta de pedido.
+    else if (reservation.status === 'pending_payment' && isStalePendingConfirmation(order, now, pendingMs)) kind = 'PAID_ORDER_INACTIVE_RESERVATION';
+    // pending_payment recente (confirmação a caminho), confirmed/em andamento e problem/late_payment_conflict (alerta próprio): sem alerta de pedido.
     if (!kind) continue;
 
     const key = `order:${order.orderId}`;
@@ -157,25 +179,35 @@ export function buildPaymentAlerts(input: BuildPaymentAlertsInput): PaymentAlert
       reservationId: reservation?.id ?? null,
       reservationStatus: reservation?.status ?? null,
       since: (order.createdAt ?? order.processedAt).toISOString(),
+      orderDeleted: Boolean(input.deletedOrderIds?.has(order.orderId)),
+      orderSettled: false,
     });
   }
 
   for (const reservation of input.flaggedReservations) {
-    const order = reservation.shopifyOrderId ? input.orders.get(reservation.shopifyOrderId) : undefined;
-    // Pedido já cancelado/reembolsado/excluído: o dinheiro foi tratado, o alerta some (a reserva segue na lista, para a equipe).
-    if (reservation.shopifyOrderId && isOrderSettled(reservation.shopifyOrderId, order, input.settledOrderIds)) continue;
-    const kind: PaymentAlertKind = reservation.status === 'late_payment_conflict' ? 'LATE_PAYMENT_CONFLICT' : 'RESERVATION_PROBLEM';
+    const orderId = reservation.shopifyOrderId;
+    const order = orderId ? input.orders.get(orderId) : undefined;
+    // Pedido de teste não é dinheiro real (mesma decisão dos alertas de pedido).
+    if (order?.test) continue;
+    const orderSettled = Boolean(orderId && isOrderSettled(orderId, order, input.settledOrderIds));
+    const conflict = reservation.status === 'late_payment_conflict';
+    // Conflito de pagamento: o que falta é devolver o dinheiro — cancelado/reembolsado resolve. Reserva em `problem`
+    // NÃO: ela continua segurando a peça e pedindo revisão até a equipe encerrá-la, mesmo com o pedido já tratado.
+    if (conflict && orderSettled) continue;
+    const kind: PaymentAlertKind = conflict ? 'LATE_PAYMENT_CONFLICT' : 'RESERVATION_PROBLEM';
     const key = `reservation:${reservation.id}`;
     byKey.set(key, {
       kind,
       key,
-      orderId: reservation.shopifyOrderId,
+      orderId,
       orderName: order?.name ?? null,
       amount: order?.totalPrice ?? null,
       currency: order?.currency ?? null,
       reservationId: reservation.id,
       reservationStatus: reservation.status,
       since: reservation.updatedAt.toISOString(),
+      orderDeleted: Boolean(orderId && input.deletedOrderIds?.has(orderId)),
+      orderSettled,
     });
   }
 
