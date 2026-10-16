@@ -17,7 +17,8 @@
  *    deslocamento é decisão comercial.
  */
 
-import { type CivilDate, addDays, civilDateFromISO, isBefore } from './civil-date';
+import { type CivilDate, addDays, isBefore } from './civil-date';
+import { MAX_SANE_RENTAL_DAYS, isValidCivilDate, parseStrictCivilDateISO } from './engine-guards';
 import type { BlockedRange } from './rental-engine';
 
 export interface ScheduleRules {
@@ -49,6 +50,8 @@ export type ScheduleViolation =
   | 'invalid_days'
   | 'days_above_max'
   | 'invalid_pickup_time'
+  | 'invalid_pickup_date'
+  | 'invalid_computed_date'
   | 'pickup_before_operation_start'
   | 'pickup_closed'
   | 'return_closed'
@@ -88,17 +91,31 @@ function zoneOffsetMs(utcMs: number, timeZone: string): number {
   return localAsUtc - whole;
 }
 
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
 /**
- * Data civil + hora local num fuso → instante. Resolve a virada de horário de verão: duas passadas convergem para o
- * instante correto; uma hora que não existe (salto do horário de verão) cai no instante equivalente depois do salto.
+ * Data civil + hora local num fuso → instante, com a virada de horário de verão tratada de forma explícita:
+ *  - hora REPETIDA (relógio volta): vale a PRIMEIRA ocorrência (o instante mais cedo — o lado conservador para a
+ *    antecedência mínima);
+ *  - hora INEXISTENTE (relógio salta): vale o mesmo "relógio de parede" deslocado para frente pela duração do salto
+ *    (ex.: 00:30 inexistente → 01:30 local, que existe).
+ * Lança `RangeError` se a data/hora for inválida; `planItemSchedule` valida antes e nunca chega aqui com entrada ruim.
  */
 export function zonedTimeToInstant(date: CivilDate, hour: number, minute: number, timeZone: string): Date {
+  if (!isValidCivilDate(date) || !Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    throw new RangeError('Data ou hora local inválida.');
+  }
   const guess = Date.UTC(date.year, date.month - 1, date.day, hour, minute);
-  const first = zoneOffsetMs(guess, timeZone);
-  let instant = guess - first;
-  const second = zoneOffsetMs(instant, timeZone);
-  if (second !== first) instant = guess - second;
-  return new Date(instant);
+  // Deslocamentos vigentes um dia antes e um dia depois: uma transição de horário de verão cabe entre os dois.
+  const before = zoneOffsetMs(guess - MS_PER_DAY, timeZone);
+  const after = zoneOffsetMs(guess + MS_PER_DAY, timeZone);
+  const candidates = [...new Set([before, after])]
+    .map((offset) => ({ offset, instant: guess - offset }))
+    .filter(({ offset, instant }) => zoneOffsetMs(instant, timeZone) === offset)
+    .map(({ instant }) => instant);
+  if (candidates.length > 0) return new Date(Math.min(...candidates));
+  // Nenhum candidato é consistente: a hora local não existe (salto). Usa o deslocamento anterior ao salto.
+  return new Date(guess - before);
 }
 
 /** Mesma fórmula do motor atual: [retirada − prep, devolução + limpeza + 1). */
@@ -116,6 +133,7 @@ function validRules(rules: ScheduleRules): boolean {
   for (const value of [rules.prepDays, rules.cleaningDays]) if (!Number.isInteger(value) || value < 0 || value > 365) return false;
   if (!Number.isFinite(rules.minAdvanceHours) || rules.minAdvanceHours < 0) return false;
   if (rules.maxDays !== undefined && (!Number.isInteger(rules.maxDays) || rules.maxDays < 1)) return false;
+  if (rules.operationStartDate !== undefined && rules.operationStartDate !== null && !isValidCivilDate(rules.operationStartDate)) return false;
   try {
     new Intl.DateTimeFormat('en', { timeZone: rules.timezone });
   } catch {
@@ -132,29 +150,41 @@ export function planItemSchedule(request: ItemScheduleRequest, rules: ScheduleRu
   if (!validRules(rules)) return { ok: false, violations: ['invalid_rules'] };
 
   const violations: ScheduleViolation[] = [];
-  const { hour, minute } = request.pickupTime;
+  const hour = request?.pickupTime?.hour;
+  const minute = request?.pickupTime?.minute;
   const validTime = Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59;
   if (!validTime) violations.push('invalid_pickup_time');
-  if (!Number.isInteger(request.days) || request.days < 1) violations.push('invalid_days');
-  else if (rules.maxDays !== undefined && request.days > rules.maxDays) violations.push('days_above_max');
-  if (violations.includes('invalid_days') || violations.includes('invalid_pickup_time')) return { ok: false, violations };
+  if (!isValidCivilDate(request?.pickupDate)) violations.push('invalid_pickup_date');
+  if (!Number.isInteger(request?.days) || request.days < 1) violations.push('invalid_days');
+  else if (request.days > MAX_SANE_RENTAL_DAYS || (rules.maxDays !== undefined && request.days > rules.maxDays)) violations.push('days_above_max');
+  if (violations.length > 0) return { ok: false, violations };
 
   const returnDate = addDays(request.pickupDate, request.days);
+  const blockedRange = blockedRangeFor(request.pickupDate, returnDate, rules);
+  // Defesa em profundidade: toda data calculada precisa existir no calendário antes de qualquer outra regra.
+  if (![returnDate, blockedRange.blockedFrom, blockedRange.blockedUntilExclusive].every(isValidCivilDate)) {
+    return { ok: false, violations: ['invalid_computed_date'] };
+  }
   if (rules.operationStartDate && isBefore(request.pickupDate, rules.operationStartDate)) violations.push('pickup_before_operation_start');
   if (!rules.isOpenOn(request.pickupDate)) violations.push('pickup_closed');
   if (!rules.isOpenOn(returnDate)) violations.push('return_closed');
 
   const pickupAt = zonedTimeToInstant(request.pickupDate, hour, minute, rules.timezone);
-  if (!meetsMinimumAdvance(pickupAt, now, rules.minAdvanceHours)) violations.push('pickup_before_minimum_advance');
+  if (!(now instanceof Date) || !meetsMinimumAdvance(pickupAt, now, rules.minAdvanceHours)) violations.push('pickup_before_minimum_advance');
 
   if (violations.length > 0) return { ok: false, violations };
   return {
     ok: true,
-    schedule: { pickupDate: request.pickupDate, returnDate, days: request.days, pickupAt, blockedRange: blockedRangeFor(request.pickupDate, returnDate, rules) },
+    schedule: { pickupDate: request.pickupDate, returnDate, days: request.days, pickupAt, blockedRange },
   };
 }
 
-/** Conveniência para quem recebe ISO (YYYY-MM-DD) do cliente. Data inválida lança, como `civilDateFromISO`. */
+/**
+ * Conveniência para quem recebe ISO (YYYY-MM-DD) do cliente. Parser ESTRITO: formato errado ou data inexistente
+ * ("2026-02-31") vira a violação `invalid_pickup_date` — não lança e não normaliza para outra data.
+ */
 export function planItemScheduleFromISO(pickupISO: string, days: number, pickupTime: ItemScheduleRequest['pickupTime'], rules: ScheduleRules, now: Date): ItemScheduleResult {
-  return planItemSchedule({ pickupDate: civilDateFromISO(pickupISO), days, pickupTime }, rules, now);
+  const pickupDate = parseStrictCivilDateISO(pickupISO);
+  if (!pickupDate) return { ok: false, violations: ['invalid_pickup_date'] };
+  return planItemSchedule({ pickupDate, days, pickupTime }, rules, now);
 }

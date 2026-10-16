@@ -156,7 +156,48 @@ describe('fail closed: violações em vez de total parcial', () => {
     expect(codes([])).toEqual(['no_items']);
     expect(codes([item('a', 1000, 1), item('b', 1000, 1), item('c', 1000, 1)], { ...CONFIG, maxItems: 2 })).toEqual(['too_many_items']);
     expect(codes([item('a', 1000, 1), item('a', 2000, 1)])).toEqual(['duplicate_item_id:a']);
-    expect(codes([item('', 1000, 1)])).toEqual(['duplicate_item_id:']);
+    expect(codes([item('', 1000, 1)])).toEqual(['invalid_item:']); // id vazio
+  });
+
+  test('B2: item null/indefinido/não-objeto, id inválido e entrada que não é lista viram violações, nunca exceção', () => {
+    const run = (items: unknown) => priceReservation(items as PricedItemInput[], CONFIG);
+    for (const bad of [[null], [undefined], [42], ['x'], [{}], [{ id: 5, baseCents: 1000, days: 1 }], [{ id: '', baseCents: 1000, days: 1 }]]) {
+      expect(() => run(bad)).not.toThrow();
+      const result = run(bad);
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.violations.map((v) => v.code)).toContain('invalid_item');
+    }
+    for (const notAList of [null, undefined, 'abc', 5, {}]) expect(run(notAList)).toEqual({ ok: false, violations: [{ code: 'no_items' }] });
+    // um item defeituoso derruba o pedido inteiro: as peças boas não vazam preço
+    expect(run([item('ok', 1000, 1), null]).ok).toBe(false);
+  });
+
+  test('B1: duração absurda é recusada pelo teto interno de sanidade, com ou sem teto comercial', () => {
+    expect(codes([item('a', 15000, 3651)])).toEqual(['days_above_max:a']);
+    expect(ok([item('a', 15000, 3650)]).items[0].days).toBe(3650);
+    for (const days of [1e9, 1e12, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE]) expect(codes([item('a', 15000, days)])).toEqual(['days_above_max:a']);
+    expect(() => priceItem(item('a', 15000, 3651), CONFIG)).toThrow(RangeError);
+    // o teto comercial continua valendo quando é menor que o de sanidade
+    expect(codes([item('a', 15000, 8)], { ...CONFIG, maxDaysPerItem: 7 })).toEqual(['days_above_max:a']);
+  });
+
+  test('limites extremos de preço e percentual não perdem precisão nem produzem total parcial', () => {
+    const extreme = ok([item('a', MAX_PRICE_CENTS, 3650)], { ...CONFIG, extraDayBasisPoints: 100_000 });
+    expect(Number.isSafeInteger(extreme.totalCents)).toBe(true);
+    expect(extreme.items[0].extraDayCents).toBe(MAX_PRICE_CENTS * 10);
+    expect(extreme.items[0].totalCents).toBe(MAX_PRICE_CENTS + 3649 * MAX_PRICE_CENTS * 10);
+    // seis peças no limite: a soma continua exata (ou falha fechado), nunca imprecisa
+    const six = priceReservation(Array.from({ length: 6 }, (_, i) => item(`p${i}`, MAX_PRICE_CENTS, 3650)), { ...CONFIG, extraDayBasisPoints: 100_000 });
+    if (six.ok) expect(six.pricing.totalCents).toBe(6 * (MAX_PRICE_CENTS + 3649 * MAX_PRICE_CENTS * 10) + CONFIG.reservationFeeCents);
+    else expect(six.violations[0].code).toBe('invalid_price');
+  });
+
+  test('R1: o arredondamento é por dia adicional (documentado); com centavos ímpares difere do arredondamento sobre o total', () => {
+    // R$ 99,99 por 3 dias, half_up: 9999 + 2 × 5000 = 19999 (arredondar só no total daria 19998)
+    expect(ok([item('a', 9999, 3)], NO_FEE).items[0].totalCents).toBe(19999);
+    expect(ok([item('a', 9999, 3)], { ...NO_FEE, extraDayRounding: 'down' }).items[0].totalCents).toBe(19997);
+    // base par: sem diferença entre os modos
+    for (const rounding of ['half_up', 'down', 'up'] as const) expect(ok([item('a', 15000, 3)], { ...NO_FEE, extraDayRounding: rounding }).items[0].totalCents).toBe(30000);
   });
 
   test('duração inválida ou acima do teto, e preço inválido, apontando a peça', () => {

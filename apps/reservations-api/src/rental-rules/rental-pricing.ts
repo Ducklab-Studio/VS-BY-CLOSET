@@ -17,6 +17,8 @@
  * fecha em centavos (valor-base com centavos ímpares), duração máxima por peça e a própria taxa de reserva.
  */
 
+import { MAX_SANE_RENTAL_DAYS } from './engine-guards';
+
 /** Como fechar o centavo quando `base × percentual` não é inteiro. `half_up`: 0,5 sobe. */
 export type ExtraDayRounding = 'half_up' | 'down' | 'up';
 
@@ -47,6 +49,8 @@ export type PricingViolationCode =
   | 'no_items'
   | 'too_many_items'
   | 'duplicate_item_id'
+  /** Item ausente/não-objeto, ou `id` que não é uma string não vazia. */
+  | 'invalid_item'
   | 'invalid_price'
   | 'invalid_days'
   | 'days_above_max';
@@ -125,7 +129,7 @@ export function extraDayPriceCents(baseCents: number, config: Pick<RentalPricing
 /** Preço de uma peça por `days` diárias (sem taxa de reserva). Lança `RangeError` para entrada inválida. */
 export function priceItem(input: PricedItemInput, config: Pick<RentalPricingConfig, 'extraDayBasisPoints' | 'extraDayRounding'>): PricedItem {
   if (!isCents(input.baseCents)) throw new RangeError('baseCents inválido.');
-  if (!Number.isInteger(input.days) || input.days < 1) throw new RangeError('days deve ser um inteiro ≥ 1.');
+  if (!Number.isInteger(input.days) || input.days < 1 || input.days > MAX_SANE_RENTAL_DAYS) throw new RangeError('days deve ser um inteiro entre 1 e o teto de sanidade.');
   const extraDays = input.days - 1;
   const extraDayCents = extraDayPriceCents(input.baseCents, config);
   const extrasCents = extraDays * extraDayCents;
@@ -143,17 +147,22 @@ export function priceItem(input: PricedItemInput, config: Pick<RentalPricingConf
 export function priceReservation(items: readonly PricedItemInput[], config: RentalPricingConfig): ReservationPricingResult {
   if (!validatePricingConfig(config)) return { ok: false, violations: [{ code: 'invalid_config' }] };
 
+  if (!Array.isArray(items)) return { ok: false, violations: [{ code: 'no_items' }] };
   const violations: PricingViolation[] = [];
   if (items.length === 0) violations.push({ code: 'no_items' });
   if (config.maxItems !== undefined && items.length > config.maxItems) violations.push({ code: 'too_many_items' });
 
   const seen = new Set<string>();
   for (const item of items) {
-    if (typeof item.id !== 'string' || item.id === '' || seen.has(item.id)) violations.push({ code: 'duplicate_item_id', itemId: item.id });
+    if (item === null || typeof item !== 'object' || typeof item.id !== 'string' || item.id === '') {
+      violations.push({ code: 'invalid_item', ...(item !== null && typeof item === 'object' && typeof item.id === 'string' ? { itemId: item.id } : {}) });
+      continue;
+    }
+    if (seen.has(item.id)) violations.push({ code: 'duplicate_item_id', itemId: item.id });
     seen.add(item.id);
     if (!isCents(item.baseCents)) violations.push({ code: 'invalid_price', itemId: item.id });
     if (!Number.isInteger(item.days) || item.days < 1) violations.push({ code: 'invalid_days', itemId: item.id });
-    else if (config.maxDaysPerItem !== undefined && item.days > config.maxDaysPerItem) violations.push({ code: 'days_above_max', itemId: item.id });
+    else if (item.days > MAX_SANE_RENTAL_DAYS || (config.maxDaysPerItem !== undefined && item.days > config.maxDaysPerItem)) violations.push({ code: 'days_above_max', itemId: item.id });
   }
   if (violations.length > 0) return { ok: false, violations };
 

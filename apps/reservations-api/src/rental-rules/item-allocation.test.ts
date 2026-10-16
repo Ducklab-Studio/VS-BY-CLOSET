@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { civilDateFromISO } from './civil-date';
 import {
   MAX_ALLOCATION_ITEMS,
-  TooManyItemsToAllocateError,
+  MAX_SEARCH_NODES,
   allocateUnitsPerItem,
   type AllocationItem,
   type AllocationUnit,
@@ -84,17 +84,26 @@ describe('duas peças da MESMA variante com datas diferentes', () => {
   });
 
   test('a busca é EXATA: um first-fit guloso deixaria a última peça sem unidade, mas há solução', () => {
-    // u1 está ocupada de 10 a 14 por outra reserva. a [1,6) pode ir em u1 ou u2; b [8,12) só cabe em u2 (u1 ocupada);
-    // c [4,9) conflita com a em u1 e com b em u2 se a tomar u2. Solução: a→u1, c→u2? c [4,9) × b [8,12) em u2 conflita.
-    // Solução real: a→u2? a [1,6) × c [4,9) em u2 conflita. Então: a→u1, b→u2, c→? —
-    // montamos um caso garantidamente solúvel: 3 unidades em que o guloso erra por ordem de id.
+    // u2 está ocupada de 3 a 5 por outra reserva. `a` [1,3) cabe em u1 ou u2; `d` [2,5) só cabe em u1 (a janela de d
+    // bate com a ocupação de u2) e se sobrepõe a `a`. Um first-fit por data põe a→u1 e deixa d sem unidade.
     const units = [unit('u1', 'V1'), unit('u2', 'V1')];
-    const occupations = [busy('u1', '2026-11-08', '2026-11-12')];
-    const items = [item('a', 'V1', '2026-11-01', '2026-11-05'), item('b', 'V1', '2026-11-09', '2026-11-13'), item('c', 'V1', '2026-11-02', '2026-11-04')];
-    // a e c se sobrepõem (precisam de unidades diferentes); b só cabe em u2 (u1 ocupada 8–12) → c e a: u1 e u2 — b em u2 exige a e c fora de u2 no período 9–13 (não conflitam). Válido:
-    const result = assignments(items, units, occupations);
-    expect(result.b).toBe('u2');
-    expect(new Set([result.a, result.c]).size).toBe(2);
+    const occupations = [busy('u2', '2026-11-03', '2026-11-05')];
+    const items = [item('a', 'V1', '2026-11-01', '2026-11-03'), item('d', 'V1', '2026-11-02', '2026-11-05')];
+
+    const naiveFirstFit = (): boolean => {
+      const placed: { unitId: string; range: BlockedRange }[] = [];
+      for (const it of [...items].sort((x, y) => civilKey(x.range.blockedFrom) - civilKey(y.range.blockedFrom))) {
+        const free = units.filter((u) => {
+          const taken = [...occupations, ...placed].filter((o) => o.unitId === u.id);
+          return !taken.some((o) => civilKey(o.range.blockedFrom) < civilKey(it.range.blockedUntilExclusive) && civilKey(it.range.blockedFrom) < civilKey(o.range.blockedUntilExclusive));
+        });
+        if (free.length === 0) return false;
+        placed.push({ unitId: free[0].id, range: it.range });
+      }
+      return true;
+    };
+    expect(naiveFirstFit()).toBe(false); // prova de que o caso derrota a estratégia gulosa
+    expect(assignments(items, units, occupations)).toEqual({ a: 'u2', d: 'u1' });
   });
 
   test('backtracking: a primeira escolha de menor id inviabiliza a seguinte e a busca volta atrás', () => {
@@ -150,10 +159,92 @@ describe('reservas com muitas peças (até 6) e proteção', () => {
     expect(failures(items, [unit('u1', 'V1')])).toEqual(['sem:no_free_unit']);
   });
 
-  test('entrada absurda é recusada em vez de explodir a busca', () => {
-    const items = Array.from({ length: MAX_ALLOCATION_ITEMS + 1 }, (_, i) => item(`p${i}`, 'V1', '2026-12-01', '2026-12-03'));
-    expect(() => allocateUnitsPerItem(items, [unit('u1', 'V1')], [])).toThrow(TooManyItemsToAllocateError);
-    expect(() => allocateUnitsPerItem([item('a', 'V1', '2026-12-01', '2026-12-03'), item('a', 'V1', '2026-12-05', '2026-12-07')], [unit('u1', 'V1')], [])).toThrow(/duplicados/);
+  test('B3: o limite é de 6 peças físicas, validado ANTES da busca combinatória (sem exceção, sem travar)', () => {
+    expect(MAX_ALLOCATION_ITEMS).toBe(6);
+    const many = (count: number) => Array.from({ length: count }, (_, i) => item(`p${i}`, 'V1', '2026-12-01', '2026-12-03'));
+    const manyUnits = Array.from({ length: 30 }, (_, i) => unit(`u${String(i).padStart(2, '0')}`, 'V1'));
+    for (const count of [7, 11, 20, 1000]) {
+      const started = Date.now();
+      expect(failures(many(count), manyUnits)).toEqual(['undefined:too_many_items']);
+      expect(Date.now() - started).toBeLessThan(200); // nem chegou a montar candidatas: não há busca
+    }
+    expect(assignments(many(6), manyUnits)).toEqual({ p0: 'u00', p1: 'u01', p2: 'u02', p3: 'u03', p4: 'u04', p5: 'u05' });
+  });
+
+  test('performance: o pior caso de 6 peças é imediato, e uma peça impossível é detectada sem varrer combinações', () => {
+    const w1 = range('2026-12-01', '2026-12-05');
+    const w2 = range('2026-12-10', '2026-12-14');
+    const manyUnits = Array.from({ length: 60 }, (_, i) => unit(`u${String(i).padStart(2, '0')}`, 'V1'));
+    // 3 peças só cabem em {u00,u01} (as outras 58 unidades estão ocupadas em w1) → impossível; as outras 3 têm 60 candidatas
+    const busyAll = manyUnits.slice(2).map((u) => ({ unitId: u.id, range: w1 }));
+    const items: AllocationItem[] = [
+      ...['x1', 'x2', 'x3'].map((id) => ({ id, variantId: 'V1', range: w1 })),
+      ...['y1', 'y2', 'y3'].map((id) => ({ id, variantId: 'V1', range: w2 })),
+    ];
+    const started = Date.now();
+    const result = allocateUnitsPerItem(items, manyUnits, busyAll);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.failures.every((f) => f.reason === 'items_conflict_with_each_other')).toBe(true);
+    expect(Date.now() - started).toBeLessThan(500);
+    // 6 peças que se sobrepõem todas, com exatamente 6 unidades
+    const sixUnits = manyUnits.slice(0, 6);
+    const sixItems = Array.from({ length: 6 }, (_, i) => item(`q${i}`, 'V1', '2026-12-01', '2026-12-05'));
+    const t0 = Date.now();
+    expect(Object.keys(assignments(sixItems, sixUnits))).toHaveLength(6);
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(MAX_SEARCH_NODES).toBeGreaterThan(0);
+  });
+
+  test('B2: entradas malformadas viram falhas estruturadas, nunca exceção', () => {
+    const run = (items: unknown, units: unknown = [unit('u1', 'V1')], occupations: unknown = []) =>
+      allocateUnitsPerItem(items as AllocationItem[], units as AllocationUnit[], occupations as UnitOccupation[]);
+    const good = item('a', 'V1', '2026-12-01', '2026-12-03');
+    const cases: [unknown, unknown, unknown, string][] = [
+      [[], [unit('u1', 'V1')], [], 'no_items'],
+      [null, [], [], 'invalid_item'],
+      [[null], [unit('u1', 'V1')], [], 'invalid_item'],
+      [[{ id: '', variantId: 'V1', range: good.range }], [unit('u1', 'V1')], [], 'invalid_item'],
+      [[{ id: 'a', variantId: 7, range: good.range }], [unit('u1', 'V1')], [], 'invalid_item'],
+      [[good, good], [unit('u1', 'V1')], [], 'duplicate_item_id'],
+      [[good], [null], [], 'invalid_unit'],
+      [[good], [unit('u1', 'V1'), unit('u1', 'V1')], [], 'duplicate_unit_id'],
+      [[good], [unit('u1', 'V1')], [null], 'invalid_occupation'],
+      [[good], [unit('u1', 'V1')], [{ unitId: '', range: good.range }], 'invalid_occupation'],
+    ];
+    for (const [items, units, occupations, reason] of cases) {
+      expect(() => run(items, units, occupations)).not.toThrow();
+      const result = run(items, units, occupations);
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.failures.map((f) => f.reason)).toContain(reason);
+    }
+  });
+
+  test('R4: janela vazia, invertida ou com data inexistente é recusada (peça e ocupação)', () => {
+    const badRanges: BlockedRange[] = [
+      range('2026-12-05', '2026-12-05'), // vazia
+      range('2026-12-10', '2026-12-05'), // invertida
+      { blockedFrom: { year: 2026, month: 2, day: 31 }, blockedUntilExclusive: { year: 2026, month: 3, day: 5 } }, // data inexistente
+      { blockedFrom: { year: NaN, month: 1, day: 1 }, blockedUntilExclusive: { year: 2026, month: 3, day: 5 } },
+    ];
+    for (const bad of badRanges) {
+      expect(failures([{ id: 'a', variantId: 'V1', range: bad }], [unit('u1', 'V1')])).toEqual(['a:invalid_range']);
+      // ocupação inválida NUNCA é ignorada: ignorá-la liberaria uma unidade possivelmente ocupada
+      expect(failures([item('a', 'V1', '2026-12-01', '2026-12-03')], [unit('u1', 'V1')], [{ unitId: 'u1', range: bad }])).toEqual(['undefined:invalid_occupation']);
+    }
+    // janela de 1 dia ([d, d+1)) é válida
+    expect(assignments([item('a', 'V1', '2026-12-05', '2026-12-06')], [unit('u1', 'V1')])).toEqual({ a: 'u1' });
+  });
+
+  test('viradas de mês, ano e ano bissexto: janelas que encostam não conflitam, sobrepostas conflitam', () => {
+    const units = [unit('u1', 'V1')];
+    // mês: [28/02, 01/03) em ano bissexto contém 29/02
+    expect(failures([item('a', 'V1', '2028-02-27', '2028-03-01'), item('b', 'V1', '2028-02-29', '2028-03-03')], units)).toEqual(['a:items_conflict_with_each_other', 'b:items_conflict_with_each_other']);
+    expect(assignments([item('a', 'V1', '2028-02-27', '2028-03-01'), item('b', 'V1', '2028-03-01', '2028-03-05')], units)).toEqual({ a: 'u1', b: 'u1' });
+    // ano: [28/12, 02/01) e [02/01, 06/01) encostam
+    expect(assignments([item('a', 'V1', '2026-12-28', '2027-01-02'), item('b', 'V1', '2027-01-02', '2027-01-06')], units)).toEqual({ a: 'u1', b: 'u1' });
+    expect(failures([item('a', 'V1', '2026-12-28', '2027-01-03'), item('b', 'V1', '2027-01-02', '2027-01-06')], units)).toEqual(['a:items_conflict_with_each_other', 'b:items_conflict_with_each_other']);
+    // 2027 não é bissexto: 29/02/2027 não existe
+    expect(failures([{ id: 'a', variantId: 'V1', range: { blockedFrom: { year: 2027, month: 2, day: 29 }, blockedUntilExclusive: { year: 2027, month: 3, day: 2 } } }], units)).toEqual(['a:invalid_range']);
   });
 
   test('janela de uma peça criada pelo cronograma bate com a ocupação já gravada no banco (mesmo intervalo meio-aberto)', () => {

@@ -50,10 +50,25 @@ e-mails/WhatsApp, "Pagamentos a tratar".
 
 | Opção | Como | Prós | Contras / riscos |
 | --- | --- | --- | --- |
-| **A (recomendada)** | Linha com preço unitário = meia diária; quantidade = `dias + 1` (1ª diária integral = 2 meias) | Sem novos escopos; matemática exata; estoque/sincronização inalterados em lógica | Muda a validação de linhas no webhook; Shopify exibe meia diária por unidade; quantidade ≠ nº de peças (afeta estoque e relatórios) |
+| **A (recomendada, com ressalva de centavos — ver 4.1)** | Linha com preço unitário = meia diária; quantidade = `dias + 1` (1ª diária integral = 2 meias) | Sem novos escopos; estoque/sincronização inalterados em lógica; exata para valor-base em centavos PARES | **Não é exata para valor-base com centavos ímpares**; muda a validação de linhas no webhook; Shopify exibe meia diária por unidade; quantidade ≠ nº de peças (afeta estoque e relatórios) |
 | B | Variantes "dia adicional" companheiras | Exibição clara | Catálogo duplicado; sincronização/estoque mais frágeis |
 | C | Código de desconto por reserva | Total exato | Exige `write_discounts` + reinstalar o app; ciclo de vida/limpeza de códigos |
 | D | Draft orders | Preço livre | Fase 2a ignora drafts; novos escopos; fluxo de pagamento diferente |
+
+### 4.1 Arredondamento e a opção A (correção da versão anterior deste documento)
+
+- O motor (`rental-pricing.ts`) arredonda **por dia adicional**: `extraDayCents = round(base × percentual)` e o total é
+  `base + (dias − 1) × extraDayCents`. O modo (`half_up`, `down`, `up`) é parâmetro — decisão comercial pendente.
+- Com valor-base de centavos **ímpares** o resultado depende desse modo e difere de arredondar só no total. Exemplo,
+  R$ 99,99 por 3 dias: `half_up` → R$ 199,99 (9999 + 2 × 5000); `down` → R$ 199,97 (9999 + 2 × 4999); arredondar
+  apenas no total daria R$ 199,98 (9999 + 2 × 4999,5).
+- A **opção A não é exata para todos os valores**: o Shopify cobra `preço unitário × quantidade` em centavos inteiros,
+  e o preço unitário seria a meia diária. Para base **par** (R$ 120,00; R$ 150,00; R$ 350,00) a meia diária é um
+  inteiro e `(dias + 1) × meia diária` bate exatamente com o motor. Para base **ímpar** (R$ 99,99) a meia diária
+  (49,995) não existe em centavos: o preço de 1 diária (2 meias) já não fecha em 99,99, e o total cobrado divergiria do
+  motor. Alternativas: exigir valor-base em centavos pares no catálogo (regra de cadastro verificável); escolher a
+  opção B/C/D; ou aceitar a divergência de até 1 centavo por dia adicional, com a conferência de valor no webhook
+  usando o MESMO critério do checkout. Isto precisa de decisão antes de qualquer integração.
 
 Shopify Functions: inviável no plano da loja. Segurança (qualquer opção): o token Storefront é público e o cliente
 pode editar linhas do carrinho; o servidor deve recalcular, assinar (binding v2) e **conferir no webhook o valor
@@ -79,6 +94,20 @@ esperado** contra o pago antes de confirmar. Hoje isso não existe.
 8. Várias unidades da mesma variante com durações diferentes: permitido?
 9. Multa por atraso, caução, textos legais, reservas feitas fora do sistema.
 10. Aprovação do modelo de dados (seção 3) e da opção de preço (seção 4).
+
+## 6.1 Robustez dos motores (revisão técnica do PR #90)
+
+- Teto INTERNO de sanidade de 3650 dias por peça (`MAX_SANE_RENTAL_DAYS`): não é regra comercial; o teto comercial
+  (`maxDays`/`maxDaysPerItem`) continua parâmetro e nunca pode ficar acima deste.
+- Toda data de entrada e toda data calculada é validada (existe no calendário, anos 1970–2200); datas inexistentes como
+  `2026-02-31` são **rejeitadas** pelos motores novos (`engine-guards.ts`). `civil-date.ts` (legado) não foi alterado e
+  continua normalizando overflow.
+- Entradas inválidas (data NaN, item `null`, lista que não é lista, faixa vazia/invertida) devolvem violações
+  estruturadas; nenhuma delas lança exceção.
+- Alocação: no máximo **6 peças físicas** por chamada (limite operacional conhecido), validado antes da busca; ordem de
+  busca das mais restritas para as menos; orçamento fixo de nós como freio determinístico.
+- Horário de verão (America/Santiago): hora **inexistente** vale o relógio deslocado pelo salto (00:30 → 01:30 local);
+  hora **repetida** vale a primeira ocorrência (a mais cedo, lado conservador para a antecedência mínima).
 
 ## 7. Testes preparados
 
