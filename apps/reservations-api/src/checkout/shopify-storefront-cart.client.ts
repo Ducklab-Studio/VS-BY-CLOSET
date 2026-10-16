@@ -15,6 +15,8 @@ const REQUEST_TIMEOUT_MS = 10_000;
 export interface CartLineInput {
   readonly merchandiseId: string;
   readonly quantity: number;
+  /** Propriedades da LINHA: o checkout da Shopify mostra ao cliente as que não começam com "_". */
+  readonly attributes?: readonly CartAttributeInput[];
 }
 
 export interface CartAttributeInput {

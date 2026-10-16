@@ -10,7 +10,14 @@ import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { type CivilDate, addDays, isSunday } from '../rental-rules/civil-date';
 import { calculateReturnDate, isOnlineReservationAllowed, today as engineToday } from '../rental-rules/rental-engine';
 import { DEFAULT_RENTAL_RULE_CONFIG } from '../rental-rules/rental-rule-config';
-import { civilDateToISO } from '../rental-rules/civil-date';
+import { civilDateToISO, civilDateFromPgDate } from '../rental-rules/civil-date';
+import { canonicalItemsFingerprint, verifyReservationSignature } from '../reservation-binding';
+import { extractNoteAttribute, extractOrderLineVariants, type ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
+
+/** dd/mm/aaaa a partir da data gravada na reserva (o que o cliente deve ver no resumo do checkout). */
+function brDate(date: Date): string {
+  return civilDateToISO(civilDateFromPgDate(date)).split('-').reverse().join('/');
+}
 
 // Segredo do binding assinado Order<->Reservation (ver
 // src/reservation-binding.ts) -- sem fallback de dev em
@@ -127,8 +134,28 @@ describe('CheckoutService — integração real (Neon) + Shopify mockada', () =>
 
       expect(cartClient.cartCreate).toHaveBeenCalledTimes(1);
       const [lines, attributes] = vi.mocked(cartClient.cartCreate).mock.calls[0];
-      expect(lines).toEqual([{ merchandiseId: `gid://shopify/ProductVariant/${variant}`, quantity: 1 }]);
+      const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
+      expect(lines).toEqual([
+        {
+          merchandiseId: `gid://shopify/ProductVariant/${variant}`,
+          quantity: 1,
+          // propriedades da LINHA (aparecem no resumo do checkout): datas reais da reserva em dd/mm/aaaa
+          attributes: [
+            { key: 'Retirada', value: brDate(stored.pickupDate!) },
+            { key: 'Devolução', value: brDate(stored.returnDate!) },
+          ],
+        },
+      ]);
       expect(attributes).toEqual(expect.arrayContaining([{ key: 'reservation_id', value: hold.reservationId }]));
+      // atributos do CARRINHO preservados integralmente (binding, assinatura, datas ISO, termos)
+      expect(attributes.map((a) => a.key)).toEqual(
+        expect.arrayContaining(['reservation_id', 'reservation_binding_id', 'reservation_signature', 'pickup_date', 'effective_return_date', 'rental_duration_days', 'terms_version']),
+      );
+      expect(attributes.find((a) => a.key === 'pickup_date')?.value).toBe(civilDateToISO(civilDateFromPgDate(stored.pickupDate!)));
+      expect(attributes.find((a) => a.key === 'effective_return_date')?.value).toBe(civilDateToISO(civilDateFromPgDate(stored.returnDate!)));
+      expect(attributes.find((a) => a.key === 'reservation_signature')?.value).toMatch(/^[a-f0-9]{64}$/);
+      // nenhuma propriedade de linha escondida/sensível: só as duas de exibição
+      expect(lines[0].attributes?.map((a) => a.key)).toEqual(['Retirada', 'Devolução']);
 
       const reservation = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId } });
       expect(reservation.status).toBe('pending_payment');
@@ -152,7 +179,7 @@ describe('CheckoutService — integração real (Neon) + Shopify mockada', () =>
       await service.createCheckout({ reservationId: hold.reservationId, holdToken: hold.holdToken! });
 
       const [lines] = vi.mocked(cartClient.cartCreate).mock.calls[0];
-      expect(lines).toEqual([{ merchandiseId: `gid://shopify/ProductVariant/${variant}`, quantity: 2 }]);
+      expect(lines).toEqual([{ merchandiseId: `gid://shopify/ProductVariant/${variant}`, quantity: 2, attributes: expect.any(Array) }]);
     },
     TIMEOUT,
   );
@@ -177,10 +204,64 @@ describe('CheckoutService — integração real (Neon) + Shopify mockada', () =>
       const [lines] = vi.mocked(cartClient.cartCreate).mock.calls[0];
       expect(lines).toEqual(
         expect.arrayContaining([
-          { merchandiseId: `gid://shopify/ProductVariant/${variantA}`, quantity: 1 },
-          { merchandiseId: `gid://shopify/ProductVariant/${variantB}`, quantity: 1 },
+          { merchandiseId: `gid://shopify/ProductVariant/${variantA}`, quantity: 1, attributes: expect.any(Array) },
+          { merchandiseId: `gid://shopify/ProductVariant/${variantB}`, quantity: 1, attributes: expect.any(Array) },
         ]),
       );
+    },
+    TIMEOUT,
+  );
+
+  test(
+    '4b) propriedades de linha (Retirada/Devolução) NÃO interferem na validação do pedido: fingerprint das linhas e assinatura HMAC seguem válidos',
+    async () => {
+      const variantA = await createVariant(1);
+      const variantB = await createVariant(1);
+      const hold = await createHold(
+        [
+          { shopifyVariantId: variantA, quantity: 1 },
+          { shopifyVariantId: variantB, quantity: 1 },
+        ],
+        33,
+      );
+      const cartClient = fakeCartClient(async () => makeOkResult());
+      const service = new CheckoutService(prisma, rentalRuleConfig, cartClient);
+      await service.createCheckout({ reservationId: hold.reservationId, holdToken: hold.holdToken! });
+
+      const [lines, attributes] = vi.mocked(cartClient.cartCreate).mock.calls[0];
+      // Todas as linhas levam as mesmas duas propriedades de exibição.
+      for (const line of lines) expect(line.attributes?.map((a) => a.key)).toEqual(['Retirada', 'Devolução']);
+
+      // Simula o que a Shopify entrega no webhook: linhas com `properties` + atributos do carrinho como note_attributes.
+      const order = {
+        id: 1,
+        admin_graphql_api_id: 'gid://shopify/Order/1',
+        note_attributes: attributes.map((a) => ({ name: a.key, value: a.value })),
+        line_items: lines.map((l) => ({
+          variant_id: l.merchandiseId.replace('gid://shopify/ProductVariant/', ''),
+          quantity: l.quantity,
+          properties: l.attributes?.map((a) => ({ name: a.key, value: a.value })),
+        })),
+      } as unknown as ShopifyOrderPayload;
+
+      const stored = await prisma.reservation.findUniqueOrThrow({ where: { id: hold.reservationId }, include: { items: { include: { rentalUnit: true } } } });
+      const signedFingerprint = canonicalItemsFingerprint(stored.items.map((i) => ({ variantId: i.rentalUnit.shopifyVariantId ?? '', quantity: 1 })));
+      // 1) as linhas do pedido (com propriedades) continuam batendo exatamente com as peças da reserva
+      expect(canonicalItemsFingerprint(extractOrderLineVariants(order))).toBe(signedFingerprint);
+      // 2) a assinatura HMAC (calculada só com reserva+tentativa+itens+datas ISO) continua verificável com os dados do pedido
+      expect(
+        verifyReservationSignature(
+          process.env.RESERVATION_BINDING_SECRET!,
+          {
+            reservationId: stored.id,
+            reservationBindingId: extractNoteAttribute(order, 'reservation_binding_id')!,
+            itemsFingerprint: signedFingerprint,
+            pickupDate: civilDateToISO(civilDateFromPgDate(stored.pickupDate!)),
+            effectiveReturnDate: civilDateToISO(civilDateFromPgDate(stored.returnDate!)),
+          },
+          extractNoteAttribute(order, 'reservation_signature'),
+        ),
+      ).toBe(true);
     },
     TIMEOUT,
   );

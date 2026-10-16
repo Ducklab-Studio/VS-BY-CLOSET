@@ -89,7 +89,7 @@ export class CheckoutService {
       throw new ConflictException('Uma das peças desta reserva não está mais disponível.');
     }
 
-    const lines = buildCartLines(reservation.items);
+    const lines = buildCartLines(reservation.items, reservation.pickupDate, reservation.returnDate);
 
     // Idempotência (item 7) — o guard É a query, não um lock em memória:
     // só uma chamada por vez consegue mover none/failed → creating; quem
@@ -285,7 +285,18 @@ export class CheckoutService {
   }
 }
 
-function buildCartLines(items: NonNullable<ReservationWithItems>['items']): CartLineInput[] {
+/** dd/mm/aaaa — o mesmo formato (pt-BR) que o carrinho do navegador usa em "Retirada"/"Devolução". */
+function formatDateBR(date: Date): string {
+  return civilDateToISO(civilDateFromPgDate(date)).split('-').reverse().join('/');
+}
+
+function buildCartLines(items: NonNullable<ReservationWithItems>['items'], pickupDate: Date | null, returnDate: Date | null): CartLineInput[] {
+  // Só para EXIBIÇÃO no resumo do checkout (propriedades da linha, sem "_"): as datas reais da reserva.
+  // A verdade continua nos atributos do carrinho assinados (reservation_signature) e no banco; o webhook
+  // só compara variante e quantidade das linhas, então estas propriedades não entram na validação.
+  const dateAttributes = pickupDate && returnDate
+    ? [{ key: 'Retirada', value: formatDateBR(pickupDate) }, { key: 'Devolução', value: formatDateBR(returnDate) }]
+    : [];
   const byVariant = new Map<string, number>();
   for (const item of items) {
     const variantId = item.rentalUnit.shopifyVariantId;
@@ -297,6 +308,7 @@ function buildCartLines(items: NonNullable<ReservationWithItems>['items']): Cart
   return Array.from(byVariant.entries()).map(([variantId, quantity]) => ({
     merchandiseId: variantId.startsWith('gid://') ? variantId : `gid://shopify/ProductVariant/${variantId}`,
     quantity,
+    ...(dateAttributes.length > 0 ? { attributes: dateAttributes } : {}),
   }));
 }
 
