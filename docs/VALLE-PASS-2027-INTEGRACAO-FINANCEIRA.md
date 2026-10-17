@@ -115,6 +115,22 @@ Para **interromper**: (1) chave `VALE_PASS_TWO_VOUCHERS_ENABLED=false` (novos pa
 
 ---
 
+### 7.1 Revisão da chave de parada: cenários em que DESLIGAR pode deixar um cliente pago sem benefício (20/10/2026)
+
+A chave proposta acima ("desligada = campanha com benefícios **retém** o pedido pago") só é segura se cada item abaixo for garantido no PR F e testado. A lista completa, com as garantias exigidas, está em `VALLE-PASS-2027-ATIVACAO-ROLLBACK.md` §1. Resumo dos riscos:
+
+1. **Desligada como "pular a emissão"** → pedido pago sem voucher e **sem retenção** (invisível). Tem de **criar retenção sempre** (motivo novo `ISSUANCE_PAUSED`).
+2. **Desligada caindo no caminho legado** → o cliente recebe um voucher único de R$ 350 sem empresa e a guarda `already` impede a emissão correta depois (benefício errado e permanente). Campanha com benefícios **nunca** usa o legado.
+3. **Religar não reprocessa** → o webhook não chega de novo e `vouchers_processed_at` já está preenchido. É preciso uma rotina de **retomada** das retenções (mais antigas primeiro).
+4. **Reconciliação com a chave desligada** também precisa reter, não pular.
+5. **O prazo de 3 dias corre desde o pagamento**, não desde a retomada → alerta de retenção parada (`ISSUANCE_HOLD_STALE`, 24 h, já no PR E) e contato direto com os clientes se a pausa passar de 48 h.
+6. **Vendas continuam abertas na Shopify** durante a pausa → a pausa vem sempre com estoque 0 da variante (equipe).
+7. **Reinício do Railway / chave lida só no boot / instâncias com valores diferentes** → ler a chave por pedido; idempotência por lock de pedido já resolve a convergência (testar duas instâncias com chaves opostas).
+8. **A chave não pode desligar cancelamento, reembolso nem exclusão** (só a emissão) e **não pode bloquear a resolução manual** ("Emitir" com confirmação reforçada é a saída de emergência).
+9. **Rollback de código com a campanha já configurada é perigoso**: uma versão sem a emissão nova mandaria os novos pagamentos ao caminho legado. Ordem obrigatória: parar vendas → pausar emissão → só então reverter.
+
+Correção ao texto da §7: "`campaign.active=false` também interrompe" **não** vale para o checkout da Shopify — só o estoque zerado na variante impede a venda.
+
 ## 8. Monitoramento mínimo no lançamento
 Alertas críticos já existentes: `ISSUANCE_HOLDS_OPEN`, `GLOBAL_LIMIT_EXCEEDED`, `EMAIL_OVERDUE`, `EMAIL_NEEDS_ATTENTION`. A acrescentar: `PAID_ORDER_UNHANDLED`, divergência de preço/moeda, fila de e-mail parada com envio bloqueado (já existe), e um resumo diário (vendas, retenções, e-mails aceitos/entregues).
 
