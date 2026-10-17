@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { itemPickupDate, itemReturnDate, occupiedBounds, occupiesWindow } from '../reservation-schedule/occupancy-sql';
 import { civilDateFromISO, civilDateToISO, diffDays } from '../rental-rules/civil-date';
 
 const MAX_RANGE_DAYS = 120;
@@ -44,22 +44,23 @@ export class AdminCalendarService {
       throw new BadRequestException(`Período solicitado excede o máximo de ${MAX_RANGE_DAYS} dias.`);
     }
 
+    // Regra de ocupação e datas por peça: `reservation-schedule/occupancy-sql` (uma só cópia). Cada linha do
+    // calendário é UMA peça e mostra as datas DELA (item legado: as da reserva, como sempre).
+    const fromDay = civilDateToISO(from);
+    const toDay = civilDateToISO(to);
+    const bounds = occupiedBounds(fromDay, toDay, 'ri');
     try {
       return await this.prisma.$queryRaw<CalendarItem[]>`
         SELECT
           ri.reservation_id AS "reservationId", ri.status, r.source, r.customer_name AS "customerName",
           ri.rental_unit_id AS "rentalUnitId", ru.code AS "rentalUnitCode",
-          r.pickup_date::text AS "pickupDate", r.return_date::text AS "effectiveReturnDate",
-          (CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${civilDateToISO(from)}::date ELSE lower(ri.blocked_range) END)::text AS "blockedFrom",
-          (CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${civilDateToISO(to)}::date ELSE upper(ri.blocked_range) END)::text AS "blockedUntilExclusive"
+          (${itemPickupDate('ri', 'r')})::text AS "pickupDate", (${itemReturnDate('ri', 'r')})::text AS "effectiveReturnDate",
+          (${bounds.lo})::text AS "blockedFrom",
+          (${bounds.hi})::text AS "blockedUntilExclusive"
         FROM reservation_items ri
         JOIN reservations r ON r.id = ri.reservation_id
         JOIN rental_units ru ON ru.id = ri.rental_unit_id
-        WHERE ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-          AND (
-            ri.blocked_range && daterange(${civilDateToISO(from)}::date, ${civilDateToISO(to)}::date, '[)')
-            OR (ri.status IN ('returned', 'cleaning') AND lower(ri.blocked_range) <= ${civilDateToISO(to)}::date)
-          )
+        WHERE ${occupiesWindow(fromDay, toDay, 'ri')}
         ORDER BY "blockedFrom"
       `;
     } catch (err) {

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnav
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { heldUntilCompleted } from '../reservation-schedule/occupancy-sql';
 
 export interface PieceListItem {
   readonly id: string;
@@ -63,7 +64,7 @@ export class AdminPiecesService {
               AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
               AND (
                 ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
-                OR ri.status IN ('returned', 'cleaning')
+                OR ${heldUntilCompleted('ri')}
               )
           ) AS "currentlyOccupied",
           (
@@ -134,7 +135,7 @@ export class AdminPiecesService {
             AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
             AND (
               ri.blocked_range @> (now() AT TIME ZONE (SELECT timezone FROM rental_rule_config WHERE id = 'default'))::date
-              OR ri.status IN ('returned', 'cleaning')
+              OR ${heldUntilCompleted('ri')}
             )
         ) AS "currentlyOccupied",
         (
