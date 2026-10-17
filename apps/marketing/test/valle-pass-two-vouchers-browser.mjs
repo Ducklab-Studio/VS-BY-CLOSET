@@ -58,7 +58,8 @@ async function createUser(name, role) {
   return { id: user.id, token };
 }
 async function newContext(token, options = {}) {
-  const context = await browser.newContext(options);
+  // O Chromium no Windows ignora a variável TZ: o contexto segue o TZ do processo para o servidor e o navegador usarem o mesmo fuso (como na CI).
+  const context = await browser.newContext({ ...(process.env.TZ ? { timezoneId: process.env.TZ } : {}), ...options });
   await context.route('**/*', (route) => {
     const hostname = new URL(route.request().url()).hostname;
     if (['localhost', '127.0.0.1'].includes(hostname)) return route.continue();
@@ -71,7 +72,7 @@ async function newContext(token, options = {}) {
 async function newPage(context, errors) {
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message.slice(0, 30)} @ ${page.url()} (erro ${errors.length}, ${Math.round(Date.now()/1000)%1000}s)`));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
   return page;
 }
@@ -165,7 +166,7 @@ try {
   assert.equal((await db.adminAuditEvent.findFirst({ where: { entityId: campaignId, action: 'VALE_PASS_BENEFITS_UPDATED' } })).adminUserId, admin.id);
   pass('1) modelo Valle Pass 2027 cadastrado pela tela (sugestão só grava após confirmar); nenhum voucher emitido; auditado');
 
-  // 2) Pagamento retido (fila): descartar é recusado enquanto o pedido está pago; emitir exige justificativa e cria os DOIS vouchers.
+  // 2) Pagamento retido (fila): confirmação reforçada. Limite 1 com 1 voucher legado vendido + 1 pedido pago aguardando = consumo 2 (excede em 1).
   storeId = `${prefix}-store`;
   await db.$executeRaw`INSERT INTO stores (id, shopify_domain, currency) VALUES (${storeId}, ${storeId + '.invalid'}, 'BRL')`;
   const orderId = `${prefix}-order`;
@@ -177,29 +178,74 @@ try {
       orderCreatedAt: new Date(Date.now() - 3_600_000), statusChangedAt: new Date(Date.now() - 3_600_000), vouchersProcessedAt: new Date(),
     },
   });
+  await db.valePass.create({ data: { code: `${prefix}-LEGADO`, campaignId, amountCents: 35_000, status: 'ACTIVE', purchasedAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() + 86_400_000) } });
+  await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: 1 } });
   const hold = await db.valePassIssuanceHold.create({
-    data: { shopifyOrderId: orderId, campaignId, units: 1, reason: 'CAPACITY_EXCEEDED', status: 'OPEN', openFlag: true, detail: { globalLimit: 1000 } },
+    data: { shopifyOrderId: orderId, campaignId, units: 1, reason: 'CAPACITY_EXCEEDED', status: 'OPEN', openFlag: true, detail: { globalLimit: 1 } },
   });
+  const newVouchers = () => db.valePass.findMany({ where: { campaignId, company: { not: null } }, orderBy: { company: 'asc' } });
   await page.reload();
   await card(page).waitFor();
   await expand(page);
   await card(page).getByText(/Pagamentos confirmados aguardando resolução \(1\)/).waitFor();
   await card(page).getByText(/Limite global esgotado/).waitFor();
-  await card(page).getByText(/ISSUANCE_HOLDS_OPEN|aguardam resolução de um administrador/).first().waitFor();
+  await card(page).getByText(/aguardam resolução de um administrador/).first().waitFor();
   await card(page).getByRole('button', { name: 'Resolver' }).click();
+  const confirmation = card(page).getByLabel('Confirmação da emissão excepcional');
+  await confirmation.waitFor();
+  assert.match(await confirmation.innerText(), /Limite global\s*1\b/);
+  assert.match(await confirmation.innerText(), /Consumido hoje\s*2 \(1 vendidos \+ 1 pagos aguardando\)/);
+  assert.match(await confirmation.innerText(), /Total projetado depois\s*2 \(2 vendidos \+ 0 aguardando\)/);
+  await confirmation.getByText(/ultrapassa o limite autorizado em 1 unidade\(s\) \(2 de 1\)/).waitFor();
   const emitir = card(page).getByRole('button', { name: /Emitir \(excedente aprovado\)/ });
-  assert.equal(await emitir.isDisabled(), true); // sem justificativa não habilita
-  await card(page).getByLabel(/Justificativa/).fill('Teste: pedido ainda pago');
+  const noteInput = card(page).getByLabel(/Justificativa/);
+  const totalInput = card(page).getByLabel(/digite o total projetado \(2\)/);
+  assert.equal(await emitir.isDisabled(), true); // sem justificativa nem total
+  await noteInput.fill('curta'); // < 10 caracteres
+  await totalInput.fill('2');
+  assert.equal(await emitir.isDisabled(), true);
+  await noteInput.fill('Excedente aprovado no teste');
+  await totalInput.fill('3'); // total errado
+  assert.equal(await emitir.isDisabled(), true);
+  await totalInput.fill('2');
+  assert.equal(await emitir.isDisabled(), false); // só aqui habilita
+  await totalInput.fill('');
   await card(page).getByRole('button', { name: /Descartar/ }).click();
   await card(page).getByText(/continua pago/).waitFor();
   assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: hold.id } })).status, 'OPEN');
-  assert.equal(await db.valePass.count({ where: { campaignId } }), 0);
-  pass('2) pagamento retido listado; descartar recusado enquanto o pedido está pago; sem justificativa não habilita');
+  assert.equal((await newVouchers()).length, 0);
 
-  await card(page).getByLabel(/Justificativa/).fill('Excedente aprovado no teste');
+  // A API recusa por conta própria (a tela não é a barreira): sem confirmação → 400; números vistos errados → 409; total digitado errado → 422.
+  const http = (path, init = {}) => fetch(`${apiUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': admin.token } });
+  const seen = await (await http(`/admin/vale-pass/holds/${hold.id}/preview`)).json();
+  assert.equal(seen.projectedTotal, 2);
+  assert.equal(seen.exceededBy, 1);
+  const expected = { projectedTotal: seen.projectedTotal, consumedTotal: seen.consumedBefore, globalLimit: seen.globalLimit, holdUpdatedAt: seen.holdUpdatedAt };
+  const post = (body) => http(`/admin/vale-pass/holds/${hold.id}/issue`, { method: 'POST', body: JSON.stringify({ adminUserId: admin.id, ...body }) });
+  assert.equal((await post({ note: 'Justificativa suficiente', expected })).status, 400); // sem confirmTotal
+  assert.equal((await post({ note: 'curta', confirmTotal: 2, expected })).status, 400); // justificativa curta
+  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 2, expected: { ...expected, consumedTotal: 1 } })).status, 409);
+  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 3, expected })).status, 422);
+  assert.equal((await newVouchers()).length, 0);
+  assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: hold.id } })).status, 'OPEN');
+  pass('2) confirmação reforçada: limite/consumo/total projetado e aviso de excesso; botão só habilita com justificativa ≥ 10 e total digitado certo; descartar recusado com pedido pago; a API recusa sem confirmação (400), com números vistos errados (409) e total errado (422)');
+
+  // 2b) Capacidade muda entre a visualização e a confirmação: rejeita, recarrega os números e exige digitar de novo.
+  await noteInput.fill('Excedente aprovado no teste');
+  await totalInput.fill('2');
+  await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: 2 } }); // outra pessoa mexe no limite depois de a tela abrir
+  await emitir.click();
+  await card(page).getByText(/mudou desde que a confirmação foi aberta/).waitFor();
+  assert.equal((await newVouchers()).length, 0);
+  await confirmation.getByText(/não ultrapassa o limite atual/).waitFor(); // números novos na tela
+  assert.equal(await totalInput.inputValue(), ''); // exige digitar de novo
+  assert.equal(await emitir.isDisabled(), true);
+  pass('2b) capacidade alterada depois de abrir a confirmação: a emissão é rejeitada, nada é criado, os números são recarregados e o total precisa ser digitado outra vez');
+
+  await totalInput.fill('2');
   await emitir.click();
   await card(page).getByText(/Pagamentos confirmados aguardando resolução/).waitFor({ state: 'detached' });
-  const vouchers = await db.valePass.findMany({ where: { campaignId }, orderBy: { company: 'asc' } });
+  const vouchers = await newVouchers();
   assert.equal(vouchers.length, 2);
   assert.deepEqual(vouchers.map((v) => [v.company, v.amountCents]), [['VALLE_SHOWROOM', 50_000], ['VS_BY_CLOSET', 5_000]]);
   assert.equal(new Set(vouchers.map((v) => v.groupId)).size, 1);
@@ -208,16 +254,28 @@ try {
   const audit = await db.adminAuditEvent.findFirst({ where: { entityId: hold.id } });
   assert.equal(audit.action, 'VALE_PASS_HOLD_ISSUED');
   assert.equal(audit.adminUserId, admin.id);
-  pass('2b) emitir com justificativa cria exatamente 2 vouchers (R$ 500 Valle Showroom + R$ 50 VS BY CLOSET), mesmo grupo, retenção fechada e auditada');
+  assert.equal(audit.isCritical, true);
+  assert.deepEqual([audit.before.globalLimit, audit.before.sold, audit.before.pending, audit.before.consumed], [2, 1, 1, 2]);
+  assert.deepEqual([audit.after.sold, audit.after.pending, audit.after.consumed], [2, 0, 2]);
+  assert.equal(audit.detail.note, 'Excedente aprovado no teste');
+  assert.equal(audit.detail.confirmedTotal, 2);
+  pass('2c) emissão confirmada cria exatamente 2 vouchers (R$ 500 Valle Showroom + R$ 50 VS BY CLOSET), mesmo grupo; consumo igual antes e depois; auditoria crítica com totais, justificativa e administrador');
 
-  // 3) Os dois vouchers aparecem separados, com empresa e validade 2027; a busca pelo pedido os encontra.
-  await page.reload();
-  await page.getByPlaceholder('Buscar por código, nome, telefone, e-mail ou nº do pedido').fill(`${prefix}#1`);
-  await page.getByText('Válido só na Valle Showroom').waitFor();
-  await page.getByText('Válido só na VS BY CLOSET').waitFor();
-  await page.getByText(/Válido de 01\/01\/2027/).first().waitFor();
-  await page.getByText(/Válido até 31\/12\/2027/).first().waitFor();
-  pass('3) os dois vouchers aparecem separados, com a empresa e a validade de 01/01/2027 a 31/12/2027');
+  // 3) Os dois vouchers aparecem separados, com empresa e validade 2027 — IGUAL em navegadores de fusos diferentes.
+  for (const timezoneId of ['UTC', 'America/Sao_Paulo', 'America/Santiago', 'Pacific/Auckland']) {
+    const tzContext = await newContext(admin.token, { viewport: { width: 1280, height: 1000 }, timezoneId });
+    const tzPage = await newPage(tzContext, []); // erros de hidratação de OUTRAS datas do painel (pedidos/lotes, ainda no fuso do aparelho) são pré-existentes e fora do escopo daqui
+    await tzPage.goto(vallePass);
+    await tzPage.getByPlaceholder('Buscar por código, nome, telefone, e-mail ou nº do pedido').fill(`${prefix}#1`);
+    await tzPage.getByText('Válido só na Valle Showroom').waitFor();
+    await tzPage.getByText('Válido só na VS BY CLOSET').waitFor();
+    await tzPage.getByText(/Válido de 01\/01\/2027/).first().waitFor();
+    await tzPage.getByText(/Válido até 31\/12\/2027/).first().waitFor();
+    assert.equal(await tzPage.getByText(/Válido até 01\/01\/2028/).count(), 0, timezoneId);
+    await tzContext.close();
+  }
+  pass('3) os dois vouchers aparecem separados, com a empresa e a validade de 01/01/2027 a 31/12/2027 em navegadores UTC, São Paulo, Santiago e Auckland');
+
 
   // 4) Perfil sem ADMIN: vê o painel, sem botões de escrita, e a API recusa (403).
   const staffCtx = await newContext(staff.token, { viewport: { width: 1280, height: 1000 } });
@@ -228,10 +286,12 @@ try {
   await expand(staffPage);
   await card(staffPage).getByText(/Pagamentos confirmados aguardando resolução/).waitFor();
   assert.equal(await card(staffPage).getByRole('button', { name: /Resolver|Sugerir modelo|Emitir|Descartar/ }).count(), 0);
+  const staffPreview = await fetch(`${apiUrl}/admin/vale-pass/holds/${hold2.id}/preview`, { headers: { Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': staff.token } });
+  assert.equal(staffPreview.status, 403); // nem o retrato dos números é do STAFF
   const forbidden = await fetch(`${apiUrl}/admin/vale-pass/holds/${hold2.id}/issue`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': staff.token },
-    body: JSON.stringify({ adminUserId: staff.id, note: 'tentativa sem perfil' }),
+    body: JSON.stringify({ adminUserId: staff.id, note: 'tentativa sem perfil', confirmTotal: 2, expected: { projectedTotal: 2, consumedTotal: 2, globalLimit: 2, holdUpdatedAt: new Date().toISOString() } }),
   });
   assert.equal(forbidden.status, 403);
   assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: hold2.id } })).status, 'OPEN');

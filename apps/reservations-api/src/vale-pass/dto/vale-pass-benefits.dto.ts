@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDefined, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { MAX_BENEFITS_PER_CAMPAIGN, MAX_VOUCHER_AMOUNT_CENTS } from '../vale-pass-benefits';
 
 export class BenefitDto {
@@ -74,4 +74,44 @@ export class HoldActionDto {
   @MinLength(3)
   @MaxLength(500)
   note!: string;
+}
+
+export class IssueHoldExpectedDto {
+  @IsInt()
+  @Min(0)
+  projectedTotal!: number;
+
+  @IsInt()
+  @Min(0)
+  consumedTotal!: number;
+
+  @ValidateIf((_o, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  globalLimit!: number | null;
+
+  @IsString()
+  @MaxLength(40)
+  holdUpdatedAt!: string;
+}
+
+/** Emissão excepcional acima do limite: justificativa forte + total projetado digitado + os números que a pessoa viu. */
+export class IssueHoldDto {
+  @IsOptional()
+  @IsUUID()
+  adminUserId?: string;
+
+  @IsString()
+  @MinLength(10)
+  @MaxLength(500)
+  note!: string;
+
+  @IsInt()
+  @Min(0)
+  confirmTotal!: number;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => IssueHoldExpectedDto)
+  expected!: IssueHoldExpectedDto;
 }

@@ -13,8 +13,12 @@ import {
   getValePassCapacity,
   listValePassCampaigns,
   replaceValePassBenefits,
-  resolveValePassHold,
+  dismissValePassHold,
+  getValePassHoldPreview,
+  issueValePassHold,
+  type IssueValePassHoldInput,
   type ValePassBenefitInput,
+  type ValePassHoldProjection,
   listValePassOrders,
   listValePassVouchers,
   markValePassOrdersViewed,
@@ -233,19 +237,47 @@ export async function updateValePassLotAction(
   }
 }
 
-/** Resolve um pagamento retido: emitir (excedente aprovado) ou descartar (pedido já não está pago). Só ADMIN, com justificativa. */
-export async function resolveValePassHoldAction(holdId: string, action: 'issue' | 'dismiss', note: string): Promise<{ error: string | null }> {
+/** Descartar um pagamento retido cujo pedido deixou de estar pago. Só ADMIN, com justificativa. */
+export async function resolveValePassHoldAction(holdId: string, action: 'dismiss', note: string): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   requireAdminRole(session, 'ADMIN');
-  if (action !== 'issue' && action !== 'dismiss') return { error: 'Ação inválida.' };
+  if (action !== 'dismiss') return { error: 'Ação inválida.' };
   if (note.trim().length < 3) return { error: 'Informe a justificativa (mínimo de 3 caracteres).' };
   try {
-    await resolveValePassHold(holdId, action, note.trim(), session.id);
+    await dismissValePassHold(holdId, note.trim(), session.id);
     revalidateValePassPath();
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível resolver a retenção.' };
+  }
+}
+
+/** Números da confirmação reforçada da emissão acima do limite (somente leitura; só ADMIN). */
+export async function previewValePassHoldAction(holdId: string): Promise<{ projection: ValePassHoldProjection | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    return { projection: await getValePassHoldPreview(holdId, session.id), error: null };
+  } catch (err) {
+    return { projection: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar a confirmação.' };
+  }
+}
+
+/** Emissão excepcional acima do limite: justificativa ≥ 10 caracteres, total projetado digitado e os números vistos. A API revalida tudo. */
+export async function issueValePassHoldAction(holdId: string, input: IssueValePassHoldInput): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (input.note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  if (!Number.isInteger(input.confirmTotal)) return { error: 'Digite o total projetado para confirmar.' };
+  try {
+    await issueValePassHold(holdId, { ...input, note: input.note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível emitir os vouchers.' };
   }
 }
 

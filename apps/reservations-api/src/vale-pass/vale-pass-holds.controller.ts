@@ -3,8 +3,8 @@ import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
 import { RequireModule } from '../admin/require-module.decorator';
-import { ValePassHoldsService, type HoldItem } from './vale-pass-holds.service';
-import { HoldActionDto } from './dto/vale-pass-benefits.dto';
+import { ValePassHoldsService, type HoldItem, type HoldProjection } from './vale-pass-holds.service';
+import { HoldActionDto, IssueHoldDto } from './dto/vale-pass-benefits.dto';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string };
@@ -25,10 +25,17 @@ export class ValePassHoldsController {
     return this.holds.list({ includeResolved: includeResolved === 'true' });
   }
 
+  /** Números da confirmação reforçada (limite, consumo de hoje, total projetado). Somente leitura. */
+  @Get(':id/preview')
+  @RequireRole('ADMIN')
+  preview(@Param('id', ParseUUIDPipe) id: string): Promise<HoldProjection> {
+    return this.holds.preview(id);
+  }
+
   @Post(':id/issue')
   @RequireRole('ADMIN')
-  issue(@Param('id', ParseUUIDPipe) id: string, @Body() dto: HoldActionDto, @Req() req: RequestWithAdminUser): Promise<HoldItem> {
-    return this.holds.issue(id, dto.note, req.adminUser!.id, req.adminUser!.name);
+  issue(@Param('id', ParseUUIDPipe) id: string, @Body() dto: IssueHoldDto, @Req() req: RequestWithAdminUser): Promise<HoldItem> {
+    return this.holds.issue(id, { note: dto.note, confirmTotal: dto.confirmTotal, expected: dto.expected }, req.adminUser!.id, req.adminUser!.name);
   }
 
   @Post(':id/dismiss')

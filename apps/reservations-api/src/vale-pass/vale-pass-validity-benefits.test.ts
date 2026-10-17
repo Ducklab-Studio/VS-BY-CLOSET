@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'vitest';
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { IssueHoldDto } from './dto/vale-pass-benefits.dto';
 import { DEFAULT_VALIDITY_TIMEZONE, resolveValidityTimezone, voucherWindow, zonedMidnightUtc } from './vale-pass-validity';
 import { MAX_BENEFITS_PER_CAMPAIGN, validateBenefits, type BenefitInput } from './vale-pass-benefits';
 
@@ -58,5 +62,35 @@ describe('validação da configuração de benefícios', () => {
     expect(validateBenefits([{ ...showroom, label: '  ' }]).length).toBeGreaterThan(0);
     const many = Array.from({ length: MAX_BENEFITS_PER_CAMPAIGN + 1 }, (_, i) => ({ ...discount, code: `d${i}` }));
     expect(validateBenefits(many).length).toBeGreaterThan(0);
+  });
+});
+
+describe('DTO da emissão excepcional acima do limite', () => {
+  const valid = {
+    note: 'Excedente aprovado em reunião',
+    confirmTotal: 6,
+    expected: { projectedTotal: 6, consumedTotal: 6, globalLimit: 5, holdUpdatedAt: '2027-01-01T00:00:00.000Z' },
+  };
+  const errorsOf = async (body: unknown) => validate(plainToInstance(IssueHoldDto, body));
+
+  test('aceita o corpo completo, inclusive sem limite global (null)', async () => {
+    expect(await errorsOf(valid)).toEqual([]);
+    expect(await errorsOf({ ...valid, expected: { ...valid.expected, globalLimit: null } })).toEqual([]);
+  });
+
+  test('recusa justificativa curta, total ausente/negativo/fracionado e números vistos ausentes ou incompletos', async () => {
+    for (const body of [
+      { ...valid, note: '123456789' },
+      { ...valid, note: '' },
+      { ...valid, confirmTotal: undefined },
+      { ...valid, confirmTotal: -1 },
+      { ...valid, confirmTotal: 6.5 },
+      { ...valid, confirmTotal: '6' },
+      { ...valid, expected: undefined },
+      { ...valid, expected: { ...valid.expected, projectedTotal: undefined } },
+      { ...valid, expected: { ...valid.expected, holdUpdatedAt: undefined } },
+    ]) {
+      expect((await errorsOf(body)).length, JSON.stringify(body)).toBeGreaterThan(0);
+    }
   });
 });

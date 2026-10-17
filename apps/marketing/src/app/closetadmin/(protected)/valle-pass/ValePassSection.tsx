@@ -24,6 +24,7 @@ import type {
 } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
+import { formatVoucherDisplayDay, formatVoucherFirstDay, formatVoucherLastDay } from '@/lib/valle-pass-dates';
 import { EmptyState } from '@/components/closetadmin/ui';
 import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
 import {
@@ -865,9 +866,9 @@ function VoucherCard({
         {voucher.customerEmail ? <p>{voucher.customerEmail}</p> : null}
         <p>Pedido Shopify: {voucher.shopifyOrderName ?? voucher.shopifyOrderId ?? '—'}</p>
         <p>
-          Comprado em {formatDatePt(voucher.purchasedAt)}
-          {voucher.validFrom ? ` · Válido de ${formatDatePt(voucher.validFrom)}` : ''} · Válido até{' '}
-          {formatDatePt(voucher.validFrom ? new Date(new Date(voucher.expiresAt).getTime() - 1).toISOString() : voucher.expiresAt)}
+          Comprado em {formatVoucherDisplayDay(voucher.purchasedAt)}
+          {voucher.validFrom ? ` · Válido de ${formatVoucherFirstDay(voucher.validFrom)}` : ''} · Válido até{' '}
+          {voucher.validFrom ? formatVoucherLastDay(voucher.expiresAt) : formatDatePt(voucher.expiresAt)}
         </p>
         {voucher.status === 'CANCELLED' && voucher.cancelReason ? (
           <p className="text-red-500 dark:text-red-400">

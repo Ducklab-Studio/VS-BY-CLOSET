@@ -613,8 +613,45 @@ export interface ValePassHold {
   readonly resolutionNote: string | null;
 }
 
-export function resolveValePassHold(holdId: string, action: 'issue' | 'dismiss', note: string, adminUserId: string): Promise<ValePassHold> {
-  return adminPost(`/admin/vale-pass/holds/${pathSegment(holdId)}/${action}`, { note, adminUserId });
+/** Descartar uma retenção cujo pedido deixou de estar pago. */
+export function dismissValePassHold(holdId: string, note: string, adminUserId: string): Promise<ValePassHold> {
+  return adminPost(`/admin/vale-pass/holds/${pathSegment(holdId)}/dismiss`, { note, adminUserId });
+}
+
+/** Retrato da emissão excepcional: o que a tela de confirmação mostra. O servidor recalcula tudo na hora de emitir. */
+export interface ValePassHoldProjection {
+  readonly holdId: string;
+  readonly campaignName: string;
+  readonly orderName: string | null;
+  readonly orderStatus: string | null;
+  readonly units: number;
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly globalLimit: number | null;
+  readonly soldBefore: number;
+  readonly pendingBefore: number;
+  readonly consumedBefore: number;
+  readonly soldAfter: number;
+  readonly pendingAfter: number;
+  readonly projectedTotal: number;
+  readonly exceedsLimit: boolean;
+  readonly exceededBy: number;
+  readonly holdUpdatedAt: string;
+  readonly canIssue: boolean;
+  readonly blockedReason: string | null;
+}
+
+export function getValePassHoldPreview(holdId: string, adminUserId: string): Promise<ValePassHoldProjection> {
+  return adminGet(`/admin/vale-pass/holds/${pathSegment(holdId)}/preview`, adminUserId);
+}
+
+export interface IssueValePassHoldInput {
+  readonly note: string;
+  readonly confirmTotal: number;
+  readonly expected: { readonly projectedTotal: number; readonly consumedTotal: number; readonly globalLimit: number | null; readonly holdUpdatedAt: string };
+}
+
+export function issueValePassHold(holdId: string, input: IssueValePassHoldInput, adminUserId: string): Promise<ValePassHold> {
+  return adminPost(`/admin/vale-pass/holds/${pathSegment(holdId)}/issue`, { ...input, adminUserId });
 }
 
 export function getValePassCapacity(campaignId: string, adminUserId: string): Promise<ValePassCapacity> {

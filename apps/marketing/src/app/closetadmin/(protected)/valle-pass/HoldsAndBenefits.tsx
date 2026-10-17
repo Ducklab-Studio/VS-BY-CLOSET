@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold } from '@/lib/admin-data';
-import { replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import type { ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import { issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
 /**
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
@@ -43,22 +43,71 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
   );
 }
 
+const MIN_ISSUE_NOTE = 10;
+
 function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; canManage: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
+  const [typed, setTyped] = useState('');
+  const [projection, setProjection] = useState<ValePassHoldProjection | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function resolve(action: 'issue' | 'dismiss') {
+  async function openPanel() {
+    if (open) return setOpen(false);
+    setOpen(true);
+    await loadProjection();
+  }
+
+  /** Busca os números ATUAIS. Chamado ao abrir e sempre que o servidor disser que algo mudou (nova confirmação). */
+  async function loadProjection() {
+    setError(null);
+    setTyped('');
+    const result = await previewValePassHoldAction(hold.id);
+    setProjection(result.projection);
+    if (result.error) setError(result.error);
+  }
+
+  async function dismiss() {
     setPending(true);
     setError(null);
-    const result = await resolveValePassHoldAction(hold.id, action, note);
+    const result = await resolveValePassHoldAction(hold.id, 'dismiss', note);
     setPending(false);
     if (result.error) return setError(result.error);
     setOpen(false);
     setNote('');
     onChanged();
   }
+
+  async function issue() {
+    if (!projection) return;
+    setPending(true);
+    setError(null);
+    const result = await issueValePassHoldAction(hold.id, {
+      note,
+      confirmTotal: Number(typed),
+      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, holdUpdatedAt: projection.holdUpdatedAt },
+    });
+    if (result.error) {
+      const message = result.error;
+      if (/mudou desde que|divergiu/.test(message)) {
+        await loadProjection(); // números novos na tela; a pessoa precisa digitar de novo (a recarga limpa a mensagem, então ela volta depois)
+        setError(`${message} Os números abaixo já foram atualizados.`);
+      } else {
+        setError(message);
+      }
+      setPending(false);
+      return;
+    }
+    setPending(false);
+    setOpen(false);
+    setNote('');
+    setTyped('');
+    onChanged();
+  }
+
+  const typedOk = projection !== null && typed.trim() !== '' && Number(typed) === projection.projectedTotal;
+  const noteOk = note.trim().length >= MIN_ISSUE_NOTE;
 
   return (
     <li className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-ink dark:text-dark-text">
@@ -67,16 +116,50 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
           Pedido {hold.shopifyOrderName ?? hold.shopifyOrderId}: {hold.units} unidade(s) · {REASON_LABELS[hold.reason]} · {formatDateTime(hold.createdAt)}
         </span>
         {canManage ? (
-          <button type="button" className={secondaryButton} onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+          <button type="button" className={secondaryButton} onClick={() => void openPanel()} aria-expanded={open}>
             Resolver
           </button>
         ) : null}
       </div>
       {open ? (
         <div className="mt-2 space-y-2">
+          {projection ? (
+            <div className="space-y-1.5 rounded-lg border border-ink/10 bg-ink/[0.03] p-3 dark:border-white/10 dark:bg-white/[0.03]" aria-label="Confirmação da emissão excepcional">
+              <p className="font-semibold">Confirmação da emissão excepcional</p>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+                <dt>Limite global</dt>
+                <dd>{projection.globalLimit === null ? 'sem limite' : projection.globalLimit}</dd>
+                <dt>Consumido hoje</dt>
+                <dd>
+                  {projection.consumedBefore} ({projection.soldBefore} vendidos + {projection.pendingBefore} pagos aguardando)
+                </dd>
+                <dt>Total projetado depois</dt>
+                <dd>
+                  <strong>{projection.projectedTotal}</strong> ({projection.soldAfter} vendidos + {projection.pendingAfter} aguardando)
+                </dd>
+              </dl>
+              {projection.exceedsLimit ? (
+                <p role="alert" className="rounded border border-red-500/30 bg-red-500/[0.08] px-2 py-1.5 font-medium text-red-500">
+                  Atenção: esta emissão ultrapassa o limite autorizado em {projection.exceededBy} unidade(s) ({projection.projectedTotal} de {projection.globalLimit}). A venda continua
+                  bloqueada para novos clientes, mas este excedente fica registrado e auditado.
+                </p>
+              ) : (
+                <p className={hintClass}>O total projetado não ultrapassa o limite atual.</p>
+              )}
+              {!projection.canIssue ? (
+                <p role="alert" className="text-red-500">
+                  {projection.blockedReason}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <label className="block text-xs font-medium text-ink/60 dark:text-dark-muted">
-            Justificativa (fica registrada na auditoria)
+            Justificativa (mínimo de {MIN_ISSUE_NOTE} caracteres; fica registrada na auditoria)
             <input className={`${inputClass} mt-1`} value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} />
+          </label>
+          <label className="block text-xs font-medium text-ink/60 dark:text-dark-muted">
+            {projection ? `Para emitir, digite o total projetado (${projection.projectedTotal})` : 'Total projetado'}
+            <input className={`${inputClass} mt-1`} inputMode="numeric" value={typed} onChange={(event) => setTyped(event.target.value.replace(/[^0-9]/g, ''))} maxLength={7} />
           </label>
           {error ? (
             <p role="alert" className="text-xs text-red-500">
@@ -84,11 +167,14 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
             </p>
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void resolve('issue')}>
+            <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !typedOk || !noteOk} onClick={() => void issue()}>
               Emitir (excedente aprovado)
             </button>
-            <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void resolve('dismiss')}>
+            <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void dismiss()}>
               Descartar (pedido não está mais pago)
+            </button>
+            <button type="button" className={secondaryButton} disabled={pending} onClick={() => void loadProjection()}>
+              Atualizar números
             </button>
           </div>
         </div>
