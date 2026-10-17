@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import {
+  DB_MAX_EXPECTED_TOTAL_CENTS,
+  DB_MAX_EXTRA_DAY_CENTS,
+  DB_MAX_LINE_TOTAL_CENTS,
+  DB_MAX_RESERVATION_FEE_CENTS,
+  DB_MAX_UNIT_BASE_CENTS,
   MAX_PRICE_CENTS,
   extraDayPriceCents,
   priceItem,
@@ -181,15 +186,49 @@ describe('fail closed: violações em vez de total parcial', () => {
     expect(codes([item('a', 15000, 8)], { ...CONFIG, maxDaysPerItem: 7 })).toEqual(['days_above_max:a']);
   });
 
-  test('limites extremos de preço e percentual não perdem precisão nem produzem total parcial', () => {
-    const extreme = ok([item('a', MAX_PRICE_CENTS, 3650)], { ...CONFIG, extraDayBasisPoints: 100_000 });
-    expect(Number.isSafeInteger(extreme.totalCents)).toBe(true);
-    expect(extreme.items[0].extraDayCents).toBe(MAX_PRICE_CENTS * 10);
-    expect(extreme.items[0].totalCents).toBe(MAX_PRICE_CENTS + 3649 * MAX_PRICE_CENTS * 10);
-    // seis peças no limite: a soma continua exata (ou falha fechado), nunca imprecisa
-    const six = priceReservation(Array.from({ length: 6 }, (_, i) => item(`p${i}`, MAX_PRICE_CENTS, 3650)), { ...CONFIG, extraDayBasisPoints: 100_000 });
-    if (six.ok) expect(six.pricing.totalCents).toBe(6 * (MAX_PRICE_CENTS + 3649 * MAX_PRICE_CENTS * 10) + CONFIG.reservationFeeCents);
-    else expect(six.violations[0].code).toBe('invalid_price');
+  test('limites extremos continuam exatos até o teto do banco e falham fechado acima dele', () => {
+    // 100% do valor-base por diária adicional: 10 diárias de R$ 1 milhão = exatamente o teto da linha (R$ 10 milhões)
+    const atCeiling = ok([item('a', DB_MAX_UNIT_BASE_CENTS, 10)], { ...NO_FEE, extraDayBasisPoints: 10_000 });
+    expect(atCeiling.items[0]).toMatchObject({ extraDayCents: DB_MAX_EXTRA_DAY_CENTS, totalCents: DB_MAX_LINE_TOTAL_CENTS });
+    expect(codes([item('a', DB_MAX_UNIT_BASE_CENTS, 11)], { ...NO_FEE, extraDayBasisPoints: 10_000 })).toEqual(['line_total_above_ceiling:a']);
+    // percentual máximo (1000%) sobre o valor-base máximo: a diária adicional sozinha estoura o teto
+    expect(codes([item('a', DB_MAX_UNIT_BASE_CENTS, 1)], { ...NO_FEE, extraDayBasisPoints: 100_000 })).toEqual(['extra_day_above_ceiling:a']);
+    // 3650 diárias de uma peça de R$ 150: 15000 + 3649 × 7500 está abaixo do teto
+    expect(ok([item('a', 15000, 3650)], NO_FEE).items[0].totalCents).toBe(15000 + 3649 * 7500);
+    // pedido: 3 linhas no teto (3 × R$ 10 milhões) passam de R$ 20 milhões, mesmo com cada linha válida
+    const full = { ...NO_FEE, extraDayBasisPoints: 10_000 };
+    const lines = Array.from({ length: 3 }, (_, i) => item(`p${i}`, DB_MAX_UNIT_BASE_CENTS, 10));
+    expect(priceReservation(lines, full)).toEqual({ ok: false, violations: [{ code: 'order_total_above_ceiling' }] });
+    expect(ok(lines.slice(0, 1), { ...full, reservationFeeCents: DB_MAX_RESERVATION_FEE_CENTS }).totalCents).toBe(DB_MAX_LINE_TOTAL_CENTS + DB_MAX_RESERVATION_FEE_CENTS);
+    // exatamente no teto do pedido é aceito; um centavo acima, não
+    const two = [item('a', 100_000_000, 10), item('b', 100_000_000, 10)]; // 2 × 1e9 (cada linha no teto) = 2e9
+    expect(ok(two, { ...NO_FEE, extraDayBasisPoints: 10_000 }).totalCents).toBe(DB_MAX_EXPECTED_TOTAL_CENTS);
+    expect(priceReservation(two, { ...NO_FEE, extraDayBasisPoints: 10_000, reservationFeeCents: 1 })).toEqual({ ok: false, violations: [{ code: 'order_total_above_ceiling' }] });
+  });
+
+  test('cada violação de teto aponta a peça e vem junto das demais', () => {
+    const config = { ...NO_FEE, extraDayBasisPoints: 10_000 };
+    expect(codes([item('a', DB_MAX_UNIT_BASE_CENTS + 1, 1), item('b', DB_MAX_UNIT_BASE_CENTS, 11), item('c', 1000, 0), item('d', 1000, 1)], config)).toEqual([
+      'price_above_ceiling:a', 'line_total_above_ceiling:b', 'invalid_days:c',
+    ]);
+    // valor enorme mas inteiro seguro é "acima do teto"; fracionário/negativo/NaN/infinito segue "inválido"
+    expect(codes([item('a', Number.MAX_SAFE_INTEGER, 1)])).toEqual(['price_above_ceiling:a']);
+    for (const base of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 2]) expect(codes([item('a', base, 1)])).toEqual(['invalid_price:a']);
+  });
+
+  test('taxa de reserva acima do teto do banco tem violação própria; taxa inválida continua invalid_config', () => {
+    expect(priceReservation([item('a', 1000, 1)], { ...CONFIG, reservationFeeCents: DB_MAX_RESERVATION_FEE_CENTS + 1 })).toEqual({ ok: false, violations: [{ code: 'reservation_fee_above_ceiling' }] });
+    expect(ok([item('a', 1000, 1)], { ...CONFIG, reservationFeeCents: DB_MAX_RESERVATION_FEE_CENTS }).reservationFeeCents).toBe(DB_MAX_RESERVATION_FEE_CENTS);
+    expect(priceReservation([item('a', 1000, 1)], { ...CONFIG, reservationFeeCents: DB_MAX_RESERVATION_FEE_CENTS + 1, extraDayBasisPoints: -1 })).toEqual({ ok: false, violations: [{ code: 'invalid_config' }] });
+  });
+
+  test('o arredondamento parametrizado e a aritmética em centavos inteiros não mudam com os tetos', () => {
+    for (const rounding of ['half_up', 'down', 'up'] as const) {
+      const r = ok([item('a', 9999, 3)], { ...NO_FEE, extraDayRounding: rounding }).items[0];
+      expect(Number.isInteger(r.extraDayCents) && Number.isInteger(r.totalCents)).toBe(true);
+    }
+    expect(extraDayPriceCents(9999, NO_FEE)).toBe(5000);
+    expect(extraDayPriceCents(9999, { ...NO_FEE, extraDayRounding: 'down' })).toBe(4999);
   });
 
   test('R1: o arredondamento é por dia adicional (documentado); com centavos ímpares difere do arredondamento sobre o total', () => {
@@ -204,7 +243,7 @@ describe('fail closed: violações em vez de total parcial', () => {
     expect(codes([item('a', 1000, 0), item('b', 1000, 2.5)])).toEqual(['invalid_days:a', 'invalid_days:b']);
     expect(codes([item('a', 1000, 8)], { ...CONFIG, maxDaysPerItem: 7 })).toEqual(['days_above_max:a']);
     expect(ok([item('a', 1000, 7)], { ...CONFIG, maxDaysPerItem: 7 }).items).toHaveLength(1);
-    expect(codes([item('a', -5, 1), item('b', 10.5, 1), item('c', MAX_PRICE_CENTS + 1, 1)])).toEqual(['invalid_price:a', 'invalid_price:b', 'invalid_price:c']);
+    expect(codes([item('a', -5, 1), item('b', 10.5, 1), item('c', MAX_PRICE_CENTS + 1, 1)])).toEqual(['invalid_price:a', 'invalid_price:b', 'price_above_ceiling:c']);
   });
 
   test('todas as violações vêm juntas e nenhuma peça válida vaza preço', () => {

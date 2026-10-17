@@ -374,29 +374,23 @@ localDescribe('Fase 3 — migration A1 (Postgres local)', () => {
     });
   });
 
-  describe('motor de preço atual × tetos do banco (divergência conhecida, A1 não altera o motor)', () => {
+  describe('motor de preço × tetos do banco (alinhados; varredura completa em fase3-pricing-db-ceilings)', () => {
     const CONFIG = { extraDayBasisPoints: 5000, extraDayRounding: 'half_up' as const, reservationFeeCents: 4999 };
 
-    test('o motor ACEITA valores que o banco recusa — alinhar no PR de preço (runbook, seção "Divergências")', async () => {
-      // valor-base de R$ 2.000.000,00: o motor aceita (até 1.000.000.000), o teto técnico do banco é 100.000.000
-      const baseOver = priceReservation([{ id: 'a', baseCents: 200_000_000, days: 1 }], CONFIG);
-      expect(baseOver.ok).toBe(true);
+    test('o motor REJEITA os valores que o banco recusa (com violação estruturada) e o banco continua recusando', async () => {
+      // valor-base de R$ 2.000.000,00: teto técnico do banco é 100.000.000
+      expect(priceReservation([{ id: 'a', baseCents: 200_000_000, days: 1 }], CONFIG)).toEqual({ ok: false, violations: [{ code: 'price_above_ceiling', itemId: 'a' }] });
       await expectViolation(async (tx, f) => piece(tx, await f.reservation(), await f.unit(), ok({ days: 1, base: 200_000_000, extra: 100_000_000, line: 200_000_000 })), 'ri_pricing_ceilings');
 
-      // 1000% do valor-base: dia extra de 1.000.000.000 (motor aceita; teto do banco: 100.000.000)
-      const extraOver = priceReservation([{ id: 'a', baseCents: 100_000_000, days: 2 }], { ...CONFIG, extraDayBasisPoints: 100_000 });
-      expect(extraOver.ok).toBe(true);
-      if (extraOver.ok) expect(extraOver.pricing.items[0].extraDayCents).toBe(1_000_000_000);
+      // 1000% do valor-base: dia extra de 1.000.000.000 (teto do banco: 100.000.000)
+      expect(priceReservation([{ id: 'a', baseCents: 100_000_000, days: 2 }], { ...CONFIG, extraDayBasisPoints: 100_000 })).toEqual({ ok: false, violations: [{ code: 'extra_day_above_ceiling', itemId: 'a' }] });
       await expectViolation(async (tx, f) => piece(tx, await f.reservation(), await f.unit(), ok({ days: 2, base: 100_000_000, extra: 1_000_000_000, line: 1_100_000_000 })), 'ri_pricing_ceilings');
 
-      // pedido de 3 peças de R$ 7.000.000,00 + taxa: total 2.100.004.999 (cabe em int4, passa do teto de 2.000.000.000)
+      // 3 peças de R$ 7.000.000,00 passam de 100.000.000 cada: o motor recusa a peça (antes aceitava e o banco recusava o total)
       const totalOver = priceReservation(Array.from({ length: 3 }, (_, i) => ({ id: `p${i}`, baseCents: 700_000_000, days: 1 })), CONFIG);
-      expect(totalOver.ok).toBe(true);
-      if (totalOver.ok) {
-        expect(totalOver.pricing.totalCents).toBe(2_100_004_999);
-        await expectViolation(async (tx, f) => tx.$executeRaw`INSERT INTO reservations (id, status, origin_store_id, pricing_version, pricing_snapshot, reservation_fee_cents, expected_total_cents)
-          VALUES (gen_random_uuid(), 'hold', ${f.storeId}, 1, ${JSON.stringify({ engine: 'rental-pricing@1', currency: 'BRL', timezone: 'America/Santiago', extraDayBasisPoints: 5000, extraDayRounding: 'half_up', reservationFeeCents: 4999 })}::jsonb, 4999, ${totalOver.pricing.totalCents}::int)`, 'r_pricing_amounts');
-      }
+      expect(totalOver.ok).toBe(false);
+      await expectViolation(async (tx, f) => tx.$executeRaw`INSERT INTO reservations (id, status, origin_store_id, pricing_version, pricing_snapshot, reservation_fee_cents, expected_total_cents)
+        VALUES (gen_random_uuid(), 'hold', ${f.storeId}, 1, ${JSON.stringify({ engine: 'rental-pricing@1', currency: 'BRL', timezone: 'America/Santiago', extraDayBasisPoints: 5000, extraDayRounding: 'half_up', reservationFeeCents: 4999 })}::jsonb, 4999, 2100004999::int)`, 'r_pricing_amounts');
     });
 
     test('resultados dentro dos tetos (preços reais da loja) casam com o banco: a fórmula do motor satisfaz o CHECK', async () => {

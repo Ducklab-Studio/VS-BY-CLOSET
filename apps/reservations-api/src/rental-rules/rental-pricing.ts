@@ -53,7 +53,13 @@ export type PricingViolationCode =
   | 'invalid_item'
   | 'invalid_price'
   | 'invalid_days'
-  | 'days_above_max';
+  | 'days_above_max'
+  /** Tetos do banco (CHECKs da migration A1): o valor é um inteiro válido, mas o PostgreSQL não o comporta. */
+  | 'price_above_ceiling'
+  | 'extra_day_above_ceiling'
+  | 'line_total_above_ceiling'
+  | 'reservation_fee_above_ceiling'
+  | 'order_total_above_ceiling';
 
 export interface PricingViolation {
   readonly code: PricingViolationCode;
@@ -90,12 +96,25 @@ export type ReservationPricingResult =
   | { readonly ok: true; readonly pricing: ReservationPricing }
   | { readonly ok: false; readonly violations: readonly PricingViolation[] };
 
-/** Teto de sanidade por valor em centavos (R$ 10 milhões): evita que `base × percentual` perca precisão. */
-export const MAX_PRICE_CENTS = 1_000_000_000;
+/**
+ * Tetos monetários (centavos) IDÊNTICOS aos CHECKs da migration A1 (`ri_pricing_ceilings`, `r_pricing_amounts`). São
+ * limites TÉCNICOS (as colunas são int4), não regra comercial: o motor nunca devolve um valor que o banco recusaria.
+ * Se um CHECK mudar, mude aqui junto — o teste de integração compara as duas pontas contra o Postgres.
+ */
+export const DB_MAX_UNIT_BASE_CENTS = 100_000_000; // reservation_items.unit_base_cents (R$ 1 milhão)
+export const DB_MAX_EXTRA_DAY_CENTS = 100_000_000; // reservation_items.extra_day_cents
+export const DB_MAX_LINE_TOTAL_CENTS = 1_000_000_000; // reservation_items.line_total_cents (R$ 10 milhões)
+export const DB_MAX_RESERVATION_FEE_CENTS = 100_000_000; // reservations.reservation_fee_cents
+export const DB_MAX_EXPECTED_TOTAL_CENTS = 2_000_000_000; // reservations.expected_total_cents (< 2^31 − 1)
+
+/** Teto do valor-base de uma peça (= `DB_MAX_UNIT_BASE_CENTS`); mantido com este nome por compatibilidade. */
+export const MAX_PRICE_CENTS = DB_MAX_UNIT_BASE_CENTS;
 export const MAX_BASIS_POINTS = 100_000;
 export const BASIS_POINTS_PER_UNIT = 10_000;
 
-const isCents = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_PRICE_CENTS;
+/** Inteiro seguro e não negativo (ainda SEM olhar teto): a diferença entre "inválido" e "válido, mas acima do teto do banco". */
+const isNonNegativeSafeInt = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const isCents = (value: unknown): value is number => isNonNegativeSafeInt(value) && value <= DB_MAX_UNIT_BASE_CENTS;
 
 /** Divisão inteira com o arredondamento pedido. Só para numeradores e denominadores positivos e seguros. */
 function divideRounded(numerator: number, denominator: number, mode: ExtraDayRounding): number {
@@ -111,7 +130,7 @@ export function validatePricingConfig(config: RentalPricingConfig): boolean {
   if (!config || typeof config !== 'object') return false;
   if (!Number.isInteger(config.extraDayBasisPoints) || config.extraDayBasisPoints < 0 || config.extraDayBasisPoints > MAX_BASIS_POINTS) return false;
   if (!['half_up', 'down', 'up'].includes(config.extraDayRounding)) return false;
-  if (!isCents(config.reservationFeeCents)) return false;
+  if (!isNonNegativeSafeInt(config.reservationFeeCents) || config.reservationFeeCents > DB_MAX_RESERVATION_FEE_CENTS) return false;
   if (config.maxDaysPerItem !== undefined && (!Number.isInteger(config.maxDaysPerItem) || config.maxDaysPerItem < 1)) return false;
   if (config.maxItems !== undefined && (!Number.isInteger(config.maxItems) || config.maxItems < 1)) return false;
   return true;
@@ -133,8 +152,9 @@ export function priceItem(input: PricedItemInput, config: Pick<RentalPricingConf
   const extraDays = input.days - 1;
   const extraDayCents = extraDayPriceCents(input.baseCents, config);
   const extrasCents = extraDays * extraDayCents;
+  if (extraDayCents > DB_MAX_EXTRA_DAY_CENTS) throw new RangeError('Diária adicional acima do teto do banco.');
   const totalCents = input.baseCents + extrasCents;
-  if (!Number.isSafeInteger(totalCents)) throw new RangeError('Total fora da faixa segura.');
+  if (!Number.isSafeInteger(totalCents) || totalCents > DB_MAX_LINE_TOTAL_CENTS) throw new RangeError('Total da peça acima do teto do banco.');
   return { id: input.id, days: input.days, baseCents: input.baseCents, firstDayCents: input.baseCents, extraDays, extraDayCents, extrasCents, totalCents };
 }
 
@@ -145,7 +165,12 @@ export function priceItem(input: PricedItemInput, config: Pick<RentalPricingConf
  * TODAS as violações e nenhum preço — não existe jeito de ler um total parcial por engano.
  */
 export function priceReservation(items: readonly PricedItemInput[], config: RentalPricingConfig): ReservationPricingResult {
-  if (!validatePricingConfig(config)) return { ok: false, violations: [{ code: 'invalid_config' }] };
+  if (!validatePricingConfig(config)) {
+    // Taxa inteira e válida, só acima do teto do banco: violação própria (o resto da configuração está bem).
+    const feeOnly = config && typeof config === 'object' && isNonNegativeSafeInt(config.reservationFeeCents) && config.reservationFeeCents > DB_MAX_RESERVATION_FEE_CENTS
+      && validatePricingConfig({ ...config, reservationFeeCents: 0 });
+    return { ok: false, violations: [{ code: feeOnly ? 'reservation_fee_above_ceiling' : 'invalid_config' }] };
+  }
 
   if (!Array.isArray(items)) return { ok: false, violations: [{ code: 'no_items' }] };
   const violations: PricingViolation[] = [];
@@ -160,7 +185,16 @@ export function priceReservation(items: readonly PricedItemInput[], config: Rent
     }
     if (seen.has(item.id)) violations.push({ code: 'duplicate_item_id', itemId: item.id });
     seen.add(item.id);
-    if (!isCents(item.baseCents)) violations.push({ code: 'invalid_price', itemId: item.id });
+    const baseUsable = isCents(item.baseCents);
+    if (baseUsable) {
+      // Mesma conta de `priceItem`, para apontar QUAL teto do banco estoura (base × bp ≤ 1e13: seguro).
+      const extra = extraDayPriceCents(item.baseCents, config);
+      if (extra > DB_MAX_EXTRA_DAY_CENTS) violations.push({ code: 'extra_day_above_ceiling', itemId: item.id });
+      else if (Number.isInteger(item.days) && item.days >= 1 && item.days <= MAX_SANE_RENTAL_DAYS && item.baseCents + (item.days - 1) * extra > DB_MAX_LINE_TOTAL_CENTS) {
+        violations.push({ code: 'line_total_above_ceiling', itemId: item.id });
+      }
+    } else if (isNonNegativeSafeInt(item.baseCents)) violations.push({ code: 'price_above_ceiling', itemId: item.id });
+    else violations.push({ code: 'invalid_price', itemId: item.id });
     if (!Number.isInteger(item.days) || item.days < 1) violations.push({ code: 'invalid_days', itemId: item.id });
     else if (item.days > MAX_SANE_RENTAL_DAYS || (config.maxDaysPerItem !== undefined && item.days > config.maxDaysPerItem)) violations.push({ code: 'days_above_max', itemId: item.id });
   }
@@ -176,6 +210,7 @@ export function priceReservation(items: readonly PricedItemInput[], config: Rent
   const subtotalCents = priced.reduce((sum, item) => sum + item.totalCents, 0);
   const totalCents = subtotalCents + config.reservationFeeCents;
   if (!Number.isSafeInteger(totalCents)) return { ok: false, violations: [{ code: 'invalid_price' }] };
+  if (totalCents > DB_MAX_EXPECTED_TOTAL_CENTS) return { ok: false, violations: [{ code: 'order_total_above_ceiling' }] };
 
   return { ok: true, pricing: { items: priced, subtotalCents, reservationFeeCents: config.reservationFeeCents, totalCents } };
 }
