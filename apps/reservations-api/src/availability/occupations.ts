@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { addDays, civilDateFromPgDate, civilDateToISO, type CivilDate } from '../rental-rules/civil-date';
-import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { itemPickupDate, itemReturnDate, occupiedBounds, occupiesWindow } from '../reservation-schedule/occupancy-sql';
 import { loadActiveStoreWideBlocks, loadActiveUnitBlocks } from '../admin/operational-blocks';
 import { kindForReservationStatus, type Occupation } from './unavailable-reason';
 
@@ -18,22 +18,21 @@ export async function loadOccupations(client: DbClient, unitIds: readonly string
   if (unitIds.length === 0) return [];
   const from = civilDateToISO(searchFrom);
   const to = civilDateToISO(searchTo);
+  // Regra de ocupação e datas por peça vêm de `reservation-schedule/occupancy-sql` (uma só cópia). Item legado:
+  // o COALESCE devolve as datas da reserva, exatamente como antes.
+  const bounds = occupiedBounds(from, to, 'ri');
   const rows = await client.$queryRaw<{ rentalUnitId: string; status: string; lo: Date; hi: Date; pickup: Date | null; return: Date | null }[]>`
     SELECT
       ri.rental_unit_id AS "rentalUnitId",
       ri.status::text AS "status",
-      CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${from}::date ELSE lower(ri.blocked_range) END AS "lo",
-      CASE WHEN ri.status IN ('returned', 'cleaning') THEN ${to}::date ELSE upper(ri.blocked_range) END AS "hi",
-      r.pickup_date AS "pickup",
-      r.return_date AS "return"
+      ${bounds.lo} AS "lo",
+      ${bounds.hi} AS "hi",
+      ${itemPickupDate('ri', 'r')} AS "pickup",
+      ${itemReturnDate('ri', 'r')} AS "return"
     FROM reservation_items ri
     JOIN reservations r ON r.id = ri.reservation_id
     WHERE ri.rental_unit_id = ANY(${[...unitIds]}::uuid[])
-      AND ri.status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-      AND (
-        ri.blocked_range && daterange(${from}::date, ${to}::date, '[)')
-        OR (ri.status IN ('returned', 'cleaning') AND lower(ri.blocked_range) <= ${to}::date)
-      )
+      AND ${occupiesWindow(from, to, 'ri')}
   `;
   const reservations: Occupation[] = rows.map((row) => {
     const kind = kindForReservationStatus(row.status);

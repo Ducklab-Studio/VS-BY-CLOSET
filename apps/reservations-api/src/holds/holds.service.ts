@@ -11,7 +11,7 @@ import {
   today as engineToday,
 } from '../rental-rules/rental-engine';
 import { type CivilDate, civilDateFromISO, civilDateFromPgDate, civilDateToISO, diffDays } from '../rental-rules/civil-date';
-import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { occupiesWindow } from '../reservation-schedule/occupancy-sql';
 import { expireDueReservations } from '../reservation-expiry/reservation-expiry';
 import { ensureStoreConfig, type StoreConfig, resolveStoreConfig } from './store-config';
 import { currentTermsVersion } from './terms';
@@ -348,11 +348,7 @@ export class HoldsService {
           SELECT DISTINCT rental_unit_id AS "rentalUnitId"
           FROM reservation_items
           WHERE rental_unit_id = ANY(${candidateIds}::uuid[])
-            AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-            AND (
-              blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
-              OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date)
-            )
+            AND ${occupiesWindow(civilDateToISO(blockedRange.blockedFrom), civilDateToISO(blockedRange.blockedUntilExclusive))}
         `
       : [];
     const occupiedIds = new Set(occupiedRows.map((r) => r.rentalUnitId));

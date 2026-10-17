@@ -17,7 +17,8 @@ import {
   validateMaxPieces,
   validateMinimumAdvance,
 } from '../rental-rules/rental-engine';
-import { OCCUPYING_RESERVATION_STATUSES } from '../reservation-status';
+import { heldUntilCompleted, occupiesWindow } from '../reservation-schedule/occupancy-sql';
+import { daysLate, effectiveReturnPgDate, expectedReturnDate } from '../reservation-schedule/item-schedule-read';
 import { expireDueReservations } from '../reservation-expiry/reservation-expiry';
 import { reservationAttentionSql, reservationNeedsAttention } from './reservation-attention';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
@@ -449,11 +450,7 @@ export class AdminReservationsService {
       SELECT DISTINCT rental_unit_id AS "rentalUnitId"
       FROM reservation_items
       WHERE rental_unit_id = ANY(${sortedUnitIds}::uuid[])
-        AND status = ANY(${OCCUPYING_RESERVATION_STATUSES}::"reservation_status"[])
-        AND (
-          blocked_range && daterange(${civilDateToISO(blockedRange.blockedFrom)}::date, ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date, '[)')
-          OR (status IN ('returned', 'cleaning') AND lower(blocked_range) <= ${civilDateToISO(blockedRange.blockedUntilExclusive)}::date)
-        )
+        AND ${occupiesWindow(civilDateToISO(blockedRange.blockedFrom), civilDateToISO(blockedRange.blockedUntilExclusive))}
     `;
     if (occupiedRows.length > 0) {
       // Nunca contornável por override (item 6) — a EXCLUDE constraint
@@ -636,9 +633,10 @@ export class AdminReservationsService {
         }
 
         const [item] = await tx.$queryRaw<
-          { id: string; rentalUnitId: string; code: string; status: ReservationStatusValue }[]
+          { id: string; rentalUnitId: string; code: string; status: ReservationStatusValue; pickupDate: Date | null; returnDate: Date | null }[]
         >`
-          SELECT ri.id, ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status
+          SELECT ri.id, ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status,
+                 ri.pickup_date AS "pickupDate", ri.return_date AS "returnDate"
           FROM reservation_items ri
           JOIN rental_units ru ON ru.id = ri.rental_unit_id
           WHERE ri.id = ${reservationItemId}::uuid AND ri.reservation_id = ${reservationId}::uuid
@@ -674,8 +672,9 @@ export class AdminReservationsService {
 
         let receipt: { condition: ReturnConditionValue; daysLate: number; expectedReturnDate: string | null; awaitingRelease: boolean; notes: string | null } | undefined;
         if (action === 'receive' && inspection) {
-          const expected = reservation.returnDate ? civilDateFromPgDate(reservation.returnDate) : null;
-          const daysLate = expected ? Math.max(0, diffDays(engineToday(await this.rentalRuleConfig.load(tx), at), expected)) : 0;
+          // Devolução prevista DESTA peça: cronograma próprio do item ou, no item legado, a da reserva (idêntico a antes).
+          const expected = expectedReturnDate(item, reservation);
+          const late = expected ? daysLate(expected, engineToday(await this.rentalRuleConfig.load(tx), at)) : 0;
           const notes = inspection.notes?.trim() || note || null;
           try {
             await tx.reservationItemReturn.create({ data: {
@@ -686,8 +685,8 @@ export class AdminReservationsService {
               receivedAt: at,
               receivedBy: actor.id,
               receivedByName: actor.name,
-              expectedReturnDate: reservation.returnDate,
-              daysLate,
+              expectedReturnDate: effectiveReturnPgDate(item, reservation),
+              daysLate: late,
             } });
           } catch (err) {
             if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
@@ -697,7 +696,7 @@ export class AdminReservationsService {
           }
           receipt = {
             condition: inspection.condition,
-            daysLate,
+            daysLate: late,
             expectedReturnDate: expected ? civilDateToISO(expected) : null,
             awaitingRelease: HELD_CONDITIONS.includes(inspection.condition),
             notes,
@@ -849,8 +848,8 @@ export class AdminReservationsService {
         if (!reservation) throw new NotFoundException('Reserva não encontrada.');
         if (reservation.archivedAt) throw new ConflictException('Esta reserva está arquivada e não permite operação.');
 
-        const [item] = await tx.$queryRaw<{ id: string; code: string; status: ReservationStatusValue }[]>`
-          SELECT ri.id, ru.code, ri.status
+        const [item] = await tx.$queryRaw<{ id: string; code: string; status: ReservationStatusValue; pickupDate: Date | null; returnDate: Date | null }[]>`
+          SELECT ri.id, ru.code, ri.status, ri.pickup_date AS "pickupDate", ri.return_date AS "returnDate"
           FROM reservation_items ri
           JOIN rental_units ru ON ru.id = ri.rental_unit_id
           WHERE ri.id = ${reservationItemId}::uuid AND ri.reservation_id = ${reservationId}::uuid
@@ -863,7 +862,8 @@ export class AdminReservationsService {
             throw new ConflictException('Só é possível registrar peça não devolvida enquanto ela ainda não foi recebida.');
           }
           const config = await this.rentalRuleConfig.load(tx);
-          const expected = reservation.returnDate ? civilDateFromPgDate(reservation.returnDate) : null;
+          // Devolução prevista DESTA peça (item ou, no legado, reserva).
+          const expected = expectedReturnDate(item, reservation);
           if (!expected || diffDays(engineToday(config), expected) < 0) {
             throw new ConflictException('A data prevista de devolução ainda não chegou.');
           }
@@ -1031,9 +1031,12 @@ export class AdminReservationsService {
         returnedAt: Date | null;
         cleaningStartedAt: Date | null;
         cleaningCompletedAt: Date | null;
+        pickupDate: Date | null;
+        returnDate: Date | null;
       }[]
     >`
       SELECT ri.id, ri.rental_unit_id AS "rentalUnitId", ru.code, ri.status,
+             ri.pickup_date AS "pickupDate", ri.return_date AS "returnDate",
              lower(ri.blocked_range) AS "blockedFrom", upper(ri.blocked_range) AS "blockedUntil",
              ri.returned_at AS "returnedAt",
              ri.cleaning_started_at AS "cleaningStartedAt",
@@ -1057,16 +1060,16 @@ export class AdminReservationsService {
           FROM reservation_item_returns r
           JOIN reservation_items ri ON ri.id = r.reservation_item_id
           WHERE r.condition IN ('needs_maintenance', 'damaged') AND r.hold_released_at IS NULL
-            AND ri.status IN ('returned', 'cleaning') AND ri.reservation_id <> ${id}::uuid
+            AND ${heldUntilCompleted('ri')} AND ri.reservation_id <> ${id}::uuid
             AND ri.rental_unit_id = ANY(${items.map((i) => i.rentalUnitId)}::uuid[])
         `
       : [];
     const occurrences = await this.prisma.reservationItemOccurrence.findMany({ where: { reservationId: id }, orderBy: { recordedAt: 'asc' } });
-    const expectedReturn = reservation.returnDate ? civilDateFromPgDate(reservation.returnDate) : null;
     const todayCivil = await this.civilToday();
-    const pendingOverdue = (status: string) =>
-      expectedReturn && (status === 'confirmed' || status === 'picked_up') && !reservation.archivedAt
-        ? Math.max(0, diffDays(todayCivil, expectedReturn))
+    // Atraso de CADA peça contra a devolução prevista DELA (item ou, no legado, reserva — idêntico a antes).
+    const pendingOverdue = (i: { status: string; pickupDate: Date | null; returnDate: Date | null }) =>
+      (i.status === 'confirmed' || i.status === 'picked_up') && !reservation.archivedAt
+        ? daysLate(expectedReturnDate(i, reservation), todayCivil)
         : 0;
 
     return {
@@ -1090,7 +1093,7 @@ export class AdminReservationsService {
       archivedBy: reservation.archivedBy,
       archiveReason: reservation.archiveReason,
       needsAttention: reservationNeedsAttention(reservation),
-      overdueDays: Math.max(0, ...items.map((i) => pendingOverdue(i.status))),
+      overdueDays: Math.max(0, ...items.map((i) => pendingOverdue(i))),
       items: items.map((i) => {
         const ret = returns.find((r) => r.reservationItemId === i.id);
         return {
@@ -1103,7 +1106,7 @@ export class AdminReservationsService {
           returnedAt: i.returnedAt?.toISOString() ?? null,
           cleaningStartedAt: i.cleaningStartedAt?.toISOString() ?? null,
           cleaningCompletedAt: i.cleaningCompletedAt?.toISOString() ?? null,
-          overdueDays: pendingOverdue(i.status),
+          overdueDays: pendingOverdue(i),
           inspection: ret
             ? {
                 condition: ret.condition,
@@ -1155,7 +1158,7 @@ export class AdminReservationsService {
           JOIN reservations hr ON hr.id = ri.reservation_id
           WHERE r.condition IN ('needs_maintenance', 'damaged')
             AND r.hold_released_at IS NULL
-            AND ri.status IN ('returned', 'cleaning')
+            AND ${heldUntilCompleted('ri')}
             AND hr.archived_at IS NULL
           ORDER BY r.received_at ASC
           LIMIT 200
