@@ -476,6 +476,15 @@ model Reservation {
   viewedStatus ReservationStatus? @map("viewed_status")
   viewedBy     String?            @map("viewed_by") @db.Uuid
 
+  /// Fase 3 (aluguel por peça) — migration A1, modelo v2.1 (docs/FASE3-MODELO-DADOS-V2.md). NADA lê nem grava estes
+  /// campos ainda; ficam nulos em toda reserva existente ("legado" ou manual sem preço). `pricing_version` nulo =
+  /// sem preço congelado. Valores em centavos, tetos técnicos nos CHECKs (`int4`, não `bigint`: JSON.stringify de
+  /// BigInt lança). Nunca devolver `pricingSnapshot`/`expectedTotalCents` em resposta pública.
+  pricingVersion      Int?  @map("pricing_version")
+  pricingSnapshot     Json? @map("pricing_snapshot")
+  reservationFeeCents Int?  @map("reservation_fee_cents")
+  expectedTotalCents  Int?  @map("expected_total_cents")
+
   originStore Store             @relation(fields: [originStoreId], references: [id])
   items       ReservationItem[]
   idempotencyKeys       HoldIdempotencyKey[]
@@ -547,6 +556,22 @@ model ReservationItem {
   cleaningStartedBy String? @map("cleaning_started_by") @db.Uuid
   cleaningCompletedAt DateTime? @map("cleaning_completed_at") @db.Timestamptz(6)
   cleaningCompletedBy String? @map("cleaning_completed_by") @db.Uuid
+
+  /// Fase 3 (aluguel por peça) — migration A1. NADA lê nem grava estes campos ainda; nulos em todo item existente.
+  /// Cronograma por peça (tudo ou nada): `rentalDays` é a duração CONTRATADA (base de preço), `calculatedReturnDate` =
+  /// retirada + dias, `returnDate` é a devolução EFETIVA (pode diferir por regra do domingo/exceção manual), e a
+  /// preparação/limpeza ficam congeladas por item. `pickupMinuteOfDay` (0–1439) é opcional.
+  pickupDate           DateTime? @map("pickup_date") @db.Date
+  rentalDays           Int?      @map("rental_days")
+  calculatedReturnDate DateTime? @map("calculated_return_date") @db.Date
+  returnDate           DateTime? @map("return_date") @db.Date
+  prepDaysApplied      Int?      @map("prep_days_applied")
+  cleaningDaysApplied  Int?      @map("cleaning_days_applied")
+  pickupMinuteOfDay    Int?      @map("pickup_minute_of_day") @db.SmallInt
+  /// Preço congelado (tudo ou nada; exige o cronograma). Centavos, `int4`.
+  unitBaseCents        Int?      @map("unit_base_cents")
+  extraDayCents        Int?      @map("extra_day_cents")
+  lineTotalCents       Int?      @map("line_total_cents")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

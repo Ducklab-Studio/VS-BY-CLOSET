@@ -80,6 +80,11 @@ jobs:
       - name: Aplicar migrations no Postgres efêmero
         run: pnpm --filter @valle/reservations-api run db:migrate
 
+      # Compara o banco efêmero já migrado com o schema.prisma (tabela/coluna/tipo/nulidade). Só localhost de teste:
+      # o script aborta se DATABASE_URL não for local. Nunca acessa produção.
+      - name: Divergência estrutural entre migrations e schema.prisma
+        run: pnpm --filter @valle/reservations-api run db:drift
+
       - name: Typecheck API
         run: pnpm --filter @valle/reservations-api run typecheck
 
