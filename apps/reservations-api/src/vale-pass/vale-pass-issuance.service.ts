@@ -177,14 +177,15 @@ export class ValePassIssuanceService {
    */
   async holdForFinancialReview(
     tx: Tx,
-    input: { campaignId: string; order: IssuanceOrder; units: number; issues: readonly { code: string; detail?: Record<string, unknown> }[] },
+    input: { campaignId: string; order: IssuanceOrder; units: number; issues: readonly { code: string; detail?: Record<string, unknown> }[]; allowWithExistingVouchers?: boolean },
   ): Promise<{ holdId: string | null; created: boolean }> {
     if (!Number.isInteger(input.units) || input.units < 1) throw new RangeError('units deve ser um inteiro ≥ 1');
     await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${input.campaignId}::uuid FOR UPDATE`; // mesma trava da emissão e do painel
     const campaign = await tx.valePassCampaign.findUnique({ where: { id: input.campaignId } });
     if (!campaign) throw new Error(`campanha ${input.campaignId} não encontrada`);
     const alreadyIssued = await tx.valePass.count({ where: { shopifyOrderId: input.order.orderId, campaignId: input.campaignId } });
-    if (alreadyIssued > 0) return { holdId: null, created: false };
+    // `allowWithExistingVouchers` (regularização de unidades adicionais): o pedido já tem vouchers, mas faltam unidades pagas — a retenção é o registro durável.
+    if (alreadyIssued > 0 && !input.allowWithExistingVouchers) return { holdId: null, created: false };
     const open = await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: input.order.orderId, campaignId: input.campaignId, status: 'OPEN' } });
     const hold = await this.upsertHold(tx, input.order.orderId, campaign, input.units, 'FINANCIAL_MISMATCH', { issues: input.issues as unknown as Prisma.InputJsonValue });
     return { holdId: hold.id, created: open === null };

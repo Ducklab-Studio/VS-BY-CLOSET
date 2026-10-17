@@ -824,6 +824,7 @@ model ValePassCampaign {
   benefits ValePassCampaignBenefit[]
   holds    ValePassIssuanceHold[]
   emails ValePassEmailOutbox[]
+  refunds  ValePassRefundApplication[]
 
   @@map("vale_pass_campaigns")
 }
@@ -1215,4 +1216,50 @@ model ValePassEmailEvent {
 
   @@index([outboxId, createdAt])
   @@map("vale_pass_email_events")
+}
+
+/// Estado de um reembolso da Shopify já tratado pelo Valle Pass.
+/// APPLIED = tratado por completo (nada a decidir); NEEDS_REVIEW = parte (ou tudo) depende de decisão humana (voucher já usado, valor sem unidade,
+/// quantidades que não fecham...); RESOLVED = um ADMIN decidiu, com justificativa e auditoria.
+enum ValePassRefundStatus {
+  APPLIED
+  NEEDS_REVIEW
+  RESOLVED
+
+  @@map("vale_pass_refund_status")
+}
+
+/// Trilha de reembolsos do Valle Pass: UMA linha por reembolso da Shopify (`shopify_refund_id` único = idempotência: reentrega nunca cancela de novo)
+/// e, ao mesmo tempo, a fila de revisão administrativa (fail-closed: voucher já usado e valor sem unidade nunca são decididos automaticamente).
+model ValePassRefundApplication {
+  id               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyRefundId  String                @unique @map("shopify_refund_id")
+  shopifyOrderId   String                @map("shopify_order_id")
+  campaignId       String?               @map("campaign_id") @db.Uuid
+  /// UNRELATED | UNITS | AMOUNT_ONLY | LEGACY_ORDER | NO_UNITS (texto livre controlado pelo código; só para leitura humana e filtros).
+  classification   String
+  /// Unidades comerciais da compra que este reembolso devolveu.
+  refundedUnits    Int                   @default(0) @map("refunded_units")
+  /// Unidades (group_id) cujos vouchers foram cancelados automaticamente por este reembolso.
+  cancelledGroupIds Json                 @default("[]") @map("cancelled_group_ids")
+  status           ValePassRefundStatus
+  /// Códigos dos motivos da revisão (sem dados pessoais).
+  reviewReasons    Json                  @default("[]") @map("review_reasons")
+  /// Retrato do cálculo (centavos, quantidades, ids de unidade). Nunca código de voucher, e-mail ou nome.
+  detail           Json?
+  shippingRefundCents Int?               @map("shipping_refund_cents")
+  transactionsCents   Int?               @map("transactions_cents")
+  /// KEEP_VOUCHERS | CANCEL_ACTIVE_VOUCHERS (preenchidos só quando RESOLVED).
+  resolution       String?
+  resolvedAt       DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy       String?               @map("resolved_by") @db.Uuid
+  resolutionNote   String?               @map("resolution_note")
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign? @relation(fields: [campaignId], references: [id])
+
+  @@index([shopifyOrderId])
+  @@index([status])
+  @@map("vale_pass_refund_applications")
 }

@@ -563,8 +563,26 @@ export interface ValePassCapacity {
   readonly paidOrdersWithoutVoucher: readonly ValePassPaidOrderShortfall[];
   /** Pagamentos confirmados que a emissão automática não atendeu: aguardam um ADMIN. */
   readonly holds: readonly ValePassCapacityHold[];
+  /** Reembolsos que o tratamento por unidade não resolveu sozinho: aguardam um ADMIN. */
+  readonly refundReviews?: readonly ValePassCapacityRefundReview[];
   readonly benefits: readonly ValePassCapacityBenefit[];
   readonly alerts: readonly ValePassCapacityAlert[];
+}
+
+export interface ValePassCapacityRefundReview {
+  readonly id: string;
+  readonly shopifyOrderName: string | null;
+  readonly refundedUnits: number;
+  readonly unitsNeedingReview: number;
+  readonly reasons: readonly string[];
+  readonly createdAt: string;
+}
+
+export type ValePassRefundReviewAction = 'KEEP_VOUCHERS' | 'CANCEL_ACTIVE_VOUCHERS';
+
+/** Decisão do ADMIN sobre um reembolso em revisão (voucher já usado nunca é alterado pela API). */
+export function resolveValePassRefundReview(id: string, input: { action: ValePassRefundReviewAction; note: string }, adminUserId: string): Promise<unknown> {
+  return adminPost(`/admin/vale-pass/refund-reviews/${pathSegment(id)}/resolve`, { ...input, adminUserId });
 }
 
 export type ValePassCompany = 'VALLE_SHOWROOM' | 'VS_BY_CLOSET';

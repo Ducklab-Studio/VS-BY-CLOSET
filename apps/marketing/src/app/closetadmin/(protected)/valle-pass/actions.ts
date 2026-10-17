@@ -18,6 +18,8 @@ import {
   listValePassCampaigns,
   replaceValePassBenefits,
   dismissValePassHold,
+  resolveValePassRefundReview,
+  type ValePassRefundReviewAction,
   getValePassHoldPreview,
   issueValePassHold,
   type IssueValePassHoldInput,
@@ -356,5 +358,21 @@ export async function actOnValePassLotAction(
     return { lot, error: null };
   } catch (err) {
     return { lot: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível concluir a ação no lote.' };
+  }
+}
+
+/** Decisão sobre um reembolso em revisão: manter tudo ou cancelar os vouchers ainda ativos das unidades propostas. Só ADMIN, justificativa ≥ 10. */
+export async function resolveValePassRefundReviewAction(id: string, action: ValePassRefundReviewAction, note: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (action !== 'KEEP_VOUCHERS' && action !== 'CANCEL_ACTIVE_VOUCHERS') return { error: 'Ação inválida.' };
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    await resolveValePassRefundReview(id, { action, note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a decisão.' };
   }
 }

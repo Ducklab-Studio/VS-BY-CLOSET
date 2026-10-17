@@ -295,6 +295,20 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_refund_applications.vale_pass_refund_applications_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "SET NULL",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_passes.vale_passes_benefit_id_fkey": {
       "columns": [
         "benefit_id"
@@ -1394,6 +1408,58 @@
       ],
       "predicate": null
     },
+    "vale_pass_refund_applications.vale_pass_refund_applications_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_refund_applications.vale_pass_refund_applications_shopify_order_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_refund_applications.vale_pass_refund_applications_shopify_refund_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_refund_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_refund_applications.vale_pass_refund_applications_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "status"
+      ],
+      "predicate": null
+    },
     "vale_passes.vale_passes_benefit_id_idx": {
       "method": "btree",
       "unique": false,
@@ -1975,6 +2041,31 @@
     },
     "vale_pass_orders.status_changed_at": {
       "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_refund_applications.cancelled_group_ids": {
+      "default": "'[]'::jsonb",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_refund_applications.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_refund_applications.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_refund_applications.refunded_units": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_refund_applications.review_reasons": {
+      "default": "'[]'::jsonb",
       "generated": null,
       "identity": null
     },
