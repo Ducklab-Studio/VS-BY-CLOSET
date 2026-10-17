@@ -163,9 +163,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
               <p className="text-3xl font-mono text-marsala font-medium tabular-nums leading-none">
                 {formatPrice(variant.price.amount, variant.price.currencyCode)}
               </p>
-              <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
-                O aluguel
-              </span>
+              {!isValePass && (
+                <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
+                  O aluguel
+                </span>
+              )}
             </div>
           )}
 

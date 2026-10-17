@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ArrowUpRight } from 'lucide-react';
 import { formatPrice, productUrl, type StorefrontProduct } from '@/lib/shopify';
+import { isValePassProduct } from '@/lib/vale-pass-product';
 import { ProductImage } from './ProductImage';
 import { SelectionFlag } from './RentalSelectionBar';
 
@@ -23,6 +24,8 @@ export function ProductCard({
 }) {
   const Heading = catalog ? 'h2' : 'h3';
   const awaiting = product.rentalStatus === 'awaiting';
+  // Valle Pass não é peça de aluguel: o cartão não deve chamá-lo de "peça".
+  const isValePass = isValePassProduct({ productId: product.id });
   return (
     <Link
       href={productUrl(product.handle)}
@@ -44,7 +47,7 @@ export function ProductCard({
         )}
         {!catalog && (
           <span className="product-action">
-            Ver peça <ArrowUpRight size={16} />
+            {isValePass ? 'Ver Valle Pass' : 'Ver peça'} <ArrowUpRight size={16} />
           </span>
         )}
         {awaiting && (
@@ -58,7 +61,7 @@ export function ProductCard({
         {catalog && !awaiting && <SelectionFlag handle={product.handle} initialRaw={draftRaw} />}
       </div>
       <p className="product-category">
-        {product.productType || (catalog ? '' : 'Seleção do closet')}
+        {product.productType || (catalog ? '' : isValePass ? 'Valle Pass' : 'Seleção do closet')}
       </p>
       <Heading>{product.title}</Heading>
       <p className="product-price">
