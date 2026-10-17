@@ -68,3 +68,6 @@ ALTER TABLE "vale_pass_lots"
       WHEN 'CLOSED' THEN "opened_at" IS NOT NULL AND "closed_at" IS NOT NULL AND "closed_at" >= "opened_at"
       ELSE "opened_at" IS NULL AND "closed_at" IS NULL
     END);
+
+-- Devolve o lock_timeout da sessão ao padrão da conexão (o SET acima é de sessão; o pré-deploy usa o pooler do Neon).
+RESET lock_timeout;

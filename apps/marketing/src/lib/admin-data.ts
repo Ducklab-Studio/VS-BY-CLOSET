@@ -513,6 +513,8 @@ export interface ValePassLot {
   /** Versão do lote: devolvida em toda ação (concorrência otimista). */
   readonly updatedAt: string;
   readonly sold: number;
+  /** Unidades pagas aguardando emissão cobradas deste lote (só o lote aberto). */
+  readonly pending: number;
   readonly remaining: number;
   readonly soldOut: boolean;
 }
@@ -541,7 +543,18 @@ export interface ValePassCapacity {
     readonly salesEndDate: string | null;
     readonly updatedAt: string;
   };
-  readonly totals: { readonly issued: number; readonly cancelled: number; readonly sold: number; readonly active: number; readonly used: number; readonly expired: number };
+  readonly totals: {
+    readonly issued: number;
+    readonly cancelled: number;
+    readonly sold: number;
+    /** Unidades de pedidos pagos ainda sem emissão completa: já consomem capacidade. */
+    readonly pending: number;
+    /** `sold + pending`: o que o limite global compara. */
+    readonly consumed: number;
+    readonly active: number;
+    readonly used: number;
+    readonly expired: number;
+  };
   readonly globalRemaining: number | null;
   readonly openLot: ValePassLot | null;
   readonly lots: readonly ValePassLot[];

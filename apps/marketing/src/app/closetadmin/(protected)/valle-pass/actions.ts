@@ -66,18 +66,18 @@ export async function createValePassCampaignAction(input: CreateValePassCampaign
   }
 }
 
-export async function toggleValePassCampaignAction(id: string, active: boolean): Promise<{ error: string | null }> {
+/** Devolve a campanha ATUALIZADA (com o novo `updatedAt`): a tela precisa dessa versão para a próxima edição não receber 409 indevido. */
+export async function toggleValePassCampaignAction(id: string, active: boolean): Promise<{ campaign: ValePassCampaign | null; error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   requireAdminRole(session, 'ADMIN');
   try {
-    if (active) await activateValePassCampaign(id, session.id);
-    else await deactivateValePassCampaign(id, session.id);
+    const campaign = active ? await activateValePassCampaign(id, session.id) : await deactivateValePassCampaign(id, session.id);
+    revalidateValePassPath();
+    return { campaign, error: null };
   } catch (err) {
-    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a campanha.' };
+    return { campaign: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a campanha.' };
   }
-  revalidateValePassPath();
-  return { error: null };
 }
 
 export async function listValePassVouchersAction(filters: ValePassVoucherFilters): Promise<{ vouchers: ValePassVoucher[] | null; error: string | null }> {

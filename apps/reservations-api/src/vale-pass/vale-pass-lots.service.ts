@@ -4,13 +4,13 @@ import type { ValePassLot } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import {
-  countPaidOrdersAwaitingProcessing,
+  awaitingProcessingCount,
   formatIsoDate,
   globalRemaining,
+  loadCapacity,
   loadLotSold,
-  loadPaidOrderShortfalls,
-  loadStatusCounts,
   recommendedShopifyStock,
+  shortfallsFrom,
   toLotView,
   type CapacityTotals,
   type LotView,
@@ -22,7 +22,9 @@ export type CapacityAlertCode =
   | 'PAID_ORDERS_WITHOUT_VOUCHER'
   | 'PAID_ORDERS_AWAITING_PROCESSING'
   | 'GLOBAL_LIMIT_REACHED'
+  | 'GLOBAL_LIMIT_EXCEEDED'
   | 'GLOBAL_LIMIT_NOT_SET'
+  | 'PAID_UNITS_COUNTED_AS_SOLD'
   | 'OPEN_LOT_SOLD_OUT';
 
 export interface CapacityAlert {
@@ -73,17 +75,16 @@ export class ValePassLotsService {
     const campaign = await this.prisma.valePassCampaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new NotFoundException('Campanha não encontrada.');
 
-    const [totals, lotRows, soldByLot, shortfalls, awaiting] = await Promise.all([
-      loadStatusCounts(this.prisma, campaignId),
-      this.prisma.valePassLot.findMany({ where: { campaignId }, orderBy: [{ createdAt: 'desc' }] }),
-      loadLotSold(this.prisma, campaignId),
-      loadPaidOrderShortfalls(this.prisma),
-      countPaidOrdersAwaitingProcessing(this.prisma),
-    ]);
+    const { totals, paidOrders } = await loadCapacity(this.prisma, campaignId);
+    const lotRows = await this.prisma.valePassLot.findMany({ where: { campaignId }, orderBy: [{ createdAt: 'desc' }] });
+    const soldByLot = await loadLotSold(this.prisma, campaignId);
+    const shortfalls = shortfallsFrom(paidOrders);
+    const awaiting = awaitingProcessingCount(paidOrders, new Date());
 
-    const lots = lotRows.map((lot) => toLotView(lot, soldByLot.get(lot.id) ?? 0));
+    // As unidades pagas aguardando emissão são cobradas do lote ABERTO (é nele que serão emitidas).
+    const lots = lotRows.map((lot) => toLotView(lot, soldByLot.get(lot.id) ?? 0, lot.status === 'OPEN' ? totals.pending : 0));
     const openLot = lots.find((lot) => lot.status === 'OPEN') ?? null;
-    const remaining = globalRemaining(campaign.globalLimit, totals.sold);
+    const remaining = globalRemaining(campaign.globalLimit, totals.consumed);
 
     const alerts: CapacityAlert[] = [];
     if (shortfalls.length > 0) {
@@ -97,8 +98,15 @@ export class ValePassLotsService {
     if (awaiting > 0) {
       alerts.push({ code: 'PAID_ORDERS_AWAITING_PROCESSING', severity: 'warning', message: `${awaiting} pedido(s) pago(s) ainda sem emissão de passe há mais de 15 minutos.` });
     }
+    if (totals.pending > 0) {
+      alerts.push({
+        code: 'PAID_UNITS_COUNTED_AS_SOLD',
+        severity: 'info',
+        message: `${totals.pending} unidade(s) de pedidos pagos aguardam emissão e JÁ contam na capacidade (saldo global, lote e estoque recomendado). Ao serem emitidas, não contam de novo.`,
+      });
+    }
     if (campaign.quantityLimit !== null) {
-      const legacyRemaining = Math.max(0, campaign.quantityLimit - totals.issued);
+      const legacyRemaining = Math.max(0, campaign.quantityLimit - totals.issued - totals.pending);
       alerts.push({
         code: 'LEGACY_LIMIT_BLOCKS_ISSUANCE',
         severity: legacyRemaining === 0 ? 'critical' : 'warning',
@@ -107,6 +115,12 @@ export class ValePassLotsService {
     }
     if (campaign.globalLimit === null) {
       alerts.push({ code: 'GLOBAL_LIMIT_NOT_SET', severity: 'warning', message: 'Nenhum limite global configurado (ex.: 1.000). Sem ele, não é possível abrir lotes.' });
+    } else if (totals.consumed > campaign.globalLimit) {
+      alerts.push({
+        code: 'GLOBAL_LIMIT_EXCEEDED',
+        severity: 'critical',
+        message: `Há ${totals.consumed} passes vendidos ou pagos (limite global ${campaign.globalLimit}): ${totals.consumed - campaign.globalLimit} acima do limite. Decida o que fazer com o excedente antes de vender mais.`,
+      });
     } else if (remaining === 0) {
       alerts.push({ code: 'GLOBAL_LIMIT_REACHED', severity: 'info', message: `Limite global de ${campaign.globalLimit} passes atingido.` });
     }
@@ -138,16 +152,16 @@ export class ValePassLotsService {
     const name = input.name.trim();
     if (!name) throw new UnprocessableEntityException('O nome do lote não pode ficar vazio.');
     const row = await this.inLockedCampaign(campaignId, 'criar o lote', async (tx, campaign) => {
-      const totals = await loadStatusCounts(tx, campaignId);
-      const remaining = globalRemaining(campaign.globalLimit, totals.sold);
+      const { totals } = await loadCapacity(tx, campaignId);
+      const remaining = globalRemaining(campaign.globalLimit, totals.consumed);
       if (remaining !== null && input.quantity > remaining) {
-        throw new UnprocessableEntityException(`O lote (${input.quantity}) não cabe no saldo do limite global (${remaining} restantes de ${campaign.globalLimit}). O limite de um lote nunca é o limite global.`);
+        throw new UnprocessableEntityException(`O lote (${input.quantity}) não cabe no saldo do limite global (${remaining} restantes de ${campaign.globalLimit}, contando os pagos aguardando emissão). O limite de um lote nunca é o limite global.`);
       }
       const created = await tx.valePassLot.create({ data: { campaignId, name, quantity: input.quantity, createdBy: actorId } });
       await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_CREATED', created.id, undefined, { name, quantity: input.quantity, campaignId });
       return created;
     });
-    return toLotView(row, 0);
+    return this.viewLot(campaignId, row.id);
   }
 
   /** Planejado: nome e quantidade. Aberto: só a quantidade (nunca abaixo do vendido, sempre dentro do saldo global). */
@@ -169,25 +183,29 @@ export class ValePassLotsService {
           after.name = name;
         }
       }
-      const sold = (await loadLotSold(tx, campaignId)).get(lot.id) ?? 0;
+      const lotSold = (await loadLotSold(tx, campaignId)).get(lot.id) ?? 0;
       if (input.quantity !== undefined && input.quantity !== lot.quantity) {
-        if (input.quantity < sold) throw new UnprocessableEntityException(`A quantidade (${input.quantity}) é menor que os ${sold} passes já vendidos neste lote.`);
-        const totals = await loadStatusCounts(tx, campaignId);
-        const remaining = globalRemaining(campaign.globalLimit, totals.sold);
-        // Saldo que o lote ainda reivindica = quantity − sold; o novo tamanho precisa caber no saldo global + o que já foi vendido nele.
-        if (remaining !== null && input.quantity - sold > remaining) {
-          throw new UnprocessableEntityException(`O lote (${input.quantity}) não cabe no limite global: restam ${remaining} passe(s) fora o que este lote já vendeu (${sold}).`);
+        const { totals } = await loadCapacity(tx, campaignId);
+        // O lote aberto carrega também as unidades pagas aguardando emissão (já contadas no consumo global).
+        const claimed = lotSold + (lot.status === 'OPEN' ? totals.pending : 0);
+        if (input.quantity < claimed) {
+          throw new UnprocessableEntityException(`A quantidade (${input.quantity}) é menor que os ${claimed} passes já vendidos ou pagos aguardando emissão neste lote.`);
+        }
+        const remaining = globalRemaining(campaign.globalLimit, totals.consumed);
+        // O que o lote ainda reivindica (quantity − claimed) precisa caber no saldo global; claimed já está no consumo.
+        if (remaining !== null && input.quantity - claimed > remaining) {
+          throw new UnprocessableEntityException(`O lote (${input.quantity}) não cabe no limite global: restam ${remaining} passe(s) fora o que este lote já vendeu ou aguarda emissão (${claimed}).`);
         }
         data.quantity = input.quantity;
         before.quantity = lot.quantity;
         after.quantity = input.quantity;
       }
-      if (Object.keys(data).length === 0) return { row: lot, sold };
+      if (Object.keys(data).length === 0) return { row: lot, sold: lotSold };
       const updated = await tx.valePassLot.update({ where: { id: lot.id }, data });
       await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_UPDATED', lot.id, before, after);
-      return { row: updated, sold };
+      return { row: updated, sold: lotSold };
     });
-    return toLotView(result.row, result.sold);
+    return this.viewLot(campaignId, result.row.id);
   }
 
   async open(campaignId: string, lotId: string, expectedUpdatedAt: string, actorId: string, actorName: string): Promise<LotView> {
@@ -201,17 +219,17 @@ export class ValePassLotsService {
       const alreadyOpen = await tx.valePassLot.findFirst({ where: { campaignId, status: 'OPEN' }, select: { name: true } });
       if (alreadyOpen) throw new ConflictException(`O lote "${alreadyOpen.name}" já está aberto. Encerre-o antes de abrir outro.`);
 
-      const totals = await loadStatusCounts(tx, campaignId);
-      const remaining = globalRemaining(campaign.globalLimit, totals.sold) as number;
+      const { totals } = await loadCapacity(tx, campaignId);
+      const remaining = globalRemaining(campaign.globalLimit, totals.consumed) as number;
       if (lot.quantity > remaining) {
-        throw new UnprocessableEntityException(`O lote (${lot.quantity}) não cabe no saldo do limite global (${remaining} restantes de ${campaign.globalLimit}).`);
+        throw new UnprocessableEntityException(`O lote (${lot.quantity}) não cabe no saldo do limite global (${remaining} restantes de ${campaign.globalLimit}, contando os pagos aguardando emissão).`);
       }
       const openedAt = new Date();
       const updated = await tx.valePassLot.update({ where: { id: lot.id }, data: { status: 'OPEN', openFlag: true, openedAt } });
-      await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_OPENED', lot.id, { status: 'PLANNED' }, { status: 'OPEN', openedAt: openedAt.toISOString(), quantity: lot.quantity, globalRemainingBefore: remaining });
-      return { row: updated, sold: 0 };
+      await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_OPENED', lot.id, { status: 'PLANNED' }, { status: 'OPEN', openedAt: openedAt.toISOString(), quantity: lot.quantity, globalRemainingBefore: remaining, pendingPaidUnits: totals.pending });
+      return { row: updated, sold: 0, pending: totals.pending };
     });
-    return toLotView(result.row, result.sold);
+    return this.viewLot(campaignId, result.row.id);
   }
 
   async close(campaignId: string, lotId: string, expectedUpdatedAt: string, actorId: string, actorName: string): Promise<LotView> {
@@ -224,7 +242,7 @@ export class ValePassLotsService {
       await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_CLOSED', lot.id, { status: 'OPEN' }, { status: 'CLOSED', closedAt: closedAt.toISOString(), sold, quantity: lot.quantity });
       return { row: updated, sold };
     });
-    return toLotView(result.row, result.sold);
+    return this.viewLot(campaignId, result.row.id);
   }
 
   /** Cancela um lote que nunca foi aberto (o histórico fica; nada é apagado). */
@@ -236,7 +254,15 @@ export class ValePassLotsService {
       await this.audit(tx, actorId, actorName, 'VALE_PASS_LOT_CANCELLED', lot.id, { status: 'PLANNED' }, { status: 'CANCELLED' });
       return { row: updated, sold: 0 };
     });
-    return toLotView(result.row, result.sold);
+    return this.viewLot(campaignId, result.row.id);
+  }
+
+  /** Visão do lote já com o que ele carrega agora (vendidos na janela + pagos aguardando emissão, só no lote aberto). */
+  private async viewLot(campaignId: string, lotId: string): Promise<LotView> {
+    const lot = await this.prisma.valePassLot.findUniqueOrThrow({ where: { id: lotId } });
+    const sold = (await loadLotSold(this.prisma, campaignId)).get(lotId) ?? 0;
+    const pending = lot.status === 'OPEN' ? (await loadCapacity(this.prisma, campaignId)).totals.pending : 0;
+    return toLotView(lot, sold, pending);
   }
 
   // ── internos ────────────────────────────────────────────────────────

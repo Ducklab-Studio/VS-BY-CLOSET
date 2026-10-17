@@ -91,7 +91,7 @@ resolução do PR B (nunca cancelar nem reembolsar sozinho). Antes: Anderson con
   Passes e pedidos existentes: **nenhuma coluna nem linha alterada**.
 * **API (ADMIN para escrever; módulo VALLE_PASS para ler):** `PATCH /admin/vale-pass/campaigns/:id` (edição com carimbo de versão e auditoria
   antes/depois), `GET …/:id/capacity`, `POST …/:id/lots`, `PATCH …/lots/:lotId`, `POST …/lots/:lotId/(open|close|cancel)`.
-* **Regras:** "vendido" = emitido e não cancelado; o lote só abre se houver **limite global configurado** e se **couber no saldo global**; um lote
+* **Regras:** **consumido = vendido + pago aguardando emissão** (vendido = unidade emitida com algum voucher não cancelado); o lote só abre se houver **limite global configurado** e se **couber no saldo global**; um lote
   encerrado nunca reabre; o limite global nunca fica abaixo do vendido nem do saldo do lote aberto; o limite legado nunca fica abaixo do já emitido;
   pertencimento a um lote é derivado do horário (`purchased_at` ∈ `[opened_at, closed_at)`); editar valor/validade **não altera passes emitidos**.
 * **Painel:** em Valle Pass → Campanhas → "Capacidade, lotes e configuração": vendidos, limite global, saldo, lote aberto, **estoque recomendado na Shopify**
@@ -118,25 +118,44 @@ resolução do PR B (nunca cancelar nem reembolsar sozinho). Antes: Anderson con
 **Pode ficar para depois:** exibição pública do lote restante (se não validada), webhook de entrega da Resend (o estado "aceito" já basta no começo),
 conferência de cupom (se não houver cupom), painel de métricas, reenvio em massa.
 
-## 8. Auditoria pré-merge do PR A (18/10/2026) — pendências, implantação e recuperação
+## 8. Auditoria pré-merge do PR A (18/10/2026) — pendências (RESOLVIDAS), implantação e recuperação
 
-Auditoria somente leitura (código, PostgreSQL descartável e consultas `SELECT` no Neon). **Pendências encontradas antes do merge:**
+Auditoria somente leitura (código, PostgreSQL descartável e consultas `SELECT` no Neon). **Pendências encontradas antes do merge — todas corrigidas no próprio PR A (ver "Correções" abaixo):**
 
-1. **"Vendido" ignora pedido pago sem voucher (confirmado em teste).** `sold` conta linhas de `vale_passes` não canceladas. Com um pedido pago de 3
+1. **[corrigido] "Vendido" ignorava pedido pago sem voucher (confirmado em teste).** `sold` conta linhas de `vale_passes` não canceladas. Com um pedido pago de 3
    unidades e 1 voucher, e outro pago de 2 ainda sem emissão, o painel mostra 1 vendido, saldo global 9 (real: 5) e aceita um lote de 9. O alerta
    crítico existe, mas os números de saldo, lote e estoque recomendado ficam **otimistas**. Correção proposta (pequena, no PR A): vendido =
    vouchers não cancelados **+ unidades pagas ainda sem voucher** (pedidos confirmados, não excluídos, com `quantidade − emitidos` > 0, processados ou não).
-2. **A migration deixa `lock_timeout = 5s` na sessão** (usa `SET` sem o `RESET` final que a A1/A2 têm; confirmado: A1 termina em 0, esta em 5 s). O pré-deploy
+2. **[corrigido] A migration deixava `lock_timeout = 5s` na sessão** (usa `SET` sem o `RESET` final que a A1/A2 têm; confirmado: A1 termina em 0, esta em 5 s). O pré-deploy
    usa a URL do **pooler** do Neon; em pooler de transações a configuração pode "vazar" para a próxima transação que reutilizar aquela conexão.
    Correção: `RESET lock_timeout;` no fim do arquivo.
-3. *(menor)* Depois de **encerrar/reativar** uma campanha, o cartão guarda o `updatedAt` antigo e a primeira edição seguinte recebe 409 ("recarregue a tela").
+3. *(menor)* [corrigido] Depois de **encerrar/reativar** uma campanha, o cartão guarda o `updatedAt` antigo e a primeira edição seguinte recebe 409 ("recarregue a tela").
    Seguro, só incômodo; correção: a ação de ligar/desligar devolver a campanha atualizada.
+
+**Correções (18/10/2026, mesmo PR):**
+
+* **Capacidade consumida.** `consumido = vendido + pendente`. *Vendido* = unidades emitidas com algum voucher não cancelado; *pendente* = `quantidade − unidades emitidas`
+  dos pedidos PAGOS (CONFIRMED, não excluídos na Shopify). O pendente já consome capacidade e sai de `pending` no instante em que vira `sold` — nunca conta duas
+  vezes (testado em cada etapa da emissão parcial → total). Passe emitido e depois cancelado conta como emitido (não volta a ser pendência) e libera a capacidade.
+  Pedido pendente de pagamento, expirado, recusado, cancelado, reembolsado ou excluído na Shopify nunca consome. Pedido duplicado/webhook repetido: um registro por pedido
+  (`shopify_order_id` único), então não há contagem dupla. O exemplo da auditoria (5 unidades pagas, 1 emitida) agora dá **5 consumidas, saldo 5**, e um lote de 6 é recusado.
+* **Atribuição à campanha** (o registro de pedidos não guarda a variante, e o webhook não foi alterado): pelos vales que o pedido já tem; senão pela variante lida do payload que a
+  Shopify enviou; sem como saber (pedido só da reconciliação) é cobrado de **todas** as campanhas — lado seguro, nunca libera capacidade. Exato com uma campanha (o caso real).
+  No PR B o pedido pago sem emissão passa a ter `campaign_id` próprio na fila de resolução, e essa heurística some.
+* **Lote aberto** carrega as unidades pendentes (`remaining = quantidade − vendidas − pendentes`); o limite global, o limite legado e o tamanho do lote aberto só podem ser
+  configurados acima do vendido **mais** o pendente.
+* **Pronto para o PR B (dois vouchers = uma unidade):** toda contagem passa por `PASS_UNIT_KEY` e `count(DISTINCT chave)`; no PR B a chave vira `coalesce(group_id, id)`.
+  Testado com `group_id` simulado: 8 linhas = 5 unidades; uma unidade com um voucher cancelado e outro ativo continua consumindo; só deixa de consumir quando TODOS cancelam.
+* **Migration:** termina com `RESET lock_timeout`. Verificado em banco descartável: aplicação, atomicidade (erro no fim do script desfaz tudo), falha por lock (`P3018` em ~5 s, nada criado,
+  `P3009` no retry, `migrate resolve --rolled-back` + novo deploy aplicam), e o `lock_timeout` volta ao padrão da conexão (7 s configurado no banco de teste) em vez de ficar em 5 s.
+* **Teste de travamento** determinístico (aguarda a trava antes da edição concorrente; 10/10 repetições; sem o `FOR UPDATE` os testes de travamento e de capacidade falham).
+* **Encerrar/reativar campanha** devolve a campanha atualizada; a edição seguinte não recebe 409 indevido. O 409 legítimo (outra pessoa alterou) continua, com teste no navegador.
 
 **Contrato de capacidade para o PR B (obrigatório):**
 
 * A contagem do limite global passa a ser **por passe** (`count(distinct coalesce(group_id, id))`), não por linha: com 2 vouchers por unidade, contar linhas
   esgotaria os 1.000 em 500 vendas.
-* "Vendido" **inclui** unidades pagas ainda sem passe (na fila de resolução ou em processamento) — uma única função usada pelo painel, pelas validações
+* "Consumido" **inclui** unidades pagas ainda sem passe (na fila de resolução ou em processamento) — uma única função (`loadCapacity`) usada pelo painel, pelas validações
   e pela emissão, dentro da trava `FOR UPDATE` da campanha. Cancelamento libera capacidade; usado/expirado continua contando.
 * Ordem de travas na emissão: operacional → webhook → pedido → **campanha**. O painel só toma a trava da campanha (nunca a do pedido), logo não há ciclo.
 
@@ -152,7 +171,7 @@ Auditoria somente leitura (código, PostgreSQL descartável e consultas `SELECT`
 
 **Plano de implantação (cada passo com autorização expressa):**
 
-1. Corrigir as pendências 1 e 2 (e, de preferência, a 3) e repetir o CI.
+1. ~~Corrigir as pendências 1 a 3 e repetir o CI~~ (feito neste PR).
 2. Conferir o Neon imediatamente antes (somente leitura): 34 migrations aplicadas/0 falhadas, sem locks nem transações longas, hashes de campanhas/passes/pedidos.
 3. Merge → pré-deploy aplica a migration (segundos) → deploy → `/health` → confirmar 35 migrations, tabela e colunas, hashes iguais e `/availability` normal.
 4. Só depois, a equipe configura (nada é automático): limite global 1.000, lote, limpeza do limite legado e estoque da Shopify.

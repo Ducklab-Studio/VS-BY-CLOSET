@@ -633,16 +633,17 @@ function CampaignCard({
   async function toggle() {
     setPending(true);
     setError(null);
-    const { error: toggleError } = await toggleValePassCampaignAction(
+    const { campaign: updated, error: toggleError } = await toggleValePassCampaignAction(
       campaign.id,
       !campaign.active,
     );
     setPending(false);
-    if (toggleError) {
-      setError(toggleError);
+    if (toggleError || !updated) {
+      setError(toggleError ?? 'Não foi possível atualizar a campanha.');
       return;
     }
-    onToggled({ ...campaign, active: !campaign.active });
+    // A versão devolvida pela API (com o novo `updatedAt`) substitui a da tela: sem isso a próxima edição receberia 409 indevido.
+    onToggled(updated);
   }
 
   return (

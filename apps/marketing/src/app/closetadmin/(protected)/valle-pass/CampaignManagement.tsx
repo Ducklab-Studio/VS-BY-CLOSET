@@ -153,12 +153,16 @@ function CapacitySummary({ capacity, onRefresh, loading }: { capacity: ValePassC
         </button>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Tile label="Vendidos (não cancelados)" value={String(totals.sold)} hint={`${totals.issued} emitidos, ${totals.cancelled} cancelados`} />
+        <Tile
+          label="Vendidos (não cancelados)"
+          value={String(totals.consumed)}
+          hint={`${totals.issued} emitidos, ${totals.cancelled} cancelados${totals.pending > 0 ? `, ${totals.pending} pagos aguardando emissão (já contam)` : ''}`}
+        />
         <Tile label="Limite global" value={capacity.campaign.globalLimit === null ? 'Sem limite' : String(capacity.campaign.globalLimit)} hint="Soma de todos os lotes" />
         <Tile label="Saldo do limite global" value={globalRemaining === null ? '—' : String(globalRemaining)} />
         <Tile
           label="Lote aberto"
-          value={openLot ? `${openLot.sold}/${openLot.quantity}` : 'Nenhum'}
+          value={openLot ? `${openLot.sold + openLot.pending}/${openLot.quantity}` : 'Nenhum'}
           hint={openLot ? `${openLot.name} — restam ${openLot.remaining}` : 'Sem lote aberto, a venda deveria estar fechada'}
         />
       </div>
@@ -299,7 +303,8 @@ function LotRow({ campaignId, lot, canManage, onChanged, onError }: { campaignId
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink dark:text-dark-text">{lot.name}</p>
           <p className="text-xs text-ink/50 dark:text-dark-subtle">
-            {lot.sold}/{lot.quantity} vendidos · restam {lot.remaining}
+            {lot.sold + lot.pending}/{lot.quantity} vendidos · restam {lot.remaining}
+            {lot.pending > 0 ? ` · ${lot.pending} pago(s) aguardando emissão já contam` : ''}
             {lot.soldOut && lot.status === 'OPEN' ? ' · esgotado' : ''}
           </p>
           {lot.openedAt ? (

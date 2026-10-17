@@ -1,46 +1,86 @@
 import { Prisma } from '@prisma/client';
-import type { ValePassLotStatus, ValePassStatus } from '@prisma/client';
+import type { ValePassLotStatus } from '@prisma/client';
 
 /**
  * Capacidade do Valle Pass: limite GLOBAL, lotes comerciais e totais. Funções puras + as consultas SQL num só lugar,
  * para que a tela, as validações e (na etapa seguinte) a emissão usem exatamente a mesma conta.
  *
- * DECISÕES (documentadas em docs/VALLE-PASS-2027-DESENHO.md):
- *  - "Vendido" = passe emitido e NÃO cancelado. Passe cancelado (ex.: pedido reembolsado) libera capacidade. Passe usado
- *    ou expirado continua contando: foi vendido.
+ * DEFINIÇÕES (documentadas em docs/VALLE-PASS-2027-DESENHO.md):
+ *  - UNIDADE de capacidade = um Valle Pass comercial. Hoje 1 unidade = 1 linha de `vale_passes`; no PR B cada unidade terá DOIS
+ *    vouchers (duas linhas com o mesmo `group_id`) e continuará consumindo UMA unidade. Por isso toda contagem passa por
+ *    `passUnitKey` (o único ponto a trocar) e por `count(DISTINCT chave)`, nunca por `count(*)`.
+ *  - VENDIDO (`sold`) = unidades emitidas com pelo menos um voucher não cancelado. Cancelar (ex.: pedido reembolsado) libera a
+ *    capacidade; usado ou expirado continua contando.
+ *  - PENDENTE (`pending`) = unidades de pedidos PAGOS (CONFIRMED, não excluídos na Shopify) que ainda não receberam todos os
+ *    passes (`quantidade − unidades emitidas`, incluindo as canceladas, que já foram emitidas). Enquanto aguardam emissão, JÁ
+ *    consomem capacidade; ao serem emitidas viram `sold` e saem de `pending` — nunca contam duas vezes.
+ *  - CONSUMIDO (`consumed`) = `sold + pending`. É o que o limite global compara. A capacidade nunca é liberada só porque um
+ *    pedido pago ainda espera emissão.
  *  - O limite de um lote NUNCA é o limite global: o lote só abre se couber no saldo global.
- *  - Pertencimento a um lote é derivado do horário (`purchased_at` dentro de `[opened_at, closed_at)`).
+ *  - Pertencimento a um lote é derivado do horário (`purchased_at` dentro de `[opened_at, closed_at)`); as unidades pendentes
+ *    são cobradas do lote ABERTO (é nele que serão emitidas), e só dele.
  */
 
 /** Teto técnico (não comercial) para quantidades configuráveis. */
 export const MAX_CONFIGURABLE_QUANTITY = 1_000_000;
 export const MAX_LOT_QUANTITY = 100_000;
 
-export function consumesCapacity(status: ValePassStatus): boolean {
-  return status !== 'CANCELLED';
+/** Chave que identifica UMA unidade vendida em `vale_passes` (alias `v`). PR B: `coalesce(v.group_id, v.id)`. */
+export const PASS_UNIT_KEY = Prisma.sql`v.id`;
+
+/**
+ * Lista de agregados por unidade. `key` é a chave da unidade (`PASS_UNIT_KEY`); a fonte precisa expor `v.status`.
+ * Uma unidade com dois vouchers conta UMA vez; só deixa de ser vendida quando TODAS as suas linhas estão canceladas.
+ */
+export function unitAggregates(key: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`
+    count(DISTINCT ${key})::int AS issued,
+    count(DISTINCT ${key}) FILTER (WHERE v.status <> 'CANCELLED')::int AS sold,
+    count(DISTINCT ${key}) FILTER (WHERE v.status = 'ACTIVE')::int AS active,
+    count(DISTINCT ${key}) FILTER (WHERE v.status = 'USED')::int AS used,
+    count(DISTINCT ${key}) FILTER (WHERE v.status = 'EXPIRED')::int AS expired`;
 }
 
 export interface CapacityTotals {
-  /** Todos os passes emitidos (inclui cancelados). */
+  /** Unidades emitidas (inclui as canceladas). */
   readonly issued: number;
+  /** Emitidas e todas canceladas: já não consomem capacidade. */
   readonly cancelled: number;
-  /** Emitidos e não cancelados: o que conta contra o limite global. */
+  /** Emitidas e não canceladas. */
+  readonly sold: number;
+  /** Unidades de pedidos pagos ainda sem emissão completa (já consomem capacidade). */
+  readonly pending: number;
+  /** `sold + pending`: o que o limite global compara. */
+  readonly consumed: number;
+  readonly active: number;
+  readonly used: number;
+  readonly expired: number;
+}
+
+export interface UnitAggregateRow {
+  readonly issued: number;
   readonly sold: number;
   readonly active: number;
   readonly used: number;
   readonly expired: number;
 }
 
-export function totalsFromStatusCounts(counts: Readonly<Partial<Record<ValePassStatus, number>>>): CapacityTotals {
-  const get = (status: ValePassStatus) => counts[status] ?? 0;
-  const cancelled = get('CANCELLED');
-  const issued = get('ACTIVE') + get('USED') + get('EXPIRED') + cancelled;
-  return { issued, cancelled, sold: issued - cancelled, active: get('ACTIVE'), used: get('USED'), expired: get('EXPIRED') };
+export function totalsFrom(rows: UnitAggregateRow, pending: number): CapacityTotals {
+  return {
+    issued: rows.issued,
+    cancelled: rows.issued - rows.sold,
+    sold: rows.sold,
+    pending,
+    consumed: rows.sold + pending,
+    active: rows.active,
+    used: rows.used,
+    expired: rows.expired,
+  };
 }
 
-/** Saldo do limite global; `null` = sem limite. Nunca negativo (vendas acima do limite aparecem como 0 + alerta). */
-export function globalRemaining(globalLimit: number | null, sold: number): number | null {
-  return globalLimit === null ? null : Math.max(0, globalLimit - sold);
+/** Saldo do limite global; `null` = sem limite. Nunca negativo (consumo acima do limite aparece como 0 + alerta). */
+export function globalRemaining(globalLimit: number | null, consumed: number): number | null {
+  return globalLimit === null ? null : Math.max(0, globalLimit - consumed);
 }
 
 export interface LotView {
@@ -52,9 +92,11 @@ export interface LotView {
   readonly closedAt: string | null;
   /** Versão do lote (concorrência otimista): a ação seguinte precisa devolvê-la. */
   readonly updatedAt: string;
-  /** Passes emitidos e não cancelados dentro da janela do lote. */
+  /** Unidades emitidas e não canceladas dentro da janela do lote. */
   readonly sold: number;
-  /** Quanto ainda cabe no lote (`quantity − sold`, nunca negativo). */
+  /** Unidades pagas aguardando emissão cobradas deste lote (só o lote ABERTO as carrega). */
+  readonly pending: number;
+  /** Quanto ainda cabe no lote (`quantity − sold − pending`, nunca negativo). */
   readonly remaining: number;
   readonly soldOut: boolean;
 }
@@ -62,6 +104,7 @@ export interface LotView {
 export function toLotView(
   lot: { id: string; name: string; quantity: number; status: ValePassLotStatus; openedAt: Date | null; closedAt: Date | null; updatedAt: Date },
   sold: number,
+  pending = 0,
 ): LotView {
   return {
     id: lot.id,
@@ -72,8 +115,9 @@ export function toLotView(
     closedAt: lot.closedAt?.toISOString() ?? null,
     updatedAt: lot.updatedAt.toISOString(),
     sold,
-    remaining: Math.max(0, lot.quantity - sold),
-    soldOut: sold >= lot.quantity,
+    pending,
+    remaining: Math.max(0, lot.quantity - sold - pending),
+    soldOut: sold + pending >= lot.quantity,
   };
 }
 
@@ -87,22 +131,146 @@ export function recommendedShopifyStock(openLot: LotView | null, remainingGlobal
   return remainingGlobal === null ? openLot.remaining : Math.min(openLot.remaining, remainingGlobal);
 }
 
+// ── pedidos pagos aguardando emissão ──────────────────────────────────
+
+/** Um pedido PAGO (CONFIRMED, não excluído na Shopify) que tem menos unidades emitidas do que o comprado. */
+export interface PaidOrderRow {
+  readonly orderId: string;
+  readonly orderName: string | null;
+  /** Unidades de Valle Pass compradas. */
+  readonly quantity: number;
+  /** Unidades já emitidas (inclui as canceladas). */
+  readonly issuedUnits: number;
+  /** Campanhas que já têm vales deste pedido. */
+  readonly campaignIds: readonly string[];
+  /** O pedido já passou pela emissão (`vouchers_processed_at`). */
+  readonly processed: boolean;
+  /** Há quanto tempo o pagamento foi confirmado. */
+  readonly statusChangedAt: Date;
+}
+
+export interface CampaignVariant {
+  readonly campaignId: string;
+  /** Parte numérica (ou o próprio texto) da variante da Shopify. */
+  readonly variant: string;
+}
+
+/** `gid://shopify/ProductVariant/123` → `123`; o que não for GID fica como está. */
+export function variantKey(value: string): string {
+  return value.replace(/^.*\//, '').trim();
+}
+
+/**
+ * Quantas unidades pagas e ainda sem emissão a campanha `campaignId` deve carregar. Pura:
+ *  - pedido que já tem vales desta campanha → o que falta emitir é dela;
+ *  - pedido que só tem vales de OUTRA campanha → não é desta;
+ *  - pedido SEM vale algum → vai para a campanha da variante comprada (lida do que a Shopify enviou: `payloadVariants`);
+ *  - sem como saber a variante (pedido só da reconciliação, sem payload) → cobrado de TODAS as campanhas. Direção segura:
+ *    nunca libera capacidade; só pode segurar a mais até a emissão acontecer.
+ */
+export function pendingUnitsForCampaign(
+  campaignId: string,
+  orders: readonly PaidOrderRow[],
+  campaigns: readonly CampaignVariant[],
+  payloadVariants: ReadonlyMap<string, readonly string[]>,
+): number {
+  let units = 0;
+  for (const order of orders) {
+    const missing = order.quantity - order.issuedUnits;
+    if (missing <= 0) continue;
+    if (order.campaignIds.length > 0) {
+      if (order.campaignIds.includes(campaignId)) units += missing;
+      continue;
+    }
+    const bought = (payloadVariants.get(order.orderId) ?? []).map(variantKey);
+    const matched = campaigns.filter((campaign) => bought.includes(variantKey(campaign.variant)));
+    if (matched.length === 0 || matched.some((campaign) => campaign.campaignId === campaignId)) units += missing;
+  }
+  return units;
+}
+
+export interface PaidOrderShortfall {
+  readonly orderId: string;
+  readonly orderName: string | null;
+  readonly quantity: number;
+  /** Unidades emitidas para o pedido (inclui canceladas). */
+  readonly issued: number;
+  readonly missing: number;
+}
+
+/** Pedidos pagos que JÁ passaram pela emissão e ficaram com menos do que o comprado (a falha do limite legado). */
+export function shortfallsFrom(orders: readonly PaidOrderRow[], limit = 50): PaidOrderShortfall[] {
+  return orders
+    .filter((order) => order.processed && order.quantity > order.issuedUnits)
+    .slice(0, limit)
+    .map((order) => ({ orderId: order.orderId, orderName: order.orderName, quantity: order.quantity, issued: order.issuedUnits, missing: order.quantity - order.issuedUnits }));
+}
+
+/** Pedidos pagos ainda NÃO processados há mais de `minutes` (webhook/reconciliação atrasados). */
+export function awaitingProcessingCount(orders: readonly PaidOrderRow[], now: Date, minutes = 15): number {
+  return orders.filter((order) => !order.processed && now.getTime() - order.statusChangedAt.getTime() > minutes * 60_000).length;
+}
+
 // ── consultas ─────────────────────────────────────────────────────────
 
 type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
-export async function loadStatusCounts(client: Reader, campaignId: string): Promise<CapacityTotals> {
-  const rows = await client.$queryRaw<{ status: ValePassStatus; n: number }[]>`
-    SELECT status::text AS status, count(*)::int AS n FROM vale_passes WHERE campaign_id = ${campaignId}::uuid GROUP BY status`;
-  const counts: Partial<Record<ValePassStatus, number>> = {};
-  for (const row of rows) counts[row.status] = row.n;
-  return totalsFromStatusCounts(counts);
+const MAX_PENDING_ROWS = 5_000;
+
+/** Pedidos pagos com menos unidades emitidas do que o comprado (qualquer campanha). */
+export async function loadPaidOrderRows(client: Reader): Promise<PaidOrderRow[]> {
+  const rows = await client.$queryRaw<
+    { orderId: string; orderName: string | null; quantity: number; issuedUnits: number; campaignIds: string[]; processed: boolean; statusChangedAt: Date }[]
+  >`
+    SELECT o.shopify_order_id AS "orderId", o.shopify_order_name AS "orderName", o.quantity,
+           count(DISTINCT ${PASS_UNIT_KEY})::int AS "issuedUnits",
+           coalesce(array_agg(DISTINCT v.campaign_id::text) FILTER (WHERE v.id IS NOT NULL), ARRAY[]::text[]) AS "campaignIds",
+           (o.vouchers_processed_at IS NOT NULL) AS processed, o.status_changed_at AS "statusChangedAt"
+    FROM vale_pass_orders o
+    LEFT JOIN vale_passes v ON v.shopify_order_id = o.shopify_order_id
+    WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL
+    GROUP BY o.id
+    HAVING count(DISTINCT ${PASS_UNIT_KEY}) < o.quantity
+    ORDER BY o.order_created_at NULLS LAST, o.id
+    LIMIT ${MAX_PENDING_ROWS}`;
+  return rows;
+}
+
+/** Variantes compradas, lidas do que a Shopify enviou nos webhooks do pedido (só leitura). */
+export async function loadPayloadVariants(client: Reader, orderIds: readonly string[]): Promise<Map<string, string[]>> {
+  if (orderIds.length === 0) return new Map();
+  const rows = await client.$queryRaw<{ orderId: string; variants: string[] }[]>`
+    SELECT w.order_id AS "orderId", array_agg(DISTINCT li->>'variant_id') AS variants
+    FROM webhook_events w
+    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(w.payload->'line_items') = 'array' THEN w.payload->'line_items' ELSE '[]'::jsonb END) li
+    WHERE w.order_id = ANY(${[...orderIds]}::text[]) AND li->>'variant_id' IS NOT NULL
+    GROUP BY w.order_id`;
+  return new Map(rows.map((row) => [row.orderId, row.variants]));
+}
+
+export interface CampaignCapacityInputs {
+  readonly totals: CapacityTotals;
+  /** Pedidos pagos ainda sem emissão completa (qualquer campanha), para alertas e lista. */
+  readonly paidOrders: readonly PaidOrderRow[];
+}
+
+/** Totais da campanha + pedidos pagos pendentes, numa leitura só (use dentro da transação com a campanha travada). */
+export async function loadCapacity(client: Reader, campaignId: string): Promise<CampaignCapacityInputs> {
+  // Sequencial de propósito: dentro de transação interativa do Prisma as consultas compartilham uma só conexão.
+  const aggregates = await client.$queryRaw<UnitAggregateRow[]>`SELECT ${unitAggregates(PASS_UNIT_KEY)} FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid`;
+  const paidOrders = await loadPaidOrderRows(client);
+  const campaigns = await client.$queryRaw<{ id: string; variant: string }[]>`SELECT id::text AS id, shopify_variant_id AS variant FROM vale_pass_campaigns`;
+  const unattributed = paidOrders.filter((order) => order.campaignIds.length === 0).map((order) => order.orderId);
+  const payloadVariants = await loadPayloadVariants(client, unattributed);
+  const pending = pendingUnitsForCampaign(campaignId, paidOrders, campaigns.map((c) => ({ campaignId: c.id, variant: c.variant })), payloadVariants);
+  const row = aggregates[0] ?? { issued: 0, sold: 0, active: 0, used: 0, expired: 0 };
+  return { totals: totalsFrom(row, pending), paidOrders };
 }
 
 /** Vendidos (não cancelados) de cada lote, pela janela de horário. Lotes não abertos têm 0. */
 export async function loadLotSold(client: Reader, campaignId: string): Promise<Map<string, number>> {
   const rows = await client.$queryRaw<{ id: string; sold: number }[]>`
-    SELECT l.id::text AS id, count(v.id) FILTER (WHERE v.status <> 'CANCELLED')::int AS sold
+    SELECT l.id::text AS id, count(DISTINCT ${PASS_UNIT_KEY}) FILTER (WHERE v.status <> 'CANCELLED')::int AS sold
     FROM vale_pass_lots l
     LEFT JOIN vale_passes v
       ON v.campaign_id = l.campaign_id
@@ -112,42 +280,6 @@ export async function loadLotSold(client: Reader, campaignId: string): Promise<M
     WHERE l.campaign_id = ${campaignId}::uuid
     GROUP BY l.id`;
   return new Map(rows.map((row) => [row.id, row.sold]));
-}
-
-export interface PaidOrderShortfall {
-  readonly orderId: string;
-  readonly orderName: string | null;
-  /** Unidades de Valle Pass compradas no pedido. */
-  readonly quantity: number;
-  /** Vales emitidos para o pedido (inclui cancelados). */
-  readonly issued: number;
-  readonly missing: number;
-}
-
-/**
- * Pedidos CONFIRMADOS (pagos) que já passaram pela emissão mas ficaram com MENOS vales do que unidades compradas. É a falha
- * que o limite legado provocava (o 11º pagante ficava sem vale). Só leitura; não identifica o cliente.
- */
-export async function loadPaidOrderShortfalls(client: Reader, limit = 50): Promise<PaidOrderShortfall[]> {
-  const rows = await client.$queryRaw<{ orderId: string; orderName: string | null; quantity: number; issued: number }[]>`
-    SELECT o.shopify_order_id AS "orderId", o.shopify_order_name AS "orderName", o.quantity, count(v.id)::int AS issued
-    FROM vale_pass_orders o
-    LEFT JOIN vale_passes v ON v.shopify_order_id = o.shopify_order_id
-    WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL AND o.vouchers_processed_at IS NOT NULL
-    GROUP BY o.id
-    HAVING count(v.id) < o.quantity
-    ORDER BY o.order_created_at NULLS LAST, o.id
-    LIMIT ${limit}`;
-  return rows.map((row) => ({ ...row, missing: row.quantity - row.issued }));
-}
-
-/** Pedidos confirmados que ainda NÃO passaram pela emissão há mais de `minutes` (webhook/reconciliação atrasados). */
-export async function countPaidOrdersAwaitingProcessing(client: Reader, minutes = 15): Promise<number> {
-  const rows = await client.$queryRaw<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM vale_pass_orders
-    WHERE status = 'CONFIRMED' AND deleted_in_shopify_at IS NULL AND vouchers_processed_at IS NULL
-      AND status_changed_at < now() - ${minutes} * interval '1 minute'`;
-  return rows[0]?.n ?? 0;
 }
 
 // ── datas e validações puras ──────────────────────────────────────────

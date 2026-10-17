@@ -82,7 +82,7 @@ export function planCampaignUpdate(current: CampaignCurrent, input: CampaignUpda
   if (has(input, 'quantityLimit')) {
     const value = input.quantityLimit as number | null;
     if (value !== null && value < context.issued) {
-      errors.push(`O limite de emissão (${value}) é menor que os ${context.issued} passes já emitidos: o próximo pagamento ficaria sem passe. Deixe vazio ou use um valor maior.`);
+      errors.push(`O limite de emissão (${value}) é menor que os ${context.issued} passes já emitidos (ou pagos aguardando emissão): o próximo pagamento ficaria sem passe. Deixe vazio ou use um valor maior.`);
     } else set('quantityLimit', current.quantityLimit, value, () => (data.quantityLimit = value));
   }
 
@@ -91,7 +91,7 @@ export function planCampaignUpdate(current: CampaignCurrent, input: CampaignUpda
     const value = input.globalLimit as number | null;
     const needed = context.sold + (context.openLot ? Math.max(0, context.openLot.quantity - context.openLot.sold) : 0);
     if (value !== null && value < context.sold) {
-      errors.push(`O limite global (${value}) é menor que os ${context.sold} passes já vendidos.`);
+      errors.push(`O limite global (${value}) é menor que os ${context.sold} passes já vendidos (incluindo pagos aguardando emissão).`);
     } else if (value !== null && value < needed) {
       errors.push(`O limite global (${value}) não comporta o saldo do lote aberto (vendidos ${context.sold} + restante do lote ${needed - context.sold} = ${needed}). Encerre ou reduza o lote antes.`);
     } else set('globalLimit', current.globalLimit, value, () => (data.globalLimit = value));

@@ -178,6 +178,32 @@ try {
   assert.equal(audit.adminUserId, admin.id);
   pass('2b) editar a configuração pela tela: limite global 1.000, limite legado removido, validade 2027; passes emitidos intactos; auditoria com antes/depois');
 
+  // 2c) Encerrar e reativar a campanha pela tela e EDITAR em seguida: a versão devolvida pela API substitui a da tela (sem 409 indevido).
+  await card(page).getByRole('button', { name: 'Encerrar campanha' }).click();
+  await page.getByRole('button', { name: 'Encerrar', exact: true }).click();
+  await card(page).getByText('Encerrada', { exact: true }).waitFor();
+  await card(page).getByRole('button', { name: 'Reativar campanha' }).click();
+  await page.getByRole('button', { name: 'Reativar', exact: true }).click();
+  await card(page).getByText('Ativa', { exact: true }).waitFor();
+  await card(page).getByRole('button', { name: 'Editar configuração' }).click();
+  await card(page).getByLabel(/Fim das vendas/).fill('2027-05-30');
+  await card(page).getByRole('button', { name: 'Salvar configuração' }).click();
+  await card(page).getByText('Limite GLOBAL de passes (todos os lotes)').waitFor({ state: 'detached' });
+  assert.equal((await db.valePassCampaign.findUnique({ where: { id: campaignId } })).salesEndDate.toISOString().slice(0, 10), '2027-05-30');
+  assert.deepEqual((await db.adminAuditEvent.findMany({ where: { entityId: campaignId }, orderBy: { createdAt: 'asc' } })).map((e) => e.action), ['VALE_PASS_CAMPAIGN_UPDATED', 'VALE_PASS_CAMPAIGN_DEACTIVATED', 'VALE_PASS_CAMPAIGN_ACTIVATED', 'VALE_PASS_CAMPAIGN_UPDATED']);
+  pass('2c) encerrar e reativar a campanha e editar em seguida: salva sem 409 indevido (fim das vendas 30/05/2027); 4 eventos de auditoria');
+
+  // 2d) O 409 LEGÍTIMO continua: outra pessoa altera a campanha (versão muda no banco) e esta aba, desatualizada, é recusada sem gravar.
+  await card(page).getByRole('button', { name: 'Editar configuração' }).click();
+  await card(page).getByLabel(/Fim das vendas/).fill('2027-06-30');
+  const bumped = await db.valePassCampaign.findUnique({ where: { id: campaignId } });
+  await db.valePassCampaign.update({ where: { id: campaignId }, data: { updatedAt: new Date(bumped.updatedAt.getTime() + 1000) } });
+  await card(page).getByRole('button', { name: 'Salvar configuração' }).click();
+  await card(page).getByText(/foi alterada por outra pessoa/).waitFor();
+  assert.equal((await db.valePassCampaign.findUnique({ where: { id: campaignId } })).salesEndDate.toISOString().slice(0, 10), '2027-05-30');
+  await card(page).getByRole('button', { name: 'Cancelar', exact: true }).click();
+  pass('2d) edição sobre versão desatualizada continua recusada (409) e nada é gravado');
+
   // 3) Abrir o lote, ver o saldo e a recomendação de estoque; encerrar; um lote encerrado não reabre.
   await page.reload();
   await card(page).waitFor();

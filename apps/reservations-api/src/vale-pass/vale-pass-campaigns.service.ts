@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException, ServiceUnavai
 import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
-import { formatIsoDate, loadLotSold, loadStatusCounts } from './vale-pass-capacity';
+import { formatIsoDate, loadCapacity, loadLotSold } from './vale-pass-capacity';
 import { planCampaignUpdate, type CampaignUpdateInput } from './vale-pass-campaign-update';
 
 export interface ValePassCampaignItem {
@@ -124,13 +124,14 @@ export class ValePassCampaignsService {
           throw new ConflictException('A campanha foi alterada por outra pessoa. Recarregue a tela e tente de novo.');
         }
 
-        const totals = await loadStatusCounts(tx, id);
+        const { totals } = await loadCapacity(tx, id);
         const openLot = await tx.valePassLot.findFirst({ where: { campaignId: id, status: 'OPEN' } });
         const openLotSold = openLot ? ((await loadLotSold(tx, id)).get(openLot.id) ?? 0) : 0;
         const plan = planCampaignUpdate(target, input, {
-          issued: totals.issued,
-          sold: totals.sold,
-          openLot: openLot ? { quantity: openLot.quantity, sold: openLotSold } : null,
+          // Pagos aguardando emissão também vão virar passes: entram nos dois limites.
+          issued: totals.issued + totals.pending,
+          sold: totals.consumed,
+          openLot: openLot ? { quantity: openLot.quantity, sold: openLotSold + totals.pending } : null,
         });
         if (!plan.ok) throw new UnprocessableEntityException(plan.errors.join(' '));
         if (plan.changed.length === 0) return { row: target, changed: false };
