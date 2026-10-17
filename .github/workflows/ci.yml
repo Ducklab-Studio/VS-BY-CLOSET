@@ -120,6 +120,9 @@ jobs:
       - name: Testar os dois vouchers do Valle Pass 2027 no ClosetAdmin (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-two-vouchers
 
+      - name: Testar o acompanhamento dos e-mails dos vouchers no ClosetAdmin (navegador isolado)
+        run: pnpm --filter @valle/marketing run test:valle-pass-emails
+
       - name: Testar contador de novas reservas no menu
         run: pnpm --filter @valle/marketing run test:reservations-badge
 

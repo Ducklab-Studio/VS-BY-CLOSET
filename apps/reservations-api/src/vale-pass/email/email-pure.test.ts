@@ -1,0 +1,247 @@
+import { describe, expect, test } from 'vitest';
+import { createHmac } from 'node:crypto';
+import { DEFAULT_FROM, canSendLive, liveBlockers, loadEmailConfig, publicEmailStatus, senderAddress } from './email-config';
+import { maskCode, maskEmail, safeReason, scrubSensitive } from './email-mask';
+import { ResendEmailProvider, type SendEmailInput } from './email-provider';
+import { EMAIL_TERMS, escapeHtml, renderVoucherEmail } from './email-template';
+import { BACKOFF_MINUTES, backoffMs } from './email-worker.service';
+import { parseResendEvent, verifySvixSignature } from './resend-webhook';
+import { isValidRecipient } from './email-outbox.service';
+
+const liveEnv = { VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key_123', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true' };
+
+describe('configuração: fail closed', () => {
+  test('o padrão é DESLIGADO e nenhum envio real é possível', () => {
+    const config = loadEmailConfig({});
+    expect(config.mode).toBe('off');
+    expect(config.from).toBe(DEFAULT_FROM);
+    expect(config.dailyLimit).toBe(80);
+    expect(canSendLive(config)).toBe(false);
+    expect(liveBlockers(config).join(' ')).toMatch(/modo "off".*RESEND_API_KEY ausente.*não marcado como verificado/s);
+  });
+
+  test('ter RESEND_API_KEY (lembretes de retirada) ou domínio cadastrado NÃO liga o envio de vouchers', () => {
+    expect(canSendLive(loadEmailConfig({ RESEND_API_KEY: 're_x' }))).toBe(false);
+    expect(canSendLive(loadEmailConfig({ RESEND_API_KEY: 're_x', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true' }))).toBe(false); // falta o modo
+    expect(canSendLive(loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_x' }))).toBe(false); // falta domínio verificado
+    expect(canSendLive(loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true' }))).toBe(false); // falta a chave
+    expect(canSendLive(loadEmailConfig({ ...liveEnv, VALE_PASS_EMAIL_MODE: 'dry-run' }))).toBe(false);
+    expect(canSendLive(loadEmailConfig({ ...liveEnv, VALE_PASS_EMAIL_MODE: 'qualquer-coisa' }))).toBe(false);
+    expect(canSendLive(loadEmailConfig({ ...liveEnv, VALE_PASS_EMAIL_FROM: 'sem-arroba' }))).toBe(false);
+    expect(canSendLive(loadEmailConfig(liveEnv))).toBe(true);
+  });
+
+  test('remetente parametrizado e valores numéricos com limites', () => {
+    expect(senderAddress('Valle Pass <vallepass@vallebycloset.com>')).toBe('vallepass@vallebycloset.com');
+    expect(senderAddress('vallepass@vallebycloset.com')).toBe('vallepass@vallebycloset.com');
+    expect(senderAddress('Valle Pass <>')).toBeNull();
+    const config = loadEmailConfig({ VALE_PASS_EMAIL_DAILY_LIMIT: '999999999', VALE_PASS_EMAIL_MAX_ATTEMPTS: '0', VALE_PASS_EMAIL_BATCH_SIZE: 'abc', VALE_PASS_EMAIL_TIMEOUT_MS: '1' });
+    expect(config).toMatchObject({ dailyLimit: 100_000, maxAttempts: 1, batchSize: 10, requestTimeoutMs: 1_000 });
+  });
+
+  test('worker: desligado em teste e com 0; intervalo mínimo de 10 s', () => {
+    expect(loadEmailConfig({ VITEST: '1' }).workerIntervalSeconds).toBeNull();
+    expect(loadEmailConfig({ VALE_PASS_EMAIL_WORKER_INTERVAL_SECONDS: '0' }).workerIntervalSeconds).toBeNull();
+    expect(loadEmailConfig({ VALE_PASS_EMAIL_WORKER_INTERVAL_SECONDS: '3' }).workerIntervalSeconds).toBe(10);
+    expect(loadEmailConfig({}).workerIntervalSeconds).toBe(60);
+  });
+
+  test('o que o painel vê da configuração nunca contém a chave nem o segredo do webhook', () => {
+    const config = loadEmailConfig({ ...liveEnv, RESEND_WEBHOOK_SECRET: 'whsec_super_secreto' });
+    const json = JSON.stringify(publicEmailStatus(config));
+    expect(json).not.toContain('re_test_key_123');
+    expect(json).not.toContain('super_secreto');
+    expect(publicEmailStatus(config)).toMatchObject({ canSend: true, providerConfigured: true, webhookConfigured: true, domainVerified: true });
+  });
+});
+
+describe('máscaras', () => {
+  test('e-mail e código', () => {
+    expect(maskEmail('maria.souza@gmail.com')).toBe('m***@gmail.com');
+    expect(maskEmail('')).toBe('***');
+    expect(maskEmail('sem-arroba')).toBe('***');
+    expect(maskCode('VALLE-AB12-CD34')).toBe('VALLE-AB12-****');
+    expect(maskCode(null)).toBe('****');
+  });
+
+  test('scrubSensitive remove códigos e e-mails de qualquer texto; safeReason só deixa código curto', () => {
+    const dirty = 'falha para maria@exemplo.com com VALLE-AB12-CD34 e VALLE-ZZ99-QQ11';
+    const clean = scrubSensitive(dirty);
+    expect(clean).not.toMatch(/maria@exemplo\.com|CD34|QQ11/);
+    expect(clean).toContain('m***@exemplo.com');
+    expect(safeReason('Validation Error: maria@x.com', 'x')).toBe('validation_error_maria_x_com');
+    expect(safeReason(undefined, 'http_500')).toBe('http_500');
+    expect(safeReason('A'.repeat(200), 'x').length).toBe(60);
+  });
+
+  test('validação de destinatário', () => {
+    for (const ok of ['a@b.co', 'maria.souza+vp@gmail.com']) expect(isValidRecipient(ok)).toBe(true);
+    for (const bad of ['', null, undefined, 'a@b', 'a b@c.com', '<a@b.com>', 'x'.repeat(320) + '@b.com']) expect(isValidRecipient(bad as string)).toBe(false);
+  });
+});
+
+describe('adaptador da Resend (fetch simulado, nenhuma rede)', () => {
+  const input: SendEmailInput = { to: 'cliente@exemplo.com', from: DEFAULT_FROM, subject: 'S', html: '<p>h</p>', text: 't', idempotencyKey: 'vpe-123' };
+  type Reply = { status?: number; body?: unknown; headers?: Record<string, string>; throws?: Error; badJson?: boolean };
+  function provider(reply: Reply, calls: { url: string; init: Record<string, unknown> }[] = []) {
+    const fetchImpl = async (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => {
+      calls.push({ url, init });
+      if (reply.throws) throw reply.throws;
+      return {
+        status: reply.status ?? 200,
+        ok: (reply.status ?? 200) < 300,
+        headers: { get: (name: string) => reply.headers?.[name.toLowerCase()] ?? null },
+        json: async () => {
+          if (reply.badJson) throw new Error('bad json');
+          return reply.body ?? {};
+        },
+      };
+    };
+    return new ResendEmailProvider({ apiKey: 're_segredo_xyz', timeoutMs: 1_000, fetchImpl });
+  }
+
+  test('aceito: devolve o id; envia chave de idempotência e autorização, e a chave NUNCA vai no corpo', async () => {
+    const calls: { url: string; init: Record<string, unknown> }[] = [];
+    expect(await provider({ body: { id: 'em_1' } }, calls).send({ ...input, replyTo: 'suporte@vallebycloset.com' })).toEqual({ kind: 'accepted', messageId: 'em_1' });
+    const init = calls[0].init as { headers: Record<string, string>; body: string };
+    expect(calls[0].url).toBe('https://api.resend.com/emails');
+    expect(init.headers['Idempotency-Key']).toBe('vpe-123');
+    expect(init.headers.Authorization).toBe('Bearer re_segredo_xyz');
+    expect(init.body).not.toContain('re_segredo_xyz');
+    expect(JSON.parse(init.body)).toMatchObject({ to: ['cliente@exemplo.com'], subject: 'S', reply_to: 'suporte@vallebycloset.com' });
+  });
+
+  test('2xx sem id ou com corpo ilegível é DESCONHECIDO (pode ter sido enviado), nunca falha', async () => {
+    expect(await provider({ body: {} }).send(input)).toEqual({ kind: 'unknown', reason: 'invalid_response' });
+    expect(await provider({ badJson: true }).send(input)).toEqual({ kind: 'unknown', reason: 'invalid_response' });
+  });
+
+  test('recusas: validação permanente; 429 com e sem Retry-After; cota excedida; credencial', async () => {
+    expect(await provider({ status: 422, body: { name: 'validation_error', message: 'cliente@exemplo.com inválido' } }).send(input)).toEqual({ kind: 'rejected', status: 422, reason: 'validation_error', permanent: true });
+    expect(await provider({ status: 429, body: { name: 'rate_limit_exceeded' }, headers: { 'retry-after': '30' } }).send(input)).toEqual({ kind: 'rejected', status: 429, reason: 'rate_limited', permanent: false, retryAfterSeconds: 30 });
+    expect(await provider({ status: 429, body: { name: 'rate_limit_exceeded' } }).send(input)).toEqual({ kind: 'rejected', status: 429, reason: 'rate_limited', permanent: false });
+    expect(await provider({ status: 429, body: { name: 'daily_quota_exceeded' } }).send(input)).toEqual({ kind: 'rejected', status: 429, reason: 'quota_exceeded', permanent: false, retryAfterSeconds: 3600 });
+    expect(await provider({ status: 401, body: { name: 'missing_api_key' } }).send(input)).toMatchObject({ kind: 'rejected', permanent: true, authProblem: true });
+    expect(await provider({ status: 403 }).send(input)).toMatchObject({ kind: 'rejected', reason: 'auth_error', authProblem: true });
+  });
+
+  test('o texto livre do provedor (pode conter o e-mail do cliente) nunca sai do adaptador', async () => {
+    const result = await provider({ status: 422, body: { name: 'validation_error', message: 'The to address maria@exemplo.com is invalid' } }).send(input);
+    expect(JSON.stringify(result)).not.toContain('maria@exemplo.com');
+  });
+
+  test('5xx, conflito de idempotência, timeout e erro de rede são DESCONHECIDOS', async () => {
+    expect(await provider({ status: 500 }).send(input)).toEqual({ kind: 'unknown', reason: 'http_5xx' });
+    expect(await provider({ status: 503 }).send(input)).toEqual({ kind: 'unknown', reason: 'http_5xx' });
+    expect(await provider({ status: 409, body: { name: 'concurrent_idempotent_requests' } }).send(input)).toEqual({ kind: 'unknown', reason: 'idempotency_conflict' });
+    expect(await provider({ throws: Object.assign(new Error('x'), { name: 'AbortError' }) }).send(input)).toEqual({ kind: 'unknown', reason: 'timeout' });
+    expect(await provider({ throws: new TypeError('fetch failed') }).send(input)).toEqual({ kind: 'unknown', reason: 'network_error' });
+  });
+
+  test('timeout real: um fetch que nunca responde é abortado e vira "desconhecido"', async () => {
+    const hanging = new ResendEmailProvider({
+      apiKey: 're_x',
+      timeoutMs: 30,
+      fetchImpl: (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))),
+    });
+    expect(await hanging.send(input)).toEqual({ kind: 'unknown', reason: 'timeout' });
+  });
+});
+
+describe('template do e-mail', () => {
+  const vouchers = [
+    { company: 'VS_BY_CLOSET' as const, amountCents: 5_000, code: 'VALLE-AAAA-1111', validFrom: new Date('2027-01-01T03:00:00Z'), expiresAt: new Date('2028-01-01T03:00:00Z') },
+    { company: 'VALLE_SHOWROOM' as const, amountCents: 50_000, code: 'VALLE-BBBB-2222', validFrom: new Date('2027-01-01T03:00:00Z'), expiresAt: new Date('2028-01-01T03:00:00Z') },
+  ];
+
+  test('traz os DOIS vouchers separados (Valle Showroom primeiro), com valor, código, empresa e validade de 2027', () => {
+    const email = renderVoucherEmail({ customerName: 'Maria Souza', orderName: '#1001', vouchers, replyTo: 'suporte@vallebycloset.com', timeZone: 'America/Sao_Paulo' });
+    expect(email.subject).toBe('Seus vouchers do Valle Pass 2027');
+    for (const part of ['R$ 500,00', 'R$ 50,00', 'VALLE-BBBB-2222', 'VALLE-AAAA-1111', 'Voucher Valle Showroom', 'Voucher VS BY CLOSET', 'Uso exclusivo na Valle Showroom.', 'Uso exclusivo na VS BY CLOSET.', 'Olá, Maria!', '#1001']) {
+      expect(email.html, part).toContain(part);
+    }
+    expect(email.html.indexOf('VALLE-BBBB-2222')).toBeLessThan(email.html.indexOf('VALLE-AAAA-1111'));
+    expect(email.html).toContain('Válido de 01/01/2027 a 31/12/2027');
+    expect(email.text).toContain('Código: VALLE-BBBB-2222');
+    expect(email.text).toContain('Válido de 01/01/2027 a 31/12/2027');
+    expect(email.html).toContain('width=device-width');
+    expect(email.html).toContain('max-width:600px');
+    for (const line of EMAIL_TERMS) expect(email.html).toContain(escapeHtml(line));
+  });
+
+  test('NÃO promete o que não está confirmado: sem desconto de 10%, uso parcial, transferência ou reembolso', () => {
+    const email = renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: 'America/Sao_Paulo' });
+    for (const text of [email.html, email.text]) {
+      expect(text).not.toMatch(/10\s?%|desconto|passeio|parcial|transfer|reembols|saldo/i);
+    }
+  });
+
+  test('a validade independe do fuso do servidor e a data final é o último dia (31/12/2027)', () => {
+    const tz = (zone: string) => renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: zone }).text;
+    expect(tz('America/Sao_Paulo')).toContain('a 31/12/2027');
+    expect(tz('UTC')).toContain('a 01/01/2028'); // outro fuso comercial muda o dia: por isso o fuso é parametrizado, e o padrão é o provisório
+  });
+
+  test('várias unidades: assunto e linha indicam "n de N"; HTML do nome do cliente é escapado', () => {
+    const email = renderVoucherEmail({ customerName: '<script>alert(1)</script> Silva', orderName: '#2', vouchers, unit: { index: 2, total: 3 }, timeZone: 'America/Sao_Paulo' });
+    expect(email.subject).toBe('Seus vouchers do Valle Pass 2027 (2 de 3)');
+    expect(email.html).toContain('Valle Pass 2 de 3 do seu pedido.');
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  test('nome absurdamente longo ou ausente cai para a saudação neutra', () => {
+    expect(renderVoucherEmail({ customerName: 'x'.repeat(80), orderName: null, vouchers, timeZone: 'UTC' }).text).toContain('Olá!');
+    expect(renderVoucherEmail({ customerName: '  ', orderName: null, vouchers, timeZone: 'UTC' }).text).toContain('Olá!');
+  });
+});
+
+describe('espera entre tentativas', () => {
+  test('cresce de 1 min a 24 h e o jitter fica em ±10%', () => {
+    expect(BACKOFF_MINUTES).toEqual([1, 5, 15, 60, 180, 360, 720, 1440]);
+    BACKOFF_MINUTES.forEach((minutes, index) => {
+      expect(backoffMs(index + 1, () => 0.5)).toBe(minutes * 60_000);
+      expect(backoffMs(index + 1, () => 0)).toBe(Math.round(minutes * 60_000 * 0.9));
+      expect(backoffMs(index + 1, () => 1)).toBe(Math.round(minutes * 60_000 * 1.1));
+    });
+    expect(backoffMs(99, () => 0.5)).toBe(1440 * 60_000);
+    expect(backoffMs(0, () => 0.5)).toBe(60_000);
+  });
+});
+
+describe('assinatura do webhook da Resend (Svix)', () => {
+  const secretBytes = Buffer.from('uma-chave-secreta-de-teste-1234567890');
+  const secret = `whsec_${secretBytes.toString('base64')}`;
+  const body = JSON.stringify({ type: 'email.delivered', data: { email_id: 'em_9' } });
+  const sign = (id: string, ts: string, payload: string, key = secretBytes) => `v1,${createHmac('sha256', key).update(`${id}.${ts}.${payload}`).digest('base64')}`;
+  const now = 1_800_000_000;
+  const base = { secret, id: 'msg_1', timestamp: String(now), rawBody: body, nowSeconds: now };
+
+  test('aceita a assinatura correta (inclusive entre várias)', () => {
+    expect(verifySvixSignature({ ...base, signature: sign('msg_1', String(now), body) })).toBe(true);
+    expect(verifySvixSignature({ ...base, signature: `v1,AAAA ${sign('msg_1', String(now), body)}` })).toBe(true);
+    expect(verifySvixSignature({ ...base, rawBody: Buffer.from(body), signature: sign('msg_1', String(now), body) })).toBe(true);
+  });
+
+  test('recusa corpo alterado, outro segredo, outro id, carimbo velho/futuro e cabeçalhos ausentes', () => {
+    const good = sign('msg_1', String(now), body);
+    expect(verifySvixSignature({ ...base, rawBody: body + ' ', signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, signature: sign('msg_1', String(now), body, Buffer.from('outro')) })).toBe(false);
+    expect(verifySvixSignature({ ...base, id: 'msg_2', signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, nowSeconds: now + 301, signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, nowSeconds: now - 301, signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, signature: undefined })).toBe(false);
+    expect(verifySvixSignature({ ...base, id: undefined, signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, timestamp: 'abc', signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, secret: '', signature: good })).toBe(false);
+    expect(verifySvixSignature({ ...base, signature: 'v2,' + good.slice(3) })).toBe(false);
+  });
+
+  test('interpreta só eventos bem formados', () => {
+    expect(parseResendEvent(body)).toEqual({ type: 'email.delivered', emailId: 'em_9' });
+    expect(parseResendEvent('não é json')).toBeNull();
+    expect(parseResendEvent(JSON.stringify({ type: 'email.delivered' }))).toBeNull();
+    expect(parseResendEvent(JSON.stringify({ type: 5, data: { email_id: 'x' } }))).toBeNull();
+    expect(parseResendEvent(undefined)).toBeNull();
+  });
+});

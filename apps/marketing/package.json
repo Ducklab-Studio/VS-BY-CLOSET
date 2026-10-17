@@ -15,6 +15,7 @@
     "test:valle-pass-badge": "node ../../scripts/no-real-network.mjs node test/valle-pass-badge.mjs",
     "test:valle-pass-lots": "node ../../scripts/no-real-network.mjs node test/valle-pass-lots-browser.mjs",
     "test:valle-pass-two-vouchers": "node ../../scripts/no-real-network.mjs node test/valle-pass-two-vouchers-browser.mjs",
+    "test:valle-pass-emails": "node ../../scripts/no-real-network.mjs node test/valle-pass-emails-browser.mjs",
     "test:reservations-badge": "node ../../scripts/no-real-network.mjs node test/reservations-badge.mjs",
     "test:shopify-deleted-orders": "node ../../scripts/no-real-network.mjs node test/shopify-deleted-orders.mjs",
     "test:sync-panel": "node ../../scripts/no-real-network.mjs node test/sync-panel-browser.mjs",

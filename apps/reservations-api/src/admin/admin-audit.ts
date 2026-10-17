@@ -54,6 +54,8 @@ const CRITICAL_ACTIONS = new Set([
   'VALE_PASS_BENEFITS_UPDATED',
   'VALE_PASS_HOLD_ISSUED',
   'VALE_PASS_HOLD_DISMISSED',
+  // Reenviar os códigos dos vouchers por e-mail (destinatário possivelmente corrigido).
+  'VALE_PASS_EMAIL_RESENT',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

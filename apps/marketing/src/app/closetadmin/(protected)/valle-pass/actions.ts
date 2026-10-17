@@ -11,6 +11,10 @@ import {
   deactivateValePassCampaign,
   getValePassAttention,
   getValePassCapacity,
+  getValePassEmailSummary,
+  listValePassEmailEvents,
+  listValePassEmails,
+  resendValePassEmail,
   listValePassCampaigns,
   replaceValePassBenefits,
   dismissValePassHold,
@@ -30,6 +34,9 @@ import {
   type UpdateValePassCampaignInput,
   type ValePassCampaign,
   type ValePassCapacity,
+  type ValePassEmailItem,
+  type ValePassEmailStatus,
+  type ValePassEmailSummary,
   type ValePassLot,
   type ValePassLotAction,
   type ValePassOrder,
@@ -292,6 +299,43 @@ export async function replaceValePassBenefitsAction(campaignId: string, benefits
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível salvar os benefícios.' };
+  }
+}
+
+/** Acompanhamento dos e-mails dos vouchers (somente leitura; qualquer perfil com o módulo). Tudo mascarado pela API. */
+export async function loadValePassEmailsAction(status?: ValePassEmailStatus): Promise<{ summary: ValePassEmailSummary | null; items: ValePassEmailItem[]; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    const [summary, items] = await Promise.all([getValePassEmailSummary(session.id), listValePassEmails(session.id, status)]);
+    return { summary, items, error: null };
+  } catch (err) {
+    return { summary: null, items: [], error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os e-mails dos vouchers.' };
+  }
+}
+
+export async function loadValePassEmailEventsAction(id: string): Promise<{ events: { type: string; detail: unknown; createdAt: string }[]; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    return { events: await listValePassEmailEvents(id, session.id), error: null };
+  } catch (err) {
+    return { events: [], error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar o histórico.' };
+  }
+}
+
+/** Reenvio dos códigos por e-mail: só ADMIN, com justificativa (≥ 10 caracteres) e confirmação; a API revalida e audita. */
+export async function resendValePassEmailAction(id: string, input: { note: string; toEmail?: string }): Promise<{ mayDuplicate: boolean; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (input.note.trim().length < 10) return { mayDuplicate: false, error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const result = await resendValePassEmail(id, { note: input.note.trim(), ...(input.toEmail?.trim() ? { toEmail: input.toEmail.trim() } : {}) }, session.id);
+    revalidateValePassPath();
+    return { mayDuplicate: result.mayDuplicate, error: null };
+  } catch (err) {
+    return { mayDuplicate: false, error: err instanceof AdminApiError ? err.message : 'Não foi possível reenviar.' };
   }
 }
 

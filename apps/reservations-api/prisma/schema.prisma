@@ -823,6 +823,7 @@ model ValePassCampaign {
   lots     ValePassLot[]
   benefits ValePassCampaignBenefit[]
   holds    ValePassIssuanceHold[]
+  emails ValePassEmailOutbox[]
 
   @@map("vale_pass_campaigns")
 }
@@ -1127,4 +1128,89 @@ model ValePassEvent {
 
   @@index([valePassId])
   @@map("vale_pass_events")
+}
+
+/// Estado de uma mensagem da caixa de saída de e-mails dos vouchers do Valle Pass.
+/// QUEUED = enfileirada; SENDING = chamada à API em andamento; UNKNOWN = resposta ambígua (timeout/erro de rede/5xx: pode ter sido aceita);
+/// ACCEPTED = aceita pela Resend (tem id); DELIVERED = entregue (webhook da Resend); FAILED = recusada/devolvida (definitivo);
+/// NEEDS_ATTENTION = exige uma pessoa (tentativas esgotadas, resultado desconhecido antigo demais, sem destinatário, credencial);
+/// CANCELLED = o pedido deixou de estar pago/os vouchers foram cancelados: nunca enviar.
+enum ValePassEmailStatus {
+  QUEUED
+  SENDING
+  UNKNOWN
+  ACCEPTED
+  DELIVERED
+  FAILED
+  NEEDS_ATTENTION
+  CANCELLED
+
+  @@map("vale_pass_email_status")
+}
+
+enum ValePassEmailKind {
+  INITIAL
+  RESEND
+
+  @@map("vale_pass_email_kind")
+}
+
+/// Caixa de saída (outbox) dos e-mails com os códigos do Valle Pass: UMA mensagem inicial por unidade comercial (`group_id`), com os
+/// vouchers dela. Os CÓDIGOS não são gravados aqui — são lidos de `vale_passes` na hora do envio, só se o pedido continuar pago e a
+/// unidade completa. Idempotência: `dedupe_key` único (`initial:<group_id>`) e a chave de idempotência da Resend (`idempotency_key`).
+model ValePassEmailOutbox {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyOrderId  String              @map("shopify_order_id")
+  campaignId      String              @map("campaign_id") @db.Uuid
+  /// Unidade comercial (liga os vouchers dela). Sem FK: `group_id` não é uma tabela.
+  groupId         String              @map("group_id") @db.Uuid
+  kind            ValePassEmailKind   @default(INITIAL)
+  /// `initial:<group_id>` ou `resend:<group_id>:<n>`. Único: enfileirar duas vezes a mesma unidade nunca duplica.
+  dedupeKey       String              @unique @map("dedupe_key")
+  toEmail         String              @map("to_email")
+  recipientName   String?             @map("recipient_name")
+  status          ValePassEmailStatus @default(QUEUED)
+  attempts        Int                 @default(0)
+  nextAttemptAt   DateTime            @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// Reserva (lease) de quem está processando. Vencida = o processo caiu no meio: o resultado é tratado como desconhecido.
+  lockedUntil     DateTime?           @map("locked_until") @db.Timestamptz(6)
+  /// Chave enviada à Resend no cabeçalho Idempotency-Key (a Resend deduplica por 24 h). Trocada só quando é seguro (nunca enviado).
+  idempotencyKey  String              @map("idempotency_key")
+  firstAttemptAt  DateTime?           @map("first_attempt_at") @db.Timestamptz(6)
+  lastAttemptAt   DateTime?           @map("last_attempt_at") @db.Timestamptz(6)
+  providerMessageId String?           @unique @map("provider_message_id")
+  acceptedAt      DateTime?           @map("accepted_at") @db.Timestamptz(6)
+  deliveredAt     DateTime?           @map("delivered_at") @db.Timestamptz(6)
+  failedAt        DateTime?           @map("failed_at") @db.Timestamptz(6)
+  /// Código curto do último problema (sem dados pessoais, sem código de voucher).
+  lastError       String?             @map("last_error")
+  /// Prazo prometido ao cliente: 3 dias depois do pagamento confirmado.
+  deadlineAt      DateTime            @map("deadline_at") @db.Timestamptz(6)
+  resendOfId      String?             @map("resend_of_id") @db.Uuid
+  requestedBy     String?             @map("requested_by") @db.Uuid
+  note            String?
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign     @relation(fields: [campaignId], references: [id])
+  events   ValePassEmailEvent[]
+
+  @@index([status, nextAttemptAt])
+  @@index([shopifyOrderId])
+  @@index([groupId])
+  @@map("vale_pass_email_outbox")
+}
+
+/// Linha do tempo de cada mensagem. Nunca guarda código de voucher nem e-mail completo.
+model ValePassEmailEvent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  outboxId  String   @map("outbox_id") @db.Uuid
+  type      String
+  detail    Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  outbox ValePassEmailOutbox @relation(fields: [outboxId], references: [id])
+
+  @@index([outboxId, createdAt])
+  @@map("vale_pass_email_events")
 }
