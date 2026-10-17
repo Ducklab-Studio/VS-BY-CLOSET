@@ -990,6 +990,8 @@ enum ValePassHoldStatus {
 enum ValePassHoldReason {
   CAPACITY_EXCEEDED
   CAMPAIGN_NOT_READY
+  /// Pedido pago com valor, moeda, quantidade ou desconto fora do esperado: aguarda decisão de um ADMIN (detalhes em `detail.issues`).
+  FINANCIAL_MISMATCH
 
   @@map("vale_pass_hold_reason")
 }

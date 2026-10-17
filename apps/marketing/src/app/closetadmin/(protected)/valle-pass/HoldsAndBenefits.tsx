@@ -21,6 +21,32 @@ const hintClass = 'mt-1 text-[0.7rem] leading-snug text-ink/45 dark:text-dark-su
 const REASON_LABELS: Record<ValePassCapacityHold['reason'], string> = {
   CAPACITY_EXCEEDED: 'Limite global esgotado',
   CAMPAIGN_NOT_READY: 'Campanha sem validade/benefícios prontos',
+  FINANCIAL_MISMATCH: 'Valor, moeda, quantidade ou desconto fora do esperado',
+};
+/** Divergências financeiras em português claro (os códigos vêm da API; nada além deles). */
+const ISSUE_LABELS: Record<string, string> = {
+  FINANCIALS_UNDEFINED: 'sem dados financeiros do pedido',
+  NOT_FULLY_PAID: 'pagamento não está integral',
+  ORDER_CANCELLED: 'pedido cancelado',
+  OUTSTANDING_BALANCE: 'saldo em aberto',
+  OUTSTANDING_UNDEFINED: 'saldo em aberto indefinido',
+  CURRENCY_MISMATCH: 'moeda diferente de BRL',
+  CURRENCY_UNDEFINED: 'moeda indefinida',
+  NO_VALLE_PASS_LINE: 'sem linha de Valle Pass',
+  MIXED_CART: 'carrinho misto',
+  UNKNOWN_VALE_PASS_VARIANT: 'variante sem preço configurado',
+  PRICE_UNDEFINED: 'preço indefinido',
+  PRICE_MISMATCH: 'preço diferente do configurado',
+  DISCOUNT_PRESENT: 'desconto aplicado',
+  DISCOUNT_UNDEFINED: 'desconto indefinido',
+  QUANTITY_INVALID: 'quantidade inválida',
+  QUANTITY_UNDEFINED: 'quantidade indefinida',
+  QUANTITY_OUT_OF_RANGE: 'quantidade acima do teto',
+  QUANTITY_CHANGED: 'unidades removidas ou reembolsadas',
+  REFUND_PRESENT: 'há reembolso',
+  EXTRA_CHARGES: 'frete ou cobrança extra',
+  TOTAL_UNDEFINED: 'total indefinido',
+  TOTAL_MISMATCH: 'total pago diferente do esperado',
 };
 const COMPANY_LABELS = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' } as const;
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -114,6 +140,9 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>
           Pedido {hold.shopifyOrderName ?? hold.shopifyOrderId}: {hold.units} unidade(s) · {REASON_LABELS[hold.reason]} · {formatDateTime(hold.createdAt)}
+          {hold.reason === 'FINANCIAL_MISMATCH' && hold.issues.length > 0 ? (
+            <span className="mt-0.5 block text-ink/60 dark:text-dark-muted">Divergências: {hold.issues.map((code) => ISSUE_LABELS[code] ?? code).join('; ')}.</span>
+          ) : null}
         </span>
         {canManage ? (
           <button type="button" className={secondaryButton} onClick={() => void openPanel()} aria-expanded={open}>

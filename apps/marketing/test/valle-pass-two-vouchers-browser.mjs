@@ -281,10 +281,13 @@ try {
   const staffCtx = await newContext(staff.token, { viewport: { width: 1280, height: 1000 } });
   const staffPage = await newPage(staffCtx, errors);
   const hold2 = await db.valePassIssuanceHold.create({ data: { shopifyOrderId: orderId, campaignId, units: 1, reason: 'CAMPAIGN_NOT_READY', status: 'OPEN', openFlag: true } });
+  await db.valePassIssuanceHold.create({ data: { shopifyOrderId: `${prefix}-fin`, campaignId, units: 1, reason: 'FINANCIAL_MISMATCH', status: 'OPEN', openFlag: true, detail: { issues: [{ code: 'DISCOUNT_PRESENT' }, { code: 'TOTAL_MISMATCH' }] } } });
   await staffPage.goto(vallePass);
   await card(staffPage).waitFor();
   await expand(staffPage);
   await card(staffPage).getByText(/Pagamentos confirmados aguardando resolução/).waitFor();
+  await card(staffPage).getByText(/Valor, moeda, quantidade ou desconto fora do esperado/).waitFor();
+  await card(staffPage).getByText('Divergências: desconto aplicado; total pago diferente do esperado.').waitFor(); // motivo e divergências em português, sem dados pessoais
   assert.equal(await card(staffPage).getByRole('button', { name: /Resolver|Sugerir modelo|Emitir|Descartar/ }).count(), 0);
   const staffPreview = await fetch(`${apiUrl}/admin/vale-pass/holds/${hold2.id}/preview`, { headers: { Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': staff.token } });
   assert.equal(staffPreview.status, 403); // nem o retrato dos números é do STAFF
