@@ -28,6 +28,11 @@ export type SendEmailResult =
       readonly permanent: boolean;
       /** Credencial/permissão: pausa o envio todo e chama uma pessoa. */
       readonly authProblem?: boolean;
+      /**
+       * Repetir não resolve e NÃO é falha do destinatário: exige uma pessoa (ex.: a mesma chave de idempotência chegou com outro conteúdo).
+       * Se uma tentativa anterior teve resultado desconhecido, a mensagem original pode já ter sido enviada.
+       */
+      readonly intervention?: boolean;
       readonly retryAfterSeconds?: number;
     }
   | { readonly kind: 'unknown'; readonly reason: string };
@@ -112,7 +117,17 @@ export class ResendEmailProvider implements EmailProvider {
       return { kind: 'rejected', status, reason: quota ? 'quota_exceeded' : 'rate_limited', permanent: false, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
     }
     if (status === 401 || status === 403) return { kind: 'rejected', status, reason: reason === `http_${status}` ? 'auth_error' : reason, permanent: true, authProblem: true };
-    if (status === 409) return { kind: 'unknown', reason: 'idempotency_conflict' }; // a mesma chave está em andamento: resultado ainda desconhecido
+    if (status === 409) {
+      // 409 tem DOIS significados na Resend (documentação de Idempotency Keys), e o nome do erro decide:
+      //  - invalid_idempotent_request: a MESMA chave chegou com OUTRO conteúdo (ex.: remetente/Reply-To mudou entre tentativas). Repetir igual
+      //    nunca resolve e a mensagem original pode já ter saído → intervenção imediata, sem gastar as tentativas.
+      //  - concurrent_idempotent_requests: o pedido original ainda está em andamento → transitório, tenta de novo com espera.
+      if (reason === 'invalid_idempotent_request') return { kind: 'rejected', status, reason, permanent: true, intervention: true };
+      if (reason === 'concurrent_idempotent_requests') return { kind: 'unknown', reason };
+      return { kind: 'unknown', reason: 'idempotency_conflict' }; // 409 sem nome conhecido: resultado ainda desconhecido (não assume falha)
+    }
+    // Chave de idempotência inválida (tamanho): defeito nosso, repetir igual não resolve.
+    if (status === 400 && reason === 'invalid_idempotency_key') return { kind: 'rejected', status, reason, permanent: true, intervention: true };
     if (status >= 500) return { kind: 'unknown', reason: 'http_5xx' };
     return { kind: 'rejected', status, reason, permanent: true };
   }

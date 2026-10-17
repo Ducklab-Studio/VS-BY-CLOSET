@@ -133,9 +133,22 @@ describe('adaptador da Resend (fetch simulado, nenhuma rede)', () => {
   test('5xx, conflito de idempotência, timeout e erro de rede são DESCONHECIDOS', async () => {
     expect(await provider({ status: 500 }).send(input)).toEqual({ kind: 'unknown', reason: 'http_5xx' });
     expect(await provider({ status: 503 }).send(input)).toEqual({ kind: 'unknown', reason: 'http_5xx' });
-    expect(await provider({ status: 409, body: { name: 'concurrent_idempotent_requests' } }).send(input)).toEqual({ kind: 'unknown', reason: 'idempotency_conflict' });
     expect(await provider({ throws: Object.assign(new Error('x'), { name: 'AbortError' }) }).send(input)).toEqual({ kind: 'unknown', reason: 'timeout' });
     expect(await provider({ throws: new TypeError('fetch failed') }).send(input)).toEqual({ kind: 'unknown', reason: 'network_error' });
+  });
+
+  test('409 tem DOIS significados: conteúdo diferente com a mesma chave → intervenção; requisição concorrente → transitório', async () => {
+    // mesma Idempotency-Key com OUTRO conteúdo: repetir igual nunca resolve e a original pode já ter saído
+    expect(await provider({ status: 409, body: { name: 'invalid_idempotent_request', message: 'x' } }).send(input)).toEqual({ kind: 'rejected', status: 409, reason: 'invalid_idempotent_request', permanent: true, intervention: true });
+    // a original ainda está em andamento: tenta de novo com espera (resultado desconhecido, nunca falha)
+    expect(await provider({ status: 409, body: { name: 'concurrent_idempotent_requests' } }).send(input)).toEqual({ kind: 'unknown', reason: 'concurrent_idempotent_requests' });
+    // 409 sem nome conhecido (ou sem corpo): continua desconhecido — nunca assume falha
+    expect(await provider({ status: 409, body: { name: 'algo_novo' } }).send(input)).toEqual({ kind: 'unknown', reason: 'idempotency_conflict' });
+    expect(await provider({ status: 409, badJson: true }).send(input)).toEqual({ kind: 'unknown', reason: 'idempotency_conflict' });
+    // chave inválida (400): defeito nosso, também exige uma pessoa
+    expect(await provider({ status: 400, body: { name: 'invalid_idempotency_key' } }).send(input)).toEqual({ kind: 'rejected', status: 400, reason: 'invalid_idempotency_key', permanent: true, intervention: true });
+    // outro 400 continua sendo erro permanente comum (sem intervenção)
+    expect(await provider({ status: 400, body: { name: 'validation_error' } }).send(input)).toEqual({ kind: 'rejected', status: 400, reason: 'validation_error', permanent: true });
   });
 
   test('timeout real: um fetch que nunca responde é abortado e vira "desconhecido"', async () => {
