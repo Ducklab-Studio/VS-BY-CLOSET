@@ -274,6 +274,12 @@ export class ValePassEmailWorkerService {
       return 'accepted';
     }
     if (result.kind === 'rejected') {
+      if (result.intervention) {
+        // Mesma chave com outro conteúdo (ou chave inválida): não repete e NÃO vira "falha" — uma tentativa anterior pode ter enviado a
+        // mensagem original. Uma pessoa confere na Resend e decide (reenvio autorizado, se for o caso).
+        await this.finish(id, sending, { status: 'NEEDS_ATTENTION', lastError: result.reason }, 'NEEDS_ATTENTION', { reason: result.reason, httpStatus: result.status, attempt, mayHaveBeenSent: row.attempts > 0 });
+        return 'needsAttention';
+      }
       if (result.authProblem) {
         this.circuitOpenUntil = now.getTime() + AUTH_PAUSE_MS;
         await this.finish(id, sending, { status: 'NEEDS_ATTENTION', lastError: result.reason }, 'NEEDS_ATTENTION', { reason: result.reason, httpStatus: result.status, attempt });

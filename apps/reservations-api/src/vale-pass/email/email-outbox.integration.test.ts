@@ -39,6 +39,9 @@ class MockProvider implements EmailProvider {
   readonly calls: SendEmailInput[] = [];
   readonly script: (SendEmailResult | 'sent-but-timeout' | Error)[] = [];
   private readonly byKey = new Map<string, string>();
+  private readonly payloadByKey = new Map<string, string>();
+  /** Imita a regra de idempotência da Resend: mesma chave + conteúdo diferente = 409 invalid_idempotent_request. */
+  strictIdempotency = true;
   readonly deliveredIds = new Set<string>();
   /** Atraso artificial por chamada (ms), para provocar concorrência real. */
   delayMs = 0;
@@ -55,8 +58,14 @@ class MockProvider implements EmailProvider {
 
   async send(input: SendEmailInput): Promise<SendEmailResult> {
     this.calls.push(input);
+    const fingerprint = JSON.stringify([input.to, input.from, input.replyTo ?? null, input.subject, input.html, input.text]);
+    const known = this.payloadByKey.get(input.idempotencyKey);
+    if (this.strictIdempotency && known !== undefined && known !== fingerprint) {
+      return { kind: 'rejected', status: 409, reason: 'invalid_idempotent_request', permanent: true, intervention: true }; // mesma chave, outro conteúdo
+    }
     if (this.delayMs) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     const next = this.script.shift();
+    if (!this.payloadByKey.has(input.idempotencyKey) && !(next && typeof next === 'object' && 'kind' in next && next.kind === 'rejected')) this.payloadByKey.set(input.idempotencyKey, fingerprint);
     if (next === 'sent-but-timeout') {
       this.deliver(input); // a Resend recebeu e enviou, mas a resposta nunca chegou
       return { kind: 'unknown', reason: 'timeout' };
@@ -400,6 +409,113 @@ localDescribe('E-mail dos vouchers — envio, reavaliação e confidencialidade'
     for (const code of await codesOf(f.groupIds[0])) expect(dump).not.toContain(code);
     expect(mine.codesMasked.every((c) => /^VALLE-[A-Z0-9]{4}-\*{4}$/.test(c))).toBe(true);
     expect(JSON.stringify(await outbox.events(mine.id))).not.toContain(f.email);
+  });
+});
+
+localDescribe('E-mail dos vouchers — 409 da Resend: conteúdo alterado × concorrência', () => {
+  test('timeout depois de a Resend enviar + remetente/Reply-To alterados antes da repetição → intervenção IMEDIATA, sem repetir, sem duplicar', async () => {
+    for (const change of [{ VALE_PASS_EMAIL_FROM: 'Valle Pass <outro@vallebycloset.com>' }, { VALE_PASS_EMAIL_REPLY_TO: 'novo-suporte@vallebycloset.com' }]) {
+      const provider = new MockProvider();
+      provider.script.push('sent-but-timeout');
+      const first = stack(liveConfig(), provider);
+      const f = await paidOrder(1);
+      await enqueue(first.outbox, f.orderId);
+      const t0 = Date.now() + 5_000;
+      await first.worker.tick(new Date(t0));
+      expect((await rowsOf(f.orderId))[0]).toMatchObject({ status: 'UNKNOWN', attempts: 1 });
+      expect(provider.deliveredIds.size).toBe(1); // a Resend já tinha enviado a original
+
+      const changed = stack(liveConfig(change), provider); // a configuração mudou antes da repetição (novo deploy)
+      const report = await changed.worker.tick(new Date(t0 + 2 * 60_000));
+      expect(report).toMatchObject({ needsAttention: 1, accepted: 0, retrying: 0, unknown: 0 });
+      const [row] = await rowsOf(f.orderId);
+      expect(row).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'invalid_idempotent_request', attempts: 2, lockedUntil: null });
+      expect(row.failedAt).toBeNull(); // NÃO é falha: a original pode ter chegado
+      const events = await prisma.valePassEmailEvent.findMany({ where: { outboxId: row.id }, orderBy: { createdAt: 'asc' } });
+      expect(events.at(-1)).toMatchObject({ type: 'NEEDS_ATTENTION', detail: { reason: 'invalid_idempotent_request', httpStatus: 409, mayHaveBeenSent: true } });
+      // nenhuma repetição depois, por mais que o tempo passe
+      for (let i = 1; i <= 5; i++) await changed.worker.tick(new Date(t0 + i * 6 * HOUR));
+      expect(provider.calls).toHaveLength(2);
+      expect(provider.deliveredIds.size).toBe(1); // continua UM e-mail real
+      expect((await changed.outbox.summary()).alerts.map((x) => x.code)).toContain('EMAIL_NEEDS_ATTENTION');
+      await cleanRows();
+    }
+  });
+
+  test('após a intervenção, o reenvio autorizado usa chave NOVA e o conteúdo atual (avisa que pode duplicar)', async () => {
+    const provider = new MockProvider();
+    provider.script.push('sent-but-timeout');
+    const first = stack(liveConfig(), provider);
+    const f = await paidOrder(1);
+    await enqueue(first.outbox, f.orderId);
+    const t0 = Date.now() + 5_000;
+    await first.worker.tick(new Date(t0));
+    const changed = stack(liveConfig({ VALE_PASS_EMAIL_FROM: 'Valle Pass <outro@vallebycloset.com>' }), provider);
+    await changed.worker.tick(new Date(t0 + 2 * 60_000));
+    const [row] = await rowsOf(f.orderId);
+    expect(row.status).toBe('NEEDS_ATTENTION');
+    const resend = await changed.outbox.requestResend(row.id, { note: 'Conferido na Resend: a original não saiu' }, { id: adminId, name: ADMIN_NAME });
+    expect(resend.mayDuplicate).toBe(true);
+    await changed.worker.tick(new Date(t0 + 5 * 60_000));
+    const sent = await prisma.valePassEmailOutbox.findUniqueOrThrow({ where: { id: resend.id } });
+    expect(sent.status).toBe('ACCEPTED');
+    expect(sent.idempotencyKey).not.toBe(row.idempotencyKey);
+    expect(provider.calls.at(-1)?.from).toBe('Valle Pass <outro@vallebycloset.com>');
+  });
+
+  test('409 concurrent_idempotent_requests é TRANSITÓRIO: resultado desconhecido, espera crescente e conclui sem duplicar', async () => {
+    const { outbox, worker, provider } = stack(liveConfig());
+    provider.script.push({ kind: 'unknown', reason: 'concurrent_idempotent_requests' }, { kind: 'unknown', reason: 'concurrent_idempotent_requests' });
+    const f = await paidOrder(1);
+    await enqueue(outbox, f.orderId);
+    let now = Date.now() + 5_000;
+    const waits: number[] = [];
+    for (let i = 0; i < 2; i++) {
+      await worker.tick(new Date(now));
+      const [row] = await rowsOf(f.orderId);
+      expect(row).toMatchObject({ status: 'UNKNOWN', lastError: 'concurrent_idempotent_requests' });
+      waits.push(row.nextAttemptAt.getTime() - now);
+      now = row.nextAttemptAt.getTime() + 1_000;
+    }
+    expect(waits).toEqual([60_000, 300_000]); // 1 min, 5 min
+    await worker.tick(new Date(now));
+    expect((await rowsOf(f.orderId))[0]).toMatchObject({ status: 'ACCEPTED', attempts: 3 });
+    expect(new Set(provider.calls.map((call) => call.idempotencyKey)).size).toBe(1); // sempre a mesma chave
+    expect(provider.deliveredIds.size).toBe(1);
+  });
+
+  test('invalid_idempotent_request logo na 1ª tentativa e chave inválida (400): intervenção, nunca FAILED, sem pausar as outras mensagens', async () => {
+    const { outbox, worker, provider } = stack(liveConfig());
+    provider.script.push(
+      { kind: 'rejected', status: 409, reason: 'invalid_idempotent_request', permanent: true, intervention: true },
+      { kind: 'rejected', status: 400, reason: 'invalid_idempotency_key', permanent: true, intervention: true },
+    );
+    const a = await paidOrder(1);
+    const b = await paidOrder(1);
+    const c = await paidOrder(1);
+    for (const f of [a, b, c]) await enqueue(outbox, f.orderId);
+    const report = await worker.tick(soon());
+    expect(report).toMatchObject({ needsAttention: 2, accepted: 1, failed: 0, paused: false });
+    expect((await rowsOf(a.orderId))[0]).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'invalid_idempotent_request', attempts: 1, failedAt: null });
+    expect((await rowsOf(b.orderId))[0]).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'invalid_idempotency_key', failedAt: null });
+    expect((await rowsOf(c.orderId))[0].status).toBe('ACCEPTED'); // as demais seguem normalmente
+    const first = await prisma.valePassEmailEvent.findMany({ where: { outboxId: (await rowsOf(a.orderId))[0].id }, orderBy: { createdAt: 'asc' } });
+    expect(first.at(-1)?.detail).toMatchObject({ mayHaveBeenSent: false });
+  });
+
+  test('o mesmo conteúdo com a mesma chave continua idempotente (a Resend devolve a original): sem 409 e sem duplicar', async () => {
+    const provider = new MockProvider();
+    provider.script.push('sent-but-timeout', 'sent-but-timeout');
+    const { outbox, worker } = stack(liveConfig(), provider);
+    const f = await paidOrder(1);
+    await enqueue(outbox, f.orderId);
+    let now = Date.now() + 5_000;
+    for (let i = 0; i < 3; i++) {
+      await worker.tick(new Date(now));
+      now += 20 * 60_000;
+    }
+    expect((await rowsOf(f.orderId))[0]).toMatchObject({ status: 'ACCEPTED', attempts: 3 });
+    expect(provider.deliveredIds.size).toBe(1);
   });
 });
 
