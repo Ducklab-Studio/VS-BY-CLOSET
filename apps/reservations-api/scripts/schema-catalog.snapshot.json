@@ -211,6 +211,34 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_email_events.vale_pass_email_events_outbox_id_fkey": {
+      "columns": [
+        "outbox_id"
+      ],
+      "references": "vale_pass_email_outbox",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_pass_events.vale_pass_events_vale_pass_id_fkey": {
       "columns": [
         "vale_pass_id"
@@ -1049,6 +1077,112 @@
       ],
       "predicate": null
     },
+    "vale_pass_email_events.vale_pass_email_events_outbox_id_created_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "outbox_id",
+        "created_at"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_events.vale_pass_email_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_dedupe_key_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "dedupe_key"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_group_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "group_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_provider_message_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "provider_message_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_shopify_order_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_email_outbox.vale_pass_email_outbox_status_next_attempt_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "status",
+        "next_attempt_at"
+      ],
+      "predicate": null
+    },
     "vale_pass_events.vale_pass_events_pkey": {
       "method": "btree",
       "unique": true,
@@ -1721,6 +1855,46 @@
     },
     "vale_pass_campaigns.id": {
       "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_events.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.attempts": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.kind": {
+      "default": "'initial'::vale_pass_email_kind",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.next_attempt_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_email_outbox.status": {
+      "default": "'queued'::vale_pass_email_status",
       "generated": null,
       "identity": null
     },
