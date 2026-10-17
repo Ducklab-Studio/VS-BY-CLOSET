@@ -473,7 +473,7 @@ localDescribe('Fase 3 — migration A1 (Postgres local)', () => {
           const full = path.join(dir, entry);
           if (statSync(full).isDirectory()) { walk(full); continue; }
           const rel = path.relative(srcDir, full).split(path.sep).join('/');
-          if (!rel.endsWith('.ts') || rel.endsWith('.test.ts') || rel.startsWith('rental-rules/')) continue; // motor puro isolado
+          if (!rel.endsWith('.ts') || rel.endsWith('.test.ts') || rel.startsWith('rental-rules/') || rel.startsWith('reservation-binding-v2/')) continue; // módulos puros isolados (o v2 tem teste próprio garantindo que ninguém o importa)
           const text = readFileSync(full, 'utf8');
           for (const name of names) if (text.includes(name)) offenders.push(`${rel}: ${name}`);
         }
