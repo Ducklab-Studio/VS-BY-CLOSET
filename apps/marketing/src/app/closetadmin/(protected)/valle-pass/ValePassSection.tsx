@@ -24,6 +24,7 @@ import type {
 } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
+import { EmailsPanel } from './EmailsPanel';
 import { formatVoucherDisplayDay, formatVoucherFirstDay, formatVoucherLastDay } from '@/lib/valle-pass-dates';
 import { EmptyState } from '@/components/closetadmin/ui';
 import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
@@ -357,6 +358,8 @@ export function ValePassSection({
           </div>
         )}
       </section>
+
+      <EmailsPanel canManage={canManageCampaigns} />
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">

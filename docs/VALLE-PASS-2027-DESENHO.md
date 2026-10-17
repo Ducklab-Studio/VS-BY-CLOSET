@@ -269,3 +269,103 @@ Fuso da validade (provisório `America/Sao_Paulo`); uso parcial do voucher (sald
   * o servidor refaz tudo dentro da transação (locks do pedido e da campanha): perfil ADMIN ativo (além do guard da rota), retenção aberta, pedido ainda pago, números que a pessoa viu **iguais** aos de agora (limite, consumo, total projetado, versão da retenção) e total digitado correto. Qualquer divergência rejeita sem emitir (409 se algo mudou entre a visualização e a confirmação — exige nova confirmação; 422 se o total digitado estiver errado; 403 se não for ADMIN);
   * invariante: a emissão só **troca** "pago aguardando" por "vendido". O consumo total não pode mudar; se mudasse, a transação é desfeita. Assim o painel nunca enxerga capacidade falsa (saldo continua 0, estoque recomendado 0, novas vendas continuam retidas, alerta crítico permanece);
   * auditoria crítica com limite, vendidos/aguardando/consumido antes e depois, quanto excede, justificativa, total confirmado e administrador.
+
+## 10. PR C — e-mail dos vouchers pela Resend (19/10/2026)
+
+**Estado: implementado, testado e DESLIGADO.** Nada envia e-mail até que (1) o domínio seja verificado, (2) a chave seja configurada no Railway, (3) o modo seja ligado e (4) a emissão dos dois vouchers seja conectada ao pagamento — cada passo com autorização expressa. O serviço de lembretes de retirada (que também usa a Resend) **não foi alterado**.
+
+### 10.1 Arquitetura
+
+```
+emissão completa (transação do pedido)         reconciliador (rede de segurança)
+        │  enqueueForOrder(tx, pedido)                │  enqueueMissing()
+        ▼                                             ▼
+   vale_pass_email_outbox  ──  UMA linha INICIAL por unidade comercial (dedupe_key = initial:<group_id>)
+        │  worker (intervalo, lease, SKIP LOCKED, limite diário sob lock consultivo)
+        ▼
+   reavalia o pedido AGORA → renderiza com os códigos lidos de vale_passes → adaptador Resend (Idempotency-Key)
+        │
+        ▼
+   QUEUED → SENDING → ACCEPTED → DELIVERED (webhook /webhooks/resend, assinatura Svix)
+                 ↘ UNKNOWN (timeout/5xx/rede: retenta com a MESMA chave) ↘ FAILED / NEEDS_ATTENTION / CANCELLED
+```
+
+* **Uma mensagem por unidade** (cada Valle Pass = 1 e-mail com seus 2 vouchers). Um pedido com 3 unidades gera 3 e-mails ("1 de 3" no assunto). *Decisão a confirmar:* se o comercial preferir um único e-mail por pedido com todas as unidades, muda só o agrupamento no enfileiramento e no template.
+* **A caixa de saída não guarda códigos.** Eles são lidos de `vale_passes` na hora do envio, e só se o pedido continuar `CONFIRMED`, sem cancelamento/reembolso/exclusão, e a unidade estiver completa e ativa. Pedido não pago, reembolsado, cancelado ou com emissão parcial nunca enfileira; se mudar depois de enfileirar, a mensagem vira `CANCELLED` (ou espera, se incompleta) e o provedor nunca é chamado.
+* **Estados:** `QUEUED` enfileirada · `SENDING` chamada à API em andamento · `UNKNOWN` resposta ambígua · `ACCEPTED` aceita pela Resend (tem id) · `DELIVERED` entregue (webhook) · `FAILED` recusada/devolvida · `NEEDS_ATTENTION` exige uma pessoa · `CANCELLED` não pode mais ser enviada.
+* **Resposta ambígua (timeout, erro de rede, 5xx, 2xx sem id, conflito de idempotência) nunca vira falha.** A próxima tentativa usa a **mesma** `Idempotency-Key` e a Resend devolve o envio original em vez de enviar de novo (janela de 24 h; o código usa 22 h). Passada a janela com resultado ainda desconhecido, só uma pessoa decide (`NEEDS_ATTENTION`, "confira na Resend antes de reenviar"). Se a tentativa foi **recusada** (429), uma chave nova é segura.
+* **Retentativas:** espera 1 min, 5 min, 15 min, 1 h, 3 h, 6 h, 12 h, 24 h (±10%); 8 tentativas por padrão. `429` respeita `Retry-After`; cota diária excedida pausa o envio por 1 h; credencial recusada (401/403) vira `NEEDS_ATTENTION` e pausa o envio por 15 min.
+* **Reinício do Railway:** o worker marca `SENDING` com uma reserva (lease de 90 s) antes de chamar a API. Se o processo cair, a reserva vence, a mensagem vira `UNKNOWN` e é retomada com a mesma chave.
+* **Concorrência:** a reserva do lote é um único comando atômico (CTE materializada + `FOR UPDATE SKIP LOCKED`), e a conta do limite diário + a reserva rodam na mesma transação sob `pg_advisory_xact_lock`.
+* **Defeitos reais achados e corrigidos nos testes repetidos** (importante para quem mexer aqui): (1) `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` pode reservar mais que `n` linhas — por isso a CTE materializada; (2) contar o limite diário em três consultas separadas deixa uma mensagem escapar de todas as contagens enquanto muda de estado — por isso uma consulta só; (3) `RETURNING` não garante ordem — o lote é reordenado do mais antigo para o mais novo.
+
+### 10.2 Variáveis de ambiente (somente no backend / Railway)
+
+| Variável | Padrão | Função |
+| --- | --- | --- |
+| `VALE_PASS_EMAIL_MODE` | `off` | `off` não faz nada · `dry-run` enfileira e valida o modelo, **nunca** chama a Resend · `live` envia |
+| `RESEND_API_KEY` | — | Chave da Resend. **Só no Railway.** Nunca no código, no banco, em logs, no site ou no repositório. Já existe para os lembretes de retirada; ter a chave **não** liga o envio de vouchers |
+| `VALE_PASS_EMAIL_DOMAIN_VERIFIED` | `false` | Marque `true` só depois que a Resend mostrar o domínio como *Verified* |
+| `VALE_PASS_EMAIL_FROM` | `Valle Pass <vallepass@vallebycloset.com>` | Remetente (precisa ser do domínio verificado) |
+| `VALE_PASS_EMAIL_REPLY_TO` | — | Endereço que recebe as respostas (recomendado) |
+| `VALE_PASS_EMAIL_DAILY_LIMIT` | `80` | Teto de envios por 24 h (plano gratuito = 100/dia; a margem fica para os lembretes) |
+| `VALE_PASS_EMAIL_MAX_ATTEMPTS` · `_BATCH_SIZE` · `_TIMEOUT_MS` · `_WORKER_INTERVAL_SECONDS` | 8 · 10 · 10000 · 60 | Ajustes do worker (`0` no intervalo desliga o worker) |
+| `RESEND_WEBHOOK_SECRET` | — | `whsec_...` do webhook de entrega. Sem ele `/webhooks/resend` responde 503 |
+| `VALE_PASS_VALIDITY_TIMEZONE` | `America/Sao_Paulo` | Fuso **provisório** das datas do e-mail e das validades |
+
+Envio real = `MODE=live` **e** chave **e** `DOMAIN_VERIFIED=true` **e** remetente válido. Qualquer item faltando bloqueia, e o painel mostra o motivo.
+
+### 10.3 Segurança
+
+* A chave nunca aparece em respostas, logs, auditoria nem no painel (o painel só vê booleanos). O adaptador nunca devolve texto livre da Resend (pode conter o e-mail do cliente): só o nome normalizado do erro.
+* E-mail e códigos saem **mascarados** de qualquer API/painel/auditoria (`m***@gmail.com`, `VALLE-AB12-****`). Testes varrem logs, linha do tempo, auditoria e HTML do painel.
+* Reenvio: só ADMIN (re-checado no serviço), justificativa ≥ 10 caracteres, confirmação na tela, pedido ainda pago e unidade completa, no máximo 5 por unidade, nova mensagem ligada à original com chave nova, auditoria crítica (`VALE_PASS_EMAIL_RESENT`). Se a original tinha resultado desconhecido, a resposta avisa que o cliente pode receber duas mensagens.
+* Banco: identidade da mensagem imutável (trigger), linha do tempo append-only (trigger), `dedupe_key` único, `ACCEPTED/DELIVERED` exige id da Resend (CHECK).
+* Webhook da Resend: assinatura Svix em tempo constante, tolerância de 5 min, rota própria (não é o webhook financeiro da Shopify). Eventos são idempotentes e monotônicos.
+* O e-mail **não promete** o que não está aprovado: nada de 10% em passeios, uso parcial, transferência ou reembolso. Só: crédito exclusivo na empresa indicada, uso durante a validade, código pessoal.
+
+### 10.4 Domínio `vallebycloset.com` e DNS (pendente — Anderson / Hostinger)
+
+1. Na Resend → *Domains* → `vallebycloset.com`: copiar os registros pedidos (tipicamente **SPF** TXT em `send`, **DKIM** TXT `resend._domainkey` e um **MX** em `send`; a Resend mostra os valores exatos — não inventar).
+2. No DNS da Hostinger, criar exatamente esses registros e aguardar a propagação.
+3. Clicar em *Verify* na Resend até o status ficar **Verified**. Recomendado também um **DMARC** (`_dmarc`, TXT, começando com `p=none` e um endereço de relatório).
+4. Só então definir `VALE_PASS_EMAIL_DOMAIN_VERIFIED=true`.
+
+### 10.5 Ativação gradual (cada degrau com autorização)
+
+1. **Hoje:** `MODE=off`. Código e migration no `main`, nada acontece.
+2. Migration aplicada (PR próprio/merge autorizado, com conferência do Neon antes e depois).
+3. `MODE=dry-run`: o worker enfileira e valida o modelo, sem chamar a Resend.
+4. Domínio verificado + `RESEND_API_KEY` no Railway + `RESEND_WEBHOOK_SECRET` + webhook configurado na Resend apontando para `/webhooks/resend`.
+5. **Teste real controlado** (autorização expressa): um pedido sintético seu, destinatário do próprio time.
+6. `MODE=live`. Acompanhar o painel nas primeiras vendas.
+
+### 10.6 Monitoramento do prazo de 3 dias
+
+Painel *E-mails dos vouchers* (ClosetAdmin): contagem por estado, mensagens por prazo (`deadline_at` = pagamento confirmado + 3 dias), alertas **críticos** para prazo vencido e para mensagens que exigem intervenção, avisos para risco nas próximas 24 h, falhas definitivas, fila parada com envio bloqueado e uso do limite diário (≥ 80%). O prazo conta como cumprido quando a Resend **aceita** a mensagem (ou um reenvio dela).
+
+### 10.7 Recuperação
+
+* **Mensagem em `NEEDS_ATTENTION` com resultado desconhecido:** conferir no painel da Resend (busca pelo destinatário/horário). Se saiu, nada a fazer; se não saiu, reenviar pelo painel (o aviso de possível duplicidade é esperado).
+* **Credencial recusada:** corrigir `RESEND_API_KEY`/domínio; as mensagens `NEEDS_ATTENTION` por credencial são reenviadas pelo painel.
+* **Cota diária atingida:** a fila espera sozinha o dia seguinte; se o prazo apertar, subir o plano da Resend.
+* **Desligar tudo imediatamente:** `VALE_PASS_EMAIL_MODE=off` no Railway (as mensagens ficam na fila, nada se perde).
+* **Migration (se o pré-deploy falhar com `P3009`):** mesma rotina das anteriores — `prisma migrate resolve --rolled-back 20261019100000_vale_pass_email_outbox` e novo deploy. O arquivo é atômico; verificado em banco descartável (aplicação, falha por lock P3018, P3009, resolve, `lock_timeout` restaurado, reversão).
+
+### 10.8 Limites do plano gratuito da Resend
+
+100 e-mails/dia e 3.000/mês, 1 domínio. Com a meta de 1.000 Valle Pass e a regra de 1 e-mail por unidade, o volume total cabe em ~12 dias de teto diário de 80 — mas picos de venda (promoção) podem passar do teto diário e o prazo de 3 dias passa a depender da fila. Recomendação: avaliar o plano pago antes de liberar vendas públicas.
+
+### 10.9 Ligação da caixa de saída à emissão real (NÃO aplicada; depende de autorização)
+
+Pré-requisito: a emissão dos dois vouchers ligada ao pagamento (§9.5). Depois, a ligação é **uma chamada** na mesma transação, depois que as unidades do pedido foram emitidas ou completadas (inclusive pela resolução administrativa da fila de retenções):
+
+```ts
+await this.emailOutbox.enqueueForOrder(tx, orderId);   // idempotente: dedupe_key único; só unidades completas e pagas
+```
+
+Garantias: roda sob o lock do pedido; reentrega do webhook não duplica; se a transação falhar, nada é enfileirado; se o enfileiramento falhar, a emissão inteira é desfeita (não existe voucher sem mensagem na fila). O reconciliador (`enqueueMissing`) cobre qualquer unidade emitida sem mensagem. Antes de ligar: ensaio completo em banco descartável com o payload anonimizado do `orders/paid`, e a validação do passo 5 da §10.5.
+
+### 10.10 Decisões pendentes
+
+Um e-mail por unidade ou por pedido · texto final das condições (hoje só o confirmado) · remetente/Reply-To definitivos · fuso da validade · plano da Resend · quem responde a falhas e reenvios dentro do prazo.

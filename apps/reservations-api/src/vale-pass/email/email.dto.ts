@@ -21,6 +21,11 @@ export class ResendEmailDto {
 
 export const EMAIL_STATUS_FILTERS = ['QUEUED', 'SENDING', 'UNKNOWN', 'ACCEPTED', 'DELIVERED', 'FAILED', 'NEEDS_ATTENTION', 'CANCELLED'] as const;
 export class ListEmailsQueryDto {
+  // O guard de sessão lê `adminUserId` também da query dos GETs.
+  @IsOptional()
+  @IsUUID()
+  adminUserId?: string;
+
   @IsOptional()
   @IsIn(EMAIL_STATUS_FILTERS)
   status?: (typeof EMAIL_STATUS_FILTERS)[number];

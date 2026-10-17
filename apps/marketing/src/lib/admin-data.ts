@@ -696,6 +696,65 @@ export function deactivateValePassCampaign(id: string, adminUserId: string): Pro
   return adminPost(`/admin/vale-pass/campaigns/${pathSegment(id)}/deactivate`, { adminUserId });
 }
 
+/** E-mails com os códigos dos vouchers (caixa de saída). Tudo mascarado: o painel nunca recebe e-mail nem código completos. */
+export type ValePassEmailStatus = 'QUEUED' | 'SENDING' | 'UNKNOWN' | 'ACCEPTED' | 'DELIVERED' | 'FAILED' | 'NEEDS_ATTENTION' | 'CANCELLED';
+
+export interface ValePassEmailItem {
+  readonly id: string;
+  readonly orderId: string;
+  readonly orderName: string | null;
+  readonly kind: 'INITIAL' | 'RESEND';
+  readonly status: ValePassEmailStatus;
+  readonly toMasked: string;
+  readonly codesMasked: readonly string[];
+  readonly attempts: number;
+  readonly maxAttempts: number;
+  readonly nextAttemptAt: string;
+  readonly lastError: string | null;
+  readonly deadlineAt: string;
+  readonly overdue: boolean;
+  readonly createdAt: string;
+  readonly acceptedAt: string | null;
+  readonly deliveredAt: string | null;
+  readonly failedAt: string | null;
+  readonly resendOfId: string | null;
+}
+
+export interface ValePassEmailSummary {
+  readonly config: {
+    readonly mode: 'off' | 'dry-run' | 'live';
+    readonly canSend: boolean;
+    readonly blockers: readonly string[];
+    readonly providerConfigured: boolean;
+    readonly domainVerified: boolean;
+    readonly webhookConfigured: boolean;
+    readonly dailyLimit: number;
+    readonly sender: string | null;
+  };
+  readonly counts: Readonly<Record<ValePassEmailStatus, number>>;
+  readonly overdue: number;
+  readonly atRisk: number;
+  readonly acceptedLast24h: number;
+  readonly dailyLimit: number;
+  readonly alerts: readonly { readonly code: string; readonly severity: 'critical' | 'warning' | 'info'; readonly message: string }[];
+}
+
+export function getValePassEmailSummary(adminUserId: string): Promise<ValePassEmailSummary> {
+  return adminGet('/admin/vale-pass/emails/summary', adminUserId);
+}
+
+export function listValePassEmails(adminUserId: string, status?: ValePassEmailStatus): Promise<ValePassEmailItem[]> {
+  return adminGet(`/admin/vale-pass/emails${status ? `?status=${encodeURIComponent(status)}` : ''}`, adminUserId);
+}
+
+export function listValePassEmailEvents(id: string, adminUserId: string): Promise<{ type: string; detail: unknown; createdAt: string }[]> {
+  return adminGet(`/admin/vale-pass/emails/${pathSegment(id)}/events`, adminUserId);
+}
+
+export function resendValePassEmail(id: string, input: { note: string; toEmail?: string }, adminUserId: string): Promise<{ id: string; status: ValePassEmailStatus; mayDuplicate: boolean }> {
+  return adminPost(`/admin/vale-pass/emails/${pathSegment(id)}/resend`, { ...input, adminUserId });
+}
+
 export type ValePassStatus = 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
 
 export interface ValePassVoucher {

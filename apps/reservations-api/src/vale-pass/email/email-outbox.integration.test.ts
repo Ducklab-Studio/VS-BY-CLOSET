@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Logger, UnprocessableEntityException } from '@nestjs/common';
 import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REQUIRE_ROLE_KEY } from '../../admin/require-role.decorator';
@@ -220,8 +220,6 @@ localDescribe('E-mail dos vouchers — enfileirar com segurança', () => {
     expect(provider.calls).toHaveLength(3);
     const seen = new Set<string>();
     for (const call of provider.calls) {
-      const mine = f.groupIds.find((groupId) => provider.calls.length && true && (async () => true)); // (mapeamento feito abaixo)
-      void mine;
       const codes = (call.text.match(/VALLE-[A-Z0-9]{4}-[A-Z0-9]{4}/g) ?? []);
       expect(codes).toHaveLength(2);
       codes.forEach((code) => seen.add(code));
@@ -402,6 +400,52 @@ localDescribe('E-mail dos vouchers — envio, reavaliação e confidencialidade'
     for (const code of await codesOf(f.groupIds[0])) expect(dump).not.toContain(code);
     expect(mine.codesMasked.every((c) => /^VALLE-[A-Z0-9]{4}-\*{4}$/.test(c))).toBe(true);
     expect(JSON.stringify(await outbox.events(mine.id))).not.toContain(f.email);
+  });
+});
+
+localDescribe('E-mail dos vouchers — logs e isolamento dos lembretes', () => {
+  test('nenhum log do envio (sucesso, erro permanente, credencial recusada, exceção, resultado desconhecido) contém código de voucher ou e-mail completo', async () => {
+    const lines: string[] = [];
+    const capture = (...args: unknown[]) => void lines.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
+    const spies = (['log', 'warn', 'error', 'debug', 'verbose'] as const).map((level) => vi.spyOn(Logger.prototype, level).mockImplementation(capture));
+    try {
+      const { outbox, worker, provider } = stack(liveConfig());
+      const fixtures = [await paidOrder(1), await paidOrder(1), await paidOrder(1), await paidOrder(1), await paidOrder(1)];
+      for (const f of fixtures) await enqueue(outbox, f.orderId);
+      provider.script.push(
+        { kind: 'accepted', messageId: 'em_ok' },
+        { kind: 'rejected', status: 422, reason: 'validation_error', permanent: true },
+        { kind: 'unknown', reason: 'timeout' },
+        new Error(`falha com ${fixtures[3].email} e código VALLE-ABCD-1234`), // exceção do provedor com dado sensível no texto
+        { kind: 'rejected', status: 401, reason: 'auth_error', permanent: true, authProblem: true },
+      );
+      await worker.tick(soon());
+      await worker.tick(new Date(Date.now() + 10 * 60_000));
+      const sensitive = [...fixtures.map((f) => f.email), 'VALLE-ABCD-1234'];
+      for (const f of fixtures) sensitive.push(...(await codesOf(f.groupIds[0])));
+      const dump = lines.join(' | ');
+      expect(lines.length).toBeGreaterThan(0); // houve log (ex.: credencial recusada)
+      for (const secret of sensitive) expect(dump, 'log vazou dado sensível').not.toContain(secret);
+      // e o que foi gravado no banco (erro, linha do tempo, auditoria) também não
+      const stored = JSON.stringify([await prisma.valePassEmailOutbox.findMany({ where: { campaignId: { in: campaignIds } } }), await prisma.valePassEmailEvent.findMany({ where: { outbox: { campaignId: { in: campaignIds } } } })]);
+      for (const secret of fixtures.map((f) => f.email)) expect(stored.replace(new RegExp(`"toEmail":"${secret}"`, 'g'), '')).not.toContain(secret);
+      expect(stored).not.toMatch(/VALLE-[A-Z0-9]{4}-[A-Z0-9]{4}/);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
+  test('o e-mail dos vouchers não toca nos lembretes de retirada: arquivos e variáveis separados, e o serviço de lembretes continua intocado', () => {
+    const emailDir = join(__dirname);
+    for (const name of readdirSync(emailDir)) {
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      const source = readFileSync(join(emailDir, name), 'utf8');
+      for (const forbidden of ['REMINDER_FROM_EMAIL', 'REMINDER_FROM_NAME', 'PICKUP_REMINDER', 'pickup-reminder', 'WHATSAPP_']) expect(source, `${name} → ${forbidden}`).not.toContain(forbidden);
+    }
+    const reminders = readFileSync(join(__dirname, '..', '..', 'reminders', 'pickup-reminder.service.ts'), 'utf8');
+    for (const forbidden of ['VALE_PASS', 'vale-pass', 'ValePass']) expect(reminders, forbidden).not.toContain(forbidden);
+    // O remetente e o modo dos vouchers vêm só de variáveis próprias: com a chave dos lembretes presente, nada liga.
+    expect(loadEmailConfig({ RESEND_API_KEY: 're_dos_lembretes', REMINDER_FROM_EMAIL: 'lembretes@vs.com', PICKUP_REMINDER_CHANNEL: 'email', PICKUP_REMINDER_ENABLED: 'true' })).toMatchObject({ mode: 'off', from: 'Valle Pass <vallepass@vallebycloset.com>' });
   });
 });
 

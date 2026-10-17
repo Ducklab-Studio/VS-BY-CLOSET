@@ -26,6 +26,7 @@ const WRITES = [
   'resolveValePassHoldAction',
   'previewValePassHoldAction',
   'issueValePassHoldAction',
+  'resendValePassEmailAction',
   'replaceValePassBenefitsAction',
 ];
 
