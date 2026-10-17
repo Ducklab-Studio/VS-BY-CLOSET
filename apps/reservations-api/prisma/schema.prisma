@@ -791,7 +791,25 @@ model ValePassCampaign {
   validityDays     Int      @map("validity_days")
   /// Nulo = sem limite. Comparado contra `count(vouchers)` no momento
   /// da emissão (dentro da mesma transação do webhook).
+  ///
+  /// ATENÇÃO — LIMITE LEGADO: hoje ele BLOQUEIA a emissão (o pedido pago
+  /// do vale N+1 fica sem vale). Não é o limite global nem o de um lote.
+  /// A etapa seguinte do Valle Pass substitui esse bloqueio pelo limite
+  /// global + fila de resolução; até lá, o campo existe só para poder ser
+  /// corrigido/limpo pelo painel.
   quantityLimit    Int?     @map("quantity_limit")
+  /// Limite GLOBAL de passes da campanha, somando todos os lotes
+  /// (ex.: 1.000). Nulo = sem teto. Passes cancelados deixam de contar.
+  globalLimit      Int?     @map("global_limit")
+  /// Validade FIXA dos vouchers (ex.: 2027-01-01 a 2027-12-31). Valem só
+  /// para passes emitidos DEPOIS de configurados; os já emitidos
+  /// guardam a própria validade. Os dois ou nenhum. A emissão passa a
+  /// usá-las na etapa seguinte; hoje a emissão ainda usa `validityDays`.
+  voucherValidFrom  DateTime? @db.Date @map("voucher_valid_from")
+  voucherValidUntil DateTime? @db.Date @map("voucher_valid_until")
+  /// Data de encerramento das vendas — INFORMATIVA. Nenhum encerramento
+  /// automático é feito (o ano ainda não foi confirmado pelo cliente).
+  salesEndDate      DateTime? @db.Date @map("sales_end_date")
   shopifyVariantId String   @unique @map("shopify_variant_id")
   active           Boolean  @default(true)
   /// Sem relação FK de propósito (mesmo padrão de
@@ -802,8 +820,57 @@ model ValePassCampaign {
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   vouchers ValePass[]
+  lots     ValePassLot[]
 
   @@map("vale_pass_campaigns")
+}
+
+enum ValePassLotStatus {
+  PLANNED
+  OPEN
+  CLOSED
+  CANCELLED
+
+  @@map("vale_pass_lot_status")
+}
+
+/// Lote comercial de uma campanha (ex.: 100, 200 passes). É um registro de
+/// CONTROLE do que o administrador decidiu vender e quando: abrir e
+/// encerrar lotes não altera a Shopify. O bloqueio real da venda continua
+/// sendo o estoque da variante na Shopify (ajustado à mão pela equipe,
+/// o painel mostra o saldo para isso).
+///
+/// Pertencimento dos passes a um lote é DERIVADO do horário: um passe é do
+/// lote cuja janela `[opened_at, closed_at)` contém `purchased_at`. Há no
+/// máximo UM lote aberto por campanha (garantido pelo banco) e um lote
+/// encerrado nunca é reaberto — o próximo lote é um registro novo —, então
+/// as janelas nunca se sobrepõem e a contagem é determinística.
+///
+/// O limite do lote NUNCA é o limite global (`ValePassCampaign.globalLimit`):
+/// o lote só pode ser criado/aberto se couber no saldo global.
+model ValePassLot {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId String            @map("campaign_id") @db.Uuid
+  name       String
+  quantity   Int
+  status     ValePassLotStatus @default(PLANNED)
+  /// `true` somente enquanto o lote está ABERTO; `NULL` nos demais. O
+  /// índice único (campaign_id, open_flag) trata NULLs como distintos, então
+  /// permite vários lotes não abertos e no máximo um aberto — sem índice
+  /// parcial (que o Prisma não representa e geraria divergência de schema).
+  openFlag   Boolean?          @map("open_flag")
+  openedAt   DateTime?         @map("opened_at") @db.Timestamptz(6)
+  closedAt   DateTime?         @map("closed_at") @db.Timestamptz(6)
+  /// Sem FK de propósito (mesmo padrão de `ValePassCampaign.createdBy`).
+  createdBy  String?           @db.Uuid @map("created_by")
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+
+  @@unique([campaignId, openFlag])
+  @@index([campaignId])
+  @@map("vale_pass_lots")
 }
 
 /// Um vale individual — nasce automaticamente quando `orders/paid`

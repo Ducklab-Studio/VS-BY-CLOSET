@@ -23,6 +23,7 @@ import type {
   ValePassVoucher,
 } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
+import { CampaignManagement } from './CampaignManagement';
 import { EmptyState } from '@/components/closetadmin/ui';
 import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
 import {
@@ -719,6 +720,8 @@ function CampaignCard({
           {error}
         </p>
       ) : null}
+
+      <CampaignManagement campaign={campaign} canManage={canManage} onCampaignChanged={onToggled} />
     </article>
   );
 }

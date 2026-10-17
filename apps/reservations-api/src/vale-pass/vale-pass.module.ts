@@ -4,6 +4,7 @@ import { ShopifyAdminClient } from '../admin-panel/shopify-admin.client';
 import { ValePassWebhookService } from './vale-pass-webhook.service';
 import { ValePassCampaignsService } from './vale-pass-campaigns.service';
 import { ValePassCampaignsController } from './vale-pass-campaigns.controller';
+import { ValePassLotsService } from './vale-pass-lots.service';
 import { ValePassVouchersService } from './vale-pass-vouchers.service';
 import { ValePassVouchersController } from './vale-pass-vouchers.controller';
 import { ValePassOrdersService } from './vale-pass-orders.service';
@@ -17,6 +18,7 @@ import { ValePassOrdersScheduler } from './vale-pass-orders.scheduler';
     ShopifyAdminClient,
     ValePassWebhookService,
     ValePassCampaignsService,
+    ValePassLotsService,
     ValePassVouchersService,
     ValePassOrdersService,
     ValePassOrdersScheduler,

@@ -468,12 +468,105 @@ export interface ValePassCampaign {
   readonly name: string;
   readonly amountCents: number;
   readonly validityDays: number;
+  /** Limite LEGADO: hoje bloqueia a emissão do vale (o pedido pago fica sem vale). Não é o limite global. */
   readonly quantityLimit: number | null;
+  /** Limite GLOBAL de passes, somando todos os lotes. */
+  readonly globalLimit: number | null;
+  /** Validade fixa dos vouchers ("YYYY-MM-DD"); as duas datas ou nenhuma. */
+  readonly voucherValidFrom: string | null;
+  readonly voucherValidUntil: string | null;
+  /** Encerramento das vendas — informativo, sem encerramento automático. */
+  readonly salesEndDate: string | null;
   readonly shopifyVariantId: string;
   readonly active: boolean;
   readonly soldCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+/** Edição parcial: campo ausente não muda; `null` limpa (onde o campo aceita vazio). */
+export interface UpdateValePassCampaignInput {
+  expectedUpdatedAt: string;
+  name?: string;
+  amountCents?: number;
+  validityDays?: number;
+  quantityLimit?: number | null;
+  globalLimit?: number | null;
+  voucherValidFrom?: string | null;
+  voucherValidUntil?: string | null;
+  salesEndDate?: string | null;
+}
+
+export function updateValePassCampaign(id: string, input: UpdateValePassCampaignInput, adminUserId: string): Promise<ValePassCampaign> {
+  return adminPatch(`/admin/vale-pass/campaigns/${pathSegment(id)}`, { ...input, adminUserId });
+}
+
+export type ValePassLotStatus = 'PLANNED' | 'OPEN' | 'CLOSED' | 'CANCELLED';
+
+export interface ValePassLot {
+  readonly id: string;
+  readonly name: string;
+  readonly quantity: number;
+  readonly status: ValePassLotStatus;
+  readonly openedAt: string | null;
+  readonly closedAt: string | null;
+  /** Versão do lote: devolvida em toda ação (concorrência otimista). */
+  readonly updatedAt: string;
+  readonly sold: number;
+  readonly remaining: number;
+  readonly soldOut: boolean;
+}
+
+export interface ValePassCapacityAlert {
+  readonly code: string;
+  readonly severity: 'critical' | 'warning' | 'info';
+  readonly message: string;
+}
+
+export interface ValePassPaidOrderShortfall {
+  readonly orderId: string;
+  readonly orderName: string | null;
+  readonly quantity: number;
+  readonly issued: number;
+  readonly missing: number;
+}
+
+export interface ValePassCapacity {
+  readonly campaign: {
+    readonly id: string;
+    readonly name: string;
+    readonly active: boolean;
+    readonly globalLimit: number | null;
+    readonly legacyQuantityLimit: number | null;
+    readonly salesEndDate: string | null;
+    readonly updatedAt: string;
+  };
+  readonly totals: { readonly issued: number; readonly cancelled: number; readonly sold: number; readonly active: number; readonly used: number; readonly expired: number };
+  readonly globalRemaining: number | null;
+  readonly openLot: ValePassLot | null;
+  readonly lots: readonly ValePassLot[];
+  /** Estoque que a Shopify deveria ter para refletir o painel — só informativo; nada é alterado na Shopify. */
+  readonly recommendedShopifyStock: number;
+  readonly paidOrdersWithoutVoucher: readonly ValePassPaidOrderShortfall[];
+  readonly alerts: readonly ValePassCapacityAlert[];
+}
+
+export function getValePassCapacity(campaignId: string, adminUserId: string): Promise<ValePassCapacity> {
+  return adminGet(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/capacity`, adminUserId);
+}
+
+export function createValePassLot(campaignId: string, input: { name: string; quantity: number }, adminUserId: string): Promise<ValePassLot> {
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/lots`, { ...input, adminUserId });
+}
+
+export function updateValePassLot(campaignId: string, lotId: string, input: { expectedUpdatedAt: string; name?: string; quantity?: number }, adminUserId: string): Promise<ValePassLot> {
+  return adminPatch(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/lots/${pathSegment(lotId)}`, { ...input, adminUserId });
+}
+
+export type ValePassLotAction = 'open' | 'close' | 'cancel';
+
+export function actOnValePassLot(campaignId: string, lotId: string, action: ValePassLotAction, expectedUpdatedAt: string, adminUserId: string): Promise<ValePassLot> {
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/lots/${pathSegment(lotId)}/${action}`, { expectedUpdatedAt, adminUserId });
 }
 
 export function listValePassCampaigns(adminUserId: string): Promise<ValePassCampaign[]> {
