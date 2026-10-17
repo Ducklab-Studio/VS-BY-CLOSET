@@ -12,6 +12,9 @@ import {
   getValePassAttention,
   getValePassCapacity,
   listValePassCampaigns,
+  replaceValePassBenefits,
+  resolveValePassHold,
+  type ValePassBenefitInput,
   listValePassOrders,
   listValePassVouchers,
   markValePassOrdersViewed,
@@ -227,6 +230,36 @@ export async function updateValePassLotAction(
     return { lot, error: null };
   } catch (err) {
     return { lot: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o lote.' };
+  }
+}
+
+/** Resolve um pagamento retido: emitir (excedente aprovado) ou descartar (pedido já não está pago). Só ADMIN, com justificativa. */
+export async function resolveValePassHoldAction(holdId: string, action: 'issue' | 'dismiss', note: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (action !== 'issue' && action !== 'dismiss') return { error: 'Ação inválida.' };
+  if (note.trim().length < 3) return { error: 'Informe a justificativa (mínimo de 3 caracteres).' };
+  try {
+    await resolveValePassHold(holdId, action, note.trim(), session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível resolver a retenção.' };
+  }
+}
+
+/** Salva os benefícios da campanha (voucher por empresa + descontos descritivos). Só ADMIN; auditado na API. */
+export async function replaceValePassBenefitsAction(campaignId: string, benefits: readonly ValePassBenefitInput[]): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    await replaceValePassBenefits(campaignId, benefits, session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível salvar os benefícios.' };
   }
 }
 

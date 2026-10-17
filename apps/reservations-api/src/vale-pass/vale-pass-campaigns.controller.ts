@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -8,6 +8,8 @@ import { CreateValePassCampaignDto } from './dto/create-vale-pass-campaign.dto';
 import { UpdateValePassCampaignDto } from './dto/update-vale-pass-campaign.dto';
 import { CreateValePassLotDto, UpdateValePassLotDto, ValePassLotActionDto } from './dto/vale-pass-lot.dto';
 import { ValePassLotsService, type CampaignCapacity } from './vale-pass-lots.service';
+import { ValePassBenefitsService, type BenefitItem } from './vale-pass-benefits.service';
+import { PutBenefitsDto } from './dto/vale-pass-benefits.dto';
 import type { LotView } from './vale-pass-capacity';
 
 interface RequestWithAdminUser {
@@ -34,6 +36,7 @@ export class ValePassCampaignsController {
   constructor(
     private readonly campaigns: ValePassCampaignsService,
     private readonly lots: ValePassLotsService,
+    private readonly benefits: ValePassBenefitsService,
   ) {}
 
   @Get()
@@ -66,6 +69,19 @@ export class ValePassCampaignsController {
     const { adminUserId: _adminUserId, ...input } = dto;
     void _adminUserId;
     return this.campaigns.update(id, input, req.adminUser!.id, req.adminUser!.name);
+  }
+
+  /** Benefícios da campanha (vouchers por empresa e descontos). Leitura: qualquer perfil com o módulo. */
+  @Get(':id/benefits')
+  listBenefits(@Param('id', ParseUUIDPipe) id: string): Promise<BenefitItem[]> {
+    return this.benefits.list(id);
+  }
+
+  /** Substitui a configuração de benefícios (ADMIN). Só vale para emissões futuras no modelo de vários vouchers; vouchers já emitidos não mudam. */
+  @Put(':id/benefits')
+  @RequireRole('ADMIN')
+  putBenefits(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PutBenefitsDto, @Req() req: RequestWithAdminUser): Promise<BenefitItem[]> {
+    return this.benefits.replace(id, dto.benefits, req.adminUser!.id, req.adminUser!.name);
   }
 
   /** Totais, saldo do limite global, lotes e alertas (leitura, qualquer perfil com o módulo). */

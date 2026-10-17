@@ -23,6 +23,8 @@ const WRITES = [
   'actOnValePassLotAction',
   'cancelValePassVoucherAction',
   'restoreValePassVoucherAction',
+  'resolveValePassHoldAction',
+  'replaceValePassBenefitsAction',
 ];
 
 test('toda ação de escrita exige o módulo VALLE_PASS e o perfil ADMIN', () => {

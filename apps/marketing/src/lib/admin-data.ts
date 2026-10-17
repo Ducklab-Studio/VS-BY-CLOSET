@@ -561,7 +561,60 @@ export interface ValePassCapacity {
   /** Estoque que a Shopify deveria ter para refletir o painel — só informativo; nada é alterado na Shopify. */
   readonly recommendedShopifyStock: number;
   readonly paidOrdersWithoutVoucher: readonly ValePassPaidOrderShortfall[];
+  /** Pagamentos confirmados que a emissão automática não atendeu: aguardam um ADMIN. */
+  readonly holds: readonly ValePassCapacityHold[];
+  readonly benefits: readonly ValePassCapacityBenefit[];
   readonly alerts: readonly ValePassCapacityAlert[];
+}
+
+export type ValePassCompany = 'VALLE_SHOWROOM' | 'VS_BY_CLOSET';
+
+export interface ValePassCapacityHold {
+  readonly id: string;
+  readonly shopifyOrderId: string;
+  readonly shopifyOrderName: string | null;
+  readonly units: number;
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly createdAt: string;
+}
+
+export interface ValePassCapacityBenefit {
+  readonly code: string;
+  readonly kind: 'VOUCHER' | 'DISCOUNT';
+  readonly company: ValePassCompany | null;
+  readonly label: string;
+  readonly amountCents: number | null;
+  readonly discountPercent: number | null;
+  readonly terms: string | null;
+  readonly active: boolean;
+  readonly vouchersIssued: number;
+}
+
+export interface ValePassBenefitInput {
+  readonly code: string;
+  readonly kind: 'VOUCHER' | 'DISCOUNT';
+  readonly company?: ValePassCompany | null;
+  readonly label: string;
+  readonly amountCents?: number | null;
+  readonly discountPercent?: number | null;
+  readonly terms?: string | null;
+  readonly active?: boolean;
+  readonly sortOrder?: number;
+}
+
+export function replaceValePassBenefits(campaignId: string, benefits: readonly ValePassBenefitInput[], adminUserId: string): Promise<unknown> {
+  return adminPut(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/benefits`, { benefits, adminUserId });
+}
+
+export interface ValePassHold {
+  readonly id: string;
+  readonly status: 'OPEN' | 'ISSUED' | 'DISMISSED';
+  readonly issuedUnits: number | null;
+  readonly resolutionNote: string | null;
+}
+
+export function resolveValePassHold(holdId: string, action: 'issue' | 'dismiss', note: string, adminUserId: string): Promise<ValePassHold> {
+  return adminPost(`/admin/vale-pass/holds/${pathSegment(holdId)}/${action}`, { note, adminUserId });
 }
 
 export function getValePassCapacity(campaignId: string, adminUserId: string): Promise<ValePassCapacity> {
@@ -615,7 +668,14 @@ export interface ValePassVoucher {
   readonly campaignName: string;
   readonly amountCents: number;
   readonly status: ValePassStatus;
+  /** Empresa onde ESTE voucher vale (crédito exclusivo). `null` = voucher legado. */
+  readonly company: ValePassCompany | null;
+  /** Vouchers com o mesmo `groupId` são da mesma unidade comercial (um Valle Pass). */
+  readonly groupId: string | null;
+  readonly benefitLabel: string | null;
   readonly purchasedAt: string;
+  /** Primeiro instante de uso; `null` = vale desde a emissão. */
+  readonly validFrom: string | null;
   readonly expiresAt: string;
   readonly customerName: string | null;
   readonly customerPhone: string | null;

@@ -821,6 +821,8 @@ model ValePassCampaign {
 
   vouchers ValePass[]
   lots     ValePassLot[]
+  benefits ValePassCampaignBenefit[]
+  holds    ValePassIssuanceHold[]
 
   @@map("vale_pass_campaigns")
 }
@@ -901,16 +903,125 @@ model ValePass {
   cancelledAt       DateTime?      @map("cancelled_at") @db.Timestamptz(6)
   cancelledBy       String?        @db.Uuid @map("cancelled_by")
   cancelReason      String?        @map("cancel_reason")
+  /// Empresa onde ESTE voucher vale (Valle Showroom ou VS BY CLOSET). Nulo = voucher LEGADO (1 linha = 1 passe, sem empresa).
+  company           ValePassCompany?
+  /// Liga os vouchers da MESMA unidade comercial (um Valle Pass = N vouchers). A capacidade conta UNIDADES
+  /// (`coalesce(group_id, id)`), nunca linhas. Nulo = legado.
+  groupId           String?        @db.Uuid @map("group_id")
+  /// Benefício configurado na campanha que originou este voucher. Nulo = legado.
+  benefitId         String?        @db.Uuid @map("benefit_id")
+  /// Início do uso (ex.: 01/01/2027, no fuso adotado). Nulo = vale desde a emissão (legado).
+  validFrom         DateTime?      @map("valid_from") @db.Timestamptz(6)
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+  campaign ValePassCampaign         @relation(fields: [campaignId], references: [id])
+  benefit  ValePassCampaignBenefit? @relation(fields: [benefitId], references: [id], onDelete: Restrict)
   events   ValePassEvent[]
 
+  @@unique([groupId, benefitId])
+  @@unique([groupId, company])
   @@index([campaignId])
   @@index([status])
   @@index([shopifyOrderId])
+  @@index([groupId])
+  @@index([benefitId])
   @@map("vale_passes")
+}
+
+enum ValePassCompany {
+  VALLE_SHOWROOM
+  VS_BY_CLOSET
+
+  @@map("vale_pass_company")
+}
+
+enum ValePassBenefitKind {
+  VOUCHER
+  DISCOUNT
+
+  @@map("vale_pass_benefit_kind")
+}
+
+/// Benefício que cada UNIDADE comercial de uma campanha concede. `VOUCHER` = crédito nominal exclusivo de UMA empresa (gera um
+/// voucher com código próprio por unidade); `DISCOUNT` = direito comercial descritivo (ex.: 10% em passeios, condições pendentes):
+/// NÃO gera código, saldo nem abatimento automático. Uma campanha com benefícios `VOUCHER` ativos emite no modelo de vários vouchers;
+/// sem eles, continua no modelo legado (1 voucher por unidade). Valor e empresa de um benefício já usado por vouchers são imutáveis
+/// (gatilho no banco).
+model ValePassCampaignBenefit {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId      String              @map("campaign_id") @db.Uuid
+  /// Identificador estável dentro da campanha (ex.: `valle_showroom_500`).
+  code            String
+  kind            ValePassBenefitKind
+  /// Só `VOUCHER`.
+  company         ValePassCompany?
+  label           String
+  /// Só `VOUCHER`, em centavos.
+  amountCents     Int?                @map("amount_cents")
+  /// Só `DISCOUNT`, 1 a 100.
+  discountPercent Int?                @map("discount_percent")
+  /// Condições (texto livre aprovado pelo cliente). Nunca é interpretado pelo sistema.
+  terms           String?
+  active          Boolean             @default(true)
+  sortOrder       Int                 @default(0) @map("sort_order")
+  createdBy       String?             @db.Uuid @map("created_by")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+  vouchers ValePass[]
+
+  @@unique([campaignId, code])
+  @@unique([campaignId, company])
+  @@index([campaignId])
+  @@map("vale_pass_campaign_benefits")
+}
+
+enum ValePassHoldStatus {
+  OPEN
+  ISSUED
+  DISMISSED
+
+  @@map("vale_pass_hold_status")
+}
+
+enum ValePassHoldReason {
+  CAPACITY_EXCEEDED
+  CAMPAIGN_NOT_READY
+
+  @@map("vale_pass_hold_reason")
+}
+
+/// Fila de resolução: pagamento CONFIRMADO que não pôde ser emitido automaticamente (sem capacidade no limite global, ou campanha sem
+/// validade configurada). O pedido continua consumindo capacidade (unidade paga aguardando emissão) e aparece como alerta crítico até
+/// um ADMIN resolver: emitir mesmo assim (excedente aprovado) ou descartar depois de o pedido ser cancelado/reembolsado na Shopify.
+/// Nunca emite, cancela nem reembolsa sozinho. Um registro ABERTO por pedido e campanha (`open_flag`).
+model ValePassIssuanceHold {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyOrderId String             @map("shopify_order_id")
+  campaignId     String             @map("campaign_id") @db.Uuid
+  /// Unidades comerciais que ficaram sem emissão.
+  units          Int
+  reason         ValePassHoldReason
+  status         ValePassHoldStatus @default(OPEN)
+  /// `true` só enquanto ABERTO; NULL nos demais (NULLs não colidem no índice único).
+  openFlag       Boolean?           @map("open_flag")
+  /// Retrato do que levou à retenção (limite, consumo sem este pedido). Sem dados pessoais.
+  detail         Json?
+  issuedUnits    Int?               @map("issued_units")
+  resolvedAt     DateTime?          @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy     String?            @db.Uuid @map("resolved_by")
+  resolutionNote String?            @map("resolution_note")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+
+  @@unique([shopifyOrderId, campaignId, openFlag])
+  @@index([campaignId])
+  @@index([status])
+  @@map("vale_pass_issuance_holds")
 }
 
 /// Pedido Shopify confirmado como cancelado/reembolsado (`orders/cancelled`,

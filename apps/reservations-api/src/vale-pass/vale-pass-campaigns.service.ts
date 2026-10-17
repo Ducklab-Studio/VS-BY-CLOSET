@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException, ServiceUnavai
 import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
-import { formatIsoDate, loadCapacity, loadLotSold } from './vale-pass-capacity';
+import { PASS_UNIT_KEY, formatIsoDate, loadCapacity, loadLotSold } from './vale-pass-capacity';
 import { planCampaignUpdate, type CampaignUpdateInput } from './vale-pass-campaign-update';
 
 export interface ValePassCampaignItem {
@@ -40,11 +40,12 @@ export class ValePassCampaignsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(): Promise<ValePassCampaignItem[]> {
-    const rows = await this.prisma.valePassCampaign.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { vouchers: true } } },
-    });
-    return rows.map((row) => toItem(row, row._count.vouchers));
+    const rows = await this.prisma.valePassCampaign.findMany({ orderBy: { createdAt: 'desc' } });
+    const units = await this.prisma.$queryRaw<{ campaignId: string; n: number }[]>`
+      SELECT v.campaign_id::text AS "campaignId", count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v GROUP BY v.campaign_id`;
+    const byCampaign = new Map(units.map((row) => [row.campaignId, row.n]));
+    // "Vendidos" = UNIDADES comerciais emitidas (um Valle Pass com dois vouchers conta 1), nunca linhas de voucher.
+    return rows.map((row) => toItem(row, byCampaign.get(row.id) ?? 0));
   }
 
   async create(
@@ -104,7 +105,7 @@ export class ValePassCampaignsService {
       after: { active: updated.active },
     });
 
-    const soldCount = await this.prisma.valePass.count({ where: { campaignId: id } });
+    const soldCount = await this.soldUnits(id);
     return toItem(updated, soldCount);
   }
 
@@ -155,8 +156,14 @@ export class ValePassCampaignsService {
         throw new ServiceUnavailableException('Não foi possível editar a campanha no momento.');
       });
 
-    const soldCount = await this.prisma.valePass.count({ where: { campaignId: id } });
+    const soldCount = await this.soldUnits(id);
     return toItem(outcome.row, soldCount);
+  }
+
+  /** Unidades comerciais emitidas da campanha (um Valle Pass com dois vouchers conta 1). */
+  private async soldUnits(campaignId: string): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>`SELECT count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid`;
+    return rows[0]?.n ?? 0;
   }
 
   private async requireCampaign(id: string): Promise<ValePassCampaign> {

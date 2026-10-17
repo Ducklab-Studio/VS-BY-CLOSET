@@ -841,6 +841,11 @@ function VoucherCard({
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
             {voucher.campaignName} · {formatCurrency(voucher.amountCents)}
           </p>
+          {voucher.company ? (
+            <p className="mt-1 inline-flex rounded-full bg-marsala/10 px-2 py-0.5 text-[0.7rem] font-semibold text-marsala dark:bg-gold/15 dark:text-gold">
+              {voucher.company === 'VALLE_SHOWROOM' ? 'Válido só na Valle Showroom' : 'Válido só na VS BY CLOSET'}
+            </p>
+          ) : null}
         </div>
         <span
           className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[voucher.status]}`}
@@ -860,8 +865,9 @@ function VoucherCard({
         {voucher.customerEmail ? <p>{voucher.customerEmail}</p> : null}
         <p>Pedido Shopify: {voucher.shopifyOrderName ?? voucher.shopifyOrderId ?? '—'}</p>
         <p>
-          Comprado em {formatDatePt(voucher.purchasedAt)} · Válido até{' '}
-          {formatDatePt(voucher.expiresAt)}
+          Comprado em {formatDatePt(voucher.purchasedAt)}
+          {voucher.validFrom ? ` · Válido de ${formatDatePt(voucher.validFrom)}` : ''} · Válido até{' '}
+          {formatDatePt(voucher.validFrom ? new Date(new Date(voucher.expiresAt).getTime() - 1).toISOString() : voucher.expiresAt)}
         </p>
         {voucher.status === 'CANCELLED' && voucher.cancelReason ? (
           <p className="text-red-500 dark:text-red-400">

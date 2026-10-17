@@ -11,7 +11,15 @@ export interface ValePassVoucherItem {
   readonly campaignName: string;
   readonly amountCents: number;
   readonly status: ValePassStatus;
+  /** Empresa onde ESTE voucher vale (crédito exclusivo; nunca se usa na outra). `null` = voucher legado, sem empresa. */
+  readonly company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET' | null;
+  /** Liga os vouchers da mesma unidade comercial (um Valle Pass = 2 vouchers). `null` = legado. */
+  readonly groupId: string | null;
+  /** Nome do benefício que originou o voucher (ex.: "Voucher Valle Showroom"). */
+  readonly benefitLabel: string | null;
   readonly purchasedAt: string;
+  /** Primeiro instante de uso. `null` = vale desde a emissão (legado). */
+  readonly validFrom: string | null;
   readonly expiresAt: string;
   readonly customerName: string | null;
   readonly customerPhone: string | null;
@@ -75,12 +83,12 @@ export class ValePassVouchersService {
             }
           : {}),
       },
-      include: { campaign: { select: { name: true } } },
+      include: { campaign: { select: { name: true } }, benefit: { select: { label: true } } },
       orderBy: { purchasedAt: 'desc' },
       take: 200,
     });
     const cancelledOrderIds = await loadCancelledOrderIds(this.prisma, rows);
-    return rows.map((row) => toItem(row, row.campaign.name, cancelledOrderIds));
+    return rows.map((row) => toItem(row, row.campaign.name, cancelledOrderIds, row.benefit?.label ?? null));
   }
 
   async findByCode(code: string): Promise<ValePassVoucherItem> {
@@ -92,6 +100,10 @@ export class ValePassVouchersService {
     const updated = await this.inVoucherTransaction(code, 'Não foi possível marcar o Valle Pass como utilizado no momento.', async (tx, target) => {
       if (target.status !== 'ACTIVE') {
         throw new BadRequestException(`Este Valle Pass não pode ser utilizado — status atual: ${STATUS_LABELS[target.status]}.`);
+      }
+      // Voucher com início de uso (ex.: 01/01/2027): antes disso não pode ser usado. Legado (sem início) vale desde a emissão.
+      if (target.validFrom && target.validFrom.getTime() > Date.now()) {
+        throw new BadRequestException(`Este Valle Pass só pode ser utilizado a partir de ${target.validFrom.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`);
       }
       // ACTIVE com pedido cancelado/reembolsado não nasce mais (o webhook
       // cancela os ativos na mesma transação em que registra o pedido); só
@@ -245,11 +257,12 @@ export class ValePassVouchersService {
   }
 
   private async toItemFresh(row: ValePass): Promise<ValePassVoucherItem> {
-    const [campaign, cancelledOrderIds] = await Promise.all([
+    const [campaign, cancelledOrderIds, benefit] = await Promise.all([
       this.prisma.valePassCampaign.findUniqueOrThrow({ where: { id: row.campaignId }, select: { name: true } }),
       loadCancelledOrderIds(this.prisma, [row]),
+      row.benefitId ? this.prisma.valePassCampaignBenefit.findUnique({ where: { id: row.benefitId }, select: { label: true } }) : Promise.resolve(null),
     ]);
-    return toItem(row, campaign.name, cancelledOrderIds);
+    return toItem(row, campaign.name, cancelledOrderIds, benefit?.label ?? null);
   }
 
   private async requireByCode(code: string): Promise<ValePass> {
@@ -336,7 +349,7 @@ function restoreEligibility(row: ValePass, cancelledOrderIds: ReadonlySet<string
   return kind ? { canBeRestored: false, restoreBlockedReason: LIST_REASONS[kind] } : { canBeRestored: true, restoreBlockedReason: null };
 }
 
-function toItem(row: ValePass, campaignName: string, cancelledOrderIds: ReadonlySet<string>): ValePassVoucherItem {
+function toItem(row: ValePass, campaignName: string, cancelledOrderIds: ReadonlySet<string>, benefitLabel: string | null = null): ValePassVoucherItem {
   const { canBeRestored, restoreBlockedReason } = restoreEligibility(row, cancelledOrderIds);
   return {
     id: row.id,
@@ -345,7 +358,11 @@ function toItem(row: ValePass, campaignName: string, cancelledOrderIds: Readonly
     campaignName,
     amountCents: row.amountCents,
     status: row.status,
+    company: row.company,
+    groupId: row.groupId,
+    benefitLabel,
     purchasedAt: row.purchasedAt.toISOString(),
+    validFrom: row.validFrom?.toISOString() ?? null,
     expiresAt: row.expiresAt.toISOString(),
     customerName: row.customerName,
     customerPhone: row.customerPhone,

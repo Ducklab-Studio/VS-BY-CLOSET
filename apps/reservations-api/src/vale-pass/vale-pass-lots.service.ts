@@ -25,6 +25,7 @@ export type CapacityAlertCode =
   | 'GLOBAL_LIMIT_EXCEEDED'
   | 'GLOBAL_LIMIT_NOT_SET'
   | 'PAID_UNITS_COUNTED_AS_SOLD'
+  | 'ISSUANCE_HOLDS_OPEN'
   | 'OPEN_LOT_SOLD_OUT';
 
 export interface CapacityAlert {
@@ -32,6 +33,29 @@ export interface CapacityAlert {
   /** `critical` = há (ou haverá) cliente pagante sem passe; `warning` = precisa de atenção; `info` = informativo. */
   readonly severity: 'critical' | 'warning' | 'info';
   readonly message: string;
+}
+
+/** Pagamento confirmado que a emissão automática não pôde atender (fila de resolução). Sem dados pessoais. */
+export interface CapacityHold {
+  readonly id: string;
+  readonly shopifyOrderId: string;
+  readonly shopifyOrderName: string | null;
+  readonly units: number;
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly createdAt: string;
+}
+
+/** Benefício configurado na campanha (resumo para o painel). */
+export interface CapacityBenefit {
+  readonly code: string;
+  readonly kind: 'VOUCHER' | 'DISCOUNT';
+  readonly company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET' | null;
+  readonly label: string;
+  readonly amountCents: number | null;
+  readonly discountPercent: number | null;
+  readonly terms: string | null;
+  readonly active: boolean;
+  readonly vouchersIssued: number;
 }
 
 export interface CampaignCapacity {
@@ -53,6 +77,9 @@ export interface CampaignCapacity {
   /** Estoque que a Shopify deveria ter para refletir o controle do painel. Só informativo: o painel não altera a Shopify. */
   readonly recommendedShopifyStock: number;
   readonly paidOrdersWithoutVoucher: readonly PaidOrderShortfall[];
+  /** Retenções abertas: pagamentos confirmados aguardando resolução de um ADMIN. */
+  readonly holds: readonly CapacityHold[];
+  readonly benefits: readonly CapacityBenefit[];
   readonly alerts: readonly CapacityAlert[];
 }
 
@@ -78,6 +105,15 @@ export class ValePassLotsService {
     const { totals, paidOrders } = await loadCapacity(this.prisma, campaignId);
     const lotRows = await this.prisma.valePassLot.findMany({ where: { campaignId }, orderBy: [{ createdAt: 'desc' }] });
     const soldByLot = await loadLotSold(this.prisma, campaignId);
+    const openHolds = await this.prisma.valePassIssuanceHold.findMany({ where: { campaignId, status: 'OPEN' }, orderBy: { createdAt: 'asc' }, take: 50 });
+    const holdOrders = openHolds.length
+      ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: openHolds.map((hold) => hold.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
+      : [];
+    const holdOrderNames = new Map(holdOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
+    const benefitRows = await this.prisma.valePassCampaignBenefit.findMany({ where: { campaignId }, orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] });
+    const issuedByBenefit = await this.prisma.$queryRaw<{ benefitId: string; n: number }[]>`
+      SELECT benefit_id::text AS "benefitId", count(*)::int AS n FROM vale_passes WHERE campaign_id = ${campaignId}::uuid AND benefit_id IS NOT NULL GROUP BY benefit_id`;
+    const issuedMap = new Map(issuedByBenefit.map((row) => [row.benefitId, row.n]));
     const shortfalls = shortfallsFrom(paidOrders);
     const awaiting = awaitingProcessingCount(paidOrders, new Date());
 
@@ -97,6 +133,14 @@ export class ValePassLotsService {
     }
     if (awaiting > 0) {
       alerts.push({ code: 'PAID_ORDERS_AWAITING_PROCESSING', severity: 'warning', message: `${awaiting} pedido(s) pago(s) ainda sem emissão de passe há mais de 15 minutos.` });
+    }
+    if (openHolds.length > 0) {
+      const heldUnits = openHolds.reduce((sum, hold) => sum + hold.units, 0);
+      alerts.push({
+        code: 'ISSUANCE_HOLDS_OPEN',
+        severity: 'critical',
+        message: `${openHolds.length} pedido(s) pago(s) aguardam resolução de um administrador (${heldUnits} unidade(s) sem voucher). Emita (excedente aprovado) ou resolva o reembolso na Shopify.`,
+      });
     }
     if (totals.pending > 0) {
       alerts.push({
@@ -144,6 +188,25 @@ export class ValePassLotsService {
       lots,
       recommendedShopifyStock: recommendedShopifyStock(openLot, remaining),
       paidOrdersWithoutVoucher: shortfalls,
+      holds: openHolds.map((hold) => ({
+        id: hold.id,
+        shopifyOrderId: hold.shopifyOrderId,
+        shopifyOrderName: holdOrderNames.get(hold.shopifyOrderId) ?? null,
+        units: hold.units,
+        reason: hold.reason,
+        createdAt: hold.createdAt.toISOString(),
+      })),
+      benefits: benefitRows.map((benefit) => ({
+        code: benefit.code,
+        kind: benefit.kind,
+        company: benefit.company,
+        label: benefit.label,
+        amountCents: benefit.amountCents,
+        discountPercent: benefit.discountPercent,
+        terms: benefit.terms,
+        active: benefit.active,
+        vouchersIssued: issuedMap.get(benefit.id) ?? 0,
+      })),
       alerts,
     };
   }

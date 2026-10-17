@@ -6,9 +6,9 @@ import type { ValePassLotStatus } from '@prisma/client';
  * para que a tela, as validações e (na etapa seguinte) a emissão usem exatamente a mesma conta.
  *
  * DEFINIÇÕES (documentadas em docs/VALLE-PASS-2027-DESENHO.md):
- *  - UNIDADE de capacidade = um Valle Pass comercial. Hoje 1 unidade = 1 linha de `vale_passes`; no PR B cada unidade terá DOIS
- *    vouchers (duas linhas com o mesmo `group_id`) e continuará consumindo UMA unidade. Por isso toda contagem passa por
- *    `passUnitKey` (o único ponto a trocar) e por `count(DISTINCT chave)`, nunca por `count(*)`.
+ *  - UNIDADE de capacidade = um Valle Pass comercial. No modelo de vários vouchers cada unidade tem DOIS vouchers (duas linhas com o
+ *    mesmo `group_id`) e consome UMA unidade; no legado 1 unidade = 1 linha (`group_id` nulo). Por isso toda contagem passa por
+ *    `PASS_UNIT_KEY` = `coalesce(group_id, id)` e por `count(DISTINCT chave)`, nunca por `count(*)`.
  *  - VENDIDO (`sold`) = unidades emitidas com pelo menos um voucher não cancelado. Cancelar (ex.: pedido reembolsado) libera a
  *    capacidade; usado ou expirado continua contando.
  *  - PENDENTE (`pending`) = unidades de pedidos PAGOS (CONFIRMED, não excluídos na Shopify) que ainda não receberam todos os
@@ -25,8 +25,8 @@ import type { ValePassLotStatus } from '@prisma/client';
 export const MAX_CONFIGURABLE_QUANTITY = 1_000_000;
 export const MAX_LOT_QUANTITY = 100_000;
 
-/** Chave que identifica UMA unidade vendida em `vale_passes` (alias `v`). PR B: `coalesce(v.group_id, v.id)`. */
-export const PASS_UNIT_KEY = Prisma.sql`v.id`;
+/** Chave que identifica UMA unidade vendida em `vale_passes` (alias `v`): o grupo (2 vouchers = 1 unidade) ou, no legado, o próprio voucher. */
+export const PASS_UNIT_KEY = Prisma.sql`coalesce(v.group_id, v.id)`;
 
 /**
  * Lista de agregados por unidade. `key` é a chave da unidade (`PASS_UNIT_KEY`); a fonte precisa expor `v.status`.
@@ -217,8 +217,8 @@ type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
 const MAX_PENDING_ROWS = 5_000;
 
-/** Pedidos pagos com menos unidades emitidas do que o comprado (qualquer campanha). */
-export async function loadPaidOrderRows(client: Reader): Promise<PaidOrderRow[]> {
+/** Pedidos pagos com menos unidades emitidas do que o comprado (qualquer campanha). `excludeOrderId` tira UM pedido da conta. */
+export async function loadPaidOrderRows(client: Reader, excludeOrderId: string | null = null): Promise<PaidOrderRow[]> {
   const rows = await client.$queryRaw<
     { orderId: string; orderName: string | null; quantity: number; issuedUnits: number; campaignIds: string[]; processed: boolean; statusChangedAt: Date }[]
   >`
@@ -228,7 +228,7 @@ export async function loadPaidOrderRows(client: Reader): Promise<PaidOrderRow[]>
            (o.vouchers_processed_at IS NOT NULL) AS processed, o.status_changed_at AS "statusChangedAt"
     FROM vale_pass_orders o
     LEFT JOIN vale_passes v ON v.shopify_order_id = o.shopify_order_id
-    WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL
+    WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL AND (${excludeOrderId}::text IS NULL OR o.shopify_order_id <> ${excludeOrderId})
     GROUP BY o.id
     HAVING count(DISTINCT ${PASS_UNIT_KEY}) < o.quantity
     ORDER BY o.order_created_at NULLS LAST, o.id
@@ -254,11 +254,14 @@ export interface CampaignCapacityInputs {
   readonly paidOrders: readonly PaidOrderRow[];
 }
 
-/** Totais da campanha + pedidos pagos pendentes, numa leitura só (use dentro da transação com a campanha travada). */
-export async function loadCapacity(client: Reader, campaignId: string): Promise<CampaignCapacityInputs> {
+/**
+ * Totais da campanha + pedidos pagos pendentes, numa leitura só (use dentro da transação com a campanha travada).
+ * `excludeOrderId`: calcula o consumo SEM um pedido (vouchers e pendência dele) — é o que a emissão usa para saber se o pedido cabe.
+ */
+export async function loadCapacity(client: Reader, campaignId: string, excludeOrderId: string | null = null): Promise<CampaignCapacityInputs> {
   // Sequencial de propósito: dentro de transação interativa do Prisma as consultas compartilham uma só conexão.
-  const aggregates = await client.$queryRaw<UnitAggregateRow[]>`SELECT ${unitAggregates(PASS_UNIT_KEY)} FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid`;
-  const paidOrders = await loadPaidOrderRows(client);
+  const aggregates = await client.$queryRaw<UnitAggregateRow[]>`SELECT ${unitAggregates(PASS_UNIT_KEY)} FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid AND (${excludeOrderId}::text IS NULL OR v.shopify_order_id IS DISTINCT FROM ${excludeOrderId})`;
+  const paidOrders = await loadPaidOrderRows(client, excludeOrderId);
   const campaigns = await client.$queryRaw<{ id: string; variant: string }[]>`SELECT id::text AS id, shopify_variant_id AS variant FROM vale_pass_campaigns`;
   const unattributed = paidOrders.filter((order) => order.campaignIds.length === 0).map((order) => order.orderId);
   const payloadVariants = await loadPayloadVariants(client, unattributed);

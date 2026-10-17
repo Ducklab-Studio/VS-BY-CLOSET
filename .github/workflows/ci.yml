@@ -117,6 +117,9 @@ jobs:
       - name: Testar campanhas, lotes e capacidade do Valle Pass (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-lots
 
+      - name: Testar os dois vouchers do Valle Pass 2027 no ClosetAdmin (navegador isolado)
+        run: pnpm --filter @valle/marketing run test:valle-pass-two-vouchers
+
       - name: Testar contador de novas reservas no menu
         run: pnpm --filter @valle/marketing run test:reservations-badge
 
