@@ -100,25 +100,28 @@ Prisma não tem migration "para baixo". Rollback = uma **nova migration só para
 3. Com dado escrito nas colunas novas: **nunca** remover colunas ou CHECKs; limpeza futura = migration própria com backup.
 4. Reverter apenas o **código** é seguro enquanto nada escreve nas colunas (hoje, nada escreve).
 
-## 6. Divergências entre o motor de preço atual e os tetos do banco (A1 não altera o motor)
+## 6. Motor de preço × tetos do banco — ALINHADOS (Fase 3, PR de alinhamento)
 
-O motor (`rental-rules/rental-pricing.ts`, PR #90) é mais permissivo que os tetos técnicos do banco. Isso não afeta nada
-agora (o motor não é usado em produção), mas **precisa ser alinhado no PR de preço** antes de qualquer gravação:
+Antes, o motor (`rental-rules/rental-pricing.ts`, PR #90) era mais permissivo que os tetos técnicos do banco. Agora
+**rejeita** (`ok: false`, violação estruturada, nenhum preço parcial) tudo que o banco recusaria. Constantes
+`DB_MAX_*` do motor = números das CHECKs (o teste de integração compara os dois lados via `pg_get_constraintdef`):
 
-| Valor | Motor atual | Banco (CHECK) |
-| --- | --- | --- |
-| Valor-base por peça | até 1.000.000.000 centavos | `unit_base_cents` ≤ 100.000.000 |
-| Preço do dia extra | sem teto (até 1e10 com 1000%) | `extra_day_cents` ≤ 100.000.000 |
-| Total da peça | sem teto | `line_total_cents` ≤ 1.000.000.000 |
-| Taxa de reserva | até 1.000.000.000 | `reservation_fee_cents` ≤ 100.000.000 |
-| Total do pedido | sem teto | `expected_total_cents` ≤ 2.000.000.000 |
-| Dias por peça | ≤ 3650 | `rental_days` ≤ 3650 (igual) |
-| Percentual do dia extra | ≤ 100000 pontos-base | ≤ 100000 (igual) |
-| Preparação/limpeza | ≤ 365 dias | ≤ 365 (igual) |
-| Janela bloqueada | `[retirada − prep, devolução + limpeza + 1)` | mesma fórmula (igual) |
+| Valor | Motor | Banco (CHECK) | Violação do motor |
+| --- | --- | --- | --- |
+| Valor-base por peça | ≤ 100.000.000 | `unit_base_cents` ≤ 100.000.000 | `price_above_ceiling` |
+| Preço do dia extra | ≤ 100.000.000 | `extra_day_cents` ≤ 100.000.000 | `extra_day_above_ceiling` |
+| Total da peça | ≤ 1.000.000.000 | `line_total_cents` ≤ 1.000.000.000 | `line_total_above_ceiling` |
+| Taxa de reserva | ≤ 100.000.000 | `reservation_fee_cents` ≤ 100.000.000 | `reservation_fee_above_ceiling` |
+| Total do pedido | ≤ 2.000.000.000 | `expected_total_cents` ≤ 2.000.000.000 | `order_total_above_ceiling` |
+| Dias por peça | ≤ 3650 | `rental_days` ≤ 3650 | `days_above_max` |
+| Percentual do dia extra | ≤ 100000 pontos-base | ≤ 100000 (snapshot) | `invalid_config` |
+| Preparação/limpeza | (motor de cronograma) ≤ 365 | ≤ 365 | — |
+| Janela bloqueada | `[retirada − prep, devolução + limpeza + 1)` | mesma fórmula | — |
 
-O teste `motor de preço atual × tetos do banco` documenta essas divergências: o motor aceita, o banco recusa. Quando o
-motor for alinhado, o teste muda de "divergência conhecida" para "paridade".
+Valor inteiro seguro acima do teto = `*_above_ceiling`; fracionário, negativo, NaN ou fora do inteiro seguro continua
+`invalid_price`. Testes: `rental-pricing.test.ts` (unitário) e `fase3-pricing-db-ceilings.integration.test.ts`
+(paridade, fronteiras e 400 pedidos gerados: tudo que o motor aceita o Postgres grava; tudo que rejeita por teto o
+Postgres também recusa). Nada disso é usado por checkout/HOLD/webhooks.
 
 ## 7. Verificação de que os campos novos não vazam
 
@@ -176,7 +179,7 @@ autorização).
 
 - `src/prisma/fase3-a1-schema.integration.test.ts` (58 testes, PostgreSQL local de teste): compatibilidade com legado (os
   `INSERT` exatos do HOLD e da reserva manual, gatilho de status, EXCLUDE), CHECKs do cronograma, datas inválidas,
-  overflow (`23514` com bigint × `22003` sem), tetos, `pricing_snapshot`, divergência com o motor, Prisma/JSON, vazamento
+  overflow (`23514` com bigint × `22003` sem), tetos, `pricing_snapshot`, paridade com o motor, Prisma/JSON, vazamento
   e ativação. Cada caso roda numa transação que sempre desfaz: não depende de ordem e não deixa resíduo.
 - Mutação: ao remover `ri_line_total_formula`/`ri_pricing_ceilings`, 8 testes falham; com a fórmula em 32 bits, o teste de
   overflow falha — ou seja, os testes pegam o defeito que protegem.
