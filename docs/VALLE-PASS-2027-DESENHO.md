@@ -8,11 +8,13 @@ parte da auditoria de 17/10 (`docs/VALLE-PASS-AUDITORIA-2026-10-17.md`) e das re
 **Confirmado:** produto *Valle Pass 2027*, R$ 350,00; por passe, **dois vouchers independentes** — A: R$ 500,00 só na **Valle
 Showroom**; B: R$ 50,00 só na **VS BY CLOSET** — e **10% de desconto em passeios** (condições a detalhar pelo Anderson); validade
 **durante 2027**; meta **1.000** passes, vendidos em **lotes** (100, 200… definidos pelo administrador) sob um **limite global** de 1.000;
-códigos por **e-mail em até 3 dias** após o pagamento, via **Resend**.
+códigos por **e-mail em até 3 dias** após o pagamento, via **Resend** (aprovada pelo Anderson; **conta, domínio e chave ainda não existem**);
+**encerramento das vendas em 30/05/2027** (confirmado em 18/10/2026; o PR A guarda a data só como informação — nenhum encerramento automático existe ainda,
+ele depende de decidir o fuso e o mecanismo no PR B/E).
 
 **NÃO definido (não implementar regra nenhuma sobre isso):** uso parcial, cumulatividade, transferência, reembolso de saldo,
 restrições de passeios, forma de validação em cada empresa, abatimento financeiro automático, fuso da "validade 2027"
-(Brasil ou Chile), ano do encerramento de 30/05 (nenhum encerramento automático foi configurado), texto das condições.
+e do encerramento de 30/05/2027 (Brasil ou Chile), condições específicas dos 10% em passeios, texto das condições.
 
 ## 2. O que a auditoria do código mostrou (suporte atual a dois vouchers)
 
@@ -104,8 +106,8 @@ resolução do PR B (nunca cancelar nem reembolsar sozinho). Antes: Anderson con
 
 | De quem | O quê |
 | --- | --- |
-| **Anderson** | condições dos vouchers e dos 10%; fuso da validade 2027; ano do encerramento (30/05); texto de termos/FAQ; cupons; **conta Resend**, domínio verificado e acesso; quantidades dos lotes; estoque real da Shopify |
-| **Conta Resend** | chave de API, domínio/remetente verificados, segredo do webhook de eventos — só então o envio real |
+| **Anderson** | condições dos vouchers e dos 10%; fuso da validade 2027 e do encerramento de 30/05/2027; condições dos 10%; texto de termos/FAQ; cupons; **conta Resend**, domínio verificado e acesso; quantidades dos lotes; estoque real da Shopify |
+| **Conta Resend** (aprovada; aguardando o Anderson criar a conta e dar acesso) | chave de API, domínio/remetente verificados, segredo do webhook de eventos — só então o envio real |
 | **Autorização de produção (sua)** | merge do PR A (aplica migration no Neon); PR B (webhook + migration); PR D; PR F; ajuste da campanha de teste e do estoque; compra real de teste com reembolso |
 | **Orlando** | fotos/vídeos (19/10) para o PR E |
 
@@ -115,3 +117,63 @@ resolução do PR B (nunca cancelar nem reembolsar sozinho). Antes: Anderson con
 (valores, limite global, lote), estoque da Shopify coerente, compra real de teste, termos/FAQ coerentes.
 **Pode ficar para depois:** exibição pública do lote restante (se não validada), webhook de entrega da Resend (o estado "aceito" já basta no começo),
 conferência de cupom (se não houver cupom), painel de métricas, reenvio em massa.
+
+## 8. Auditoria pré-merge do PR A (18/10/2026) — pendências, implantação e recuperação
+
+Auditoria somente leitura (código, PostgreSQL descartável e consultas `SELECT` no Neon). **Pendências encontradas antes do merge:**
+
+1. **"Vendido" ignora pedido pago sem voucher (confirmado em teste).** `sold` conta linhas de `vale_passes` não canceladas. Com um pedido pago de 3
+   unidades e 1 voucher, e outro pago de 2 ainda sem emissão, o painel mostra 1 vendido, saldo global 9 (real: 5) e aceita um lote de 9. O alerta
+   crítico existe, mas os números de saldo, lote e estoque recomendado ficam **otimistas**. Correção proposta (pequena, no PR A): vendido =
+   vouchers não cancelados **+ unidades pagas ainda sem voucher** (pedidos confirmados, não excluídos, com `quantidade − emitidos` > 0, processados ou não).
+2. **A migration deixa `lock_timeout = 5s` na sessão** (usa `SET` sem o `RESET` final que a A1/A2 têm; confirmado: A1 termina em 0, esta em 5 s). O pré-deploy
+   usa a URL do **pooler** do Neon; em pooler de transações a configuração pode "vazar" para a próxima transação que reutilizar aquela conexão.
+   Correção: `RESET lock_timeout;` no fim do arquivo.
+3. *(menor)* Depois de **encerrar/reativar** uma campanha, o cartão guarda o `updatedAt` antigo e a primeira edição seguinte recebe 409 ("recarregue a tela").
+   Seguro, só incômodo; correção: a ação de ligar/desligar devolver a campanha atualizada.
+
+**Contrato de capacidade para o PR B (obrigatório):**
+
+* A contagem do limite global passa a ser **por passe** (`count(distinct coalesce(group_id, id))`), não por linha: com 2 vouchers por unidade, contar linhas
+  esgotaria os 1.000 em 500 vendas.
+* "Vendido" **inclui** unidades pagas ainda sem passe (na fila de resolução ou em processamento) — uma única função usada pelo painel, pelas validações
+  e pela emissão, dentro da trava `FOR UPDATE` da campanha. Cancelamento libera capacidade; usado/expirado continua contando.
+* Ordem de travas na emissão: operacional → webhook → pedido → **campanha**. O painel só toma a trava da campanha (nunca a do pedido), logo não há ciclo.
+
+**Migration — segurança e atomicidade (verificado em PostgreSQL descartável 16):**
+
+* Todo o arquivo roda como **uma transação implícita**: com `vale_pass_campaigns` segurada por outra transação, o `ALTER` estourou o `lock_timeout`
+  em ~5 s (`55P03`), a migration ficou "falhada" no Prisma e **nada** foi criado (nem o `CREATE TYPE` anterior ao `ALTER`).
+* Efeito de produção se isso acontecer: o pré-deploy do Railway falha, **o deploy novo não sobe e o anterior continua no ar**; o próximo deploy
+  responde `P3009` até alguém resolver.
+* Locks: `ADD COLUMN` nulo e `ADD CONSTRAINT CHECK` pedem `ACCESS EXCLUSIVE` por instantes (1 campanha); a FK nova pede só `SHARE ROW EXCLUSIVE` na campanha
+  (não bloqueia leitura nem a verificação de FK dos vales). Estado do Neon na auditoria: 0 locks em tabelas `vale_pass*`, 0 transações longas, 0 esperando lock.
+* Limite do teste: o Neon é PostgreSQL 18.6 e o teste local 16; o SQL usa só construções básicas (as mesmas da A1, já aplicada em produção).
+
+**Plano de implantação (cada passo com autorização expressa):**
+
+1. Corrigir as pendências 1 e 2 (e, de preferência, a 3) e repetir o CI.
+2. Conferir o Neon imediatamente antes (somente leitura): 34 migrations aplicadas/0 falhadas, sem locks nem transações longas, hashes de campanhas/passes/pedidos.
+3. Merge → pré-deploy aplica a migration (segundos) → deploy → `/health` → confirmar 35 migrations, tabela e colunas, hashes iguais e `/availability` normal.
+4. Só depois, a equipe configura (nada é automático): limite global 1.000, lote, limpeza do limite legado e estoque da Shopify.
+
+**Recuperação se o pré-deploy falhar (`P3009`)** — o arquivo é atômico, então o banco está intacto:
+
+```
+pnpm --filter @valle/reservations-api exec prisma migrate resolve --rolled-back 20261017140000_vale_pass_lotes_e_limite_global
+```
+
+depois reexecutar o deploy no Railway (testado: `resolve --rolled-back` + novo `migrate deploy` aplicam com sucesso). Não editar `_prisma_migrations` à mão.
+
+**Reverter depois de aplicada:** o código antigo ignora as colunas e a tabela novas, então **reverter o deploy (Railway) basta**; nada precisa ser desfeito no banco.
+Só se for necessário remover o esquema (tabelas vazias), testado em banco descartável (volta às 10 colunas originais):
+
+```sql
+DROP TABLE vale_pass_lots;
+DROP TYPE vale_pass_lot_status;
+ALTER TABLE vale_pass_campaigns
+  DROP CONSTRAINT vpc_global_limit_positive, DROP CONSTRAINT vpc_voucher_window,
+  DROP COLUMN global_limit, DROP COLUMN sales_end_date, DROP COLUMN voucher_valid_from, DROP COLUMN voucher_valid_until;
+```
+
+A remoção definitiva deve ser uma **nova migration**, nunca edição da aplicada. O snapshot do Neon (anterior à A1) não deve ser tocado.
