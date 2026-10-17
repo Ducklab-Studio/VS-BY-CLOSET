@@ -125,6 +125,7 @@ localDescribe('Valle Pass — edição de campanha', () => {
 
   test('versão antiga é recusada (409); duas edições simultâneas: uma vence, a outra recebe 409', async () => {
     const c = await newCampaign();
+    await sleep(5); // a versão nova precisa diferir em pelo menos 1 ms da gravada na criação
     await campaigns.update(c.id, { expectedUpdatedAt: stamp(c), name: `${TAG}-a` }, adminId, ADMIN_NAME);
     await expect(campaigns.update(c.id, { expectedUpdatedAt: stamp(c), name: `${TAG}-b` }, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(ConflictException);
 
@@ -280,6 +281,7 @@ localDescribe('Valle Pass — lotes e limite global', () => {
     const other = await newCampaign({ globalLimit: 100 });
     const lot = await lots.create(c.id, { name: 'L', quantity: 10 }, adminId, ADMIN_NAME);
     const old = await lotStamp(lot.id);
+    await sleep(5);
     await lots.update(c.id, lot.id, { expectedUpdatedAt: old, quantity: 12 }, adminId, ADMIN_NAME);
     await expect(lots.open(c.id, lot.id, old, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(ConflictException);
     await expect(lots.open(other.id, lot.id, await lotStamp(lot.id), adminId, ADMIN_NAME)).rejects.toThrow(/Lote não encontrado/);
@@ -316,7 +318,10 @@ localDescribe('Valle Pass — travamento da campanha (determinístico)', () => {
 
   test('editar a campanha enxerga a mudança feita por quem a tinha travada (409, sem atualização perdida)', async () => {
     const c = await newCampaign();
-    const holder = holdAndChange(c.id, (tx) => tx.$executeRaw`UPDATE vale_pass_campaigns SET name = ${TAG + '-do-outro'}, updated_at = now() WHERE id = ${c.id}::uuid`);
+    // Nova versão = 1 s depois da que esta pessoa viu. (Com `now()` o relógio do banco podia cair no MESMO milissegundo do `updatedAt`
+    // gravado pelo Prisma e a versão "nova" parecer igual à antiga — foi o que reprovou este teste no CI.)
+    const newer = new Date(c.updatedAt.getTime() + 1000);
+    const holder = holdAndChange(c.id, (tx) => tx.$executeRaw`UPDATE vale_pass_campaigns SET name = ${TAG + '-do-outro'}, updated_at = ${newer} WHERE id = ${c.id}::uuid`);
     // começa depois de o outro travar; a versão que esta pessoa viu já é a antiga
     await expect(campaigns.update(c.id, { expectedUpdatedAt: stamp(c), name: `${TAG}-minha` }, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(ConflictException);
     await holder;
