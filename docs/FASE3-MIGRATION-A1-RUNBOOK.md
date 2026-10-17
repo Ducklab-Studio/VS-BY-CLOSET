@@ -135,14 +135,42 @@ motor for alinhado, o teste muda de "divergência conhecida" para "paridade".
 
 ## 8. Verificação de drift entre `schema.prisma` e migrations (CI)
 
-- Antes desta mudança o CI não verificava isso. Medição na `main` de 16/10/2026: `prisma migrate diff` já mostrava
-  diferenças **benignas e antigas** (ações referenciais de chaves estrangeiras, índices antigos, `DROP DEFAULT` de
-  `updated_at`), então `--exit-code` direto reprovaria a `main`.
-- `apps/reservations-api/scripts/check-schema-drift.mjs` (`pnpm --filter @valle/reservations-api run db:drift`) compara o
-  banco efêmero migrado com o schema e **falha só em divergência estrutural**: tabela, coluna, tipo, nulidade ou tipo
-  enumerado. Roda no CI logo após `db:migrate`.
-- Aborta se `DATABASE_URL` não for PostgreSQL local de teste; nunca acessa produção.
-- Testado: sem divergência hoje; falha ao remover um campo do schema, ao criar coluna só no banco e ao alterar nulidade.
+Antes deste PR o CI não verificava isso. Medição na `main` de 16/10/2026: `prisma migrate diff` já mostrava 33
+diferenças **antigas** (ações referenciais de 14 chaves estrangeiras, 3 índices, `DROP DEFAULT` de 2 `updated_at`),
+então `--exit-code` direto reprovaria a `main`. O verificador (`pnpm --filter @valle/reservations-api run db:drift`,
+roda no CI logo após `db:migrate`) tem **duas camadas**, e qualquer violação reprova:
+
+1. **Diff do Prisma × lista explícita e justificada** (`scripts/schema-drift.baseline.json`, 33 entradas, cada uma com o
+   motivo). Divergência ESTRUTURAL (tabela, coluna, tipo, nulidade, tipo enumerado) nunca é tolerada nem pode entrar na
+   lista. Instrução **nova** (índice, DEFAULT, chave estrangeira ou qualquer outra) reprova; entrada da lista que deixou de
+   existir (divergência corrigida) também reprova, para a lista não ficar velha.
+2. **Retrato estruturado do catálogo** (`scripts/schema-catalog.snapshot.json`: 19 FKs, 69 índices, 70 DEFAULTs), para o
+   que o Prisma **não enxerga**. Achado real: trocar uma FK que já diverge (`NO ACTION` → `ON DELETE CASCADE`) gera
+   **exatamente o mesmo** diff do Prisma; e o Prisma ignora condição de índice parcial (`WHERE`), ordem das colunas e
+   método de acesso. O retrato cobre, campo a campo:
+   - **FK:** colunas, tabela e colunas referenciadas, `ON DELETE`, `ON UPDATE`, `MATCH`, deferrable/initially deferred;
+   - **índice** (inclui a EXCLUDE): método, único, primário, nº de colunas-chave/total, colunas ou expressões **na ordem**,
+     condição (`WHERE`), opções (DESC/NULLS) e validade;
+   - **DEFAULT:** expressão, coluna gerada e identity.
+
+   A comparação é **estruturada** (ação referencial vem do código do catálogo, não do SQL deparsado); só expressões de
+   DEFAULT e condição de índice são texto e passam por normalização de espaços, caixa e parênteses externos. Recriar o
+   mesmo objeto com outra grafia SQL (`alter  table ... on delete no action`, `NOW ( )`, `using btree`) **não** reprova.
+
+**Mudança intencional** (nova migration com FK/índice/DEFAULT): rodar `pnpm --filter @valle/reservations-api run
+db:drift:snapshot` num banco local migrado e revisar o diff do retrato no PR; se o Prisma passar a apontar uma
+divergência legítima, acrescentá-la à lista **com justificativa**. O retrato é gerado/validado no PostgreSQL do CI
+(16); em outra versão major podem aparecer diferenças só de formatação de expressão (o relatório avisa).
+
+Segurança: aborta (exit 2, sem tentar conectar) se `DATABASE_URL` não for PostgreSQL local de teste (`localhost`/`127.0.0.1`
+e nome com `test`/`audit`/`operational`); todas as consultas rodam em transação `READ ONLY`; o CLI do Prisma roda com
+`CHECKPOINT_DISABLE`. `--write-snapshot` só grava o arquivo do retrato.
+
+**Limitações conhecidas** (não verificadas por este script): CHECKs, gatilhos, funções, extensões, privilégios e valores de
+tipos enumerados. CHECKs/gatilhos/EXCLUDE de cada migration têm testes de integração próprios (A1: 58 testes);
+tipo/nulidade de coluna é coberto pela camada 1. O retrato guarda o estado do banco **migrado do zero**: não prova que um
+banco de produção já existente está igual (isso exigiria rodar o verificador contra ele, o que é proibido sem
+autorização).
 
 ## 9. Testes
 
@@ -152,7 +180,13 @@ motor for alinhado, o teste muda de "divergência conhecida" para "paridade".
   e ativação. Cada caso roda numa transação que sempre desfaz: não depende de ordem e não deixa resíduo.
 - Mutação: ao remover `ri_line_total_formula`/`ri_pricing_ceilings`, 8 testes falham; com a fórmula em 32 bits, o teste de
   overflow falha — ou seja, os testes pegam o defeito que protegem.
-- Suíte completa da API no banco descartável migrado: 92 arquivos, 1237 testes, todos passando.
+- Verificador de drift: `scripts/schema-drift-lib.test.mjs` (25 testes puros, com instruções no formato real do Prisma:
+  lista, instruções novas/obsoletas/combinadas, FK/índice/DEFAULT, formatação irrelevante) e
+  `scripts/schema-drift.e2e.test.mjs` (10 testes de **mutação** num banco descartável `drift_e2e_test_*` criado e
+  removido pelo próprio teste: muda deliberadamente FKs, índices e DEFAULTs, confirma a reprovação, **reverte** e confirma
+  que volta a passar; inclui a prova de que o diff do Prisma não muda quando uma FK legada vira `CASCADE`).
+- Suíte completa da API no banco descartável migrado: 94 arquivos, 1272 testes, todos passando; `tsc`, `pnpm lint` e
+  `nest build` limpos.
 
 ## 10. Próximas etapas (cada uma com autorização própria)
 

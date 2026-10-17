@@ -1,0 +1,139 @@
+{
+  "versao": 1,
+  "geradoCom": "prisma 5.22.0 · PostgreSQL 16 (CI) · 17/10/2026",
+  "comoUsar": "Cada entrada é uma instrução EXATA do diff do Prisma (normalizada) que já existia antes da Fase 3, com a justificativa. Instrução nova reprova o CI; entrada que deixou de existir também reprova (remova-a). Nunca inclua divergência estrutural (tabela/coluna/tipo/nulidade).",
+  "statements": [
+    {
+      "sql": "ALTER TABLE \"admin_audit_events\" ADD CONSTRAINT \"admin_audit_events_admin_user_id_fkey\" FOREIGN KEY (\"admin_user_id\") REFERENCES \"admin_users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE SET NULL ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"admin_audit_events\" DROP CONSTRAINT \"admin_audit_events_admin_user_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"admin_sessions\" ADD CONSTRAINT \"admin_sessions_admin_user_id_fkey\" FOREIGN KEY (\"admin_user_id\") REFERENCES \"admin_users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"admin_sessions\" DROP CONSTRAINT \"admin_sessions_admin_user_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"hold_idempotency_keys\" ADD CONSTRAINT \"hold_idempotency_keys_reservation_id_fkey\" FOREIGN KEY (\"reservation_id\") REFERENCES \"reservations\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"hold_idempotency_keys\" DROP CONSTRAINT \"hold_idempotency_keys_reservation_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"manual_reservation_idempotency_keys\" ADD CONSTRAINT \"manual_reservation_idempotency_keys_reservation_id_fkey\" FOREIGN KEY (\"reservation_id\") REFERENCES \"reservations\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"manual_reservation_idempotency_keys\" DROP CONSTRAINT \"manual_reservation_idempotency_keys_reservation_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"operational_blocks\" ADD CONSTRAINT \"operational_blocks_created_by_admin_user_id_fkey\" FOREIGN KEY (\"created_by_admin_user_id\") REFERENCES \"admin_users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"operational_blocks\" ADD CONSTRAINT \"operational_blocks_rental_unit_id_fkey\" FOREIGN KEY (\"rental_unit_id\") REFERENCES \"rental_units\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE SET NULL ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"operational_blocks\" DROP CONSTRAINT \"operational_blocks_created_by_admin_user_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"operational_blocks\" DROP CONSTRAINT \"operational_blocks_rental_unit_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"rental_rule_config\" ALTER COLUMN \"updated_at\" DROP DEFAULT",
+      "reason": "O banco tem DEFAULT now() em updated_at e o schema usa @updatedAt (preenchido pelo cliente Prisma). Sem efeito funcional. DEFAULT atual fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_events\" ADD CONSTRAINT \"reservation_events_reservation_id_fkey\" FOREIGN KEY (\"reservation_id\") REFERENCES \"reservations\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE SET NULL ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_events\" ADD CONSTRAINT \"reservation_events_webhook_event_id_fkey\" FOREIGN KEY (\"webhook_event_id\") REFERENCES \"webhook_events\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE SET NULL ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_events\" DROP CONSTRAINT \"reservation_events_reservation_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_events\" DROP CONSTRAINT \"reservation_events_webhook_event_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_items\" ADD CONSTRAINT \"reservation_items_rental_unit_id_fkey\" FOREIGN KEY (\"rental_unit_id\") REFERENCES \"rental_units\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_items\" ADD CONSTRAINT \"reservation_items_reservation_id_fkey\" FOREIGN KEY (\"reservation_id\") REFERENCES \"reservations\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_items\" DROP CONSTRAINT \"reservation_items_rental_unit_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservation_items\" DROP CONSTRAINT \"reservation_items_reservation_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"reservations\" ALTER COLUMN \"updated_at\" DROP DEFAULT",
+      "reason": "O banco tem DEFAULT now() em updated_at e o schema usa @updatedAt (preenchido pelo cliente Prisma). Sem efeito funcional. DEFAULT atual fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_pass_events\" ADD CONSTRAINT \"vale_pass_events_vale_pass_id_fkey\" FOREIGN KEY (\"vale_pass_id\") REFERENCES \"vale_passes\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_pass_events\" DROP CONSTRAINT \"vale_pass_events_vale_pass_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_pass_order_events\" ADD CONSTRAINT \"vale_pass_order_events_vale_pass_order_id_fkey\" FOREIGN KEY (\"vale_pass_order_id\") REFERENCES \"vale_pass_orders\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_pass_order_events\" DROP CONSTRAINT \"vale_pass_order_events_vale_pass_order_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_passes\" ADD CONSTRAINT \"vale_passes_campaign_id_fkey\" FOREIGN KEY (\"campaign_id\") REFERENCES \"vale_pass_campaigns\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"vale_passes\" DROP CONSTRAINT \"vale_passes_campaign_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"webhook_events\" ADD CONSTRAINT \"webhook_events_reservation_id_fkey\" FOREIGN KEY (\"reservation_id\") REFERENCES \"reservations\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE SET NULL ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "ALTER TABLE \"webhook_events\" DROP CONSTRAINT \"webhook_events_reservation_id_fkey\"",
+      "reason": "Chave estrangeira criada por migration SQL SEM ação referencial (o banco aplica NO ACTION), enquanto o schema.prisma implica ON DELETE RESTRICT ON UPDATE CASCADE. Divergência antiga (Fases 1–9), sem efeito hoje: o sistema nunca apaga linhas-pai (cancela, arquiva ou marca). Corrigir exige migration própria; o comportamento atual do banco está fixado em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "CREATE INDEX \"reservations_status_idx\" ON \"reservations\"(\"status\")",
+      "reason": "O schema.prisma declara @@index([status]) em reservations, mas nenhuma migration criou esse índice (o banco só tem o legado sku+status). Sem efeito funcional com o volume atual; criar o índice é decisão de migration própria."
+    },
+    {
+      "sql": "DROP INDEX \"hold_idempotency_keys_reservation_id_idx\"",
+      "reason": "Índice existente no banco (criado por migration da idempotência do HOLD) e não declarado no schema.prisma. Inofensivo; remover ou declarar exige decisão própria. Definição fixada em schema-catalog.snapshot.json."
+    },
+    {
+      "sql": "DROP INDEX \"reservations_sku_status_idx\"",
+      "reason": "Índice da Fase 1 sobre a coluna legada sku (mantida até uma migration de limpeza, ver schema.prisma) e não declarado no schema. Inofensivo. Definição fixada em schema-catalog.snapshot.json."
+    }
+  ]
+}

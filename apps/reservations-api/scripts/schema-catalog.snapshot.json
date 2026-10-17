@@ -1,0 +1,1530 @@
+{
+  "generatedOnPostgresMajor": "16",
+  "foreignKeys": {
+    "admin_audit_events.admin_audit_events_admin_user_id_fkey": {
+      "columns": [
+        "admin_user_id"
+      ],
+      "references": "admin_users",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "admin_presence.admin_presence_session_id_fkey": {
+      "columns": [
+        "session_id"
+      ],
+      "references": "admin_sessions",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "CASCADE",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "admin_sessions.admin_sessions_admin_user_id_fkey": {
+      "columns": [
+        "admin_user_id"
+      ],
+      "references": "admin_users",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "hold_idempotency_keys.hold_idempotency_keys_reservation_id_fkey": {
+      "columns": [
+        "reservation_id"
+      ],
+      "references": "reservations",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "manual_reservation_idempotency_keys.manual_reservation_idempotency_keys_reservation_id_fkey": {
+      "columns": [
+        "reservation_id"
+      ],
+      "references": "reservations",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "operational_blocks.operational_blocks_created_by_admin_user_id_fkey": {
+      "columns": [
+        "created_by_admin_user_id"
+      ],
+      "references": "admin_users",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "operational_blocks.operational_blocks_rental_unit_id_fkey": {
+      "columns": [
+        "rental_unit_id"
+      ],
+      "references": "rental_units",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_events.reservation_events_reservation_id_fkey": {
+      "columns": [
+        "reservation_id"
+      ],
+      "references": "reservations",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_events.reservation_events_webhook_event_id_fkey": {
+      "columns": [
+        "webhook_event_id"
+      ],
+      "references": "webhook_events",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_item_occurrences.reservation_item_occurrences_reservation_item_id_fkey": {
+      "columns": [
+        "reservation_item_id"
+      ],
+      "references": "reservation_items",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_item_returns.reservation_item_returns_reservation_item_id_fkey": {
+      "columns": [
+        "reservation_item_id"
+      ],
+      "references": "reservation_items",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_items.reservation_items_rental_unit_id_fkey": {
+      "columns": [
+        "rental_unit_id"
+      ],
+      "references": "rental_units",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservation_items.reservation_items_reservation_id_fkey": {
+      "columns": [
+        "reservation_id"
+      ],
+      "references": "reservations",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "reservations.reservations_origin_store_id_fkey": {
+      "columns": [
+        "origin_store_id"
+      ],
+      "references": "stores",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_pass_events.vale_pass_events_vale_pass_id_fkey": {
+      "columns": [
+        "vale_pass_id"
+      ],
+      "references": "vale_passes",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_pass_order_events.vale_pass_order_events_vale_pass_order_id_fkey": {
+      "columns": [
+        "vale_pass_order_id"
+      ],
+      "references": "vale_pass_orders",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_passes.vale_passes_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "webhook_events.webhook_events_reservation_id_fkey": {
+      "columns": [
+        "reservation_id"
+      ],
+      "references": "reservations",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "NO ACTION",
+      "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "webhook_events.webhook_events_store_id_fkey": {
+      "columns": [
+        "store_id"
+      ],
+      "references": "stores",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    }
+  },
+  "indexes": {
+    "admin_audit_events.admin_audit_events_action_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "action"
+      ],
+      "predicate": null
+    },
+    "admin_audit_events.admin_audit_events_admin_user_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "admin_user_id"
+      ],
+      "predicate": null
+    },
+    "admin_audit_events.admin_audit_events_created_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "created_at"
+      ],
+      "predicate": null
+    },
+    "admin_audit_events.admin_audit_events_is_critical_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "is_critical"
+      ],
+      "predicate": null
+    },
+    "admin_audit_events.admin_audit_events_is_privileged_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "is_privileged"
+      ],
+      "predicate": null
+    },
+    "admin_audit_events.admin_audit_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "admin_presence.admin_presence_last_seen_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "last_seen_at"
+      ],
+      "predicate": null
+    },
+    "admin_presence.admin_presence_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "admin_presence.admin_presence_session_id_client_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "session_id",
+        "client_id"
+      ],
+      "predicate": null
+    },
+    "admin_sessions.admin_sessions_admin_user_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "admin_user_id"
+      ],
+      "predicate": null
+    },
+    "admin_sessions.admin_sessions_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "admin_sessions.admin_sessions_token_hash_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "token_hash"
+      ],
+      "predicate": null
+    },
+    "admin_users.admin_users_phone_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "phone"
+      ],
+      "predicate": null
+    },
+    "admin_users.admin_users_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "catalog_sync_state.catalog_sync_state_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "hold_idempotency_keys.hold_idempotency_keys_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "key"
+      ],
+      "predicate": null
+    },
+    "hold_idempotency_keys.hold_idempotency_keys_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "manual_reservation_idempotency_keys.manual_reservation_idempotency_keys_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "key"
+      ],
+      "predicate": null
+    },
+    "operational_blocks.operational_blocks_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "operational_blocks.operational_blocks_rental_unit_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "rental_unit_id"
+      ],
+      "predicate": null
+    },
+    "operational_blocks.operational_blocks_start_date_end_date_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "start_date",
+        "end_date"
+      ],
+      "predicate": null
+    },
+    "rental_rule_config.rental_rule_config_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "rental_units.rental_units_active_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "active"
+      ],
+      "predicate": null
+    },
+    "rental_units.rental_units_code_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "code"
+      ],
+      "predicate": null
+    },
+    "rental_units.rental_units_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "rental_units.rental_units_shopify_variant_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_variant_id"
+      ],
+      "predicate": null
+    },
+    "reservation_events.reservation_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "reservation_events.reservation_events_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "reservation_events.reservation_events_type_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "type"
+      ],
+      "predicate": null
+    },
+    "reservation_item_occurrences.reservation_item_occurrences_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "reservation_item_occurrences.reservation_item_occurrences_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "reservation_item_occurrences.reservation_item_occurrences_reservation_item_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_item_id"
+      ],
+      "predicate": null
+    },
+    "reservation_item_returns.reservation_item_returns_condition_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "condition"
+      ],
+      "predicate": null
+    },
+    "reservation_item_returns.reservation_item_returns_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "reservation_item_returns.reservation_item_returns_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "reservation_item_returns.reservation_item_returns_reservation_item_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_item_id"
+      ],
+      "predicate": null
+    },
+    "reservation_items.reservation_items_no_overlap_per_unit": {
+      "method": "gist",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "rental_unit_id",
+        "blocked_range"
+      ],
+      "predicate": "status=any(array['hold'::reservation_status,'pending_payment'::reservation_status,'confirmed'::reservation_status,'preparing'::reservation_status,'ready_for_pickup'::reservation_status,'picked_up'::reservation_status,'returned'::reservation_status,'cleaning'::reservation_status,'problem'::reservation_status])"
+    },
+    "reservation_items.reservation_items_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "reservation_items.reservation_items_rental_unit_id_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "rental_unit_id",
+        "status"
+      ],
+      "predicate": null
+    },
+    "reservation_items.reservation_items_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_archived_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "archived_at"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_no_overlap_per_sku": {
+      "method": "gist",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "sku",
+        "date_range"
+      ],
+      "predicate": "status='confirmed'::reservation_status"
+    },
+    "reservations.reservations_origin_store_id_shopify_order_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "origin_store_id",
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_reservation_binding_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_binding_id"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_shopify_cart_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_cart_id"
+      ],
+      "predicate": null
+    },
+    "reservations.reservations_sku_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "sku",
+        "status"
+      ],
+      "predicate": null
+    },
+    "stores.stores_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "stores.stores_shopify_domain_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_domain"
+      ],
+      "predicate": null
+    },
+    "vale_pass_campaigns.vale_pass_campaigns_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_campaigns.vale_pass_campaigns_shopify_variant_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_variant_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_events.vale_pass_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_events.vale_pass_events_vale_pass_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "vale_pass_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_order_cancellations.vale_pass_order_cancellations_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_order_events.vale_pass_order_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_order_events.vale_pass_order_events_vale_pass_order_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "vale_pass_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_orders.vale_pass_orders_order_created_at_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "order_created_at"
+      ],
+      "predicate": null
+    },
+    "vale_pass_orders.vale_pass_orders_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_orders.vale_pass_orders_shopify_order_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_orders.vale_pass_orders_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "status"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_campaign_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "campaign_id"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_code_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "code"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_shopify_order_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "status"
+      ],
+      "predicate": null
+    },
+    "webhook_events.webhook_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "webhook_events.webhook_events_reservation_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reservation_id"
+      ],
+      "predicate": null
+    },
+    "webhook_events.webhook_events_shopify_webhook_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_webhook_id"
+      ],
+      "predicate": null
+    },
+    "webhook_events.webhook_events_store_id_topic_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "store_id",
+        "topic"
+      ],
+      "predicate": null
+    }
+  },
+  "defaults": {
+    "admin_audit_events.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_audit_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_audit_events.is_critical": {
+      "default": "false",
+      "generated": null,
+      "identity": null
+    },
+    "admin_audit_events.is_privileged": {
+      "default": "false",
+      "generated": null,
+      "identity": null
+    },
+    "admin_presence.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "admin_presence.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_presence.last_seen_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "admin_sessions.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_sessions.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_users.active": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "admin_users.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_users.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "admin_users.is_technical": {
+      "default": "false",
+      "generated": null,
+      "identity": null
+    },
+    "admin_users.module_access": {
+      "default": "'{}'::admin_module[]",
+      "generated": null,
+      "identity": null
+    },
+    "catalog_sync_state.checked_variants": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "catalog_sync_state.deactivated_count": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "catalog_sync_state.id": {
+      "default": "'default'::text",
+      "generated": null,
+      "identity": null
+    },
+    "catalog_sync_state.reactivated_count": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "hold_idempotency_keys.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "manual_reservation_idempotency_keys.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "operational_blocks.active": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "operational_blocks.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "operational_blocks.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.cleaning_days": {
+      "default": "2",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.id": {
+      "default": "'default'::text",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.max_pieces": {
+      "default": "6",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.min_advance_days": {
+      "default": "15",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.prep_days": {
+      "default": "3",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.timezone": {
+      "default": "'america/santiago'::text",
+      "generated": null,
+      "identity": null
+    },
+    "rental_rule_config.updated_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "rental_units.active": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "rental_units.counts_toward_rental_duration": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "rental_units.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "rental_units.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "rental_units.reservable_online": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_events.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_item_occurrences.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_item_occurrences.recorded_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_item_returns.days_late": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_item_returns.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_item_returns.received_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_items.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "reservation_items.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.checkout_state": {
+      "default": "'none'::checkout_state",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.source": {
+      "default": "'online'::reservation_source",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.status": {
+      "default": "'hold'::reservation_status",
+      "generated": null,
+      "identity": null
+    },
+    "reservations.updated_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "stores.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaigns.active": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaigns.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaigns.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_events.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_order_cancellations.confirmed_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_order_events.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_order_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_orders.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_orders.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_orders.quantity": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_orders.status": {
+      "default": "'pending'::vale_pass_order_status",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_orders.status_changed_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_passes.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_passes.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_passes.status": {
+      "default": "'active'::vale_pass_status",
+      "generated": null,
+      "identity": null
+    },
+    "webhook_events.attempt_count": {
+      "default": "1",
+      "generated": null,
+      "identity": null
+    },
+    "webhook_events.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "webhook_events.processed_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    }
+  }
+}
