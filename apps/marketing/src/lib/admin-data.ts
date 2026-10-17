@@ -574,7 +574,9 @@ export interface ValePassCapacityHold {
   readonly shopifyOrderId: string;
   readonly shopifyOrderName: string | null;
   readonly units: number;
-  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH';
+  /** Códigos das divergências financeiras (só em FINANCIAL_MISMATCH). */
+  readonly issues: readonly string[];
   readonly createdAt: string;
 }
 
@@ -625,7 +627,7 @@ export interface ValePassHoldProjection {
   readonly orderName: string | null;
   readonly orderStatus: string | null;
   readonly units: number;
-  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH';
   readonly globalLimit: number | null;
   readonly soldBefore: number;
   readonly pendingBefore: number;

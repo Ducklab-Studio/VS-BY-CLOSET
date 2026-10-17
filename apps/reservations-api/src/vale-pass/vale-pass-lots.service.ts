@@ -26,7 +26,18 @@ export type CapacityAlertCode =
   | 'GLOBAL_LIMIT_NOT_SET'
   | 'PAID_UNITS_COUNTED_AS_SOLD'
   | 'ISSUANCE_HOLDS_OPEN'
+  | 'ISSUANCE_HOLD_STALE'
   | 'OPEN_LOT_SOLD_OUT';
+
+/** Retenção aberta há mais que isso pede ação imediata: o cliente já pagou e o prazo de 3 dias para os códigos corre desde o pagamento. */
+export const STALE_HOLD_HOURS = 24;
+
+/** Códigos das divergências guardadas em `detail.issues` da retenção (nada além dos códigos sai daqui). */
+export function financialIssueCodes(detail: unknown): string[] {
+  const issues = detail && typeof detail === 'object' ? (detail as { issues?: unknown }).issues : null;
+  if (!Array.isArray(issues)) return [];
+  return issues.map((issue) => (issue && typeof issue === 'object' && typeof (issue as { code?: unknown }).code === 'string' ? (issue as { code: string }).code : null)).filter((code): code is string => code !== null).slice(0, 20);
+}
 
 export interface CapacityAlert {
   readonly code: CapacityAlertCode;
@@ -41,7 +52,9 @@ export interface CapacityHold {
   readonly shopifyOrderId: string;
   readonly shopifyOrderName: string | null;
   readonly units: number;
-  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY';
+  readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH';
+  /** Códigos das divergências financeiras (só quando `reason` = FINANCIAL_MISMATCH). Sem dados pessoais. */
+  readonly issues: readonly string[];
   readonly createdAt: string;
 }
 
@@ -142,6 +155,15 @@ export class ValePassLotsService {
         message: `${openHolds.length} pedido(s) pago(s) aguardam resolução de um administrador (${heldUnits} unidade(s) sem voucher). Emita (excedente aprovado) ou resolva o reembolso na Shopify.`,
       });
     }
+    const staleSince = Date.now() - STALE_HOLD_HOURS * 3_600_000;
+    const staleHolds = openHolds.filter((hold) => hold.createdAt.getTime() < staleSince);
+    if (staleHolds.length > 0) {
+      alerts.push({
+        code: 'ISSUANCE_HOLD_STALE',
+        severity: 'critical',
+        message: `${staleHolds.length} pedido(s) pago(s) estão retidos há mais de ${STALE_HOLD_HOURS} horas. O prazo de 3 dias para o cliente receber os códigos corre desde o pagamento: resolva agora (emitir com justificativa ou reembolsar na Shopify e descartar).`,
+      });
+    }
     if (totals.pending > 0) {
       alerts.push({
         code: 'PAID_UNITS_COUNTED_AS_SOLD',
@@ -194,6 +216,7 @@ export class ValePassLotsService {
         shopifyOrderName: holdOrderNames.get(hold.shopifyOrderId) ?? null,
         units: hold.units,
         reason: hold.reason,
+        issues: financialIssueCodes(hold.detail),
         createdAt: hold.createdAt.toISOString(),
       })),
       benefits: benefitRows.map((benefit) => ({

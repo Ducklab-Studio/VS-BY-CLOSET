@@ -169,6 +169,27 @@ export class ValePassIssuanceService {
     return { mode: 'benefits', issuedUnits: toCreate, completedUnits: completed.units, heldUnits: 0, holdId: null, vouchersCreated: created + completed.vouchers, events };
   }
 
+  /**
+   * Retém um pedido PAGO cuja validação financeira (valor, moeda, quantidade, desconto) deu problema. Não emite, não cancela e não reembolsa: abre
+   * (ou atualiza) UMA retenção aberta por pedido e campanha para um ADMIN resolver (emitir mesmo assim, com justificativa e confirmação reforçada,
+   * ou descartar depois de reembolsar na Shopify). A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
+   * pedido já tem vouchers da campanha, não abre retenção (já foi tratado). ISOLADO: nenhum fluxo ativo chama este método.
+   */
+  async holdForFinancialReview(
+    tx: Tx,
+    input: { campaignId: string; order: IssuanceOrder; units: number; issues: readonly { code: string; detail?: Record<string, unknown> }[] },
+  ): Promise<{ holdId: string | null; created: boolean }> {
+    if (!Number.isInteger(input.units) || input.units < 1) throw new RangeError('units deve ser um inteiro ≥ 1');
+    await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${input.campaignId}::uuid FOR UPDATE`; // mesma trava da emissão e do painel
+    const campaign = await tx.valePassCampaign.findUnique({ where: { id: input.campaignId } });
+    if (!campaign) throw new Error(`campanha ${input.campaignId} não encontrada`);
+    const alreadyIssued = await tx.valePass.count({ where: { shopifyOrderId: input.order.orderId, campaignId: input.campaignId } });
+    if (alreadyIssued > 0) return { holdId: null, created: false };
+    const open = await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: input.order.orderId, campaignId: input.campaignId, status: 'OPEN' } });
+    const hold = await this.upsertHold(tx, input.order.orderId, campaign, input.units, 'FINANCIAL_MISMATCH', { issues: input.issues as unknown as Prisma.InputJsonValue });
+    return { holdId: hold.id, created: open === null };
+  }
+
   private notReadyReason(campaign: ValePassCampaign, benefits: readonly ValePassCampaignBenefit[]): string | null {
     if (benefits.length === 0) return 'a campanha tem benefícios cadastrados, mas nenhum voucher ativo';
     if (!campaign.voucherValidFrom || !campaign.voucherValidUntil) return 'a campanha não tem a validade dos vouchers configurada (início e fim)';
@@ -250,7 +271,7 @@ export class ValePassIssuanceService {
     orderId: string,
     campaign: ValePassCampaign,
     units: number,
-    reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY',
+    reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH',
     detail: Record<string, unknown>,
   ): Promise<ValePassIssuanceHold> {
     const open = await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: orderId, campaignId: campaign.id, status: 'OPEN' } });
