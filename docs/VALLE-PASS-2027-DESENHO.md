@@ -196,3 +196,76 @@ ALTER TABLE vale_pass_campaigns
 ```
 
 A remoção definitiva deve ser uma **nova migration**, nunca edição da aplicada. O snapshot do Neon (anterior à A1) não deve ser tocado.
+
+## 9. PR B — emissão segura dos dois vouchers (18/10/2026)
+
+**Estado: implementado, testado e NÃO ligado ao pagamento.** Este PR entrega o modelo de dados, o serviço de emissão (idempotente, tudo-ou-nada por pedido), a fila de resolução e o painel. O webhook financeiro (`vale-pass-webhook.service.ts`), o checkout, o HMAC v1/v2 e as reservas **não foram tocados**; um teste do PR (`isolamento: a emissão ativa do webhook NÃO mudou`) trava isso. A ligação ao pagamento é a etapa 9.5, que só entra com autorização expressa.
+
+### 9.1 Auditoria (Etapa 1) — o que o código fazia antes
+
+| Ponto | Achado |
+| --- | --- |
+| Emissão | `handleOrderPaid` cria **um** voucher por unidade comprada, dentro da transação/lock do pedido do webhook. |
+| Idempotência | guarda `already` (qualquer voucher do pedido ⇒ não emite de novo) + lock por pedido. Insuficiente para dois vouchers: uma emissão pela metade seria tratada como "já emitida" e nunca completaria. |
+| Capacidade | `quantity_limit` legado (`count` de linhas de voucher) — com dois vouchers por venda contaria dobrado. A A1 já trouxe limite global/lotes por **unidade** (`coalesce(group_id, id)`), pronta para isto. |
+| Unicidade | só o `code` era único; nada impedia dois vouchers do mesmo benefício na mesma unidade. |
+| Imutabilidade | nenhuma proteção de banco sobre valor/código/validade de voucher emitido. |
+| Pagamento sem emissão | `VALE_PASS_QUANTITY_LIMIT_REACHED` só vira evento/log; o pedido pago ficava sem voucher e sem fila. |
+| Resgate | `markUsed` por voucher; sem empresa; sem data de início de uso. |
+
+### 9.2 Modelo de dados (Etapa 2) — migration aditiva `20261018100000_vale_pass_dois_vouchers`
+
+* `vale_passes` ganha 4 colunas **nulas** (`company`, `group_id`, `benefit_id`, `valid_from`): todo voucher existente permanece "legado", sem alteração de nenhum campo.
+* `vale_pass_campaign_benefits`: benefícios por campanha — `VOUCHER` (empresa + valor) ou `DISCOUNT` (percentual **descritivo**: sem código, sem saldo, sem desconto financeiro automático). Um voucher por empresa por campanha.
+* `vale_pass_issuance_holds`: fila de pagamentos confirmados que não puderam ser emitidos (limite global esgotado ou campanha sem validade). Uma retenção ABERTA por pedido+campanha (`open_flag`).
+* Garantias no banco: `UNIQUE(group_id, benefit_id)` e `UNIQUE(group_id, company)`; `company/group_id/benefit_id` andam juntos (CHECK); triggers tornam imutáveis código, valor, empresa, grupo, benefício, pedido, campanha e datas de **qualquer** voucher (inclusive legado); benefício já emitido não muda empresa/valor/tipo/código; FK `ON DELETE RESTRICT`.
+* Migration atômica, `SET lock_timeout='5s'` + `RESET lock_timeout`. **Não aplicada no Neon.** Verificada em PostgreSQL descartável: aplica; reaplicar não faz nada; erro no fim desfaz tudo; falha por lock ⇒ `P3018`, depois `P3009`, `migrate resolve --rolled-back` + novo deploy aplicam; `lock_timeout` volta ao padrão da conexão; reversão SQL testada (volta às 20 colunas originais).
+* Reverter o deploy basta (código antigo ignora colunas/tabelas novas). Atenção: depois de existirem vouchers novos, remover o esquema exigiria antes decidir o destino deles — por isso a remoção deve ser uma nova migration, nunca edição da aplicada.
+
+### 9.3 Emissão (Etapa 3) — `ValePassIssuanceService.issueForCampaign(tx, …)`
+
+Opt-in **por campanha**: sem benefícios cadastrados ⇒ `{ mode: 'legacy' }` (nada muda); com benefícios mas nenhum ativo/sem validade ⇒ **retém** (`CAMPAIGN_NOT_READY`), nunca cai silenciosamente no legado. Para campanha pronta:
+
+1. Ordem de locks: operacional → webhook → **pedido** → **campanha (`FOR UPDATE`)**. O lock da campanha serializa pedidos concorrentes pelo último lugar.
+2. Grupos incompletos (emissão interrompida) são **completados** sem consumir capacidade nova.
+3. Unidades novas: capacidade global = `limite − (vendidas + pagas-pendentes dos outros pedidos)`. **Tudo ou nada por pedido**: se não couber, o pedido inteiro vira retenção `CAPACITY_EXCEEDED` (a unidade segue contando como consumida, alerta crítico `ISSUANCE_HOLDS_OPEN`/`GLOBAL_LIMIT_EXCEEDED`). Lote nunca bloqueia; limite legado não é aplicado.
+4. Cada unidade = um `group_id` com exatamente os vouchers `VOUCHER` ativos (R$ 500 Valle Showroom + R$ 50 VS BY CLOSET), códigos independentes (`VALLE-XXXX-XXXX`), `valid_from`/`expires_at` da campanha (2027) convertidos no fuso `America/Sao_Paulo` (**provisório**, `VALE_PASS_VALIDITY_TIMEZONE`). O desconto de 10% **não gera voucher**.
+5. Pedido já cancelado/reembolsado antes da emissão: emite e cancela na mesma transação (mesmo estado final do legado), sem consumir capacidade nem criar retenção.
+6. Eventos não carregam o código do voucher.
+
+**Fila de resolução (somente ADMIN, justificativa ≥ 3 caracteres, auditada):** *Emitir* = excedente consciente acima do limite (exige pedido ainda pago); *Descartar* só depois de o pedido deixar de estar pago (reembolso/cancelamento ocorre **na Shopify**). Nenhuma das duas ações reembolsa, cancela ou transfere crédito. Reprocessar o webhook com mais capacidade emite sozinho e fecha a retenção.
+
+### 9.4 Resgate e painel (Etapa 4)
+
+* Vouchers aparecem **separados**, com empresa ("Válido só na Valle Showroom/VS BY CLOSET"), grupo, benefício e validade 01/01/2027 a 31/12/2027; `markUsed` de um voucher não toca no irmão; uso antes de `valid_from` é recusado; **não há transferência de saldo entre empresas** (nem campo, nem serviço).
+* Cancelar/reembolsar o pedido cancela **os dois** vouchers e libera **uma** unidade; cancelar só um voucher não libera a unidade (o outro segue ativo).
+* "Vendidos" = **unidades** (`count(DISTINCT coalesce(group_id,id))`), nunca linhas de voucher (lista de campanhas, capacidade, lotes).
+* Painel: fila de retenções (com *Resolver*), benefícios da campanha (sugestão do modelo Valle Pass 2027, **só grava após confirmação do ADMIN**), alerta crítico quando há retenção.
+
+### 9.5 Ligação ao pagamento — PLANO DE SEGURANÇA (NÃO APLICADO; aguarda autorização)
+
+A ligação muda o comportamento financeiro ativo do webhook e por isso **fica de fora deste PR**. Proposta, de diff pequeno e isolada em `handleOrderPaid`:
+
+1. `ValePassWebhookService` recebe `ValePassIssuanceService` (parâmetro opcional no construtor; testes existentes usam `new ValePassWebhookService()`).
+2. Em `handleOrderPaid`, **depois** de achar as campanhas e **antes** da guarda `already`, para cada linha cuja campanha tenha benefícios: `issuance.issueForCampaign(tx, { campaignId, order, units: line.quantity, mode: 'enforce' })`; se devolver `{ mode: 'legacy' }`, segue o caminho antigo **só para aquela linha**. A guarda `already` e o `quantity_limit` passam a valer apenas para campanhas legadas.
+3. Nada muda enquanto nenhuma campanha tiver benefícios cadastrados — e a campanha real **não tem** (0 linhas na tabela nova). O rollback da ligação é simplesmente apagar os benefícios da campanha (ou reverter o deploy): os vouchers já emitidos permanecem válidos.
+4. Pré-requisitos antes de ligar: (a) autorização expressa; (b) decisões da §9.6; (c) ensaio de ponta a ponta em banco descartável com o payload real anonimizado de `orders/paid` e `orders/updated`, reentregas e fora de ordem; (d) migration já aplicada e verificada em produção (PR separado, antes); (e) campanha configurada pela equipe (benefícios, janela 2027, limite global 1.000) **sem** vendas públicas ativas.
+5. Observabilidade: alerta `ISSUANCE_HOLDS_OPEN` (crítico) e contagem de retenções abertas no painel; qualquer retenção aberta deve ser resolvida por um ADMIN antes do prazo de 3 dias do e-mail (PR C).
+
+### 9.6 Decisões pendentes (comerciais/técnicas)
+
+Fuso da validade (provisório `America/Sao_Paulo`); uso parcial do voucher (saldo restante?) e reembolso de saldo; resgate por empresa (quem valida o voucher da VS BY CLOSET e como baixa); transferência/ cessão a terceiros; condições do desconto de 10% em passeios; responsável por resolver retenções; texto/regras exibidos ao cliente; envio dos códigos por e-mail em até 3 dias (PR C, Resend ainda sem conta).
+
+### 9.7 Testes (Etapa 5)
+
+`vale-pass-issuance.integration.test.ts` (30 testes, PostgreSQL descartável): uma unidade ⇒ 2 vouchers; pedido com 3 unidades ⇒ 6 em 3 grupos; webhook duplicado e entregas simultâneas; cancelamento antes da emissão; emissão parcial completada com limite esgotado; falha no meio ⇒ rollback e reprocessamento; constraints do banco; tudo-ou-nada sem capacidade; retenção única por pedido; lote/limite legado não bloqueiam; disputa pelo último lugar; estresse (30 pedidos, limite 20 ⇒ 20 unidades/40 vouchers/10 retenções); resolução (emitir/descartar, auditoria, dupla resolução); campanha sem validade/benefícios inativos; RBAC; saldo por voucher; `valid_from`; cancelamento/reembolso; vouchers legados intactos; imutabilidade; serviço de benefícios; isolamento do webhook. Mutação verificada (sem `FOR UPDATE` o teste de concorrência falha). Mais: testes puros de validade/benefícios, teste de navegador `test:valle-pass-two-vouchers` e verificação da migration (script de banco descartável).
+
+### 9.8 Correções da auditoria pré-merge (B1 e B2)
+
+* **B1 — datas de validade no painel.** "Válido de/até" (e "Comprado em") do cartão do voucher passam a ser calculados explicitamente em `America/Sao_Paulo` (`apps/marketing/src/lib/valle-pass-dates.ts`), nunca no fuso do navegador/servidor: o último dia aparece como 31/12/2027 em UTC, São Paulo, Santiago, Auckland e Kolkata. Nenhum instante gravado, regra de expiração ou validação de resgate mudou. O fuso continua **provisório**; a definição comercial definitiva segue pendente. Resíduo conhecido e fora de escopo: outras datas já existentes do painel (lista de pedidos, lotes) ainda usam o fuso do aparelho.
+* **B2 — emissão excepcional acima do limite global.** Passa a exigir confirmação reforçada, sempre revalidada no servidor:
+  * a tela mostra limite global, consumo de hoje, total projetado depois e aviso explícito de que a emissão ultrapassa o limite autorizado;
+  * justificativa de no mínimo 10 caracteres e digitação do total projetado;
+  * o servidor refaz tudo dentro da transação (locks do pedido e da campanha): perfil ADMIN ativo (além do guard da rota), retenção aberta, pedido ainda pago, números que a pessoa viu **iguais** aos de agora (limite, consumo, total projetado, versão da retenção) e total digitado correto. Qualquer divergência rejeita sem emitir (409 se algo mudou entre a visualização e a confirmação — exige nova confirmação; 422 se o total digitado estiver errado; 403 se não for ADMIN);
+  * invariante: a emissão só **troca** "pago aguardando" por "vendido". O consumo total não pode mudar; se mudasse, a transação é desfeita. Assim o painel nunca enxerga capacidade falsa (saldo continua 0, estoque recomendado 0, novas vendas continuam retidas, alerta crítico permanece);
+  * auditoria crítica com limite, vendidos/aguardando/consumido antes e depois, quanto excede, justificativa, total confirmado e administrador.

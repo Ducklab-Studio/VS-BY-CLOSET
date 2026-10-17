@@ -197,6 +197,20 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_campaign_benefits.vale_pass_campaign_benefits_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_pass_events.vale_pass_events_vale_pass_id_fkey": {
       "columns": [
         "vale_pass_id"
@@ -207,6 +221,20 @@
       ],
       "onDelete": "NO ACTION",
       "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_pass_issuance_holds.vale_pass_issuance_holds_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
       "match": "SIMPLE",
       "deferrable": false,
       "initiallyDeferred": false
@@ -235,6 +263,20 @@
       ],
       "onDelete": "NO ACTION",
       "onUpdate": "NO ACTION",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_passes.vale_passes_benefit_id_fkey": {
+      "columns": [
+        "benefit_id"
+      ],
+      "references": "vale_pass_campaign_benefits",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
       "match": "SIMPLE",
       "deferrable": false,
       "initiallyDeferred": false
@@ -927,6 +969,60 @@
       ],
       "predicate": null
     },
+    "vale_pass_campaign_benefits.vale_pass_campaign_benefits_campaign_id_code_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "campaign_id",
+        "code"
+      ],
+      "predicate": null
+    },
+    "vale_pass_campaign_benefits.vale_pass_campaign_benefits_campaign_id_company_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "campaign_id",
+        "company"
+      ],
+      "predicate": null
+    },
+    "vale_pass_campaign_benefits.vale_pass_campaign_benefits_campaign_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "campaign_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_campaign_benefits.vale_pass_campaign_benefits_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
     "vale_pass_campaigns.vale_pass_campaigns_pkey": {
       "method": "btree",
       "unique": true,
@@ -976,6 +1072,60 @@
       "options": "0",
       "columns": [
         "vale_pass_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_issuance_holds.vale_pass_issuance_holds_campaign_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "campaign_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_issuance_holds.vale_pass_issuance_holds_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_issuance_holds.vale_pass_issuance_holds_shopify_order_id_campaign_id_open__key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 3,
+      "totalColumns": 3,
+      "valid": true,
+      "options": "0 0 0",
+      "columns": [
+        "shopify_order_id",
+        "campaign_id",
+        "open_flag"
+      ],
+      "predicate": null
+    },
+    "vale_pass_issuance_holds.vale_pass_issuance_holds_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "status"
       ],
       "predicate": null
     },
@@ -1110,6 +1260,19 @@
       ],
       "predicate": null
     },
+    "vale_passes.vale_passes_benefit_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "benefit_id"
+      ],
+      "predicate": null
+    },
     "vale_passes.vale_passes_campaign_id_idx": {
       "method": "btree",
       "unique": false,
@@ -1133,6 +1296,47 @@
       "options": "0",
       "columns": [
         "code"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_group_id_benefit_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "group_id",
+        "benefit_id"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_group_id_company_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "group_id",
+        "company"
+      ],
+      "predicate": null
+    },
+    "vale_passes.vale_passes_group_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "group_id"
       ],
       "predicate": null
     },
@@ -1485,6 +1689,26 @@
       "generated": null,
       "identity": null
     },
+    "vale_pass_campaign_benefits.active": {
+      "default": "true",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaign_benefits.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaign_benefits.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_campaign_benefits.sort_order": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
     "vale_pass_campaigns.active": {
       "default": "true",
       "generated": null,
@@ -1507,6 +1731,21 @@
     },
     "vale_pass_events.id": {
       "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_issuance_holds.created_at": {
+      "default": "current_timestamp",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_issuance_holds.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_issuance_holds.status": {
+      "default": "'open'::vale_pass_hold_status",
       "generated": null,
       "identity": null
     },

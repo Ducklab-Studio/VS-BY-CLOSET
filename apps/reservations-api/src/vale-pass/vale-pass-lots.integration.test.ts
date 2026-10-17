@@ -10,7 +10,7 @@ import { REQUIRE_ROLE_KEY } from '../admin/require-role.decorator';
 import { ValePassCampaignsService } from './vale-pass-campaigns.service';
 import { ValePassCampaignsController } from './vale-pass-campaigns.controller';
 import { ValePassLotsService } from './vale-pass-lots.service';
-import { PASS_UNIT_KEY, unitAggregates } from './vale-pass-capacity';
+import { unitAggregates } from './vale-pass-capacity';
 
 /**
  * Campanhas editáveis, lotes e capacidade do Valle Pass — PostgreSQL LOCAL descartável (sem `DATABASE_URL` de loopback com
@@ -592,9 +592,9 @@ localDescribe('Valle Pass — capacidade CONSUMIDA (vendido + pago aguardando em
       SELECT ${unitAggregates(Prisma.sql`coalesce(v.group_id, v.id)`)}
       FROM (VALUES ('a','g1','ACTIVE'),('b','g1','ACTIVE'),('c','g2','CANCELLED'),('d','g2','ACTIVE'),('e','g3','CANCELLED'),('f','g3','CANCELLED'),('h',NULL,'USED'),('i',NULL,'EXPIRED')) AS v(id, group_id, status)`;
     expect(row).toEqual({ issued: 5, sold: 4, active: 2, used: 1, expired: 1 }); // 8 linhas, 5 unidades; só g3 deixa de consumir
-    // a chave atual (sem grupo) trata cada linha como uma unidade, exatamente como era
+    // sem grupo (legado), cada linha é uma unidade, exatamente como era; a chave real (`PASS_UNIT_KEY`) é exercitada na tabela de verdade nos testes de emissão
     const [legacy] = await prisma.$queryRaw<{ issued: number; sold: number }[]>`
-      SELECT ${unitAggregates(PASS_UNIT_KEY)} FROM (VALUES ('a','ACTIVE'),('b','CANCELLED'),('c','USED')) AS v(id, status)`;
+      SELECT ${unitAggregates(Prisma.sql`v.id`)} FROM (VALUES ('a','ACTIVE'),('b','CANCELLED'),('c','USED')) AS v(id, status)`;
     expect(legacy).toMatchObject({ issued: 3, sold: 2 });
   });
 
@@ -669,11 +669,13 @@ localDescribe('Valle Pass — permissões e isolamento da emissão', () => {
     }
   });
 
-  test('migração aditiva: passes existentes não ganharam nenhuma coluna nem mudaram', async () => {
+  test('migrações aditivas: as colunas originais dos passes continuam as mesmas (só 4 novas, nulas, no fim)', async () => {
     const columns = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'vale_passes' ORDER BY ordinal_position`;
     expect(columns.map((c) => c.column_name)).toEqual([
       'id', 'code', 'campaign_id', 'amount_cents', 'status', 'purchased_at', 'expires_at', 'customer_name', 'customer_phone', 'customer_email',
       'shopify_order_id', 'shopify_order_gid', 'shopify_order_name', 'used_at', 'used_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'created_at', 'updated_at',
+      // PR B (dois vouchers): só 4 colunas NOVAS e NULAS — todo voucher existente continua legado
+      'benefit_id', 'company', 'group_id', 'valid_from',
     ]);
   });
 });
