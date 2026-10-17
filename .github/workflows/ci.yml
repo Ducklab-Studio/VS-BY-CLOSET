@@ -123,6 +123,9 @@ jobs:
       - name: Testar o acompanhamento dos e-mails dos vouchers no ClosetAdmin (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-emails
 
+      - name: Testar a fila de reembolsos em revisão do Valle Pass no ClosetAdmin (navegador isolado)
+        run: pnpm --filter @valle/marketing run test:valle-pass-refund-reviews
+
       - name: Testar contador de novas reservas no menu
         run: pnpm --filter @valle/marketing run test:reservations-badge
 

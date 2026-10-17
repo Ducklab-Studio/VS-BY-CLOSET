@@ -1,6 +1,6 @@
 -- Valle Pass 2027 — PR G: trilha de reembolsos (idempotência por reembolso + fila de revisão administrativa).
 --
--- Estritamente ADITIVA: uma tabela nova e um tipo novo. Nenhuma tabela existente é alterada e nenhuma linha é lida, copiada ou apagada (a única tabela
+-- ADITIVA: uma tabela nova, um tipo novo e UM gatilho em vale_passes (só dispara na transição para USED). Nenhum dado existente é alterado e nenhuma linha é lida, copiada ou apagada (a única tabela
 -- existente referenciada é vale_pass_campaigns, pela FK opcional). Nada usa a tabela até a integração financeira (PR F, com autorização própria).
 --
 -- Atomicidade: o arquivo roda como uma transação implícita; `lock_timeout` evita esperar indefinidamente atrás de uma transação longa.
@@ -73,6 +73,22 @@ BEGIN
 END
 $fn$;
 CREATE TRIGGER "vale_pass_refund_guard" BEFORE UPDATE OR DELETE ON "vale_pass_refund_applications" FOR EACH ROW EXECUTE FUNCTION "vale_pass_refund_guard"();
+
+-- Defesa em profundidade (F2): nenhum caminho — nem SQL direto — marca como USADO um voucher de unidade com reembolso em revisão. A cláusula WHEN
+-- restringe o gatilho à transição para USED; as demais atualizações de vale_passes não executam nada. Sem linhas NEEDS_REVIEW, nunca bloqueia.
+CREATE FUNCTION "vale_pass_block_use_under_refund_review"() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF NEW."group_id" IS NOT NULL AND NEW."shopify_order_id" IS NOT NULL AND EXISTS (
+    SELECT 1 FROM "vale_pass_refund_applications" r
+    WHERE r."shopify_order_id" = NEW."shopify_order_id" AND r."status" = 'NEEDS_REVIEW' AND r."detail"->'reviewGroupIds' @> to_jsonb(NEW."group_id"::text)
+  ) THEN
+    RAISE EXCEPTION 'vale_pass_use_blocked_refund_review: unidade com reembolso aguardando decisão administrativa' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END
+$fn$;
+CREATE TRIGGER "vale_pass_block_use_under_refund_review" BEFORE UPDATE OF "status" ON "vale_passes" FOR EACH ROW
+  WHEN (NEW."status" = 'USED' AND OLD."status" IS DISTINCT FROM 'USED') EXECUTE FUNCTION "vale_pass_block_use_under_refund_review"();
 
 -- Devolve o lock_timeout da sessão ao padrão da conexão (o SET acima é de sessão; o pré-deploy usa o pooler do Neon).
 RESET lock_timeout;

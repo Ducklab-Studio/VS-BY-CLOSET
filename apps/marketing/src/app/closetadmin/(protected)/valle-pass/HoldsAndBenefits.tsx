@@ -47,6 +47,7 @@ const ISSUE_LABELS: Record<string, string> = {
   EXTRA_CHARGES: 'frete ou cobrança extra',
   TOTAL_UNDEFINED: 'total indefinido',
   TOTAL_MISMATCH: 'total pago diferente do esperado',
+  REFUND_PENDING_REVIEW: 'reembolso aguardando decisão de um administrador',
 };
 const COMPANY_LABELS = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' } as const;
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -292,6 +293,7 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
 
 const REFUND_REASON_LABELS: Record<string, string> = {
   USED_VOUCHERS: 'voucher já usado em unidade reembolsada',
+  UNIT_CONFIRMATION_REQUIRED: 'a Shopify não diz qual unidade foi devolvida: confirme a proposta (os vouchers propostos estão bloqueados para resgate)',
   AMOUNT_MISMATCH: 'valor devolvido não fecha com o preço',
   AMOUNT_ONLY_REFUND: 'dinheiro devolvido sem unidade',
   QUANTITY_EXCEEDS_UNITS: 'mais unidades devolvidas que as existentes',
@@ -323,6 +325,7 @@ function RefundReviewRow({ review, canManage, onChanged }: { review: ValePassCap
   const [note, setNote] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function decide(action: 'KEEP_VOUCHERS' | 'CANCEL_ACTIVE_VOUCHERS') {
     setPending(true);
@@ -330,9 +333,20 @@ function RefundReviewRow({ review, canManage, onChanged }: { review: ValePassCap
     const result = await resolveValePassRefundReviewAction(review.id, action, note);
     setPending(false);
     if (result.error) return setError(result.error);
-    setOpen(false);
     setNote('');
+    if (result.notice) return setNotice(result.notice); // fica na tela até a pessoa confirmar que leu
+    setOpen(false);
     onChanged();
+  }
+
+  if (notice) {
+    return (
+      <li role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-ink dark:text-dark-text">
+        <p className="font-semibold">{review.shopifyOrderName ?? 'Pedido'}: atenção operacional</p>
+        <p className="mt-1">{notice}</p>
+        <button type="button" className={`${secondaryButton} mt-2`} onClick={onChanged}>Entendi</button>
+      </li>
+    );
   }
 
   return (

@@ -7,8 +7,10 @@ import type { RefundFacts, RefundLineFacts } from './refund-facts';
  *
  * Princípios:
  *  - Reembolso que não toca a linha do Valle Pass (frete, outro produto) NÃO mexe em nenhum voucher.
- *  - Reembolso de N unidades cancela N unidades — as MAIS NOVAS entre as que NENHUM voucher foi usado. A Shopify não diz qual unidade foi devolvida;
- *    escolher a mais nova e intocada é a regra mais justa e previsível (decisão comercial a confirmar com o Anderson).
+ *  - Reembolso de N unidades primeiro "absorve" as unidades PAGAS e AINDA NÃO EMITIDAS (não há voucher a cancelar: a emissão posterior as desconta).
+ *    Só o que sobrar atinge unidades já emitidas. A Shopify NÃO diz qual unidade foi devolvida; por isso, na política provisória (ADMIN_CONFIRM) o
+ *    sistema NÃO cancela voucher emitido sozinho: propõe as unidades mais novas e intocadas e espera a confirmação de um ADMIN (os vouchers propostos
+ *    ficam bloqueados para uso enquanto isso). A política AUTO_NEWEST (cancelar sozinho as mais novas) existe, mas só pode ser ligada com aprovação do Anderson.
  *  - Voucher já usado (ou expirado) nunca é cancelado nem "desusado" automaticamente: o que faltar vira REVISÃO administrativa (fail-closed).
  *  - Valor devolvido sem unidade correspondente, quantidade/valor que não fecham ou dado ilegível: REVISÃO, nada automático.
  *  - Nunca reativa voucher cancelado e nunca toca em unidade que não foi reembolsada.
@@ -32,7 +34,12 @@ export function standingOf(unit: UnitState): UnitStanding {
 
 export type RefundClassification = 'UNRELATED' | 'UNITS' | 'AMOUNT_ONLY' | 'NO_UNITS';
 
+/** ADMIN_CONFIRM = provisória e segura (padrão); AUTO_NEWEST = cancela sozinho as unidades intocadas mais novas — NÃO aprovada comercialmente. */
+export type IssuedUnitPolicy = 'ADMIN_CONFIRM' | 'AUTO_NEWEST';
+export const ISSUED_UNIT_CANCEL_POLICY: IssuedUnitPolicy = 'ADMIN_CONFIRM';
+
 export type ReviewReason =
+  | 'UNIT_CONFIRMATION_REQUIRED' // reembolso atinge unidade já emitida e a Shopify não diz qual: o ADMIN confirma
   | 'REFUND_UNDEFINED' // sem id do reembolso/pedido ou quantidade ilegível
   | 'TRANSACTION_UNDEFINED' // valor de transação ilegível
   | 'AMOUNT_ONLY_REFUND' // dinheiro devolvido sem linha de produto nem frete que o explique
@@ -53,6 +60,9 @@ export interface RefundPlanInput {
   readonly alreadyRefundedUnits: number;
   /** Unidades pagas do pedido (registro). */
   readonly paidUnits: number;
+  /** Unidades pagas ainda sem voucher e não descontadas por reembolso anterior. */
+  readonly unissuedUnits?: number;
+  readonly policy?: IssuedUnitPolicy;
 }
 
 export interface RefundPlan {
@@ -65,6 +75,10 @@ export interface RefundPlan {
   readonly reviewReasons: readonly ReviewReason[];
   /** Quantas das unidades reembolsadas ficaram sem tratamento automático. */
   readonly unitsNeedingReview: number;
+  /** Unidades pagas não emitidas que ESTE reembolso absorveu (a emissão posterior as desconta). */
+  readonly unissuedAbsorbed: number;
+  /** Em revisão: quantas unidades não emitidas seriam absorvidas se o ADMIN confirmar. */
+  readonly unissuedProposed: number;
   /** Depois deste reembolso, todas as unidades pagas foram devolvidas. */
   readonly orderFullyRefunded: boolean;
 }
@@ -75,8 +89,10 @@ export function planRefund(input: RefundPlanInput): RefundPlan {
   const { refund } = input;
   const reasons = new Set<ReviewReason>();
   const none = (classification: RefundClassification, refundedUnits = 0): RefundPlan => ({
-    classification, refundedUnits, cancelGroupIds: [], reviewGroupIds: [], reviewReasons: [...reasons], unitsNeedingReview: 0, orderFullyRefunded: false,
+    classification, refundedUnits, cancelGroupIds: [], reviewGroupIds: [], reviewReasons: [...reasons], unitsNeedingReview: 0, unissuedAbsorbed: 0, unissuedProposed: 0, orderFullyRefunded: false,
   });
+  const unissued = Math.max(0, input.unissuedUnits ?? 0);
+  const policy = input.policy ?? ISSUED_UNIT_CANCEL_POLICY;
 
   if (!refund.refundId || !refund.orderId) {
     reasons.add('REFUND_UNDEFINED');
@@ -112,33 +128,41 @@ export function planRefund(input: RefundPlanInput): RefundPlan {
   }
 
   const alive = input.units.filter((unit) => standingOf(unit) !== 'CANCELLED');
-  if (refundedUnits > alive.length) reasons.add('QUANTITY_EXCEEDS_UNITS');
+  if (refundedUnits > alive.length + unissued) reasons.add('QUANTITY_EXCEEDS_UNITS');
   if (input.alreadyRefundedUnits + refundedUnits > input.paidUnits) reasons.add('PAID_UNITS_EXCEEDED');
 
   // Qualquer dúvida sobre valores/quantidades: nada automático — o quadro inteiro vai para revisão.
   if (reasons.size > 0) {
     // PROPOSTA (não aplicada): as unidades mais novas, intocadas primeiro. O ADMIN decide se cancela os vouchers ativos delas ou mantém tudo.
+    const proposedUnissued = Math.min(refundedUnits, unissued);
     const proposal = [...alive.filter((unit) => standingOf(unit) === 'UNUSED').sort(newestFirst), ...alive.filter((unit) => standingOf(unit) === 'TOUCHED').sort(newestFirst)];
     return {
-      classification: 'UNITS', refundedUnits, cancelGroupIds: [], reviewGroupIds: proposal.slice(0, Math.min(refundedUnits, proposal.length)).map((unit) => unit.groupId), reviewReasons: [...reasons], unitsNeedingReview: refundedUnits, orderFullyRefunded: false,
+      classification: 'UNITS', refundedUnits, cancelGroupIds: [], reviewGroupIds: proposal.slice(0, Math.min(refundedUnits - proposedUnissued, proposal.length)).map((unit) => unit.groupId), reviewReasons: [...reasons], unitsNeedingReview: refundedUnits, unissuedAbsorbed: 0, unissuedProposed: proposedUnissued, orderFullyRefunded: false,
     };
   }
 
-  // 3) Escolha determinística: as unidades intocadas mais novas.
+  // 3) Primeiro as unidades pagas e não emitidas (nada a cancelar); depois as emitidas, intocadas e mais novas.
+  const absorbed = Math.min(refundedUnits, unissued);
+  const rest = refundedUnits - absorbed;
   const unused = input.units.filter((unit) => standingOf(unit) === 'UNUSED').sort(newestFirst);
   const touched = input.units.filter((unit) => standingOf(unit) === 'TOUCHED').sort(newestFirst);
-  const cancelCount = Math.min(refundedUnits, unused.length);
-  const shortfall = refundedUnits - cancelCount;
-  const reviewGroupIds = shortfall > 0 ? touched.slice(0, shortfall).map((unit) => unit.groupId) : [];
+  const cancelCount = Math.min(rest, unused.length);
+  const shortfall = rest - cancelCount;
+  const chosen = unused.slice(0, cancelCount).map((unit) => unit.groupId);
+  const touchedForReview = shortfall > 0 ? touched.slice(0, shortfall).map((unit) => unit.groupId) : [];
   if (shortfall > 0) reasons.add('USED_VOUCHERS');
+  const needsConfirmation = policy === 'ADMIN_CONFIRM' && chosen.length > 0;
+  if (needsConfirmation) reasons.add('UNIT_CONFIRMATION_REQUIRED');
 
   return {
     classification: 'UNITS',
     refundedUnits,
-    cancelGroupIds: unused.slice(0, cancelCount).map((unit) => unit.groupId),
-    reviewGroupIds,
+    cancelGroupIds: needsConfirmation ? [] : chosen, // sem aprovação comercial, o sistema só PROPÕE
+    reviewGroupIds: [...(needsConfirmation ? chosen : []), ...touchedForReview],
     reviewReasons: [...reasons],
-    unitsNeedingReview: shortfall,
+    unitsNeedingReview: (needsConfirmation ? chosen.length : 0) + shortfall,
+    unissuedAbsorbed: absorbed,
+    unissuedProposed: 0,
     orderFullyRefunded: input.alreadyRefundedUnits + refundedUnits >= input.paidUnits,
   };
 }

@@ -35,7 +35,7 @@ const unit = (groupId: string, minutes: number, statuses: VoucherStatus[] = ['AC
 });
 const isValePassLine = (line: RefundLineFacts) => line.variantId === VARIANT || line.productId === PRODUCT;
 function plan(payload: unknown, units: UnitState[], over: Partial<RefundPlanInput> = {}) {
-  return planRefund({ refund: factsFromRefundWebhook(payload), isValePassLine, unitPriceByVariant: new Map([[VARIANT, 35000]]), units, alreadyRefundedUnits: 0, paidUnits: units.length, ...over });
+  return planRefund({ refund: factsFromRefundWebhook(payload), isValePassLine, unitPriceByVariant: new Map([[VARIANT, 35000]]), units, alreadyRefundedUnits: 0, paidUnits: units.length, policy: 'AUTO_NEWEST', ...over });
 }
 const three = [unit('g1', 1), unit('g2', 2), unit('g3', 3)];
 
@@ -196,5 +196,49 @@ describe('status do pedido depois do reembolso (hoje parcial vira REFUNDED)', ()
     expect(statusAfterRefund({ financialStatus: 'refunded', remainingUnits: 5 })).toBe('REFUNDED');
     expect(statusAfterRefund({ financialStatus: 'paid', remainingUnits: 3 })).toBeNull();
     expect(statusAfterRefund({ financialStatus: null, remainingUnits: 1 })).toBeNull();
+  });
+});
+
+describe('plano: política provisória ADMIN_CONFIRM, unidades não emitidas e reembolso antes da emissão', () => {
+  const unit = (groupId: string, ageMin: number): UnitState => ({ groupId, createdAt: new Date(Date.UTC(2026, 9, 1, 12, 60 - ageMin)), vouchers: [{ id: groupId + 'a', status: 'ACTIVE' }, { id: groupId + 'b', status: 'ACTIVE' }] });
+  const refundOf = (quantity: number) => ({
+    id: 'rf1', order_id: 'o1', refund_line_items: [{ line_item_id: 1, quantity, subtotal: 350 * quantity, total_tax: 0, restock_type: 'return', line_item: { variant_id: Number(VARIANT), price: '350.00', quantity: 3 } }],
+    refund_shipping_lines: [], transactions: [], order_adjustments: [],
+  });
+  const run = (quantity: number, units: UnitState[], over: Partial<RefundPlanInput> = {}) => plan(refundOf(quantity), units, { paidUnits: 3, policy: undefined, ...over });
+
+  test('padrão (ADMIN_CONFIRM): reembolso que atinge unidade EMITIDA não cancela sozinho; propõe as mais novas e pede confirmação', () => {
+    const result = run(1, [unit('g1', 3), unit('g2', 2), unit('g3', 1)]);
+    expect(result.cancelGroupIds).toEqual([]);
+    expect(result.reviewGroupIds).toEqual(['g3']);
+    expect(result.reviewReasons).toEqual(['UNIT_CONFIRMATION_REQUIRED']);
+    expect(result.unitsNeedingReview).toBe(1);
+  });
+
+  test('reembolso ANTES da emissão: absorve as unidades não emitidas, sem revisão e sem tocar voucher algum', () => {
+    const result = run(2, [], { unissuedUnits: 3 });
+    expect(result).toMatchObject({ classification: 'UNITS', refundedUnits: 2, cancelGroupIds: [], reviewGroupIds: [], reviewReasons: [], unissuedAbsorbed: 2 });
+  });
+
+  test('reembolso parcial antes da emissão (1 de 3 pagas, 2 já emitidas): absorve a não emitida e NÃO toca nas emitidas', () => {
+    const result = run(1, [unit('g1', 2), unit('g2', 1)], { unissuedUnits: 1 });
+    expect(result).toMatchObject({ cancelGroupIds: [], reviewGroupIds: [], reviewReasons: [], unissuedAbsorbed: 1 });
+  });
+
+  test('reembolso maior que as não emitidas: absorve o que há e o resto vai para confirmação sobre as emitidas', () => {
+    const result = run(2, [unit('g1', 2), unit('g2', 1)], { unissuedUnits: 1 });
+    expect(result).toMatchObject({ unissuedAbsorbed: 1, reviewGroupIds: ['g2'], reviewReasons: ['UNIT_CONFIRMATION_REQUIRED'] });
+  });
+
+  test('valor que não fecha com unidades não emitidas: nada automático; a proposta lembra quantas não emitidas seriam absorvidas', () => {
+    const payload = refundOf(2);
+    (payload.refund_line_items[0] as { subtotal: number }).subtotal = 100;
+    const result = plan(payload, [], { paidUnits: 3, unissuedUnits: 3, policy: undefined });
+    expect(result).toMatchObject({ unissuedAbsorbed: 0, unissuedProposed: 2, cancelGroupIds: [] });
+    expect(result.reviewReasons).toContain('AMOUNT_MISMATCH');
+  });
+
+  test('mais unidades reembolsadas do que existem (emitidas vivas + não emitidas) → revisão', () => {
+    expect(run(4, [unit('g1', 1)], { unissuedUnits: 1, paidUnits: 5 }).reviewReasons).toContain('QUANTITY_EXCEEDS_UNITS');
   });
 });

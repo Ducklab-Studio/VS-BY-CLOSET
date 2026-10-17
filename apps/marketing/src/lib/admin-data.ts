@@ -578,10 +578,16 @@ export interface ValePassCapacityRefundReview {
   readonly createdAt: string;
 }
 
+export interface ValePassRefundReviewResult {
+  readonly vouchersCancelled: number;
+  /** Unidades pagas e ainda não emitidas que a decisão passou a descontar da emissão. */
+  readonly unissuedUnitsApplied: number;
+}
+
 export type ValePassRefundReviewAction = 'KEEP_VOUCHERS' | 'CANCEL_ACTIVE_VOUCHERS';
 
 /** Decisão do ADMIN sobre um reembolso em revisão (voucher já usado nunca é alterado pela API). */
-export function resolveValePassRefundReview(id: string, input: { action: ValePassRefundReviewAction; note: string }, adminUserId: string): Promise<unknown> {
+export function resolveValePassRefundReview(id: string, input: { action: ValePassRefundReviewAction; note: string }, adminUserId: string): Promise<ValePassRefundReviewResult> {
   return adminPost(`/admin/vale-pass/refund-reviews/${pathSegment(id)}/resolve`, { ...input, adminUserId });
 }
 

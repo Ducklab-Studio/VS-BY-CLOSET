@@ -22,7 +22,9 @@ Consequência: um reembolso parcial ou de frete cancela vouchers de unidades **n
 ## 3. Política implementada
 
 - Cada unidade = 2 vouchers com o mesmo `group_id`, sempre cancelados juntos.
-- Reembolso de N unidades cancela as N unidades **mais novas** que estejam totalmente ACTIVE (desempate por `group_id`). *Regra a confirmar com o Anderson.*
+- **Reembolso antes da emissão (F1).** O reembolso de N unidades primeiro "absorve" unidades pagas **ainda não emitidas**: grava na trilha `detail.unissuedAbsorbed`, e a emissão (`issueForCampaign`, usada por webhook e reconciliação) passa a criar `unidades − existentes − absorvidas`. O pedido **não** é marcado como cancelado, nenhum fato de cancelamento é gravado e a capacidade/"pendência" já desconta as unidades devolvidas. Cobre webhook fora de ordem: se o reembolso chega antes de o pedido existir no registro e traz linha de Valle Pass, o fato é gravado assumindo unidades não emitidas. Se o reembolso é duvidoso (valor não fecha etc.) e há unidades por emitir, a emissão fica em **retenção administrativa** (`FINANCIAL_MISMATCH` com `REFUND_PENDING_REVIEW`) até a decisão; a emissão excepcional de um ADMIN continua possível. Sem linhas na trilha, tudo isso é inerte (desconto 0).
+- **Unidade emitida (F3).** A Shopify não diz qual unidade foi devolvida. Política **provisória e segura `ADMIN_CONFIRM`** (padrão): o sistema NÃO cancela voucher emitido sozinho; propõe as unidades intocadas mais novas (`reviewGroupIds`, motivo `UNIT_CONFIRMATION_REQUIRED`) e um ADMIN confirma. A política `AUTO_NEWEST` (cancelar sozinho as mais novas) existe no código, mas **não foi aprovada por Anderson e não deve ser ligada**. Se o cliente devolveu outra unidade, o ADMIN escolhe "Manter" e cancela os códigos corretos pelo cancelamento de voucher existente (a escolha de outra unidade na própria tela é uma evolução proposta).
+- **Bloqueio de resgate (F2).** Enquanto uma revisão `NEEDS_REVIEW` propõe uma unidade, os DOIS vouchers dela não podem ser resgatados: o `markUsed` (único caminho que grava USED) responde 409 sob o mesmo lock de pedido do reembolso, e um gatilho no banco (`vale_pass_block_use_under_refund_review`, só na transição para USED) bloqueia qualquer outro caminho, inclusive SQL direto. Outras unidades, outros pedidos e vouchers legados não são afetados. Limitação: revisão sem unidade proposta (dinheiro avulso) não bloqueia nada.
 - Frete, outro produto ou cancelamento sem dinheiro: nenhum voucher é tocado (`UNRELATED`).
 - Pedido sem vouchers (cancelado antes de pagar): registra `NO_UNITS`, sem revisão.
 - Pedido com voucher **legado** (sem `group_id`): `LEGACY_ORDER`; o chamador segue o caminho antigo.
@@ -39,7 +41,7 @@ Consequência: um reembolso parcial ou de frete cancela vouchers de unidades **n
 ## 5. Procedimento por exceção (operação)
 
 1. **Alerta `REFUND_REVIEW_OPEN`** na tela da campanha: abrir "Reembolsos aguardando decisão".
-2. Conferir no Shopify Admin o reembolso (valores, itens) e, no painel, se o voucher da unidade proposta já foi usado.
+2. Conferir no Shopify Admin o reembolso (o painel avisa quando a decisão cancelou 0 vouchers: isso NÃO significa reembolso resolvido) (valores, itens) e, no painel, se o voucher da unidade proposta já foi usado.
 3. Decidir (somente ADMIN, justificativa ≥ 10 caracteres, auditada como crítica):
    - **Manter vouchers**: nada muda.
    - **Cancelar ativos**: cancela só os vouchers ainda ativos das unidades propostas; voucher usado nunca é alterado. Indisponível quando não há unidade proposta (dinheiro sem unidade).
@@ -47,6 +49,8 @@ Consequência: um reembolso parcial ou de frete cancela vouchers de unidades **n
 5. Nunca editar vouchers por SQL. Sem `migrate resolve` automático.
 
 ## 6. Decisões comerciais pendentes (Anderson)
+
+0. Aprovar (ou não) a política `AUTO_NEWEST`; até lá vale `ADMIN_CONFIRM`.
 
 1. Qual unidade cancelar num reembolso parcial (adotado: mais nova e intocada).
 2. Política para voucher já usado em unidade reembolsada (adotado: segurar e decidir caso a caso).
@@ -65,4 +69,4 @@ Consequência: um reembolso parcial ou de frete cancela vouchers de unidades **n
 
 ## 8. Migration e rollback
 
-`20261021100000_vale_pass_refund_applications`: aditiva (enum, tabela, CHECKs, trigger), atômica, `lock_timeout` de 5 s com `RESET`. Verificada em PostgreSQL descartável: aplica, falha atômica sob lock (P3018, nada criado), reaplica após `migrate resolve --rolled-back`, sem drift. Rollback manual (somente se nada usa a tabela): `DROP TABLE vale_pass_refund_applications; DROP TYPE vale_pass_refund_status; DROP FUNCTION vale_pass_refund_guard();`. **O merge aplica a migration em produção via Railway: requer autorização expressa.**
+`20261021100000_vale_pass_refund_applications`: aditiva (enum, tabela, CHECKs, trigger da tabela e UM gatilho em `vale_passes` que só dispara na transição para USED), atômica, `lock_timeout` de 5 s com `RESET`. Verificada em PostgreSQL descartável: aplica, falha atômica sob lock (P3018, nada criado), reaplica após `migrate resolve --rolled-back`, sem drift. Rollback manual (somente se nada usa a tabela): `DROP TABLE vale_pass_refund_applications; DROP TYPE vale_pass_refund_status; DROP FUNCTION vale_pass_refund_guard(); DROP TRIGGER vale_pass_block_use_under_refund_review ON vale_passes; DROP FUNCTION vale_pass_block_use_under_refund_review();`. **O merge aplica a migration em produção via Railway: requer autorização expressa.**

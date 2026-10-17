@@ -4,7 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import type { OrderFinancialFacts } from '../financial/order-facts';
 import { ValePassFinancialGuard, summarizeIssues } from '../financial/financial-guard.service';
-import { PASS_UNIT_KEY } from '../vale-pass-capacity';
+import { PASS_UNIT_KEY, REFUND_ABSORBED_UNITS } from '../vale-pass-capacity';
+import { absorbedUnissuedUnits } from './refund.service';
 import { ValePassIssuanceService } from '../vale-pass-issuance.service';
 
 type Tx = Prisma.TransactionClient;
@@ -52,14 +53,14 @@ export class ValePassRegularizationService {
       { orderId: string; orderName: string | null; quantity: number; issued: number; legacy: boolean; hasOpenHold: boolean }[]
     >`
       SELECT o.shopify_order_id AS "orderId", o.shopify_order_name AS "orderName", o.quantity,
-             count(DISTINCT ${PASS_UNIT_KEY})::int AS issued,
+             (count(DISTINCT ${PASS_UNIT_KEY}) + ${REFUND_ABSORBED_UNITS})::int AS issued,
              coalesce(bool_or(v.id IS NOT NULL AND v.group_id IS NULL), false) AS legacy,
              EXISTS (SELECT 1 FROM vale_pass_issuance_holds h WHERE h.shopify_order_id = o.shopify_order_id AND h.status = 'OPEN') AS "hasOpenHold"
       FROM vale_pass_orders o
       LEFT JOIN vale_passes v ON v.shopify_order_id = o.shopify_order_id
       WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL
       GROUP BY o.id
-      HAVING count(DISTINCT ${PASS_UNIT_KEY}) < o.quantity
+      HAVING count(DISTINCT ${PASS_UNIT_KEY}) + ${REFUND_ABSORBED_UNITS} < o.quantity
       ORDER BY o.order_created_at NULLS LAST, o.id
       LIMIT ${Math.min(limit, 500)}`;
     return rows.map((row) => ({
@@ -84,7 +85,7 @@ export class ValePassRegularizationService {
     const existing = await tx.valePass.findMany({ where: { shopifyOrderId: input.orderId }, select: { groupId: true, campaignId: true } });
     if (existing.some((voucher) => voucher.groupId === null)) return { status: 'LEGACY_ORDER' };
     const unitsExisting = new Set(existing.map((voucher) => voucher.groupId)).size;
-    const missing = order.quantity - unitsExisting;
+    const missing = order.quantity - unitsExisting - (await absorbedUnissuedUnits(tx, input.orderId));
     if (missing <= 0) return { status: 'NOTHING_TO_DO' };
 
     const verdict = await this.guard.evaluate(tx, input.facts);

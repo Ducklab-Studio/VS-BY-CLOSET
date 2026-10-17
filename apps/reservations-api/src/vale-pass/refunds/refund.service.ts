@@ -6,7 +6,7 @@ import { writeAdminAuditEvent } from '../../admin/admin-audit';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { KNOWN_VALE_PASS_PRODUCT_ID, KNOWN_VALE_PASS_VARIANT_ID, numericShopifyId } from '../vale-pass-order-status';
 import type { RefundFacts, RefundLineFacts } from './refund-facts';
-import { planRefund, type RefundPlan, type UnitState, type VoucherStatus } from './refund-plan';
+import { planRefund, type IssuedUnitPolicy, type RefundPlan, type UnitState, type VoucherStatus } from './refund-plan';
 
 type Tx = Prisma.TransactionClient;
 export const MIN_REVIEW_NOTE = 10;
@@ -37,6 +37,12 @@ export interface RefundReviewItem {
   readonly resolution: string | null;
 }
 
+/** Unidades pagas e não emitidas que reembolsos anteriores do pedido já descontaram (a emissão posterior as desconta também). */
+export async function absorbedUnissuedUnits(tx: Pick<Tx, 'valePassRefundApplication'>, orderId: string): Promise<number> {
+  const rows = await tx.valePassRefundApplication.findMany({ where: { shopifyOrderId: orderId }, select: { detail: true } });
+  return rows.reduce((sum, row) => sum + Number((row.detail as { unissuedAbsorbed?: unknown } | null)?.unissuedAbsorbed ?? 0), 0);
+}
+
 const asStringArray = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
 
 /**
@@ -54,7 +60,7 @@ export class ValePassRefundService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Aplica um reembolso dentro de uma transação que o chamador abriu (o lock do pedido é tomado aqui também; é reentrante). */
-  async apply(tx: Tx, refund: RefundFacts): Promise<RefundOutcome> {
+  async apply(tx: Tx, refund: RefundFacts, options: { policy?: IssuedUnitPolicy } = {}): Promise<RefundOutcome> {
     if (!refund.orderId || !refund.refundId) {
       // Sem identidade não há idempotência possível: não age. O chamador registra o evento recebido e segue o caminho de sempre.
       return { status: 'NOT_VALE_PASS' };
@@ -64,35 +70,30 @@ export class ValePassRefundService {
     const duplicate = await tx.valePassRefundApplication.findUnique({ where: { shopifyRefundId: refund.refundId } });
     if (duplicate) return { status: 'DUPLICATE', application: duplicate };
 
-    const order = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: refund.orderId } });
-    if (!order) return { status: 'NOT_VALE_PASS' };
-    const vouchers = await tx.valePass.findMany({ where: { shopifyOrderId: refund.orderId }, orderBy: { createdAt: 'asc' } });
-    if (vouchers.some((voucher) => voucher.groupId === null)) return { status: 'LEGACY_ORDER' };
-
     const campaigns = await tx.valePassCampaign.findMany({ select: { id: true, shopifyVariantId: true, amountCents: true } });
     const unitPriceByVariant = new Map<string, number>();
+    const campaignByVariant = new Map<string, string>();
     for (const campaign of campaigns) {
       const variant = numericShopifyId(campaign.shopifyVariantId);
-      if (variant) unitPriceByVariant.set(variant, campaign.amountCents);
+      if (variant) {
+        unitPriceByVariant.set(variant, campaign.amountCents);
+        campaignByVariant.set(variant, campaign.id);
+      }
     }
     const isValePassLine = (line: RefundLineFacts): boolean => {
       const variant = numericShopifyId(line.variantId);
       const product = numericShopifyId(line.productId);
       return (variant !== null && (unitPriceByVariant.has(variant) || variant === KNOWN_VALE_PASS_VARIANT_ID)) || product === KNOWN_VALE_PASS_PRODUCT_ID;
     };
+    const valeLines = refund.lines.filter(isValePassLine);
+    const valeQuantity = valeLines.reduce((sum, line) => sum + (line.quantity ?? 0), 0);
 
-    // Pedido sem NENHUM voucher (ex.: cancelado antes do pagamento, nunca emitido): não há o que cancelar nem o que revisar. Registra e segue.
-    if (vouchers.length === 0) {
-      const valeUnits = refund.lines.filter(isValePassLine).reduce((sum, line) => sum + (line.quantity ?? 0), 0);
-      const application = await tx.valePassRefundApplication.create({
-        data: {
-          shopifyRefundId: refund.refundId, shopifyOrderId: refund.orderId, campaignId: null, classification: 'NO_UNITS', refundedUnits: valeUnits, status: 'APPLIED',
-          shippingRefundCents: refund.shippingRefundCents, transactionsCents: refund.transactionsCents,
-          detail: { paidUnits: order.quantity, reviewGroupIds: [], unitsNeedingReview: 0, orderFullyRefunded: false, note: 'pedido sem vouchers emitidos' } as unknown as Prisma.InputJsonValue,
-        },
-      });
-      return { status: 'APPLIED', application, cancelledVouchers: 0 };
-    }
+    // Webhook FORA DE ORDEM: o reembolso pode chegar antes de o pedido existir no registro. Se ele traz linha de Valle Pass, o fato é gravado na mesma
+    // trilha (assumindo que as unidades reembolsadas ainda não foram emitidas) e a emissão posterior as desconta; sem linha de Valle Pass, não é conosco.
+    const order = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: refund.orderId } });
+    if (!order && valeQuantity === 0) return { status: 'NOT_VALE_PASS' };
+    const vouchers = await tx.valePass.findMany({ where: { shopifyOrderId: refund.orderId }, orderBy: { createdAt: 'asc' } });
+    if (vouchers.some((voucher) => voucher.groupId === null)) return { status: 'LEGACY_ORDER' };
 
     const byGroup = new Map<string, { createdAt: Date; vouchers: { id: string; status: VoucherStatus }[] }>();
     for (const voucher of vouchers) {
@@ -103,6 +104,9 @@ export class ValePassRefundService {
     }
     const units: UnitState[] = [...byGroup.entries()].map(([groupId, entry]) => ({ groupId, createdAt: entry.createdAt, vouchers: entry.vouchers }));
     const previous = await tx.valePassRefundApplication.aggregate({ where: { shopifyOrderId: refund.orderId }, _sum: { refundedUnits: true } });
+    const absorbedBefore = await absorbedUnissuedUnits(tx, refund.orderId);
+    const paidUnits = order?.quantity ?? Number.MAX_SAFE_INTEGER;
+    const unissuedUnits = order ? Math.max(0, order.quantity - byGroup.size - absorbedBefore) : valeQuantity;
 
     const plan = planRefund({
       refund,
@@ -110,7 +114,9 @@ export class ValePassRefundService {
       unitPriceByVariant,
       units,
       alreadyRefundedUnits: previous._sum.refundedUnits ?? 0,
-      paidUnits: order.quantity,
+      paidUnits,
+      unissuedUnits,
+      policy: options.policy,
     });
 
     // Cancela as unidades escolhidas (os DOIS vouchers de cada uma, juntos). Voucher que deixou de estar ACTIVE entre a leitura e a escrita é impossível
@@ -130,7 +136,8 @@ export class ValePassRefundService {
     }
 
     const status: ValePassRefundStatus = plan.reviewReasons.length > 0 ? 'NEEDS_REVIEW' : 'APPLIED';
-    const campaignId = vouchers[0]?.campaignId ?? null;
+    const firstLine = valeLines[0];
+    const campaignId = vouchers[0]?.campaignId ?? (firstLine?.variantId ? campaignByVariant.get(numericShopifyId(firstLine.variantId) ?? '') ?? null : null);
     const application = await tx.valePassRefundApplication.create({
       data: {
         shopifyRefundId: refund.refundId,
@@ -143,17 +150,20 @@ export class ValePassRefundService {
         reviewReasons: plan.reviewReasons as unknown as Prisma.InputJsonValue,
         shippingRefundCents: refund.shippingRefundCents,
         transactionsCents: refund.transactionsCents,
-        detail: this.detailOf(plan, refund, order.quantity) as unknown as Prisma.InputJsonValue,
+        detail: this.detailOf(plan, refund, order?.quantity ?? null) as unknown as Prisma.InputJsonValue,
       },
     });
     return { status, application, cancelledVouchers };
   }
 
-  private detailOf(plan: RefundPlan, refund: RefundFacts, paidUnits: number): Record<string, unknown> {
+  private detailOf(plan: RefundPlan, refund: RefundFacts, paidUnits: number | null): Record<string, unknown> {
     return {
       paidUnits,
       reviewGroupIds: plan.reviewGroupIds,
       unitsNeedingReview: plan.unitsNeedingReview,
+      unissuedAbsorbed: plan.unissuedAbsorbed,
+      unissuedProposed: plan.unissuedProposed,
+      orderKnown: paidUnits !== null,
       orderFullyRefunded: plan.orderFullyRefunded,
       lines: refund.lines.map((line) => ({ quantity: line.quantity, subtotalCents: line.subtotalCents, unitPriceCents: line.unitPriceCents, restockType: line.restockType })),
       transactionCount: refund.transactionCount,
@@ -197,10 +207,11 @@ export class ValePassRefundService {
     id: string,
     input: { action: 'KEEP_VOUCHERS' | 'CANCEL_ACTIVE_VOUCHERS'; note: string },
     actor: { id: string; name: string },
-  ): Promise<RefundReviewItem> {
+  ): Promise<RefundReviewItem & { vouchersCancelled: number; unissuedUnitsApplied: number }> {
     const note = (input.note ?? '').trim();
     if (note.length < MIN_REVIEW_NOTE) throw new UnprocessableEntityException(`Informe a justificativa (mínimo de ${MIN_REVIEW_NOTE} caracteres).`);
     if (input.action !== 'KEEP_VOUCHERS' && input.action !== 'CANCEL_ACTIVE_VOUCHERS') throw new UnprocessableEntityException('Ação inválida.');
+    let outcome = { vouchersCancelled: 0, unissuedUnitsApplied: 0 };
     try {
       await this.prisma.$transaction(async (tx) => {
         const located = await tx.valePassRefundApplication.findUnique({ where: { id } });
@@ -212,9 +223,10 @@ export class ValePassRefundService {
         if (row.status !== 'NEEDS_REVIEW') throw new ConflictException('Esta revisão já foi resolvida.');
 
         let cancelled = 0;
+        const proposedUnissued = Number((row.detail as { unissuedProposed?: unknown } | null)?.unissuedProposed ?? 0);
         const groups = asStringArray((row.detail as { reviewGroupIds?: unknown } | null)?.reviewGroupIds);
         if (input.action === 'CANCEL_ACTIVE_VOUCHERS') {
-          if (groups.length === 0) throw new ConflictException('Não há unidades propostas para cancelar nesta revisão. Use "manter".');
+          if (groups.length === 0 && proposedUnissued === 0) throw new ConflictException('Não há unidades propostas para cancelar nesta revisão. Use "manter".');
           for (const groupId of groups) {
             const active = await tx.valePass.findMany({ where: { groupId, shopifyOrderId: row.shopifyOrderId, status: 'ACTIVE' }, select: { id: true } });
             if (active.length === 0) continue;
@@ -228,9 +240,13 @@ export class ValePassRefundService {
             cancelled += active.length;
           }
         }
+        // Confirmar o reembolso sobre unidades pagas e ainda NÃO emitidas: a emissão posterior passa a descontá-las.
+        const appliedUnissued = input.action === 'CANCEL_ACTIVE_VOUCHERS' ? proposedUnissued : 0;
+        const detail = { ...((row.detail as Record<string, unknown> | null) ?? {}), unissuedAbsorbed: Number((row.detail as { unissuedAbsorbed?: unknown } | null)?.unissuedAbsorbed ?? 0) + appliedUnissued, unissuedProposed: 0 };
+        outcome = { vouchersCancelled: cancelled, unissuedUnitsApplied: appliedUnissued };
         await tx.valePassRefundApplication.update({
           where: { id },
-          data: { status: 'RESOLVED', resolution: input.action, resolvedAt: new Date(), resolvedBy: actor.id, resolutionNote: note },
+          data: { detail: detail as unknown as Prisma.InputJsonValue, status: 'RESOLVED', resolution: input.action, resolvedAt: new Date(), resolvedBy: actor.id, resolutionNote: note },
         });
         await writeAdminAuditEvent(tx, {
           adminUserId: actor.id,
@@ -239,7 +255,7 @@ export class ValePassRefundService {
           entityType: 'ValePassRefundApplication',
           entityId: row.id,
           before: { status: 'NEEDS_REVIEW', reasons: asStringArray(row.reviewReasons), refundedUnits: row.refundedUnits },
-          after: { status: 'RESOLVED', resolution: input.action, vouchersCancelled: cancelled },
+          after: { status: 'RESOLVED', resolution: input.action, vouchersCancelled: cancelled, unissuedUnitsApplied: appliedUnissued },
           detail: { orderId: row.shopifyOrderId, refundId: row.shopifyRefundId, note },
         });
       }, TX);
@@ -250,6 +266,6 @@ export class ValePassRefundService {
     }
     const [item] = (await this.listReviews({ status: 'RESOLVED', limit: 200 })).filter((entry) => entry.id === id);
     if (!item) throw new NotFoundException('Revisão de reembolso não encontrada.');
-    return item;
+    return { ...item, ...outcome };
   }
 }

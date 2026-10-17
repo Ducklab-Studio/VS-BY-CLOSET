@@ -362,15 +362,25 @@ export async function actOnValePassLotAction(
 }
 
 /** Decisão sobre um reembolso em revisão: manter tudo ou cancelar os vouchers ainda ativos das unidades propostas. Só ADMIN, justificativa ≥ 10. */
-export async function resolveValePassRefundReviewAction(id: string, action: ValePassRefundReviewAction, note: string): Promise<{ error: string | null }> {
+export async function resolveValePassRefundReviewAction(id: string, action: ValePassRefundReviewAction, note: string): Promise<{ error: string | null; notice?: string }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   requireAdminRole(session, 'ADMIN');
   if (action !== 'KEEP_VOUCHERS' && action !== 'CANCEL_ACTIVE_VOUCHERS') return { error: 'Ação inválida.' };
   if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
   try {
-    await resolveValePassRefundReview(id, { action, note: note.trim() }, session.id);
+    const result = await resolveValePassRefundReview(id, { action, note: note.trim() }, session.id);
     revalidateValePassPath();
+    // Decisão de cancelar que não cancelou nenhum voucher: a decisão ficou registrada, mas a ocorrência pode exigir providência operacional.
+    if (action === 'CANCEL_ACTIVE_VOUCHERS' && result.vouchersCancelled === 0) {
+      return {
+        error: null,
+        notice:
+          result.unissuedUnitsApplied > 0
+            ? `Decisão registrada: nenhum voucher foi cancelado (não havia voucher ativo), mas ${result.unissuedUnitsApplied} unidade(s) ainda não emitida(s) foi(ram) descontada(s) da emissão. Confira o pedido na Shopify.`
+            : 'Decisão registrada, mas NENHUM voucher foi cancelado (não havia voucher ativo nas unidades propostas). Isso não significa que o reembolso esteja resolvido: confira o pedido e os códigos manualmente, se necessário.',
+      };
+    }
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a decisão.' };

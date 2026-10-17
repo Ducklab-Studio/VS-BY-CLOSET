@@ -112,6 +112,18 @@ export class ValePassVouchersService {
         throw new ConflictException('O pedido Shopify deste Valle Pass foi cancelado ou reembolsado — o vale não pode ser utilizado.');
       }
 
+      // Unidade em revisão de reembolso (NEEDS_REVIEW): o resgate fica bloqueado até um ADMIN decidir. Lido sob o MESMO lock do pedido que o reembolso toma,
+      // então uso e reembolso nunca se cruzam. Sem linhas na trilha de reembolsos, nunca bloqueia.
+      if (target.shopifyOrderId && target.groupId) {
+        const blocking = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM vale_pass_refund_applications
+          WHERE shopify_order_id = ${target.shopifyOrderId} AND status = 'NEEDS_REVIEW' AND detail->'reviewGroupIds' @> to_jsonb(${target.groupId}::text)
+          LIMIT 1`;
+        if (blocking.length > 0) {
+          throw new ConflictException('Este Valle Pass pertence a uma unidade com reembolso aguardando decisão de um administrador — o resgate está bloqueado até a decisão.');
+        }
+      }
+
       // Status no WHERE + contagem: dois resgates simultâneos do mesmo
       // código nunca gravam USED os dois.
       const changed = await tx.valePass.updateMany({

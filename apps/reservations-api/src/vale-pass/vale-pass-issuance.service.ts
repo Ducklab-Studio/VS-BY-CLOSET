@@ -104,7 +104,9 @@ export class ValePassIssuanceService {
     }
     const unitsExisting = legacyUnits.length + groups.size;
     const consumingExisting = legacyUnits.filter((voucher) => voucher.status !== 'CANCELLED').length + [...groups.values()].filter((group) => group.consumes).length;
-    const toCreate = Math.max(0, units - unitsExisting);
+    // Reembolso já registrado (PR G) de unidades pagas e ainda NÃO emitidas: não se emite voucher para elas. Sem linhas na trilha o desconto é 0.
+    const refundedUnissued = await this.refundedUnissuedUnits(tx, order.orderId);
+    const toCreate = Math.max(0, units - unitsExisting - refundedUnissued);
     const incomplete = [...groups.entries()].filter(([, group]) => benefits.some((benefit) => !group.benefitIds.has(benefit.id)));
 
     const openHold = await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: order.orderId, campaignId, status: 'OPEN' } });
@@ -126,6 +128,14 @@ export class ValePassIssuanceService {
     }
 
     const priorCancellation = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: order.orderId } });
+
+    // Reembolso deste pedido aguardando decisão de um ADMIN: não dá para saber quais unidades foram devolvidas, então NÃO se emite o que falta
+    // (retenção administrativa, sem presumir cancelamento integral). A emissão excepcional por um ADMIN (modo override) segue possível.
+    if (toCreate > 0 && input.mode === 'enforce' && (await tx.valePassRefundApplication.count({ where: { shopifyOrderId: order.orderId, status: 'NEEDS_REVIEW' } })) > 0) {
+      const hold = await this.upsertHold(tx, order.orderId, campaign, toCreate, 'FINANCIAL_MISMATCH', { issues: [{ code: 'REFUND_PENDING_REVIEW' }] as unknown as Prisma.InputJsonValue });
+      events.push({ type: 'VALE_PASS_ISSUANCE_HELD', detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'FINANCIAL_MISMATCH', note: 'reembolso aguardando decisão administrativa' } });
+      return { mode: 'benefits', issuedUnits: 0, completedUnits: 0, heldUnits: toCreate, holdId: hold.id, vouchersCreated: 0, events };
+    }
 
     // Capacidade: só unidades NOVAS consomem; completar uma unidade que já existe não consome nada. Pedido já cancelado/reembolsado emite e
     // cancela na hora (mesmo comportamento do legado): não consome capacidade, então não passa pela checagem nem abre retenção.
@@ -175,6 +185,12 @@ export class ValePassIssuanceService {
    * ou descartar depois de reembolsar na Shopify). A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
    * pedido já tem vouchers da campanha, não abre retenção (já foi tratado). ISOLADO: nenhum fluxo ativo chama este método.
    */
+  /** Soma, na trilha de reembolsos, das unidades pagas e não emitidas já descontadas. Pedido sem reembolso registrado: 0. */
+  private async refundedUnissuedUnits(tx: Tx, orderId: string): Promise<number> {
+    const rows = await tx.valePassRefundApplication.findMany({ where: { shopifyOrderId: orderId }, select: { detail: true } });
+    return rows.reduce((sum, row) => sum + Math.max(0, Number((row.detail as { unissuedAbsorbed?: unknown } | null)?.unissuedAbsorbed ?? 0) || 0), 0);
+  }
+
   async holdForFinancialReview(
     tx: Tx,
     input: { campaignId: string; order: IssuanceOrder; units: number; issues: readonly { code: string; detail?: Record<string, unknown> }[]; allowWithExistingVouchers?: boolean },
