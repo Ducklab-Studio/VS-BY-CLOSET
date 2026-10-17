@@ -4,18 +4,27 @@ import { revalidatePath } from 'next/cache';
 import { getAdminSession, hasAdminModule, requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import {
   activateValePassCampaign,
+  actOnValePassLot,
   cancelValePassVoucher,
   createValePassCampaign,
+  createValePassLot,
   deactivateValePassCampaign,
   getValePassAttention,
+  getValePassCapacity,
   listValePassCampaigns,
   listValePassOrders,
   listValePassVouchers,
   markValePassOrdersViewed,
   markValePassVoucherUsed,
   restoreValePassVoucher,
+  updateValePassCampaign,
+  updateValePassLot,
   type CreateValePassCampaignInput,
+  type UpdateValePassCampaignInput,
   type ValePassCampaign,
+  type ValePassCapacity,
+  type ValePassLot,
+  type ValePassLotAction,
   type ValePassOrder,
   type ValePassVoucher,
   type ValePassVoucherFilters,
@@ -57,18 +66,18 @@ export async function createValePassCampaignAction(input: CreateValePassCampaign
   }
 }
 
-export async function toggleValePassCampaignAction(id: string, active: boolean): Promise<{ error: string | null }> {
+/** Devolve a campanha ATUALIZADA (com o novo `updatedAt`): a tela precisa dessa versão para a próxima edição não receber 409 indevido. */
+export async function toggleValePassCampaignAction(id: string, active: boolean): Promise<{ campaign: ValePassCampaign | null; error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   requireAdminRole(session, 'ADMIN');
   try {
-    if (active) await activateValePassCampaign(id, session.id);
-    else await deactivateValePassCampaign(id, session.id);
+    const campaign = active ? await activateValePassCampaign(id, session.id) : await deactivateValePassCampaign(id, session.id);
+    revalidateValePassPath();
+    return { campaign, error: null };
   } catch (err) {
-    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a campanha.' };
+    return { campaign: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível atualizar a campanha.' };
   }
-  revalidateValePassPath();
-  return { error: null };
 }
 
 export async function listValePassVouchersAction(filters: ValePassVoucherFilters): Promise<{ vouchers: ValePassVoucher[] | null; error: string | null }> {
@@ -163,3 +172,80 @@ export async function restoreValePassVoucherAction(code: string, reason: string)
   }
 }
 
+
+// ── Capacidade, lotes e edição de campanha ───────────────────────────────────
+// Leitura: módulo VALLE_PASS. Qualquer escrita: ADMIN por cima do módulo (o backend confere de novo). Nada aqui
+// altera a Shopify nem a emissão de vales; a API devolve mensagens explicativas que são repassadas como estão.
+
+export async function getValePassCapacityAction(campaignId: string): Promise<{ capacity: ValePassCapacity | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    return { capacity: await getValePassCapacity(campaignId, session.id), error: null };
+  } catch (err) {
+    return { capacity: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar a capacidade da campanha.' };
+  }
+}
+
+export async function updateValePassCampaignAction(id: string, input: UpdateValePassCampaignInput): Promise<{ campaign: ValePassCampaign | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const campaign = await updateValePassCampaign(id, input, session.id);
+    revalidateValePassPath();
+    return { campaign, error: null };
+  } catch (err) {
+    return { campaign: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível salvar a campanha.' };
+  }
+}
+
+export async function createValePassLotAction(campaignId: string, input: { name: string; quantity: number }): Promise<{ lot: ValePassLot | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const lot = await createValePassLot(campaignId, input, session.id);
+    revalidateValePassPath();
+    return { lot, error: null };
+  } catch (err) {
+    return { lot: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível criar o lote.' };
+  }
+}
+
+export async function updateValePassLotAction(
+  campaignId: string,
+  lotId: string,
+  input: { expectedUpdatedAt: string; name?: string; quantity?: number },
+): Promise<{ lot: ValePassLot | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const lot = await updateValePassLot(campaignId, lotId, input, session.id);
+    revalidateValePassPath();
+    return { lot, error: null };
+  } catch (err) {
+    return { lot: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o lote.' };
+  }
+}
+
+/** Abrir, encerrar ou cancelar um lote (a API valida o estado e a versão que a pessoa viu). */
+export async function actOnValePassLotAction(
+  campaignId: string,
+  lotId: string,
+  action: ValePassLotAction,
+  expectedUpdatedAt: string,
+): Promise<{ lot: ValePassLot | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (action !== 'open' && action !== 'close' && action !== 'cancel') return { lot: null, error: 'Ação inválida.' };
+  try {
+    const lot = await actOnValePassLot(campaignId, lotId, action, expectedUpdatedAt, session.id);
+    revalidateValePassPath();
+    return { lot, error: null };
+  } catch (err) {
+    return { lot: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível concluir a ação no lote.' };
+  }
+}
