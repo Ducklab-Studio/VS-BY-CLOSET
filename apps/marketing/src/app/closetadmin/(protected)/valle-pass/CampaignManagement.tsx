@@ -198,13 +198,13 @@ function ShortfallList({ capacity }: { capacity: ValePassCapacity }) {
         {capacity.paidOrdersWithoutVoucher.map((order) => (
           <li key={order.orderId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-xs text-ink dark:text-dark-text">
             <span>
-              Pedido {order.orderName ?? order.orderId}: comprou {order.quantity}, emitidos {order.issued}
+              Pedido {order.orderName ?? order.orderId}: pagas {order.quantity} · emitidas {order.issued} · devolvidas antes de emitir {order.absorbed ?? 0}
             </span>
-            <strong className="text-red-500">faltam {order.missing}</strong>
+            <strong className="text-red-500">ainda elegíveis {order.missing}</strong>
           </li>
         ))}
       </ul>
-      <p className={hintClass}>A emissão dos passes que faltam é uma ação administrativa da próxima etapa; por ora, identifique o pedido pelo número na Shopify.</p>
+      <p className={hintClass}>&quot;Ainda elegíveis&quot; =pagas − emitidas − devolvidas por reembolso antes da emissão. Unidade devolvida nunca recebe voucher. A emissão das elegíveis é uma ação de ADMIN (justificativa, confirmação e auditoria) e não é automática enquanto a regra comercial não estiver definida; identifique o pedido pelo número na Shopify.</p>
     </section>
   );
 }

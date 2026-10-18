@@ -139,8 +139,10 @@ export interface PaidOrderRow {
   readonly orderName: string | null;
   /** Unidades de Valle Pass compradas. */
   readonly quantity: number;
-  /** Unidades já emitidas (inclui as canceladas). */
+  /** Unidades já emitidas (inclui as canceladas) MAIS as devolvidas por reembolso antes da emissão. */
   readonly issuedUnits: number;
+  /** Parte de `issuedUnits` que são unidades reembolsadas ANTES de emitir (nenhum voucher existe para elas). */
+  readonly absorbedUnits?: number;
   /** Campanhas que já têm vales deste pedido. */
   readonly campaignIds: readonly string[];
   /** O pedido já passou pela emissão (`vouchers_processed_at`). */
@@ -193,8 +195,11 @@ export interface PaidOrderShortfall {
   readonly orderId: string;
   readonly orderName: string | null;
   readonly quantity: number;
-  /** Unidades emitidas para o pedido (inclui canceladas). */
+  /** Unidades emitidas para o pedido (inclui canceladas), sem contar as devolvidas antes da emissão. */
   readonly issued: number;
+  /** Unidades pagas devolvidas por reembolso ANTES de emitir: não recebem voucher. */
+  readonly absorbed: number;
+  /** Unidades ainda elegíveis a emissão (pagas − emitidas − devolvidas). A emissão exige decisão de um ADMIN enquanto a regra comercial não existe. */
   readonly missing: number;
 }
 
@@ -203,7 +208,14 @@ export function shortfallsFrom(orders: readonly PaidOrderRow[], limit = 50): Pai
   return orders
     .filter((order) => order.processed && order.quantity > order.issuedUnits)
     .slice(0, limit)
-    .map((order) => ({ orderId: order.orderId, orderName: order.orderName, quantity: order.quantity, issued: order.issuedUnits, missing: order.quantity - order.issuedUnits }));
+    .map((order) => ({
+      orderId: order.orderId,
+      orderName: order.orderName,
+      quantity: order.quantity,
+      issued: order.issuedUnits - (order.absorbedUnits ?? 0),
+      absorbed: order.absorbedUnits ?? 0,
+      missing: order.quantity - order.issuedUnits,
+    }));
 }
 
 /** Pedidos pagos ainda NÃO processados há mais de `minutes` (webhook/reconciliação atrasados). */
@@ -223,10 +235,11 @@ const MAX_PENDING_ROWS = 5_000;
 /** Pedidos pagos com menos unidades emitidas do que o comprado (qualquer campanha). `excludeOrderId` tira UM pedido da conta. */
 export async function loadPaidOrderRows(client: Reader, excludeOrderId: string | null = null): Promise<PaidOrderRow[]> {
   const rows = await client.$queryRaw<
-    { orderId: string; orderName: string | null; quantity: number; issuedUnits: number; campaignIds: string[]; processed: boolean; statusChangedAt: Date }[]
+    { orderId: string; orderName: string | null; quantity: number; issuedUnits: number; absorbedUnits: number; campaignIds: string[]; processed: boolean; statusChangedAt: Date }[]
   >`
     SELECT o.shopify_order_id AS "orderId", o.shopify_order_name AS "orderName", o.quantity,
            (count(DISTINCT ${PASS_UNIT_KEY}) + ${REFUND_ABSORBED_UNITS})::int AS "issuedUnits",
+           ${REFUND_ABSORBED_UNITS} AS "absorbedUnits",
            coalesce(array_agg(DISTINCT v.campaign_id::text) FILTER (WHERE v.id IS NOT NULL), ARRAY[]::text[]) AS "campaignIds",
            (o.vouchers_processed_at IS NOT NULL) AS processed, o.status_changed_at AS "statusChangedAt"
     FROM vale_pass_orders o

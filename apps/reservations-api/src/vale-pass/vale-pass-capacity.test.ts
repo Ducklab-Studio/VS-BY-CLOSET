@@ -104,7 +104,7 @@ describe('alertas a partir dos pedidos pagos', () => {
       order({ orderId: 'old', quantity: 1, issuedUnits: 0, processed: false, statusChangedAt: new Date('2026-11-01T11:00:00Z') }),
       order({ orderId: 'fresh', quantity: 1, issuedUnits: 0, processed: false, statusChangedAt: new Date('2026-11-01T11:55:00Z') }),
     ];
-    expect(shortfallsFrom(orders)).toEqual([{ orderId: 'short', orderName: null, quantity: 3, issued: 1, missing: 2 }]);
+    expect(shortfallsFrom(orders)).toEqual([{ orderId: 'short', orderName: null, quantity: 3, issued: 1, absorbed: 0, missing: 2 }]);
     expect(awaitingProcessingCount(orders, now)).toBe(1);
   });
 });
@@ -121,5 +121,11 @@ describe('datas', () => {
   test('formatIsoDate ida e volta', () => {
     expect(formatIsoDate(parseIsoDate('2027-01-01'))).toBe('2027-01-01');
     expect(formatIsoDate(null)).toBeNull();
+  });
+
+  test('pendência após reembolso antes da emissão: pagas − emitidas − devolvidas = elegíveis (unidade devolvida não conta como emitida nem como elegível)', () => {
+    const rows = [order({ orderId: 'r', quantity: 3, issuedUnits: 2, absorbedUnits: 1, processed: true })];
+    expect(shortfallsFrom(rows)).toEqual([{ orderId: 'r', orderName: null, quantity: 3, issued: 1, absorbed: 1, missing: 1 }]);
+    expect(shortfallsFrom([order({ orderId: 'z', quantity: 3, issuedUnits: 3, absorbedUnits: 2, processed: true })])).toEqual([]);
   });
 });

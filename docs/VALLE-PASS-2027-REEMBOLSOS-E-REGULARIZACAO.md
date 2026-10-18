@@ -70,3 +70,22 @@ Consequência: um reembolso parcial ou de frete cancela vouchers de unidades **n
 ## 8. Migration e rollback
 
 `20261021100000_vale_pass_refund_applications`: aditiva (enum, tabela, CHECKs, trigger da tabela e UM gatilho em `vale_passes` que só dispara na transição para USED), atômica, `lock_timeout` de 5 s com `RESET`. Verificada em PostgreSQL descartável: aplica, falha atômica sob lock (P3018, nada criado), reaplica após `migrate resolve --rolled-back`, sem drift. Rollback manual (somente se nada usa a tabela): `DROP TABLE vale_pass_refund_applications; DROP TYPE vale_pass_refund_status; DROP FUNCTION vale_pass_refund_guard(); DROP TRIGGER vale_pass_block_use_under_refund_review ON vale_passes; DROP FUNCTION vale_pass_block_use_under_refund_review();`. **O merge aplica a migration em produção via Railway: requer autorização expressa.**
+
+## 9. Correções finais pré-integração (PR de 17–18/10/2026)
+
+Continua tudo ISOLADO: nenhum webhook financeiro ativo chama `ValePassRefundService`/`ValePassRegularizationService` (teste de isolamento no PR). As correções valem quando a integração (PR F) for autorizada.
+
+1. **Revisão sem unidade identificada bloqueia o pedido.** Reembolso de dinheiro sem item (`AMOUNT_ONLY_REFUND`) ou qualquer revisão `NEEDS_REVIEW` com `reviewGroupIds` vazio bloqueia o resgate de TODOS os vouchers com unidade daquele pedido. Backend (`markUsed`, 409, sob o lock do pedido) e banco (função do gatilho substituída pela migration aditiva `20261022100000_vale_pass_block_use_order_wide_review`, sem bloqueio de tabela). Não altera status nem saldo de nenhum voucher; vouchers de outros pedidos e legados (sem unidade) não são afetados. Ao resolver a revisão ("manter"), voltam a ser utilizáveis só os que continuam ACTIVE (cancelado e expirado seguem recusados). Voucher já usado antes da revisão continua usado.
+2. **Pedido já cancelado pelo fluxo legado.** Se existe o fato de cancelamento do pedido (`vale_pass_order_cancellations`, de `orders/cancelled` ou de um `refunds/create` antigo), o reembolso é gravado como `ALREADY_CANCELLED` (auditável, `refundedUnits = 0`, `detail.reportedRefundedUnits`), sem revisão, sem contagem e sem alterar capacidade ou vouchers. Reembolso parcial SEM esse fato nunca é tratado como cancelamento integral. Idempotente por `shopify_refund_id`.
+3. **Regularização após reembolso parcial.** Unidade devolvida antes de emitir nunca recebe voucher (a emissão desconta), unidades pagas restantes aparecem no ClosetAdmin como "pagas · emitidas · devolvidas antes de emitir · ainda elegíveis" (sem dados pessoais). O validador financeiro continua recusando pedidos com reembolso, então a emissão das elegíveis segue por retenção + emissão excepcional de ADMIN (justificativa, confirmação reforçada e auditoria).
+
+### Riscos residuais
+- `AUTO_NEWEST` (não aprovada) cancelaria com `cancelledBy = null`; o resgate trata voucher cancelado sem autor como "pedido cancelado/reembolsado" e bloquearia o pedido inteiro. **Nunca ligar `AUTO_NEWEST` sem revisar isso.** Na política atual (`ADMIN_CONFIRM`) o cancelamento carrega o autor (ADMIN).
+- SQL manual sem lock de pedido concorrente com a criação da revisão: janela teórica, sem caminho suportado (sondagem de 40 rodadas: nenhuma ocorrência).
+- Revisão sem unidade bloqueia o pedido todo até a decisão: é conservador de propósito.
+
+### Plano seguro para o futuro PR F (não executar sem autorização)
+1. Auditar `WebhooksService.handleRefundCreated` e a reconciliação; decidir a ordem: legado primeiro quando `LEGACY_ORDER`/`NOT_VALE_PASS`, senão `ValePassRefundService.apply` na mesma transação e sob o mesmo lock.
+2. Ligar atrás de uma flag desligada por padrão, ativar primeiro em um pedido de teste de staging.
+3. Atualizar o registro do pedido com `statusAfterRefund` e `current_quantity`.
+4. Decisões comerciais de Anderson aprovadas e registradas (seção 6) e nova auditoria somente leitura antes de qualquer ativação; plano de rollback (flag) documentado.

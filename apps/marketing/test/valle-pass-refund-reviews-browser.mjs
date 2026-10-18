@@ -72,17 +72,17 @@ async function newPage(token, options = {}) {
 }
 
 /** Pedido com 1 unidade (2 vouchers) e uma revisão NEEDS_REVIEW propondo essa unidade. `statuses` = situação dos dois vouchers. */
-async function seedReview(label, statuses, reasons = ['UNIT_CONFIRMATION_REQUIRED']) {
+async function seedReview(label, statuses, reasons = ['UNIT_CONFIRMATION_REQUIRED'], proposeUnit = true, quantity = 1) {
   const orderId = `${prefix}-${label}`;
   orderIds.push(orderId);
-  await db.valePassOrder.create({ data: { shopifyOrderId: orderId, shopifyOrderGid: `gid://shopify/Order/${orderId}`, shopifyOrderName: `#${label}`, status: 'CONFIRMED', financialStatus: 'paid', quantity: 1, customerName: 'Cliente', customerEmail: 'c@exemplo.invalid', customerPhone: '+5500000000000', lastSyncSource: 'teste', orderCreatedAt: new Date(), statusChangedAt: new Date(), vouchersProcessedAt: new Date() } });
+  await db.valePassOrder.create({ data: { shopifyOrderId: orderId, shopifyOrderGid: `gid://shopify/Order/${orderId}`, shopifyOrderName: `#${label}`, status: 'CONFIRMED', financialStatus: 'paid', quantity, customerName: 'Cliente', customerEmail: 'c@exemplo.invalid', customerPhone: '+5500000000000', lastSyncSource: 'teste', orderCreatedAt: new Date(), statusChangedAt: new Date(), vouchersProcessedAt: new Date() } });
   const groupId = (await db.$queryRaw`SELECT gen_random_uuid()::text AS g`)[0].g;
   const benefits = await db.valePassCampaignBenefit.findMany({ where: { campaignId } });
   const companies = ['VALLE_SHOWROOM', 'VS_BY_CLOSET'];
   for (let i = 0; i < 2; i++) {
     await db.valePass.create({ data: { benefitId: benefits.find((b) => b.company === companies[i]).id, code: `${prefix}-${label}-${i}`, campaignId, amountCents: 5000, status: statuses[i], purchasedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000), shopifyOrderId: orderId, groupId, company: companies[i], usedAt: statuses[i] === 'USED' ? new Date() : null } });
   }
-  return db.valePassRefundApplication.create({ data: { shopifyRefundId: `${prefix}-r-${label}`, shopifyOrderId: orderId, campaignId, classification: 'UNITS', refundedUnits: 1, status: 'NEEDS_REVIEW', reviewReasons: reasons, detail: { reviewGroupIds: [groupId], unitsNeedingReview: 1, paidUnits: 1, unissuedProposed: 0 } } });
+  return db.valePassRefundApplication.create({ data: { shopifyRefundId: `${prefix}-r-${label}`, shopifyOrderId: orderId, campaignId, classification: 'UNITS', refundedUnits: 1, status: 'NEEDS_REVIEW', reviewReasons: reasons, detail: { reviewGroupIds: proposeUnit ? [groupId] : [], unitsNeedingReview: 1, paidUnits: quantity, unissuedProposed: 0 } } });
 }
 
 async function clean() {
@@ -220,9 +220,31 @@ try {
   assert.ok(box && box.x >= 0 && box.x + box.width <= 376, 'botão fora da tela');
   pass('7) 375px com tema escuro: sem rolagem horizontal e botões dentro da tela');
 
+  // 8) Revisão SEM unidade identificada: o painel avisa que o resgate do pedido todo está bloqueado
+  const order = await seedReview('1005', ['ACTIVE', 'ACTIVE'], ['AMOUNT_ONLY_REFUND'], false);
+  await page.reload();
+  await expand(page);
+  await panel(page).getByText('#1005').waitFor();
+  await panel(page).getByText(/resgate de TODOS os vouchers deste pedido está bloqueado/).waitFor();
+  assert.ok(order.id);
+  pass('8) revisão sem unidade identificada: o painel explica que o resgate de todos os vouchers do pedido está bloqueado');
+
+  // 9) Pendências após reembolso parcial: pagas / emitidas / devolvidas antes de emitir / ainda elegíveis, sem dados pessoais
+  await seedReview('1006', ['ACTIVE', 'ACTIVE'], ['UNIT_CONFIRMATION_REQUIRED'], true, 3);
+  await db.valePassRefundApplication.create({ data: { shopifyRefundId: `${prefix}-r-abs`, shopifyOrderId: `${prefix}-1006`, campaignId, classification: 'UNITS', refundedUnits: 1, status: 'APPLIED', detail: { unissuedAbsorbed: 1, reviewGroupIds: [], paidUnits: 3 } } });
+  await page.reload();
+  await expand(page);
+  const shortfall = page.getByLabel('Pedidos pagos sem todos os passes');
+  await shortfall.getByText(/#1006: pagas 3 · emitidas 1 · devolvidas antes de emitir 1/).waitFor();
+  await shortfall.getByText('ainda elegíveis 1').waitFor();
+  await shortfall.getByText(/não é automática/).waitFor();
+  const shortfallText = await shortfall.innerText();
+  assert.ok(!/@|\+55|Cliente/.test(shortfallText), 'dados pessoais na lista de pendências');
+  pass('9) pendências após reembolso parcial: pagas, emitidas, devolvidas antes de emitir e elegíveis, sem dados pessoais e com aviso de emissão por ADMIN');
+
   assert.deepEqual(externalRequests, [], 'houve requisição externa');
   assert.deepEqual(errors, []);
-  pass('8) nenhuma requisição externa e nenhum erro de console/página');
+  pass('10) nenhuma requisição externa e nenhum erro de console/página');
   console.log(`\n${results.length} verificações do navegador passaram.`);
 } catch (error) {
   console.error('FALHOU:', error.message);

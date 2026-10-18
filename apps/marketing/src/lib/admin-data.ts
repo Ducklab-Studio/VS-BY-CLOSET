@@ -529,7 +529,11 @@ export interface ValePassPaidOrderShortfall {
   readonly orderId: string;
   readonly orderName: string | null;
   readonly quantity: number;
+  /** Emitidas (inclui canceladas), sem contar as devolvidas antes de emitir. */
   readonly issued: number;
+  /** Pagas e devolvidas por reembolso ANTES da emissão (não recebem voucher). */
+  readonly absorbed?: number;
+  /** Ainda elegíveis a emissão (decisão de um ADMIN). */
   readonly missing: number;
 }
 
