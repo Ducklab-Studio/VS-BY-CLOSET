@@ -295,7 +295,7 @@ const REFUND_REASON_LABELS: Record<string, string> = {
   USED_VOUCHERS: 'voucher já usado em unidade reembolsada',
   UNIT_CONFIRMATION_REQUIRED: 'a Shopify não diz qual unidade foi devolvida: confirme a proposta (os vouchers propostos estão bloqueados para resgate)',
   AMOUNT_MISMATCH: 'valor devolvido não fecha com o preço',
-  AMOUNT_ONLY_REFUND: 'dinheiro devolvido sem unidade',
+  AMOUNT_ONLY_REFUND: 'dinheiro devolvido sem unidade identificada: o resgate de TODOS os vouchers deste pedido está bloqueado até a decisão',
   QUANTITY_EXCEEDS_UNITS: 'mais unidades devolvidas que as existentes',
   PAID_UNITS_EXCEEDED: 'devoluções acima das unidades pagas',
   PRICE_UNKNOWN: 'variante sem preço configurado',

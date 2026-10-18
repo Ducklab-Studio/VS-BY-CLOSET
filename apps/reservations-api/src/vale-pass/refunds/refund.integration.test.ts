@@ -660,3 +660,166 @@ localDescribe('F2 — voucher de unidade em revisão NEEDS_REVIEW não pode ser 
     expect(await refunds.resolveReview(application.id, { action: 'CANCEL_ACTIVE_VOUCHERS', note: 'Cancelar o que ainda estiver ativo' }, { id: adminId, name: ADMIN_NAME })).toMatchObject({ vouchersCancelled: 0, unissuedUnitsApplied: 0 });
   });
 });
+
+// ── Correções pré-integração financeira ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const amountOnly = (f: Fixture, id?: string) => refundFor(f, { id, lines: [], transactions: [{ amount: '100.00', kind: 'refund', status: 'success' }] });
+const markUsed = (code: string) => vouchersService.markUsed(code, adminId, ADMIN_NAME);
+
+localDescribe('revisão SEM unidade identificada bloqueia o resgate do pedido todo', () => {
+  test('dinheiro devolvido sem unidade: os 4 vouchers do pedido ficam bloqueados (409) e nada é alterado; outro pedido e voucher legado de outro pedido seguem utilizáveis', async () => {
+    const f = await paidOrderWithUnits(2);
+    const other = await paidOrderWithUnits(1);
+    const otherLegacy = await prisma.valePass.create({ data: { code: `${TAG}-LEGX`, campaignId: other.campaign.id, amountCents: 35_000, purchasedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000), shopifyOrderId: `${TAG}-sem-pedido` } });
+    expect(await applyDefault(amountOnly(f))).toMatchObject({ status: 'NEEDS_REVIEW', cancelledVouchers: 0 });
+    const before = await vouchersOf(f.orderId);
+    expect(before).toHaveLength(4);
+    for (const voucher of before) await expect(markUsed(voucher.code)).rejects.toMatchObject({ status: 409 });
+    expect(await vouchersOf(f.orderId)).toEqual(before); // saldo/status intactos
+    await expect(markUsed((await vouchersOf(other.orderId))[0].code)).resolves.toMatchObject({ status: 'USED' });
+    await expect(markUsed(otherLegacy.code)).resolves.toMatchObject({ status: 'USED' });
+  });
+
+  test('trava no BANCO: SQL direto também é recusado para qualquer voucher do pedido; a transição para outros estados continua possível', async () => {
+    const f = await paidOrderWithUnits(1);
+    await applyDefault(amountOnly(f));
+    const [a, b] = await vouchersOf(f.orderId);
+    await expect(prisma.valePass.update({ where: { id: a.id }, data: { status: 'USED', usedAt: new Date() } })).rejects.toThrow(/vale_pass_use_blocked_refund_review/);
+    await expect(prisma.valePass.update({ where: { id: b.id }, data: { status: 'EXPIRED' } })).resolves.toMatchObject({ status: 'EXPIRED' });
+  });
+
+  test('após a decisão do ADMIN ("manter"): só os vouchers que continuam elegíveis voltam a ser utilizáveis — cancelado/expirado seguem recusados', async () => {
+    const f = await paidOrderWithUnits(2);
+    const [u0a, u0b, u1a, u1b] = await vouchersOf(f.orderId);
+    await prisma.valePass.update({ where: { id: u1b.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: adminId, cancelReason: 'admin' } });
+    await prisma.valePass.update({ where: { id: u1a.id }, data: { status: 'EXPIRED' } });
+    const { application } = (await applyDefault(amountOnly(f))) as { application: { id: string } };
+    await expect(markUsed(u0a.code)).rejects.toMatchObject({ status: 409 });
+    await refunds.resolveReview(application.id, { action: 'KEEP_VOUCHERS', note: 'Cortesia: valor devolvido não afeta vouchers' }, { id: adminId, name: ADMIN_NAME });
+    await expect(markUsed(u0a.code)).resolves.toMatchObject({ status: 'USED' });
+    await expect(markUsed(u0b.code)).resolves.toMatchObject({ status: 'USED' });
+    await expect(markUsed(u1a.code)).rejects.toMatchObject({ status: 400 }); // expirado
+    await expect(markUsed(u1b.code)).rejects.toMatchObject({ status: 400 }); // cancelado
+  });
+
+  test('evento fora de ordem: voucher JÁ usado antes da revisão continua usado (nada é desfeito); os demais ficam bloqueados', async () => {
+    const f = await paidOrderWithUnits(1);
+    const [a, b] = await vouchersOf(f.orderId);
+    await markUsed(a.code);
+    await applyDefault(amountOnly(f));
+    expect((await vouchersOf(f.orderId)).find((v) => v.id === a.id)).toMatchObject({ status: 'USED' });
+    await expect(markUsed(b.code)).rejects.toMatchObject({ status: 409 });
+  });
+
+  test('CORRIDA resgate × revisão sem unidade (10 rodadas): quem perdeu a corrida é recusado; DEPOIS da revisão aberta nenhum outro voucher do pedido é aceito', async () => {
+    for (let round = 0; round < 10; round++) {
+      const f = await paidOrderWithUnits(2);
+      const rows = await vouchersOf(f.orderId);
+      await Promise.allSettled([markUsed(rows[0].code), applyDefault(amountOnly(f, `${TAG}-sw${round}`))]);
+      expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: f.orderId, status: 'NEEDS_REVIEW' } }), `rodada ${round}`).toBe(1);
+      for (const voucher of rows.slice(1)) await expect(markUsed(voucher.code), `rodada ${round}`).rejects.toMatchObject({ status: 409 });
+      await cleanRows();
+    }
+  });
+});
+
+localDescribe('pedido já cancelado pelo fluxo legado: o reembolso não é contado de novo', () => {
+  async function legacyCancelled() {
+    const f = await paidOrderWithUnits(2);
+    await prisma.valePass.updateMany({ where: { shopifyOrderId: f.orderId }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'shopify:orders/cancelled' } });
+    await prisma.valePassOrderCancellation.create({ data: { shopifyOrderId: f.orderId, topic: 'orders/cancelled' } as never });
+    return f;
+  }
+
+  test('registro auditável sem contagem duplicada, sem revisão, sem alterar vouchers nem capacidade; reentrega e paralelo são idempotentes', async () => {
+    const f = await legacyCancelled();
+    const capacityBefore = (await lots.getCapacity(f.campaign.id)).totals;
+    const vouchersBefore = await vouchersOf(f.orderId);
+    const payload = refundFor(f, { quantity: 2, id: `${TAG}-leg-1`, transactions: [{ amount: '700.00', kind: 'refund', status: 'success' }] });
+    const results = await Promise.all(Array.from({ length: 5 }, () => applyDefault(payload)));
+    expect(results.filter((r) => r.status === 'APPLIED')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'DUPLICATE')).toHaveLength(4);
+    const row = await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { shopifyRefundId: `${TAG}-leg-1` } });
+    expect(row).toMatchObject({ status: 'APPLIED', classification: 'ALREADY_CANCELLED', refundedUnits: 0, transactionsCents: 70000 });
+    expect(row.detail).toMatchObject({ reportedRefundedUnits: 2, legacyCancellationTopic: 'orders/cancelled', unitsNeedingReview: 0 });
+    expect(await vouchersOf(f.orderId)).toEqual(vouchersBefore);
+    expect((await lots.getCapacity(f.campaign.id)).totals).toEqual(capacityBefore);
+    expect((await lots.getCapacity(f.campaign.id)).alerts.map((a) => a.code)).not.toContain('REFUND_REVIEW_OPEN');
+    expect((await prisma.valePassRefundApplication.aggregate({ where: { shopifyOrderId: f.orderId }, _sum: { refundedUnits: true } }))._sum.refundedUnits).toBe(0);
+  });
+
+  test('reembolsos seguintes (frete, outra mercadoria, unidades) no pedido cancelado também só são registrados', async () => {
+    const f = await legacyCancelled();
+    expect(await applyDefault(refundFor(f, { lines: [], shipping: ['22.00'] }))).toMatchObject({ status: 'APPLIED', cancelledVouchers: 0 });
+    expect(await applyDefault(refundFor(f, { quantity: 1 }))).toMatchObject({ status: 'APPLIED', cancelledVouchers: 0 });
+    expect(await applyDefault(refundFor(f, { quantity: 5 }))).toMatchObject({ status: 'APPLIED', cancelledVouchers: 0 }); // sem "QUANTITY_EXCEEDS_UNITS"
+    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: f.orderId, status: 'NEEDS_REVIEW' } })).toBe(0);
+    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: f.orderId } })).toBe(3);
+  });
+
+  test('SEM o fato de cancelamento, um reembolso parcial NUNCA é tratado como cancelamento integral (mesmo com uma unidade cancelada à mão)', async () => {
+    const f = await paidOrderWithUnits(3);
+    await prisma.valePass.updateMany({ where: { shopifyOrderId: f.orderId, groupId: f.groupIds[2] }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: adminId, cancelReason: 'admin' } });
+    const outcome = await applyDefault(refundFor(f, { quantity: 1 }));
+    expect(outcome).toMatchObject({ status: 'NEEDS_REVIEW', cancelledVouchers: 0 });
+    expect((outcome as { application: { classification: string; refundedUnits: number } }).application).toMatchObject({ classification: 'UNITS', refundedUnits: 1 });
+    expect((await vouchersOf(f.orderId)).filter((v) => v.status === 'ACTIVE')).toHaveLength(4); // as duas outras unidades seguem vivas
+  });
+});
+
+localDescribe('reembolso parcial com unidades emitidas, devolvidas e ainda pagas: pendências e regularização', () => {
+  const partial = async () => {
+    const f = await paidOrderWithUnits(1, undefined, 3); // 3 pagas, 1 emitida
+    await applyDefault(refundFor(f, { quantity: 1 })); // 1 devolvida antes de emitir → sobra 1 elegível
+    return f;
+  };
+  const ambiguousFacts = (f: Fixture) =>
+    factsFromWebhookPayload({
+      id: f.orderId, financial_status: 'partially_refunded', cancelled_at: null, currency: 'BRL', presentment_currency: 'BRL', current_total_price: '700.00', total_outstanding: '0.00', total_discounts: '0.00', discount_codes: [], refunds: [{ id: 1 }],
+      total_shipping_price_set: money('0.00'), line_items: [{ variant_id: Number(f.campaign.numericVariant), product_id: null, quantity: 3, current_quantity: 2, price: '350.00', price_set: money('350.00'), discount_allocations: [] }],
+    });
+
+  test('o painel recebe pagas / emitidas / devolvidas antes de emitir / ainda elegíveis, sem dados pessoais', async () => {
+    const f = await partial();
+    const capacity = await lots.getCapacity(f.campaign.id);
+    const row = capacity.paidOrdersWithoutVoucher.find((o) => o.orderId === f.orderId)!;
+    expect(row).toMatchObject({ quantity: 3, issued: 1, absorbed: 1, missing: 1 });
+    expect(Object.keys(row).sort()).toEqual(['absorbed', 'issued', 'missing', 'orderId', 'orderName', 'quantity']); // sem nome, e-mail ou telefone
+    expect(capacity.totals).toMatchObject({ sold: 1, pending: 1, consumed: 2 }); // a elegível ainda consome capacidade; a devolvida não
+  });
+
+  test('o validador financeiro considera o pedido ambíguo → retenção (nada é emitido sozinho); a emissão excepcional do ADMIN emite SÓ a unidade elegível', async () => {
+    const f = await partial();
+    expect(await prisma.$transaction((tx) => regularization.regularize(tx, { orderId: f.orderId, facts: ambiguousFacts(f) }))).toMatchObject({ status: 'HELD', reason: 'FINANCIAL_MISMATCH', missing: 1 });
+    expect(await vouchersOf(f.orderId)).toHaveLength(2); // nada novo
+    const hold = await prisma.valePassIssuanceHold.findFirstOrThrow({ where: { shopifyOrderId: f.orderId, status: 'OPEN' } });
+    expect(hold.units).toBe(1);
+    expect((await lots.getCapacity(f.campaign.id)).holds.map((h) => h.id)).toContain(hold.id);
+    await issueLater(f, 3, 'override'); // o que a emissão excepcional do ADMIN executa
+    const rows = await vouchersOf(f.orderId);
+    expect(new Set(rows.map((v) => v.groupId)).size).toBe(2); // 3 pagas − 1 devolvida = 2 unidades
+    expect(rows).toHaveLength(4);
+    expect(rows.every((v) => v.status === 'ACTIVE')).toBe(true);
+    expect((await lots.getCapacity(f.campaign.id)).paidOrdersWithoutVoucher.some((o) => o.orderId === f.orderId)).toBe(false);
+  });
+
+  test('4 pagas, 2 emitidas, 2 devolvidas antes de emitir: nenhuma devolvida recebe voucher; um terceiro reembolso passa a exigir confirmação sobre as emitidas', async () => {
+    const f = await paidOrderWithUnits(2, undefined, 4); // 4 pagas, 2 emitidas, 2 por emitir
+    const first = (await applyDefault(refundFor(f, { quantity: 2 }))) as { application: { id: string; reviewReasons: unknown } };
+    expect(first.application.reviewReasons).toEqual([]); // as duas devolvidas absorvem as 2 não emitidas: nada a revisar
+    expect(await issueLater(f, 4)).toMatchObject({ issuedUnits: 0, vouchersCreated: 0 });
+    const second = (await applyDefault(refundFor(f, { quantity: 1 }))) as { application: { id: string; reviewReasons: unknown } };
+    expect(second.application.reviewReasons).toEqual(['UNIT_CONFIRMATION_REQUIRED']); // já não há unidade por emitir: atinge uma emitida → o ADMIN confirma
+    expect(await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { id: second.application.id } })).toMatchObject({ status: 'NEEDS_REVIEW' });
+  });
+
+  test('webhook repetido depois da decisão do ADMIN não reabre nem altera nada (DUPLICATE); a revisão resolvida libera o pedido', async () => {
+    const f = await paidOrderWithUnits(2);
+    const payload = amountOnly(f, `${TAG}-redeliver`);
+    const { application } = (await applyDefault(payload)) as { application: { id: string } };
+    await refunds.resolveReview(application.id, { action: 'KEEP_VOUCHERS', note: 'Conferido: nenhuma unidade afetada' }, { id: adminId, name: ADMIN_NAME });
+    expect(await applyDefault(payload)).toMatchObject({ status: 'DUPLICATE' });
+    expect((await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { id: application.id } })).status).toBe('RESOLVED');
+    await expect(markUsed((await vouchersOf(f.orderId))[0].code)).resolves.toMatchObject({ status: 'USED' });
+  });
+});

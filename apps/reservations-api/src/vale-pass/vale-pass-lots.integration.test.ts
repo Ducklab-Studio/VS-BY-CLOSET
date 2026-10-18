@@ -643,7 +643,7 @@ localDescribe('Valle Pass — alertas de capacidade e de pagamento sem passe', (
 
     const capacity = await lots.getCapacity(c.id);
     const mine = capacity.paidOrdersWithoutVoucher.filter((o) => o.orderId.startsWith(TAG));
-    expect(mine).toEqual([{ orderId, orderName: `${TAG}#1`, quantity: 3, issued: 1, missing: 2 }]);
+    expect(mine).toEqual([{ orderId, orderName: `${TAG}#1`, quantity: 3, issued: 1, absorbed: 0, missing: 2 }]);
     expect(capacity.alerts.find((a) => a.code === 'PAID_ORDERS_WITHOUT_VOUCHER')?.severity).toBe('critical');
     expect(capacity.alerts.find((a) => a.code === 'PAID_ORDERS_AWAITING_PROCESSING')?.severity).toBe('warning'); // o pedido sem processamento há 1 h
     // nenhuma identificação do cliente na resposta

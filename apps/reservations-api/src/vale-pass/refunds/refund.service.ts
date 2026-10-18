@@ -95,6 +95,21 @@ export class ValePassRefundService {
     const vouchers = await tx.valePass.findMany({ where: { shopifyOrderId: refund.orderId }, orderBy: { createdAt: 'asc' } });
     if (vouchers.some((voucher) => voucher.groupId === null)) return { status: 'LEGACY_ORDER' };
 
+    // Pedido JÁ cancelado pelo caminho legado (fato de cancelamento gravado: orders/cancelled ou um refunds/create antigo): todas as unidades já foram
+    // canceladas por ele. O reembolso só entra na trilha como registro auditável — não cancela, não conta unidades (refundedUnits = 0), não abre revisão e
+    // não altera a capacidade. Um reembolso parcial SEM esse fato nunca é tratado como cancelamento integral (segue o plano por unidade).
+    const legacyCancellation = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: refund.orderId } });
+    if (legacyCancellation) {
+      const application = await tx.valePassRefundApplication.create({
+        data: {
+          shopifyRefundId: refund.refundId, shopifyOrderId: refund.orderId, campaignId: vouchers[0]?.campaignId ?? null, classification: 'ALREADY_CANCELLED', refundedUnits: 0, status: 'APPLIED',
+          shippingRefundCents: refund.shippingRefundCents, transactionsCents: refund.transactionsCents,
+          detail: { paidUnits: order?.quantity ?? null, reviewGroupIds: [], unitsNeedingReview: 0, unissuedAbsorbed: 0, unissuedProposed: 0, reportedRefundedUnits: valeQuantity, legacyCancellationTopic: legacyCancellation.topic, note: 'pedido já cancelado pelo fluxo legado: nada contado de novo' } as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return { status: 'APPLIED', application, cancelledVouchers: 0 };
+    }
+
     const byGroup = new Map<string, { createdAt: Date; vouchers: { id: string; status: VoucherStatus }[] }>();
     for (const voucher of vouchers) {
       const entry = byGroup.get(voucher.groupId as string) ?? { createdAt: voucher.createdAt, vouchers: [] };
