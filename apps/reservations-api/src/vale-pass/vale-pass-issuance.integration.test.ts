@@ -794,11 +794,12 @@ localDescribe('Valle Pass 2027 — imutabilidade e benefícios', () => {
 });
 
 localDescribe('Valle Pass 2027 — isolamento: a emissão ativa do webhook NÃO mudou', () => {
-  test('o webhook financeiro e o checkout não conhecem o serviço novo, os benefícios, os grupos nem a fila', () => {
+  test('o webhook só DELEGA ao fluxo de pagamento (atrás da chave desligada): não emite, não retém e não enfileira por conta própria', () => {
     const webhook = readFileSync(join(__dirname, 'vale-pass-webhook.service.ts'), 'utf8');
-    for (const name of ['issuance', 'Issuance', 'benefit', 'Benefit', 'groupId', 'group_id', 'valePassIssuanceHold', 'validFrom', 'company']) {
+    for (const name of ['issueForCampaign', 'holdForFinancialReview', 'enqueueForOrder', 'ValePassIssuanceService', 'valePassIssuanceHold', 'validFrom', 'ValePassEmail', 'Resend']) {
       expect(webhook, name).not.toContain(name);
     }
+    expect(webhook).toContain('ValePassPaymentFlowService');
     const webhooksService = readFileSync(join(__dirname, '..', 'webhooks', 'webhooks.service.ts'), 'utf8');
     expect(webhooksService).not.toContain('vale-pass-issuance');
   });
@@ -814,6 +815,6 @@ localDescribe('Valle Pass 2027 — isolamento: a emissão ativa do webhook NÃO 
       }
     };
     walk(root);
-    expect(offenders.sort()).toEqual(['vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-holds.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts'].sort().filter((file) => file !== 'vale-pass/vale-pass-issuance.service.ts'));
+    expect(offenders.sort()).toEqual(['vale-pass/flow/payment-flow.service.ts', 'vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-holds.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts'].sort().filter((file) => file !== 'vale-pass/vale-pass-issuance.service.ts'));
   });
 });

@@ -294,7 +294,7 @@ localDescribe('isolamento: a validação financeira não está ligada ao fluxo f
       }
     };
     walk(root);
-    expect(users.sort()).toEqual(['vale-pass/financial/financial-guard.service.ts', 'vale-pass/financial/order-facts.ts', 'vale-pass/financial/validate-order.ts', 'vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts']);
+    expect(users.sort()).toEqual(['vale-pass/financial/financial-guard.service.ts', 'vale-pass/financial/order-facts.ts', 'vale-pass/financial/validate-order.ts', 'vale-pass/flow/payment-flow.service.ts', 'vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts']);
     for (const file of ['vale-pass/vale-pass-webhook.service.ts', 'webhooks/webhooks.service.ts', 'webhooks/webhooks.controller.ts', 'webhooks/shopify-hmac.ts', 'vale-pass/vale-pass-orders.service.ts']) {
       const source = readFileSync(join(root, file), 'utf8');
       for (const name of ['/financial/', 'ValePassFinancialGuard', 'validateValePassFinancials', 'holdForFinancialReview', 'factsFromWebhookPayload']) expect(source, `${file} → ${name}`).not.toContain(name);

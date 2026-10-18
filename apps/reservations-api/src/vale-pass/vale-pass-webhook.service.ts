@@ -1,6 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
+import { ValePassPaymentFlowService } from './flow/payment-flow.service';
+import { resolveWebhookSignal, type ValePassWebhookMeta } from './flow/payment-instant';
+import { decidePaymentTime } from './flow/payment-time-policy';
+import { envFlowFlags, FLOW_FLAGS_TOKEN, paymentTimeOf, type FlowFlags } from './flow/flow-flags';
+import { ValePassRefundService } from './refunds/refund.service';
+import { factsFromRefundWebhook } from './refunds/refund-facts';
 import { KNOWN_VALE_PASS_VARIANT_ID, valePassUnits } from './vale-pass-order-status';
 import { ValePassOrderRegistry, type ValePassOrderSnapshot } from './vale-pass-order-registry';
 import {
@@ -61,6 +67,16 @@ export { KNOWN_VALE_PASS_VARIANT_ID };
 export class ValePassWebhookService {
   private readonly logger = new Logger(ValePassWebhookService.name);
   readonly orders = new ValePassOrderRegistry();
+  private readonly flow: ValePassPaymentFlowService;
+
+  constructor(
+    // `@Inject` explícito: parâmetro opcional/união perde o token de injeção do Nest (um teste de DI real trava isto).
+    @Optional() @Inject(ValePassPaymentFlowService) flow?: ValePassPaymentFlowService,
+    @Optional() @Inject(ValePassRefundService) private readonly refunds?: ValePassRefundService,
+    @Optional() @Inject(FLOW_FLAGS_TOKEN) private readonly flags: FlowFlags = envFlowFlags(),
+  ) {
+    this.flow = flow ?? new ValePassPaymentFlowService(undefined, undefined, null, this.flags);
+  }
 
   /**
    * Registro do PEDIDO de Valle Pass (tabela `vale_pass_orders`), para todos
@@ -73,11 +89,11 @@ export class ValePassWebhookService {
    * (regra de sempre) ou, se esse webhook se perdeu, o `orders/updated` que
    * mostra o pedido pago. `orders/create` nunca emite vale.
    */
-  async handleOrderWebhook(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<EventInput[]> {
+  async handleOrderWebhook(tx: Prisma.TransactionClient, topic: string, payload: unknown, meta: ValePassWebhookMeta = { triggeredAt: null }): Promise<EventInput[]> {
     const source = `webhook:${topic}`;
     switch (topic) {
       case 'refunds/create':
-        return this.orders.markRefunded(tx, String((payload as ShopifyRefundPayload).order_id), source);
+        return this.markOrderRefunded(tx, payload as ShopifyRefundPayload, source);
       case 'orders/delete':
         return this.orders.markDeleted(tx, String((payload as { id: number | string }).id), source);
       case 'orders/create':
@@ -92,8 +108,24 @@ export class ValePassWebhookService {
     const order = payload as ShopifyOrderPayload;
     const quantity = await this.valePassQuantity(tx, order);
     if (quantity === 0) return [];
-    const result = await this.orders.apply(tx, snapshotFromPayload(order, quantity), source);
+    const unitModel = await this.flow.usesUnitModel(tx, String(order.id), (order.line_items ?? []).map((line) => line.variant_id));
+    const result = await this.orders.apply(tx, { ...snapshotFromPayload(order, quantity), keepPaidOnPartialRefund: unitModel }, source);
     const events: EventInput[] = [...result.events];
+
+    // Horário do pagamento: o webhook `orders/paid` traz SINAIS (cabeçalho X-Shopify-Triggered-At e updated_at), que NÃO provam a confirmação financeira. A política
+    // (estrita por padrão) decide se algum horário passa a valer; sem horário confiável o fluxo retém o pedido (PAYMENT_TIME_UNKNOWN) — nunca se usa o horário do
+    // processamento. Gravado ANTES da emissão: retenção, alertas e prazo do e-mail leem dele.
+    let registered = result.order;
+    // Só pedidos do modelo novo (campanha com benefícios): o pedido LEGADO não usa o horário do pagamento, então nada é gravado nem entra na linha do tempo dele.
+    if (topic === 'orders/paid' && order.financial_status === 'paid' && !registered.deletedInShopifyAt && (await this.needsPaymentTime(tx, order))) {
+      const signal = resolveWebhookSignal({ topic, triggeredAt: meta.triggeredAt, payloadUpdatedAt: order.updated_at, orderCreatedAt: registered.orderCreatedAt ?? parseDate(order.created_at) });
+      const stored = (registered.paymentTimeEvidence as { transaction?: { instant: string | null; reason: string } } | null)?.transaction;
+      const transaction = stored ? { instant: stored.instant ? new Date(stored.instant) : null, reason: stored.reason } : null;
+      const decision = decidePaymentTime({ config: paymentTimeOf(this.flags), webhook: signal, transaction });
+      const recorded = await this.orders.recordPaymentTime(tx, registered.id, { signal, decision }, source);
+      registered = recorded.order;
+      events.push(...recorded.events);
+    }
 
     if (result.order.deletedInShopifyAt && (topic === 'orders/paid' || topic === 'orders/updated') && order.financial_status === 'paid') {
       // Pagamento entregue depois da exclusão do pedido na Shopify: registra e
@@ -104,13 +136,67 @@ export class ValePassWebhookService {
       // atrasado): pedido expirado não fica confirmado nem ganha vale ativo.
       events.push({ type: 'VALE_PASS_PAYMENT_NOT_APPLIED', detail: { orderId: result.order.shopifyOrderId, status: result.order.status, reason: 'estado mais recente do pedido é expirado/recusado' } });
     } else if (topic === 'orders/paid' && order.financial_status === 'paid') {
-      const issued = await this.handleOrderPaid(tx, order);
+      const issued = await this.handleOrderPaid(tx, order, registered);
       events.push(...issued);
-      await this.orders.markVouchersProcessed(tx, result.order.id, source, issued);
+      await this.orders.markVouchersProcessed(tx, registered.id, source, issued);
     } else if (topic === 'orders/updated') {
-      events.push(...(await this.issueForConfirmedOrder(tx, result.order, order, source)));
+      events.push(...(await this.issueForConfirmedOrder(tx, registered, order, source)));
+      // Compra que CRESCEU depois da emissão: retenção visível (nunca emissão automática do acréscimo).
+      if (order.financial_status === 'paid' && registered.status === 'CONFIRMED' && registered.vouchersProcessedAt && !registered.deletedInShopifyAt) {
+        events.push(...(await this.flow.holdQuantityIncrease(tx, { registry: registered, campaigns: await this.benefitCampaigns(tx, order), payload: order })));
+      }
     }
     return events;
+  }
+
+  /**
+   * O pedido pode vir a ser do modelo de dois vouchers? Sim se alguma linha cai numa campanha COM benefícios ou em nenhuma campanha (a campanha pode ser
+   * cadastrada depois e o pedido regularizado). Só o pedido certamente LEGADO (todas as campanhas das linhas sem benefícios) dispensa o horário do pagamento.
+   */
+  private async needsPaymentTime(tx: Prisma.TransactionClient, order: ShopifyOrderPayload): Promise<boolean> {
+    const variantIds = [...new Set(extractOrderLineVariants(order).map((line) => line.variantId))];
+    if (variantIds.length === 0) return true;
+    const campaigns = await tx.valePassCampaign.findMany({ where: { shopifyVariantId: { in: variantIds } }, select: { _count: { select: { benefits: true } } } });
+    return campaigns.length === 0 || campaigns.some((campaign) => campaign._count.benefits > 0);
+  }
+
+  /** Campanhas do pedido que seguem o modelo de dois vouchers (com benefícios cadastrados). */
+  private async benefitCampaigns(tx: Prisma.TransactionClient, order: ShopifyOrderPayload) {
+    const variantIds = [...new Set(extractOrderLineVariants(order).map((line) => line.variantId))];
+    if (variantIds.length === 0) return [];
+    return tx.valePassCampaign.findMany({ where: { shopifyVariantId: { in: variantIds }, benefits: { some: {} } } });
+  }
+
+  /**
+   * `refunds/create` do Valle Pass. Pedido do modelo novo (ver `usesUnitModel`): sempre por unidade, com as chaves ligadas ou não — desligar uma chave NUNCA
+   * volta ao cancelamento integral, nunca impede o registro do reembolso e nunca cancela unidade não reembolsada. Pedido legado (vouchers sem unidade) ou que
+   * não é de Valle Pass continua no caminho legado de sempre (cancela os vales ativos do pedido).
+   */
+  async handleRefund(tx: Prisma.TransactionClient, refund: ShopifyRefundPayload): Promise<EventInput[]> {
+    const orderId = String(refund.order_id);
+    const facts = factsFromRefundWebhook(refund);
+    if (await this.flow.usesUnitModel(tx, orderId, facts.lines.map((line) => line.variantId))) {
+      // Sem o serviço de reembolso por unidade não há como proteger o pedido: falha fechada (503 → a Shopify reentrega), nunca cancelamento integral.
+      if (!this.refunds) throw new Error('Reembolso de pedido do modelo de dois vouchers sem o serviço de reembolso por unidade.');
+      const outcome = await this.refunds.apply(tx, facts);
+      if (outcome.status === 'APPLIED' || outcome.status === 'NEEDS_REVIEW' || outcome.status === 'DUPLICATE') {
+        const cancelledVouchers = 'cancelledVouchers' in outcome ? outcome.cancelledVouchers : 0;
+        return [{ type: 'VALE_PASS_REFUND_BY_UNIT', detail: { orderId, refundId: String(refund.id), outcome: outcome.status, cancelledVouchers } }];
+      }
+    }
+    return this.handleOrderCancelledOrRefunded(tx, orderId, 'refunds/create');
+  }
+
+  /** Registro do pedido após um reembolso: parcial por unidade (chave ligada) mantém o pedido pago; o resto segue a regra de sempre. */
+  private async markOrderRefunded(tx: Prisma.TransactionClient, refund: ShopifyRefundPayload, source: string): Promise<EventInput[]> {
+    const orderId = String(refund.order_id);
+    // Só existe linha na trilha se o reembolso foi tratado por unidade (modelo novo ou chave ligada).
+    const row = await tx.valePassRefundApplication.findUnique({ where: { shopifyRefundId: String(refund.id) } });
+    const fullyRefunded = (row?.detail as { orderFullyRefunded?: unknown } | null)?.orderFullyRefunded === true;
+    if (row && row.classification !== 'ALREADY_CANCELLED' && !fullyRefunded) {
+      return [{ type: 'VALE_PASS_ORDER_SYNCED', detail: { orderId, source, changed: false, note: 'reembolso por unidade: o pedido segue pago para as unidades que restam' } }];
+    }
+    return this.orders.markRefunded(tx, orderId, source);
   }
 
   /** Pedido CONFIRMADO cujo pagamento ainda não passou pela emissão (o
@@ -118,7 +204,7 @@ export class ValePassWebhookService {
    *  não emite de novo para um pedido que já tem vale. */
   async issueForConfirmedOrder(tx: Prisma.TransactionClient, order: ValePassOrder, payload: ShopifyOrderPayload, source: string): Promise<EventInput[]> {
     if (order.status !== 'CONFIRMED' || order.vouchersProcessedAt || order.deletedInShopifyAt) return [];
-    const issued = await this.handleOrderPaid(tx, payload);
+    const issued = await this.handleOrderPaid(tx, payload, order);
     await this.orders.markVouchersProcessed(tx, order.id, source, issued);
     return [
       { type: 'VALE_PASS_PAYMENT_RECOVERED', detail: { orderId: order.shopifyOrderId, source, note: 'pagamento confirmado processado fora do orders/paid (webhook perdido ou fora de ordem)' } },
@@ -142,7 +228,7 @@ export class ValePassWebhookService {
    *  do WebhooksService) — nunca abre transação própria. Devolve `[]`
    *  (no-op silencioso) quando o pedido não contém nenhuma linha de
    *  Valle Pass, que é o caso normal pra 100% dos pedidos de aluguel. */
-  async handleOrderPaid(tx: Prisma.TransactionClient, order: ShopifyOrderPayload): Promise<EventInput[]> {
+  async handleOrderPaid(tx: Prisma.TransactionClient, order: ShopifyOrderPayload, registry: ValePassOrder | null = null): Promise<EventInput[]> {
     const lines = extractOrderLineVariants(order);
     if (lines.length === 0) return [];
 
@@ -156,21 +242,36 @@ export class ValePassWebhookService {
       // manual em vez de desaparecer sem rastro (ver comentário de
       // KNOWN_VALE_PASS_VARIANT_ID acima). Nunca cria vale aqui: só
       // torna o caso visível, quem decide é uma pessoa.
-      if (variantIds.includes(KNOWN_VALE_PASS_VARIANT_ID)) {
-        this.logger.error(`Pedido ${orderId} pago com a variante conhecida do Valle Pass (${KNOWN_VALE_PASS_VARIANT_ID}), mas nenhuma ValePassCampaign existe para ela — nenhum vale foi emitido.`);
+      // Variante conhecida OU qualquer variante (inclusive NOVA) do produto do Valle Pass: o registro do pedido (CONFIRMED, com unidades e sem vouchers) é a
+      // pendência rastreável — aparece em "Pagamentos sem tratamento" (/admin/vale-pass/flow) e no alerta do painel até um ADMIN regularizar.
+      if (valePassUnits((order.line_items ?? []).map((line) => ({ variantId: line.variant_id, productId: line.product_id, quantity: typeof line.quantity === 'number' ? line.quantity : 0 })), []) > 0) {
+        this.logger.error(`Pedido ${orderId} pago com Valle Pass, mas nenhuma ValePassCampaign existe para a variante (${variantIds.join(', ')}) — nenhum vale foi emitido.`);
         return [{
           type: 'VALE_PASS_ORDER_WITHOUT_CAMPAIGN',
-          detail: { orderId, variantId: KNOWN_VALE_PASS_VARIANT_ID, reason: 'pedido pago da variante do Valle Pass sem nenhuma campanha cadastrada — revisão manual necessária, nenhum vale foi criado automaticamente' },
+          detail: { orderId, variantIds, reason: 'pedido pago do produto Valle Pass sem campanha cadastrada para a variante — revisão manual necessária, nenhum vale foi criado automaticamente' },
         }];
       }
       return [];
     }
 
+    // Campanha COM benefícios cadastrados = modelo de dois vouchers (Valle Pass 2027). Esse pagamento NUNCA cai no caminho legado de voucher único:
+    // com a chave ligada passa pela validação financeira e pela emissão por unidade; desligada, vira retenção visível (ver ValePassPaymentFlowService).
+    const flowCampaigns: typeof campaigns = [];
+    const legacyCampaigns: typeof campaigns = [];
+    for (const campaign of campaigns) {
+      ((await tx.valePassCampaignBenefit.count({ where: { campaignId: campaign.id } })) > 0 ? flowCampaigns : legacyCampaigns).push(campaign);
+    }
+    const flowEvents: EventInput[] = [];
+    if (flowCampaigns.length > 0) {
+      flowEvents.push(...(await this.flow.processPaidOrder(tx, { payload: order, registry: registry ?? (await tx.valePassOrder.findUnique({ where: { shopifyOrderId: orderId } })), campaigns: flowCampaigns, source: 'webhook' })));
+      if (legacyCampaigns.length === 0) return flowEvents;
+    }
+
     // Idempotência (defesa em profundidade — o lock por orderId do
     // WebhooksService já serializa reentregas, mas nunca custa checar):
     // se este pedido já emitiu algum vale, não emite de novo.
-    const already = await tx.valePass.findFirst({ where: { shopifyOrderId: orderId } });
-    if (already) return [{ type: 'VALE_PASS_ALREADY_ISSUED', detail: { orderId } }];
+    const already = await tx.valePass.findFirst({ where: { shopifyOrderId: orderId, ...(flowCampaigns.length > 0 ? { campaignId: { in: legacyCampaigns.map((c) => c.id) } } : {}) } });
+    if (already) return [...flowEvents, { type: 'VALE_PASS_ALREADY_ISSUED', detail: { orderId } }];
 
     // `orders/paid` reentregue DEPOIS do cancelamento/reembolso: o vale é
     // emitido e cancelado na mesma transação — mesmo estado final da ordem
@@ -183,9 +284,9 @@ export class ValePassWebhookService {
     const customerPhone = extractCustomerPhone(order);
     const customerEmail = extractCustomerEmail(order);
 
-    const events: EventInput[] = [];
+    const events: EventInput[] = [...flowEvents];
     for (const line of lines) {
-      const campaign = campaigns.find((c) => c.shopifyVariantId === line.variantId);
+      const campaign = legacyCampaigns.find((c) => c.shopifyVariantId === line.variantId);
       if (!campaign) continue;
 
       for (let i = 0; i < line.quantity; i++) {

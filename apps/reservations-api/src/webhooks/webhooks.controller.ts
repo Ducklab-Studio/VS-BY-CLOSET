@@ -35,6 +35,7 @@ export class WebhooksController {
     @Headers('x-shopify-topic') topic?: string,
     @Headers('x-shopify-webhook-id') webhookId?: string,
     @Headers('x-shopify-shop-domain') shopDomain?: string,
+    @Headers('x-shopify-triggered-at') triggeredAt?: string,
   ): Promise<{ ok: true }> {
     // Item 3, OBRIGATÓRIO: sem corpo cru, sem verificação possível —
     // fail closed, nunca cai pro body já parseado como substituto.
@@ -79,7 +80,7 @@ export class WebhooksController {
       throw new BadRequestException('Corpo malformado.');
     }
 
-    const { outcome } = await this.webhooks.handleIncoming({ topic, shopifyWebhookId: webhookId, payload });
+    const { outcome } = await this.webhooks.handleIncoming({ topic, shopifyWebhookId: webhookId, payload, triggeredAt: typeof triggeredAt === 'string' ? triggeredAt : null });
     // Uma linha por entrega, sem corpo, sem dados do cliente: permite ver nos
     // logs da aplicação que a Shopify está entregando (e o que foi feito).
     this.logger.log(`Webhook ${safeLabel(topic)} → ${outcome}`);

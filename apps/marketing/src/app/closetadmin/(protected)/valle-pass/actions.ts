@@ -18,6 +18,14 @@ import {
   listValePassCampaigns,
   replaceValePassBenefits,
   dismissValePassHold,
+  resumeValePassHeldPayments,
+  getValePassFlowStatus,
+  getValePassOperationalAlerts,
+  verifyValePassPaymentTime,
+  confirmValePassPaymentTime,
+  regularizeValePassOrder,
+  type ValePassFlowStatus,
+  type ValePassResumeReport,
   resolveValePassRefundReview,
   type ValePassRefundReviewAction,
   getValePassHoldPreview,
@@ -384,5 +392,114 @@ export async function resolveValePassRefundReviewAction(id: string, action: Vale
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a decisão.' };
+  }
+}
+
+/** Estado das chaves e das pendências da integração financeira (leitura: módulo VALLE_PASS). */
+export async function getValePassFlowStatusAction(): Promise<{ status: ValePassFlowStatus | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    return { status: await getValePassFlowStatus(session.id), error: null };
+  } catch (err) {
+    return { status: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar o estado da integração.' };
+  }
+}
+
+const REGULARIZE_MESSAGES: Record<string, string> = {
+  ISSUED: 'Pedido regularizado: vouchers emitidos e e-mail(s) registrado(s) na fila (nenhum e-mail é enviado por aqui).',
+  HELD: 'Os fatos financeiros do pedido NÃO fecham: nada foi emitido e o pedido ficou na fila de retenções com os motivos.',
+  NOTHING_TO_DO: 'Nada a regularizar: o pedido já tem todas as unidades emitidas.',
+  CAMPAIGN_UNRESOLVED: 'Não há campanha única para este pedido: cadastre a campanha da variante comprada antes de regularizar.',
+  FACTS_MISMATCH: 'Os dados financeiros guardados não são deste pedido. Nada foi emitido.',
+  LEGACY_ORDER: 'Pedido do modelo antigo: não é regularizado por aqui.',
+  NOT_PAID: 'O pedido não está pago/ativo. Nada foi emitido.',
+};
+
+/** Regularização de pedido pago com unidades sem voucher (só ADMIN, justificativa ≥ 10; a API revalida o pagamento e audita). */
+export async function regularizeValePassOrderAction(orderId: string, note: string): Promise<{ error: string | null; message?: string }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const result = await regularizeValePassOrder({ orderId, note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null, message: REGULARIZE_MESSAGES[result.outcome.status] ?? 'Pedido avaliado.' };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível regularizar o pedido.' };
+  }
+}
+
+/**
+ * Segundo contador do menu: pagamentos confirmados SEM benefício (`count`) e, destes, os críticos (`alerts`: prazo de 72 h vencido ou e-mail vencido).
+ * Chamado em segundo plano pelo menu de qualquer página; nunca redireciona. Leitura: módulo VALLE_PASS.
+ */
+export async function getValePassFinancialAttentionAction(): Promise<{ count: number; alerts: number } | { forbidden: true } | { error: true }> {
+  const session = await getAdminSession();
+  if (!session || !hasAdminModule(session, 'VALLE_PASS')) return { forbidden: true };
+  try {
+    const snapshot = await getValePassOperationalAlerts(session.id);
+    return { count: snapshot.withoutBenefit.orders + (snapshot.emailsOverdue.units > 0 ? 1 : 0), alerts: snapshot.overdue.orders + (snapshot.emailsOverdue.units > 0 ? 1 : 0) };
+  } catch (err) {
+    return err instanceof AdminApiError && (err.status === 401 || err.status === 403) ? { forbidden: true } : { error: true };
+  }
+}
+
+const PAYMENT_TIME_REASONS: Record<string, string> = {
+  TRANSACTION_DIVERGENT: 'a transação da Shopify e o webhook divergem: confira o horário na Shopify e confirme manualmente',
+  NO_SUCCESS_TRANSACTION: 'a Shopify não mostra transação concluída (Pix pendente, só autorização ou falha)',
+  PARTIAL_PAYMENT: 'as transações concluídas não cobrem o total do pedido',
+  ONLY_TEST_TRANSACTIONS: 'só há transações de teste',
+  TOTAL_UNKNOWN: 'a Shopify não informou o total do pedido',
+  PROCESSED_AT_UNKNOWN: 'a transação não tem horário de processamento',
+  AMOUNT_UNKNOWN: 'valor de transação ilegível',
+  CURRENCY_MISMATCH: 'moeda da transação diferente da do pedido',
+};
+
+/** Confere o horário do pagamento na Shopify (leitura) e só confirma se a transação concordar com o webhook. Só ADMIN. */
+export async function verifyValePassPaymentTimeAction(orderId: string, note: string): Promise<{ error: string | null; message?: string }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const result = await verifyValePassPaymentTime({ orderId, note: note.trim() }, session.id);
+    revalidateValePassPath();
+    if (result.status === 'CONFIRMED') return { error: null, message: 'Horário confirmado pela transação da Shopify. Agora use "Retomar retenções" para emitir.' };
+    if (result.status === 'ALREADY_CONFIRMED') return { error: null, message: 'O horário deste pedido já estava confirmado.' };
+    return { error: null, message: `Horário NÃO confirmado: ${PAYMENT_TIME_REASONS[result.reason] ?? result.reason}.` };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível conferir o horário na Shopify.' };
+  }
+}
+
+/** O ADMIN informa o horário do pagamento (ex.: 2026-10-18T14:30:00-03:00), com justificativa. Só ADMIN. */
+export async function confirmValePassPaymentTimeAction(orderId: string, confirmedAt: string, note: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    await confirmValePassPaymentTime({ orderId, confirmedAt: confirmedAt.trim(), note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível confirmar o horário.' };
+  }
+}
+
+/** Retomada das retenções feitas com a integração desligada (só ADMIN, justificativa ≥ 10). A API exige a chave ligada e processa as mais antigas primeiro. */
+export async function resumeHeldPaymentsAction(note: string): Promise<{ error: string | null; report?: ValePassResumeReport }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const report = await resumeValePassHeldPayments({ note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null, report };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível retomar as retenções.' };
   }
 }

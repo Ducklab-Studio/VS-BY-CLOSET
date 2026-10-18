@@ -27,11 +27,18 @@ export type CapacityAlertCode =
   | 'PAID_UNITS_COUNTED_AS_SOLD'
   | 'ISSUANCE_HOLDS_OPEN'
   | 'ISSUANCE_HOLD_STALE'
+  | 'HOLD_NEAR_DEADLINE'
+  | 'HOLD_DEADLINE_EXCEEDED'
+  | 'INTEGRATION_HOLDS_OPEN'
+  | 'PAYMENT_TIME_UNKNOWN'
   | 'REFUND_REVIEW_OPEN'
   | 'OPEN_LOT_SOLD_OUT';
 
 /** Retenção aberta há mais que isso pede ação imediata: o cliente já pagou e o prazo de 3 dias para os códigos corre desde o pagamento. */
 export const STALE_HOLD_HOURS = 24;
+/** Prazo prometido: códigos em até 3 dias (72 h) do pagamento. A partir de 48 h a retenção está a menos de 24 h do prazo. */
+export const HOLD_DEADLINE_HOURS = 72;
+export const HOLD_NEAR_DEADLINE_HOURS = 48;
 
 /** Códigos das divergências guardadas em `detail.issues` da retenção (nada além dos códigos sai daqui). */
 export function financialIssueCodes(detail: unknown): string[] {
@@ -57,6 +64,8 @@ export interface CapacityHold {
   /** Códigos das divergências financeiras (só quando `reason` = FINANCIAL_MISMATCH). Sem dados pessoais. */
   readonly issues: readonly string[];
   readonly createdAt: string;
+  /** Instante REAL do pagamento (X-Shopify-Triggered-At do orders/paid); null = desconhecido (o prazo de 3 dias não é calculável). */
+  readonly paymentConfirmedAt: string | null;
 }
 
 /** Benefício configurado na campanha (resumo para o painel). */
@@ -133,9 +142,12 @@ export class ValePassLotsService {
     const soldByLot = await loadLotSold(this.prisma, campaignId);
     const openHolds = await this.prisma.valePassIssuanceHold.findMany({ where: { campaignId, status: 'OPEN' }, orderBy: { createdAt: 'asc' }, take: 50 });
     const holdOrders = openHolds.length
-      ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: openHolds.map((hold) => hold.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
+      ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: openHolds.map((hold) => hold.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true, paymentConfirmedAt: true } })
       : [];
     const holdOrderNames = new Map(holdOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
+    const holdPaidAt = new Map(holdOrders.map((order) => [order.shopifyOrderId, order.paymentConfirmedAt]));
+    // Idade da retenção = desde o PAGAMENTO real. Sem o instante (desconhecido) usa-se "desde que foi retida" — só como piso, e o alerta PAYMENT_TIME_UNKNOWN acompanha.
+    const paidSince = (hold: { shopifyOrderId: string; createdAt: Date }): Date => holdPaidAt.get(hold.shopifyOrderId) ?? hold.createdAt;
     const refundRows = await this.prisma.valePassRefundApplication.findMany({ where: { status: 'NEEDS_REVIEW', campaignId }, orderBy: { createdAt: 'asc' }, take: 50 });
     const refundOrders = refundRows.length
       ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: refundRows.map((row) => row.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
@@ -174,12 +186,48 @@ export class ValePassLotsService {
       });
     }
     const staleSince = Date.now() - STALE_HOLD_HOURS * 3_600_000;
-    const staleHolds = openHolds.filter((hold) => hold.createdAt.getTime() < staleSince);
+    const staleHolds = openHolds.filter((hold) => paidSince(hold).getTime() < staleSince);
     if (staleHolds.length > 0) {
       alerts.push({
         code: 'ISSUANCE_HOLD_STALE',
         severity: 'critical',
         message: `${staleHolds.length} pedido(s) pago(s) estão retidos há mais de ${STALE_HOLD_HOURS} horas. O prazo de 3 dias para o cliente receber os códigos corre desde o pagamento: resolva agora (emitir com justificativa ou reembolsar na Shopify e descartar).`,
+      });
+    }
+    const nowMs = Date.now();
+    const overdue = openHolds.filter((hold) => nowMs - paidSince(hold).getTime() >= HOLD_DEADLINE_HOURS * 3_600_000);
+    const nearDeadline = openHolds.filter((hold) => {
+      const age = nowMs - paidSince(hold).getTime();
+      return age >= HOLD_NEAR_DEADLINE_HOURS * 3_600_000 && age < HOLD_DEADLINE_HOURS * 3_600_000;
+    });
+    if (overdue.length > 0) {
+      alerts.push({
+        code: 'HOLD_DEADLINE_EXCEEDED',
+        severity: 'critical',
+        message: `${overdue.length} pedido(s) pago(s) estão retidos há mais de ${HOLD_DEADLINE_HOURS} horas: o prazo de 3 dias para o cliente receber os códigos JÁ VENCEU. Resolva agora e avise o cliente.`,
+      });
+    }
+    if (nearDeadline.length > 0) {
+      alerts.push({
+        code: 'HOLD_NEAR_DEADLINE',
+        severity: 'critical',
+        message: `${nearDeadline.length} pedido(s) pago(s) estão retidos há mais de ${HOLD_NEAR_DEADLINE_HOURS} horas: faltam menos de 24 horas para o prazo de 3 dias do cliente.`,
+      });
+    }
+    const unknownPaymentTime = openHolds.filter((hold) => !holdPaidAt.get(hold.shopifyOrderId));
+    if (unknownPaymentTime.length > 0) {
+      alerts.push({
+        code: 'PAYMENT_TIME_UNKNOWN',
+        severity: 'critical',
+        message: `${unknownPaymentTime.length} pedido(s) pago(s) estão sem o instante real do pagamento (a Shopify não o informou ou só o pedido atualizado chegou). O prazo de 3 dias NÃO foi calculado por falta de dado: confira o horário do pagamento na Shopify e resolva agora (emissão excepcional com justificativa).`,
+      });
+    }
+    const integrationHolds = openHolds.filter((hold) => financialIssueCodes(hold.detail).includes('INTEGRATION_DISABLED'));
+    if (integrationHolds.length > 0) {
+      alerts.push({
+        code: 'INTEGRATION_HOLDS_OPEN',
+        severity: 'critical',
+        message: `${integrationHolds.length} pagamento(s) confirmado(s) chegaram com a integração dos dois vouchers DESLIGADA e aguardam. Nenhum voucher foi emitido. Ligue a integração e use "Retomar retenções" (mais antigas primeiro), ou emita com a emissão excepcional de um ADMIN.`,
       });
     }
     if (refundRows.length > 0) {
@@ -243,6 +291,7 @@ export class ValePassLotsService {
         reason: hold.reason,
         issues: financialIssueCodes(hold.detail),
         createdAt: hold.createdAt.toISOString(),
+        paymentConfirmedAt: holdPaidAt.get(hold.shopifyOrderId)?.toISOString() ?? null,
       })),
       refundReviews: refundRows.map((row) => ({
         id: row.id,

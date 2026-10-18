@@ -129,6 +129,9 @@ jobs:
       - name: Testar a fila de reembolsos em revisão do Valle Pass no ClosetAdmin (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-refund-reviews
 
+      - name: Testar a integração financeira do Valle Pass (chaves, pendências e regularização) no ClosetAdmin (navegador isolado)
+        run: pnpm --filter @valle/marketing run test:valle-pass-flow
+
       - name: Testar contador de novas reservas no menu
         run: pnpm --filter @valle/marketing run test:reservations-badge
 

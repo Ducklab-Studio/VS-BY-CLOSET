@@ -1,4 +1,6 @@
 import type { Prisma, ValePassOrder } from '@prisma/client';
+import type { ResolvedWebhookSignal } from './flow/payment-instant';
+import type { PaymentTimeDecision } from './flow/payment-time-policy';
 import { canReplaceValePassOrderStatus, compareFreshness, deriveValePassOrderStatus } from './vale-pass-order-status';
 
 /** Estado de um pedido com Valle Pass, já normalizado — webhook e Admin API
@@ -17,6 +19,8 @@ export interface ValePassOrderSnapshot {
   readonly customerName: string | null;
   readonly customerPhone: string | null;
   readonly customerEmail: string | null;
+  /** Reembolso por unidade ligado (ver `ShopifyPaymentState.keepPaidOnPartialRefund`). */
+  readonly keepPaidOnPartialRefund?: boolean;
 }
 
 export interface ValePassOrderEventInput {
@@ -169,6 +173,54 @@ export class ValePassOrderRegistry {
     };
     await this.log(tx, existing.id, 'DELETED_IN_SHOPIFY', detail);
     return [{ type: 'VALE_PASS_ORDER_DELETED_IN_SHOPIFY', detail }];
+  }
+
+  /**
+   * Grava os SINAIS do horário do pagamento vindos do webhook `orders/paid` e, se a política já confia neles, o horário CONFIÁVEL (ver flow/payment-time-policy.ts).
+   * O sinal (`payment_signal_at`) guarda o cabeçalho mais antigo; o horário confiável nunca anda para frente com uma reentrega (vale o mais antigo da MESMA fonte).
+   * Cada entrega registra a diferença entre o cabeçalho e o updated_at — é o que o ensaio usa para medir a tolerância.
+   */
+  async recordPaymentTime(
+    tx: Prisma.TransactionClient,
+    id: string,
+    input: { signal: ResolvedWebhookSignal; decision: PaymentTimeDecision },
+    source: string,
+  ): Promise<{ order: ValePassOrder; events: ValePassOrderEventInput[] }> {
+    const existing = await tx.valePassOrder.findUniqueOrThrow({ where: { id } });
+    const { signal, decision } = input;
+    const previous = (existing.paymentTimeEvidence as { webhook?: { deliveries?: number } } | null) ?? {};
+    const deltaSeconds = signal.triggered && signal.updated ? Math.round(Math.abs(signal.triggered.getTime() - signal.updated.getTime()) / 1000) : null;
+    const evidence = {
+      ...(existing.paymentTimeEvidence as Record<string, unknown> | null),
+      webhook: {
+        triggeredAt: signal.triggered?.toISOString() ?? null,
+        payloadUpdatedAt: signal.updated?.toISOString() ?? null,
+        deltaSeconds,
+        triggeredRejected: signal.triggeredRejected,
+        updatedRejected: signal.updatedRejected,
+        deliveries: (previous.webhook?.deliveries ?? 0) + 1,
+        recordedAt: new Date().toISOString(),
+      },
+    };
+    const data: Prisma.ValePassOrderUpdateInput = { paymentTimeEvidence: evidence as Prisma.InputJsonValue };
+    if (signal.triggered && (!existing.paymentSignalAt || existing.paymentSignalAt.getTime() > signal.triggered.getTime())) data.paymentSignalAt = signal.triggered;
+    let changed = false;
+    if (decision.trusted) {
+      const sameFamily = existing.paymentConfirmedSource === null || existing.paymentConfirmedSource === decision.source;
+      if (!existing.paymentConfirmedAt || (sameFamily && existing.paymentConfirmedAt.getTime() > decision.trusted.getTime())) {
+        data.paymentConfirmedAt = decision.trusted;
+        data.paymentConfirmedSource = decision.source;
+        changed = true;
+      }
+    }
+    const order = await tx.valePassOrder.update({ where: { id }, data });
+    const detail = { orderId: order.shopifyOrderId, source, deltaSeconds, decision: decision.reason, trusted: decision.trusted?.toISOString() ?? null, via: decision.source };
+    await this.log(tx, id, 'PAYMENT_TIME_SIGNAL', detail);
+    if (decision.trusted && changed) return { order, events: [{ type: 'VALE_PASS_PAYMENT_INSTANT_RECORDED', detail }] };
+    if (!decision.trusted && !order.paymentConfirmedAt) {
+      return { order, events: [{ type: 'VALE_PASS_PAYMENT_INSTANT_UNRELIABLE', detail: { ...detail, note: 'horário do pagamento NÃO confirmado: o prazo de 3 dias não é calculado e o pedido fica retido para um administrador' } }] };
+    }
+    return { order, events: [] };
   }
 
   /** Pagamento confirmado passou pela emissão de vales — uma vez só. O

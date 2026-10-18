@@ -28,6 +28,8 @@ const WRITES = [
   'issueValePassHoldAction',
   'resendValePassEmailAction',
   'replaceValePassBenefitsAction',
+  'resumeHeldPaymentsAction',
+  'regularizeValePassOrderAction',
 ];
 
 test('toda ação de escrita exige o módulo VALLE_PASS e o perfil ADMIN', () => {
@@ -42,6 +44,13 @@ test('a leitura da capacidade exige só o módulo (a equipe vê, não altera)', 
   const text = body('getValePassCapacityAction');
   assert.match(text, /requireAdminModule\(session, 'VALLE_PASS'\)/);
   assert.doesNotMatch(text, /requireAdminRole/);
+});
+
+test('o estado da integração financeira (chaves e pendências) exige só o módulo (a equipe vê, não altera)', () => {
+  const text = body('getValePassFlowStatusAction');
+  assert.match(text, /requireAdminModule\(session, 'VALLE_PASS'\)/);
+  assert.doesNotMatch(text, /requireAdminRole/);
+  assert.doesNotMatch(text, /process\.env/); // as chaves são lidas do servidor da API, nunca alteradas nem lidas aqui
 });
 
 test('a ação de lote só aceita abrir, encerrar e cancelar', () => {
