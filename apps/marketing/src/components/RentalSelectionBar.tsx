@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { X } from 'lucide-react';
 import { formatPrice } from '@/lib/shopify';
+import { productHref } from '@/lib/product-options';
 import { fromISO } from '@/lib/rental-rules';
 import { draftReturnDate, removePiece } from '@/lib/rental-draft';
 import { selectionTotal } from '@/lib/rental-price';
@@ -89,11 +90,16 @@ export function RentalSelectionBar({
             className="group flex items-center gap-2 rounded-full border border-ink/10 bg-cream/50 py-1.5 pl-4 pr-1.5 text-[0.8rem] shadow-sm transition hover:border-marsala/30 hover:bg-white"
           >
             <Link
-              href={`/pecas/${piece.handle}`}
+              href={productHref(piece.handle, piece.variantId)}
               className="font-medium text-ink/80 transition-colors hover:text-marsala focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 rounded-sm"
             >
               {piece.title}
             </Link>
+            {piece.optionLabel && (
+              <span className="text-ink/60" data-testid="piece-option">
+                · {piece.optionLabel}
+              </span>
+            )}
             <span className="tabular-nums text-ink/40 font-mono text-[0.75rem]">
               {piece.priceAmount !== null && piece.currencyCode
                 ? formatPrice(piece.priceAmount, piece.currencyCode, locale)
@@ -102,7 +108,7 @@ export function RentalSelectionBar({
             <button
               type="button"
               onClick={() => write(removePiece(draft, piece.variantId))}
-              aria-label={`Remover ${piece.title} da reserva`}
+              aria-label={`Remover ${piece.title}${piece.optionLabel ? ` (${piece.optionLabel})` : ''} da reserva`}
               className="ml-1 rounded-full p-1 text-ink/40 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
             >
               <X size={14} aria-hidden />
@@ -136,7 +142,7 @@ export function RentalSelectionBar({
             Continuar escolhendo
           </a>
           <Link
-            href={`/pecas/${last.handle}#rental-calendar`}
+            href={`${productHref(last.handle, last.variantId)}#rental-calendar`}
             className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-xl bg-marsala px-6 py-3 text-[0.7rem] font-bold uppercase tracking-[0.12em] text-cream transition-all hover:bg-marsala-glow hover:shadow-[0_0_20px_rgba(83,19,30,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala/40 focus-visible:ring-offset-2 active:scale-95"
           >
             Alugar agora

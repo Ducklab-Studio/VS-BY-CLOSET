@@ -23,6 +23,7 @@ import {
   type CartLine,
 } from '@/lib/cart';
 import { formatPrice } from '@/lib/shopify';
+import { optionLabel, productHref } from '@/lib/product-options';
 import { type SundayReturnOptionInfo } from '@/lib/checkout';
 import { returnOptionFromLines } from '@/lib/rental-selection';
 import { PAYMENT_WINDOW_MINUTES_LABEL } from '@/lib/payment-window';
@@ -393,7 +394,7 @@ export default function CarrinhoPage() {
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-start justify-between gap-3">
                     <Link
-                      href={`/pecas/${line.merchandise.product.handle}`}
+                      href={productHref(line.merchandise.product.handle, line.merchandise.id)}
                       className="font-heading text-xl leading-tight text-ink/90 transition-colors hover:text-marsala"
                     >
                       {line.merchandise.product.title}
@@ -404,6 +405,12 @@ export default function CarrinhoPage() {
                       </p>
                     </div>
                   </div>
+
+                  {optionLabel(line.merchandise.selectedOptions) && (
+                    <p className="text-[0.78rem] text-ink/65" data-testid="line-option">
+                      {optionLabel(line.merchandise.selectedOptions)}
+                    </p>
+                  )}
 
                   {line.merchandise.sku && (
                     <p className="font-mono text-[0.7rem] uppercase tracking-wider text-ink/40">

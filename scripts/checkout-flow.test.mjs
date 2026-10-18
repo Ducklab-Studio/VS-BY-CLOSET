@@ -422,7 +422,13 @@ test('1) a página da peça só renderiza ValePassPresentation (nunca RentalCale
     page,
     /isValePassProduct\(\{\s*productId:\s*product\.id,\s*variantId:\s*variant\?\.id\s*\}\)/,
   );
+  // Qualquer variante do Valle Pass tira a peça do caminho de aluguel...
+  assert.match(page, /product\.variants\.some\(\(candidate\)\s*=>\s*isValePassProduct\(\{\s*variantId:\s*candidate\.id\s*\}\)\)/);
+  // ...só peça de aluguel com variante passa pelo seletor/calendário, e o Valle Pass cai no ramo da apresentação.
+  assert.match(page, /const selectable = !!variant && !isValePass;/);
   assert.match(page, /isValePass\s*\?\s*\(\s*<ValePassPresentation/);
+  // A página nunca renderiza o calendário diretamente: só o seletor de variante o faz.
+  assert.doesNotMatch(page, /RentalCalendar/);
 });
 
 test('2) a apresentação do Valle Pass nunca chama HOLD, disponibilidade ou reserva', () => {
@@ -445,9 +451,12 @@ test('3) produto de aluguel comum continua mostrando o calendário', () => {
   );
 
   const page = read('apps/marketing/src/app/pecas/[handle]/page.tsx');
-  // o calendário agora vem pelo seletor de tamanho (com uma variante só, é o calendário de sempre)
-  assert.match(page, /\)\s*:\s*\(\s*<RentalVariantPicker/);
-  assert.match(read('apps/marketing/src/components/RentalVariantPicker.tsx'), /<RentalCalendar key=\{selected\.id\}/);
+  // o calendário vem pelo seletor de variante: nenhuma vem escolhida e o calendário recebe sempre a variante EXATA
+  assert.match(page, /enabled=\{selectable\}/);
+  assert.match(page, /<VariantRental\s*\/>/);
+  const selection = read('apps/marketing/src/components/ProductVariantSelection.tsx');
+  assert.match(selection, /<RentalCalendar[\s\S]*variant=\{variant\}/);
+  assert.doesNotMatch(selection, /ValePassPresentation/);
 });
 
 test('4) o checkout do Valle Pass continua funcionando — link direto pro carrinho oficial da Shopify', () => {

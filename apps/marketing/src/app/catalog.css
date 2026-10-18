@@ -530,3 +530,80 @@ button.gallery-main {
     scroll-behavior: auto;
   }
 }
+
+/* Seletor de opções da peça (tamanho etc.) — ProductVariantSelection */
+.variant-picker {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 24px;
+}
+.variant-legend {
+  margin: 0 0 8px;
+  color: #65594f;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.variant-chosen {
+  color: #53131e;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.variant-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.variant-option {
+  min-width: 48px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #53131e33;
+  border-radius: 9999px;
+  background: #fffcf6;
+  color: #53131e;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+.variant-option:hover:not([aria-disabled='true']):not([data-state='selected']) {
+  border-color: #53131e;
+  background: #f6f1e9;
+}
+.variant-option[data-state='selected'] {
+  border-color: #53131e;
+  background: #53131e;
+  color: #fffcf6;
+}
+.variant-option:focus-visible {
+  outline: 2px solid #53131e;
+  outline-offset: 2px;
+}
+.variant-option[data-state='soldout'] {
+  border-style: dashed;
+  background: #f1ebe3;
+  color: #6f6262;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+.variant-option[aria-disabled='true']:not([data-state='soldout']) {
+  opacity: 0.6;
+  cursor: progress;
+}
+.variant-hint {
+  min-height: 1em;
+  margin: 0;
+  color: #65594f;
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .variant-option {
+    transition: none;
+  }
+}
