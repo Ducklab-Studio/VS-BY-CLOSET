@@ -58,6 +58,8 @@ const CRITICAL_ACTIONS = new Set([
   'VALE_PASS_EMAIL_RESENT',
   // Decisão administrativa sobre um reembolso parcial/total que o sistema não resolveu sozinho (voucher já usado, valor sem unidade...).
   'VALE_PASS_REFUND_REVIEW_RESOLVED',
+  // Retomada (ADMIN) das retenções feitas com a integração desligada.
+  'VALE_PASS_HOLDS_RESUMED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

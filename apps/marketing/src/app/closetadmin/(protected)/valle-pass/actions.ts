@@ -18,6 +18,8 @@ import {
   listValePassCampaigns,
   replaceValePassBenefits,
   dismissValePassHold,
+  resumeValePassHeldPayments,
+  type ValePassResumeReport,
   resolveValePassRefundReview,
   type ValePassRefundReviewAction,
   getValePassHoldPreview,
@@ -384,5 +386,20 @@ export async function resolveValePassRefundReviewAction(id: string, action: Vale
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a decisão.' };
+  }
+}
+
+/** Retomada das retenções feitas com a integração desligada (só ADMIN, justificativa ≥ 10). A API exige a chave ligada e processa as mais antigas primeiro. */
+export async function resumeHeldPaymentsAction(note: string): Promise<{ error: string | null; report?: ValePassResumeReport }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const report = await resumeValePassHeldPayments({ note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null, report };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível retomar as retenções.' };
   }
 }

@@ -94,6 +94,7 @@ async function clean() {
     const vouchers = await tx.valePass.findMany({ where: { campaignId }, select: { id: true } });
     const applications = await tx.valePassRefundApplication.findMany({ where: { shopifyOrderId: { in: orderIds } }, select: { id: true } });
     await tx.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: [campaignId, ...applications.map((a) => a.id), ...vouchers.map((v) => v.id)].filter(Boolean) } }, { adminUserId: { in: userIds } }] } });
+    await tx.valePassIssuanceHold.deleteMany({ where: { campaignId } });
     await tx.valePassRefundApplication.deleteMany({ where: { shopifyOrderId: { in: orderIds } } });
     await tx.valePassEvent.deleteMany({ where: { valePassId: { in: vouchers.map((v) => v.id) } } });
     await tx.valePass.deleteMany({ where: { campaignId } });
@@ -242,9 +243,29 @@ try {
   assert.ok(!/@|\+55|Cliente/.test(shortfallText), 'dados pessoais na lista de pendências');
   pass('9) pendências após reembolso parcial: pagas, emitidas, devolvidas antes de emitir e elegíveis, sem dados pessoais e com aviso de emissão por ADMIN');
 
+  // 10) PR F: pagamento retido porque a integração dos dois vouchers estava DESLIGADA — alerta crítico, motivo em português e "Retomar retenções".
+  // O servidor deste teste roda com a chave desligada (padrão): retomar é recusado com explicação e NADA é emitido.
+  const heldOrderId = `${prefix}-9001`;
+  orderIds.push(heldOrderId);
+  await db.valePassOrder.create({ data: { shopifyOrderId: heldOrderId, shopifyOrderGid: `gid://shopify/Order/${heldOrderId}`, shopifyOrderName: '#9001', status: 'CONFIRMED', financialStatus: 'paid', quantity: 2, customerName: 'Cliente', customerEmail: 'c@exemplo.invalid', customerPhone: '+5500000000000', lastSyncSource: 'teste', orderCreatedAt: new Date(), statusChangedAt: new Date(), vouchersProcessedAt: new Date() } });
+  const heldHold = await db.valePassIssuanceHold.create({ data: { shopifyOrderId: heldOrderId, campaignId, units: 2, reason: 'FINANCIAL_MISMATCH', status: 'OPEN', openFlag: true, detail: { issues: [{ code: 'INTEGRATION_DISABLED' }] } } });
+  await page.reload();
+  await expand(page);
+  await page.getByText(/integração dos dois vouchers DESLIGADA/).waitFor();
+  await page.getByText(/o pagamento chegou com a integração dos dois vouchers desligada/).first().waitFor();
+  const resume = page.getByRole('group', { name: 'Retomada das retenções' });
+  await resume.getByRole('button', { name: 'Retomar retenções' }).click();
+  await resume.getByPlaceholder(/Justificativa/).fill('Tentativa de retomada com a integração ainda desligada');
+  await resume.getByRole('button', { name: 'Retomar agora' }).click();
+  await resume.getByRole('alert').waitFor();
+  assert.match(await resume.getByRole('alert').innerText(), /desligada|ligue/i);
+  assert.equal(await db.valePass.count({ where: { shopifyOrderId: heldOrderId } }), 0);
+  assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: heldHold.id } })).status, 'OPEN');
+  pass('11) pagamento retido com a integração desligada: alerta crítico, motivo claro e "Retomar retenções" recusado com explicação; nenhum voucher e a retenção segue aberta');
+
   assert.deepEqual(externalRequests, [], 'houve requisição externa');
   assert.deepEqual(errors, []);
-  pass('10) nenhuma requisição externa e nenhum erro de console/página');
+  pass('12) nenhuma requisição externa e nenhum erro de console/página');
   console.log(`\n${results.length} verificações do navegador passaram.`);
 } catch (error) {
   console.error('FALHOU:', error.message);

@@ -25,12 +25,15 @@ import { ValePassFinancialGuard } from './financial/financial-guard.service';
 import { ValePassRefundService } from './refunds/refund.service';
 import { ValePassRefundReviewsController } from './refunds/refund-reviews.controller';
 import { ValePassRegularizationService } from './refunds/regularization.service';
+import { ValePassPaymentFlowService } from './flow/payment-flow.service';
+import { ValePassFlowController } from './flow/flow.controller';
+import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
 
 /** Sem chave configurada o provedor nunca é chamado (o worker bloqueia antes); se for, devolve resultado desconhecido em vez de fingir sucesso. */
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController],
+  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -55,6 +58,8 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassFinancialGuard,
     ValePassRefundService,
     ValePassRegularizationService,
+    { provide: FLOW_FLAGS_TOKEN, useFactory: () => envFlowFlags() },
+    ValePassPaymentFlowService,
   ],
   // `ValePassWebhookService` é consumido pelo WebhooksModule (produto
   // totalmente separado do fluxo de aluguel, mas o gancho de emissão

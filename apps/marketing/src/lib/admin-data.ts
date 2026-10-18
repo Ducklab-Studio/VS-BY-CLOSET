@@ -643,6 +643,18 @@ export interface ValePassHold {
   readonly resolutionNote: string | null;
 }
 
+export interface ValePassResumeReport {
+  readonly considered: number;
+  readonly issued: number;
+  readonly reclassified: number;
+  readonly skipped: readonly { readonly orderName: string | null; readonly reason: string }[];
+}
+
+/** Retoma (das mais antigas para as mais novas) as retenções feitas com a integração dos dois vouchers desligada. Só ADMIN. */
+export function resumeValePassHeldPayments(input: { note: string; limit?: number }, adminUserId: string): Promise<ValePassResumeReport> {
+  return adminPost('/admin/vale-pass/flow/resume', { ...input, adminUserId });
+}
+
 /** Descartar uma retenção cujo pedido deixou de estar pago. */
 export function dismissValePassHold(holdId: string, note: string, adminUserId: string): Promise<ValePassHold> {
   return adminPost(`/admin/vale-pass/holds/${pathSegment(holdId)}/dismiss`, { note, adminUserId });

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { ValePassCapacityRefundReview, ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
-import { resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import { resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
 /**
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
@@ -48,6 +48,9 @@ const ISSUE_LABELS: Record<string, string> = {
   TOTAL_UNDEFINED: 'total indefinido',
   TOTAL_MISMATCH: 'total pago diferente do esperado',
   REFUND_PENDING_REVIEW: 'reembolso aguardando decisão de um administrador',
+  INTEGRATION_DISABLED: 'o pagamento chegou com a integração dos dois vouchers desligada',
+  ORDER_NOT_REGISTERED: 'pedido ainda não registrado',
+  MULTIPLE_CAMPAIGNS: 'mais de uma campanha no mesmo pedido',
 };
 const COMPANY_LABELS = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' } as const;
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -57,6 +60,7 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
   return (
     <section aria-label="Pagamentos retidos">
       <h4 className="mb-2 text-xs font-semibold text-red-500">Pagamentos confirmados aguardando resolução ({holds.length})</h4>
+      {canManage && holds.some((hold) => hold.issues.includes('INTEGRATION_DISABLED')) ? <ResumeHeldPayments onChanged={onChanged} /> : null}
       <ul className="space-y-2">
         {holds.map((hold) => (
           <HoldRow key={hold.id} hold={hold} canManage={canManage} onChanged={onChanged} />
@@ -373,5 +377,43 @@ function RefundReviewRow({ review, canManage, onChanged }: { review: ValePassCap
         </div>
       ) : null}
     </li>
+  );
+}
+
+/** Retomada em lote das retenções feitas com a integração desligada. Só funciona com a integração ligada no servidor; a API recusa com explicação se não estiver. */
+function ResumeHeldPayments({ onChanged }: { onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function run() {
+    setPending(true);
+    setError(null);
+    const result = await resumeHeldPaymentsAction(note);
+    setPending(false);
+    if (result.error || !result.report) return setError(result.error ?? 'Não foi possível retomar.');
+    const { issued, reclassified, skipped } = result.report;
+    setMessage(`Retomada concluída: ${issued} emitido(s), ${reclassified} ainda retido(s) com os motivos reais, ${skipped.length} pulado(s).`);
+    setNote('');
+    onChanged();
+  }
+
+  return (
+    <div role="group" aria-label="Retomada das retenções" className="mb-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-ink dark:text-dark-text">
+      <p>Há pagamentos retidos porque a integração dos dois vouchers estava desligada. Depois de LIGAR a integração, retome-os aqui (mais antigos primeiro, em lotes).</p>
+      <button type="button" className={`${secondaryButton} mt-2`} onClick={() => setOpen((value) => !value)}>
+        {open ? 'Fechar' : 'Retomar retenções'}
+      </button>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          <textarea className={inputClass} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Justificativa (mínimo de 10 caracteres)" />
+          <button type="button" className={secondaryButton} disabled={pending} onClick={run}>Retomar agora</button>
+          {error ? <p role="alert" className="text-red-500">{error}</p> : null}
+          {message ? <p role="status">{message}</p> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

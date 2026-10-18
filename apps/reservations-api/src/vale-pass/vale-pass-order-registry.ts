@@ -17,6 +17,8 @@ export interface ValePassOrderSnapshot {
   readonly customerName: string | null;
   readonly customerPhone: string | null;
   readonly customerEmail: string | null;
+  /** Reembolso por unidade ligado (ver `ShopifyPaymentState.keepPaidOnPartialRefund`). */
+  readonly keepPaidOnPartialRefund?: boolean;
 }
 
 export interface ValePassOrderEventInput {

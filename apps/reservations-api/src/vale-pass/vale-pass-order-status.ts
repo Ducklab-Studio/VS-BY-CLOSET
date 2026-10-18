@@ -57,6 +57,8 @@ export interface ShopifyPaymentState {
   readonly financialStatus: string | null | undefined;
   readonly cancelledAt: string | null | undefined;
   readonly cancelReason: string | null | undefined;
+  /** Reembolso por unidade ligado: `partially_refunded` NÃO tira o pedido de CONFIRMED (as unidades que sobraram continuam pagas). */
+  readonly keepPaidOnPartialRefund?: boolean;
 }
 
 /**
@@ -72,6 +74,7 @@ export function deriveValePassOrderStatus(state: ShopifyPaymentState): ValePassO
     if (state.cancelReason?.trim().toLowerCase() === 'declined' || financial === 'voided') return 'DECLINED';
     return 'CANCELLED';
   }
+  if (financial === 'partially_refunded' && state.keepPaidOnPartialRefund) return 'CONFIRMED';
   if (financial === 'refunded' || financial === 'partially_refunded') return 'REFUNDED';
   if (financial === 'expired') return 'EXPIRED';
   if (financial === 'voided') return 'DECLINED';

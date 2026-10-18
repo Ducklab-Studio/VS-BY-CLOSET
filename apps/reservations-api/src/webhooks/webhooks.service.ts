@@ -706,7 +706,7 @@ export class WebhooksService {
 
     // Valle Pass — independente do fluxo de reserva abaixo. Registra o
     // reembolso do pedido e cancela os vales ATIVOS dele.
-    const valePassEvents = await this.valePass.handleOrderCancelledOrRefunded(tx, orderId, 'refunds/create');
+    const valePassEvents = await this.valePass.handleRefund(tx, refund);
     events.push(...valePassEvents);
     const valePassStatus = valePassEvents.length > 0 ? ('processed' as const) : undefined;
 
