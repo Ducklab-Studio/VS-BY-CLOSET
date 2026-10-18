@@ -51,6 +51,8 @@ export interface CartLine {
     id: string;
     sku: string | null;
     title: string;
+    /** Opções da variante (ex.: Tamanho = M), para mostrar a escolha no carrinho. Ausente em respostas antigas. */
+    selectedOptions?: { name: string; value: string }[];
     availableForSale: boolean;
     /** Quantidade vendável reportada diretamente pela Shopify. */
     quantityAvailable: number | null;
@@ -97,6 +99,7 @@ const CART_FIELDS = `
           id
           sku
           title
+          selectedOptions { name value }
           availableForSale
           quantityAvailable
           price { amount currencyCode }

@@ -3,7 +3,7 @@ import { OFFICIAL_WHATSAPP } from '@/lib/contact';
 import { ProductGallery } from '@/components/ProductGallery';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { RentalVariantPicker } from '@/components/RentalVariantPicker';
+import { ProductVariantProvider, VariantPicker, VariantPrice, VariantRental } from '@/components/ProductVariantSelection';
 import { ValePassPresentation } from '@/components/ValePassPresentation';
 import {
   formatPrice,
@@ -14,7 +14,8 @@ import {
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { isValePassProduct } from '@/lib/vale-pass-product';
 import { sanitizeProductDescription } from '@/lib/product-description';
-import { needsVariantPicker } from '@/lib/variant-selection';
+import type { ReactNode } from 'react';
+import type { StorefrontVariant } from '@/lib/shopify';
 
 /**
  * Página da peça — onde o cliente escolhe a data e aluga.
@@ -71,6 +72,30 @@ export async function generateMetadata({
   }
 }
 
+/** Só a peça de aluguel com variante recebe o contexto da escolha; Valle Pass e peça sem variante renderizam como sempre. */
+function VariantScope({
+  enabled,
+  variants,
+  productTitle,
+  productHandle,
+  whatsapp,
+  children,
+}: {
+  enabled: boolean;
+  variants: StorefrontVariant[];
+  productTitle: string;
+  productHandle: string;
+  whatsapp?: string;
+  children: ReactNode;
+}) {
+  if (!enabled) return <>{children}</>;
+  return (
+    <ProductVariantProvider key={productHandle} variants={variants} productTitle={productTitle} productHandle={productHandle} whatsapp={whatsapp}>
+      {children}
+    </ProductVariantProvider>
+  );
+}
+
 export default async function PecaPage({ params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
 
@@ -91,11 +116,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     : getDemoProductDetail(handle);
   if (!product) notFound();
 
-  // Cada variante (tamanho) tem as próprias peças físicas, ligadas pelo ID da
-  // variante. Com mais de uma, o seletor (RentalVariantPicker) escolhe a variante
-  // e mostra o preço dela; com uma só, nada muda na tela.
+  // Cada variante (tamanho etc.) tem as próprias peças físicas, ligadas pelo ID da
+  // variante. Com mais de uma, quem escolhe é o cliente (ProductVariantSelection),
+  // com as opções que a própria Shopify cadastrou; nenhuma vem escolhida e o
+  // calendário só aparece com a variante exata. Com uma só, nada muda na tela.
   const variant = product.variants[0];
-  const multipleVariants = needsVariantPicker(product.variants);
   const gallery =
     product.images.length > 0
       ? product.images
@@ -113,7 +138,11 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
   // Valle Pass é vale-presente/crédito de compra — produto Shopify
   // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
   // disponibilidade, HOLD, reserva). Ver lib/vale-pass-product.ts.
-  const isValePass = isValePassProduct({ productId: product.id, variantId: variant?.id });
+  const isValePass =
+    isValePassProduct({ productId: product.id, variantId: variant?.id }) ||
+    product.variants.some((candidate) => isValePassProduct({ variantId: candidate.id }));
+  // Só peça de aluguel com variante passa pelo seletor; Valle Pass e peça sem variante seguem o caminho de sempre.
+  const selectable = !!variant && !isValePass;
 
   return (
     <div className="max-w-[1360px] mx-auto px-6 py-12 lg:px-10 lg:py-16">
@@ -158,15 +187,29 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             {product.title}
           </h1>
 
-          {variant && !multipleVariants && (
-            <div className="flex items-end gap-3 mb-6">
-              <p className="text-3xl font-mono text-marsala font-medium tabular-nums leading-none">
-                {formatPrice(variant.price.amount, variant.price.currencyCode)}
-              </p>
-              <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
-                O aluguel
-              </span>
-            </div>
+          <VariantScope
+            enabled={selectable}
+            variants={product.variants}
+            productTitle={product.title}
+            productHandle={product.handle}
+            whatsapp={OFFICIAL_WHATSAPP}
+          >
+          {selectable ? (
+            <>
+              <VariantPrice />
+              <VariantPicker />
+            </>
+          ) : (
+            variant && (
+              <div className="flex items-end gap-3 mb-6">
+                <p className="text-3xl font-mono text-marsala font-medium tabular-nums leading-none">
+                  {formatPrice(variant.price.amount, variant.price.currencyCode)}
+                </p>
+                <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
+                  O aluguel
+                </span>
+              </div>
+            )
           )}
 
           {descriptionHtml && (
@@ -192,14 +235,10 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
             ) : isValePass ? (
               <ValePassPresentation variant={variant} productTitle={product.title} />
             ) : (
-              <RentalVariantPicker
-                variants={product.variants}
-                productTitle={product.title}
-                productHandle={product.handle}
-                whatsapp={OFFICIAL_WHATSAPP}
-              />
+              <VariantRental />
             )}
           </div>
+          </VariantScope>
 
           {!isValePass && (
             <p className="mt-8 flex items-start gap-3 rounded-xl bg-ink/5 p-4 text-[0.75rem] leading-relaxed text-ink/60">

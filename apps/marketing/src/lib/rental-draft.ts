@@ -26,6 +26,8 @@ export interface DraftPiece {
   /** Preço da vitrine (texto decimal da Shopify, "0.0" é válido). `null` = a confirmar no carrinho. */
   readonly priceAmount: string | null;
   readonly currencyCode: string | null;
+  /** Escolha da peça como a Shopify cadastrou ("Tamanho: M"); só para mostrar. Não afeta preço, datas nem HOLD. */
+  readonly optionLabel?: string | null;
 }
 
 export interface RentalDraft {
@@ -56,6 +58,7 @@ const isPiece = (value: unknown): value is DraftPiece => {
 const withPrice = (piece: DraftPiece): DraftPiece => {
   const amount = typeof piece.priceAmount === 'string' && amountToCents(piece.priceAmount) !== null ? piece.priceAmount.trim() : null;
   const currencyCode = isCurrencyCode(piece.currencyCode) ? piece.currencyCode : null;
+  const label = typeof piece.optionLabel === 'string' ? piece.optionLabel.trim() : '';
   return {
     variantId: piece.variantId,
     sku: piece.sku,
@@ -63,6 +66,7 @@ const withPrice = (piece: DraftPiece): DraftPiece => {
     handle: piece.handle,
     priceAmount: amount !== null && currencyCode !== null ? amount : null,
     currencyCode,
+    ...(label !== '' && label.length <= 200 ? { optionLabel: label } : {}),
   };
 };
 

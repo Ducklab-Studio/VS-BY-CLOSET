@@ -326,6 +326,12 @@ export interface StorefrontVariant {
   title: string;
   availableForSale: boolean;
   price: { amount: string; currencyCode: string };
+  /**
+   * Opções desta variante como a Shopify cadastrou (ex.: Tamanho = M). É daqui
+   * que vêm os seletores da página da peça (lib/product-options.ts) — nunca de
+   * uma lista no código. Ausente em dados antigos/demonstração.
+   */
+  selectedOptions?: { name: string; value: string }[];
 }
 
 export interface StorefrontProductDetail extends Omit<StorefrontProduct, 'images' | 'variants'> {
@@ -341,13 +347,14 @@ export async function getProductDetail(handle: string): Promise<StorefrontProduc
         ${PRODUCT_FIELDS}
         descriptionHtml
         images(first: 8) { nodes { url altText width height } }
-        variants(first: 20) {
+        variants(first: 100) {
           nodes {
             id
             sku
             title
             availableForSale
             price { amount currencyCode }
+            selectedOptions { name value }
           }
         }
       }
