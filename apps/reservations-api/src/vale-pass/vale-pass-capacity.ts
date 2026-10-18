@@ -215,6 +215,9 @@ export function awaitingProcessingCount(orders: readonly PaidOrderRow[], now: Da
 
 type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
+/** Unidades pagas e NÃO emitidas já descontadas por reembolso (trilha do PR G; sem linhas = 0). Conta como "emitida" para não virar falsa pendência. */
+export const REFUND_ABSORBED_UNITS = Prisma.sql`coalesce((SELECT sum(coalesce((r.detail->>'unissuedAbsorbed')::int, 0)) FROM vale_pass_refund_applications r WHERE r.shopify_order_id = o.shopify_order_id), 0)::int`;
+
 const MAX_PENDING_ROWS = 5_000;
 
 /** Pedidos pagos com menos unidades emitidas do que o comprado (qualquer campanha). `excludeOrderId` tira UM pedido da conta. */
@@ -223,14 +226,14 @@ export async function loadPaidOrderRows(client: Reader, excludeOrderId: string |
     { orderId: string; orderName: string | null; quantity: number; issuedUnits: number; campaignIds: string[]; processed: boolean; statusChangedAt: Date }[]
   >`
     SELECT o.shopify_order_id AS "orderId", o.shopify_order_name AS "orderName", o.quantity,
-           count(DISTINCT ${PASS_UNIT_KEY})::int AS "issuedUnits",
+           (count(DISTINCT ${PASS_UNIT_KEY}) + ${REFUND_ABSORBED_UNITS})::int AS "issuedUnits",
            coalesce(array_agg(DISTINCT v.campaign_id::text) FILTER (WHERE v.id IS NOT NULL), ARRAY[]::text[]) AS "campaignIds",
            (o.vouchers_processed_at IS NOT NULL) AS processed, o.status_changed_at AS "statusChangedAt"
     FROM vale_pass_orders o
     LEFT JOIN vale_passes v ON v.shopify_order_id = o.shopify_order_id
     WHERE o.status = 'CONFIRMED' AND o.deleted_in_shopify_at IS NULL AND (${excludeOrderId}::text IS NULL OR o.shopify_order_id <> ${excludeOrderId})
     GROUP BY o.id
-    HAVING count(DISTINCT ${PASS_UNIT_KEY}) < o.quantity
+    HAVING count(DISTINCT ${PASS_UNIT_KEY}) + ${REFUND_ABSORBED_UNITS} < o.quantity
     ORDER BY o.order_created_at NULLS LAST, o.id
     LIMIT ${MAX_PENDING_ROWS}`;
   return rows;

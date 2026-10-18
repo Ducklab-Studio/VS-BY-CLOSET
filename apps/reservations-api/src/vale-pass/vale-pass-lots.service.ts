@@ -27,6 +27,7 @@ export type CapacityAlertCode =
   | 'PAID_UNITS_COUNTED_AS_SOLD'
   | 'ISSUANCE_HOLDS_OPEN'
   | 'ISSUANCE_HOLD_STALE'
+  | 'REFUND_REVIEW_OPEN'
   | 'OPEN_LOT_SOLD_OUT';
 
 /** Retenção aberta há mais que isso pede ação imediata: o cliente já pagou e o prazo de 3 dias para os códigos corre desde o pagamento. */
@@ -59,6 +60,16 @@ export interface CapacityHold {
 }
 
 /** Benefício configurado na campanha (resumo para o painel). */
+/** Reembolso que o sistema não resolveu sozinho (voucher já usado, valor sem unidade, quantidades que não fecham). Sem dados pessoais. */
+export interface CapacityRefundReview {
+  readonly id: string;
+  readonly shopifyOrderName: string | null;
+  readonly refundedUnits: number;
+  readonly unitsNeedingReview: number;
+  readonly reasons: readonly string[];
+  readonly createdAt: string;
+}
+
 export interface CapacityBenefit {
   readonly code: string;
   readonly kind: 'VOUCHER' | 'DISCOUNT';
@@ -92,6 +103,8 @@ export interface CampaignCapacity {
   readonly paidOrdersWithoutVoucher: readonly PaidOrderShortfall[];
   /** Retenções abertas: pagamentos confirmados aguardando resolução de um ADMIN. */
   readonly holds: readonly CapacityHold[];
+  /** Reembolsos aguardando decisão de um ADMIN. */
+  readonly refundReviews: readonly CapacityRefundReview[];
   readonly benefits: readonly CapacityBenefit[];
   readonly alerts: readonly CapacityAlert[];
 }
@@ -123,6 +136,11 @@ export class ValePassLotsService {
       ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: openHolds.map((hold) => hold.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
       : [];
     const holdOrderNames = new Map(holdOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
+    const refundRows = await this.prisma.valePassRefundApplication.findMany({ where: { status: 'NEEDS_REVIEW', campaignId }, orderBy: { createdAt: 'asc' }, take: 50 });
+    const refundOrders = refundRows.length
+      ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: refundRows.map((row) => row.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
+      : [];
+    const refundOrderNames = new Map(refundOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
     const benefitRows = await this.prisma.valePassCampaignBenefit.findMany({ where: { campaignId }, orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] });
     const issuedByBenefit = await this.prisma.$queryRaw<{ benefitId: string; n: number }[]>`
       SELECT benefit_id::text AS "benefitId", count(*)::int AS n FROM vale_passes WHERE campaign_id = ${campaignId}::uuid AND benefit_id IS NOT NULL GROUP BY benefit_id`;
@@ -162,6 +180,13 @@ export class ValePassLotsService {
         code: 'ISSUANCE_HOLD_STALE',
         severity: 'critical',
         message: `${staleHolds.length} pedido(s) pago(s) estão retidos há mais de ${STALE_HOLD_HOURS} horas. O prazo de 3 dias para o cliente receber os códigos corre desde o pagamento: resolva agora (emitir com justificativa ou reembolsar na Shopify e descartar).`,
+      });
+    }
+    if (refundRows.length > 0) {
+      alerts.push({
+        code: 'REFUND_REVIEW_OPEN',
+        severity: 'critical',
+        message: `${refundRows.length} reembolso(s) aguardam decisão de um administrador (voucher já usado, valor sem unidade ou quantidades que não fecham). Nada foi alterado além do que era seguro.`,
       });
     }
     if (totals.pending > 0) {
@@ -218,6 +243,14 @@ export class ValePassLotsService {
         reason: hold.reason,
         issues: financialIssueCodes(hold.detail),
         createdAt: hold.createdAt.toISOString(),
+      })),
+      refundReviews: refundRows.map((row) => ({
+        id: row.id,
+        shopifyOrderName: refundOrderNames.get(row.shopifyOrderId) ?? null,
+        refundedUnits: row.refundedUnits,
+        unitsNeedingReview: Number((row.detail as { unitsNeedingReview?: unknown } | null)?.unitsNeedingReview ?? 0),
+        reasons: Array.isArray(row.reviewReasons) ? (row.reviewReasons as unknown[]).filter((reason): reason is string => typeof reason === 'string') : [],
+        createdAt: row.createdAt.toISOString(),
       })),
       benefits: benefitRows.map((benefit) => ({
         code: benefit.code,

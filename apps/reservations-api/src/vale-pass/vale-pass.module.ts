@@ -21,12 +21,16 @@ import { ValePassEmailOutboxService } from './email/email-outbox.service';
 import { ValePassEmailScheduler, ValePassEmailWorkerService } from './email/email-worker.service';
 import { ValePassEmailController } from './email/email.controller';
 import { ResendWebhookController } from './email/resend-webhook.controller';
+import { ValePassFinancialGuard } from './financial/financial-guard.service';
+import { ValePassRefundService } from './refunds/refund.service';
+import { ValePassRefundReviewsController } from './refunds/refund-reviews.controller';
+import { ValePassRegularizationService } from './refunds/regularization.service';
 
 /** Sem chave configurada o provedor nunca é chamado (o worker bloqueia antes); se for, devolve resultado desconhecido em vez de fingir sucesso. */
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController],
+  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -48,6 +52,9 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassEmailOutboxService,
     ValePassEmailWorkerService,
     ValePassEmailScheduler,
+    ValePassFinancialGuard,
+    ValePassRefundService,
+    ValePassRegularizationService,
   ],
   // `ValePassWebhookService` é consumido pelo WebhooksModule (produto
   // totalmente separado do fluxo de aluguel, mas o gancho de emissão

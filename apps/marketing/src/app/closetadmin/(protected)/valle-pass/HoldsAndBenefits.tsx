@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import type { ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
-import { issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import type { ValePassCapacityRefundReview, ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import { resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
 /**
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
@@ -47,6 +47,7 @@ const ISSUE_LABELS: Record<string, string> = {
   EXTRA_CHARGES: 'frete ou cobrança extra',
   TOTAL_UNDEFINED: 'total indefinido',
   TOTAL_MISMATCH: 'total pago diferente do esperado',
+  REFUND_PENDING_REVIEW: 'reembolso aguardando decisão de um administrador',
 };
 const COMPANY_LABELS = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' } as const;
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -287,5 +288,90 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
       ) : null}
       <p className={hintClass}>Empresa e valor de um voucher não mudam depois da primeira emissão. Cada empresa tem saldo próprio: um voucher nunca vale na outra empresa.</p>
     </section>
+  );
+}
+
+const REFUND_REASON_LABELS: Record<string, string> = {
+  USED_VOUCHERS: 'voucher já usado em unidade reembolsada',
+  UNIT_CONFIRMATION_REQUIRED: 'a Shopify não diz qual unidade foi devolvida: confirme a proposta (os vouchers propostos estão bloqueados para resgate)',
+  AMOUNT_MISMATCH: 'valor devolvido não fecha com o preço',
+  AMOUNT_ONLY_REFUND: 'dinheiro devolvido sem unidade',
+  QUANTITY_EXCEEDS_UNITS: 'mais unidades devolvidas que as existentes',
+  PAID_UNITS_EXCEEDED: 'devoluções acima das unidades pagas',
+  PRICE_UNKNOWN: 'variante sem preço configurado',
+  REFUND_UNDEFINED: 'dados do reembolso incompletos',
+  TRANSACTION_UNDEFINED: 'valor da transação ilegível',
+};
+
+/** Reembolsos em revisão: a API já cancelou o que era seguro; aqui o ADMIN decide o resto. Voucher usado nunca é alterado. */
+export function RefundReviewsPanel({ reviews, canManage, onChanged }: { reviews: readonly ValePassCapacityRefundReview[]; canManage: boolean; onChanged: () => void }) {
+  return (
+    <section aria-label="Reembolsos em revisão">
+      <h4 className="mb-2 text-xs font-semibold text-red-500">Reembolsos aguardando decisão ({reviews.length})</h4>
+      <ul className="space-y-2">
+        {reviews.map((review) => (
+          <RefundReviewRow key={review.id} review={review} canManage={canManage} onChanged={onChanged} />
+        ))}
+      </ul>
+      <p className={hintClass}>
+        &quot;Manter&quot; não altera nenhum voucher. &quot;Cancelar ativos&quot; cancela só os vouchers ainda ativos das unidades propostas; um voucher já usado nunca é desfeito.
+      </p>
+    </section>
+  );
+}
+
+function RefundReviewRow({ review, canManage, onChanged }: { review: ValePassCapacityRefundReview; canManage: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function decide(action: 'KEEP_VOUCHERS' | 'CANCEL_ACTIVE_VOUCHERS') {
+    setPending(true);
+    setError(null);
+    const result = await resolveValePassRefundReviewAction(review.id, action, note);
+    setPending(false);
+    if (result.error) return setError(result.error);
+    setNote('');
+    if (result.notice) return setNotice(result.notice); // fica na tela até a pessoa confirmar que leu
+    setOpen(false);
+    onChanged();
+  }
+
+  if (notice) {
+    return (
+      <li role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-ink dark:text-dark-text">
+        <p className="font-semibold">{review.shopifyOrderName ?? 'Pedido'}: atenção operacional</p>
+        <p className="mt-1">{notice}</p>
+        <button type="button" className={`${secondaryButton} mt-2`} onClick={onChanged}>Entendi</button>
+      </li>
+    );
+  }
+
+  return (
+    <li className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-xs text-ink dark:text-dark-text">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          <strong>{review.shopifyOrderName ?? 'Pedido'}</strong> · {review.refundedUnits} unidade(s) devolvida(s), {review.unitsNeedingReview} sem tratamento automático · {formatDateTime(review.createdAt)}
+        </span>
+        {canManage ? (
+          <button type="button" className={secondaryButton} onClick={() => setOpen((value) => !value)}>
+            {open ? 'Fechar' : 'Decidir'}
+          </button>
+        ) : null}
+      </div>
+      <p className={hintClass}>{review.reasons.map((reason) => REFUND_REASON_LABELS[reason] ?? reason).join('; ')}</p>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          <textarea className={inputClass} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Justificativa (mínimo de 10 caracteres)" />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={secondaryButton} disabled={pending} onClick={() => decide('KEEP_VOUCHERS')}>Manter vouchers</button>
+            <button type="button" className={secondaryButton} disabled={pending} onClick={() => decide('CANCEL_ACTIVE_VOUCHERS')}>Cancelar ativos</button>
+          </div>
+          {error ? <p role="alert" className="text-red-500">{error}</p> : null}
+        </div>
+      ) : null}
+    </li>
   );
 }

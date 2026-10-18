@@ -814,6 +814,6 @@ localDescribe('Valle Pass 2027 — isolamento: a emissão ativa do webhook NÃO 
       }
     };
     walk(root);
-    expect(offenders.sort()).toEqual(['vale-pass/vale-pass-holds.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts'].sort().filter((file) => file !== 'vale-pass/vale-pass-issuance.service.ts'));
+    expect(offenders.sort()).toEqual(['vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-holds.service.ts', 'vale-pass/vale-pass-issuance.service.ts', 'vale-pass/vale-pass.module.ts'].sort().filter((file) => file !== 'vale-pass/vale-pass-issuance.service.ts'));
   });
 });
