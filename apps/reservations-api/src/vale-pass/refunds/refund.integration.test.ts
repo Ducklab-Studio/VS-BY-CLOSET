@@ -446,7 +446,7 @@ localDescribe('garantias do banco e isolamento', () => {
       }
     };
     walk(root);
-    expect(users.sort()).toEqual(['vale-pass/refunds/refund-facts.ts', 'vale-pass/refunds/refund-plan.ts', 'vale-pass/refunds/refund-reviews.controller.ts', 'vale-pass/refunds/refund.service.ts', 'vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-webhook.service.ts', 'vale-pass/vale-pass.module.ts']);
+    expect(users.sort()).toEqual(['vale-pass/flow/payment-flow.service.ts', 'vale-pass/refunds/refund-facts.ts', 'vale-pass/refunds/refund-plan.ts', 'vale-pass/refunds/refund-reviews.controller.ts', 'vale-pass/refunds/refund.service.ts', 'vale-pass/refunds/regularization.service.ts', 'vale-pass/vale-pass-webhook.service.ts', 'vale-pass/vale-pass.module.ts']);
     // O webhook de pedidos (ValePassWebhookService) é o ÚNICO ponto de integração, atrás da chave VALE_PASS_UNIT_REFUNDS (desligada por padrão).
     for (const file of ['webhooks/webhooks.service.ts', 'webhooks/webhooks.controller.ts', 'webhooks/shopify-hmac.ts', 'vale-pass/vale-pass-orders.service.ts', 'vale-pass/vale-pass-order-registry.ts', 'vale-pass/vale-pass-order-status.ts']) {
       const source = readFileSync(join(root, file), 'utf8');

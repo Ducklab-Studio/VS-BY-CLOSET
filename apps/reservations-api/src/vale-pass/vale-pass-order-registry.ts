@@ -173,6 +173,19 @@ export class ValePassOrderRegistry {
     return [{ type: 'VALE_PASS_ORDER_DELETED_IN_SHOPIFY', detail }];
   }
 
+  /**
+   * Grava o instante REAL do pagamento (ver flow/payment-instant.ts). Vale o MAIS ANTIGO já validado: reentrega ou um segundo `orders/paid` nunca
+   * empurra o prazo para frente. Só chamar com um instante já validado.
+   */
+  async recordPaymentInstant(tx: Prisma.TransactionClient, id: string, at: Date, source: string): Promise<{ order: ValePassOrder; events: ValePassOrderEventInput[] }> {
+    const changed = await tx.valePassOrder.updateMany({ where: { id, OR: [{ paymentConfirmedAt: null }, { paymentConfirmedAt: { gt: at } }] }, data: { paymentConfirmedAt: at } });
+    const order = await tx.valePassOrder.findUniqueOrThrow({ where: { id } });
+    if (changed.count !== 1) return { order, events: [] };
+    const detail = { orderId: order.shopifyOrderId, source, paymentConfirmedAt: at.toISOString(), origin: 'X-Shopify-Triggered-At (orders/paid)' };
+    await this.log(tx, id, 'PAYMENT_CONFIRMED_AT', detail);
+    return { order, events: [{ type: 'VALE_PASS_PAYMENT_INSTANT_RECORDED', detail }] };
+  }
+
   /** Pagamento confirmado passou pela emissão de vales — uma vez só. O
    *  histórico guarda o resultado (tipos de evento), nunca o código do vale. */
   async markVouchersProcessed(tx: Prisma.TransactionClient, id: string, source: string, outcome: readonly ValePassOrderEventInput[]): Promise<void> {

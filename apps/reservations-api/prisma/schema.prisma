@@ -1082,6 +1082,9 @@ model ValePassOrder {
   /// atrasado/fora de ordem) nunca sobrescreve um mais novo.
   shopifyUpdatedAt    DateTime?           @map("shopify_updated_at") @db.Timestamptz(6)
   statusChangedAt     DateTime            @default(now()) @map("status_changed_at") @db.Timestamptz(6)
+  /// Instante REAL do pagamento: `X-Shopify-Triggered-At` da entrega de `orders/paid` (validado). Nunca vem de orders/updated nem do processamento.
+  /// NULL = desconhecido (não se inventa horário: o fluxo retém e alerta).
+  paymentConfirmedAt  DateTime?           @map("payment_confirmed_at") @db.Timestamptz(6)
   /// Pagamento confirmado já passou pela emissão de vales (emitidos ou
   /// sinalizados para revisão) — a reconciliação não repete.
   vouchersProcessedAt DateTime?           @map("vouchers_processed_at") @db.Timestamptz(6)

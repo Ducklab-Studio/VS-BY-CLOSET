@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, ServiceUnavailableException } from '@nest
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ValePassWebhookService } from '../vale-pass/vale-pass-webhook.service';
+import type { ValePassWebhookMeta, WebhookInput } from '../vale-pass/flow/payment-instant';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { resolveReservationBindingSecret } from '../checkout/checkout.config';
 import { canonicalItemsFingerprint, verifyReservationSignature } from '../reservation-binding';
@@ -54,7 +55,7 @@ export class WebhooksService {
     @Optional() private readonly catalogRevalidation?: CatalogRevalidationService,
   ) {}
 
-  async handleIncoming(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
+  async handleIncoming(input: WebhookInput): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
     try {
       const result = await this.processWebhook(input);
       // Só depois do commit: a vitrine, ao revalidar, já enxerga o catálogo e as peças atualizados.
@@ -75,7 +76,7 @@ export class WebhooksService {
     }
   }
 
-  private async processWebhook(input: { topic: string; shopifyWebhookId: string; payload: unknown }): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
+  private async processWebhook(input: WebhookInput): Promise<{ outcome: 'processed' | 'ignored' | 'duplicate' }> {
     const store = resolveStoreConfig();
 
     return this.prisma.$transaction(
@@ -94,7 +95,7 @@ export class WebhooksService {
           return { outcome: 'duplicate' as const };
         }
 
-        const result = await this.dispatch(tx, input.topic, input.payload);
+        const result = await this.dispatch(tx, input.topic, input.payload, { triggeredAt: input.triggeredAt ?? null });
 
         const jsonPayload = input.payload as Prisma.InputJsonValue;
         let webhookEventId: string;
@@ -144,7 +145,7 @@ export class WebhooksService {
     );
   }
 
-  private async dispatch(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<DispatchResult> {
+  private async dispatch(tx: Prisma.TransactionClient, topic: string, payload: unknown, meta: ValePassWebhookMeta = { triggeredAt: null }): Promise<DispatchResult> {
     switch (topic) {
       // Valle Pass — produto totalmente separado do fluxo de aluguel (ver
       // ValePassWebhookService.handleOrderWebhook). Passo ADICIONAL, nunca
@@ -159,7 +160,7 @@ export class WebhooksService {
         // `orders/updated` (voided/expired) ATRASADO, anterior ao pagamento, não era
         // reconhecido como antigo e jogava a reserva já paga em revisão.
         if (handled.reservationId) await advanceOrderWatermark(tx, handled.reservationId, (payload as ShopifyOrderPayload).updated_at);
-        return this.withValePass(tx, topic, payload, handled);
+        return this.withValePass(tx, topic, payload, handled, meta);
       }
       case 'orders/cancelled':
         return this.withValePass(tx, topic, payload, await this.handleOrderCancelled(tx, payload as ShopifyOrderPayload));
@@ -196,8 +197,8 @@ export class WebhooksService {
     }
   }
 
-  private async withValePass(tx: Prisma.TransactionClient, topic: string, payload: unknown, result: DispatchResult): Promise<DispatchResult> {
-    const valePassEvents = await this.valePass.handleOrderWebhook(tx, topic, payload);
+  private async withValePass(tx: Prisma.TransactionClient, topic: string, payload: unknown, result: DispatchResult, meta: ValePassWebhookMeta = { triggeredAt: null }): Promise<DispatchResult> {
+    const valePassEvents = await this.valePass.handleOrderWebhook(tx, topic, payload, meta);
     if (valePassEvents.length === 0) return result;
     return { ...result, status: 'processed', events: [...result.events, ...valePassEvents] };
   }

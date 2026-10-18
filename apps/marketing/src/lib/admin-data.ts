@@ -606,6 +606,8 @@ export interface ValePassCapacityHold {
   /** Códigos das divergências financeiras (só em FINANCIAL_MISMATCH). */
   readonly issues: readonly string[];
   readonly createdAt: string;
+  /** Instante REAL do pagamento (cabeçalho do orders/paid); null = desconhecido (o prazo de 3 dias não é calculável). */
+  readonly paymentConfirmedAt?: string | null;
 }
 
 export interface ValePassCapacityBenefit {
@@ -653,6 +655,34 @@ export interface ValePassResumeReport {
 /** Retoma (das mais antigas para as mais novas) as retenções feitas com a integração dos dois vouchers desligada. Só ADMIN. */
 export function resumeValePassHeldPayments(input: { note: string; limit?: number }, adminUserId: string): Promise<ValePassResumeReport> {
   return adminPost('/admin/vale-pass/flow/resume', { ...input, adminUserId });
+}
+
+/** Estado das duas chaves da integração financeira e o que ainda não está resolvido (retidos × unidades pendentes × e-mails aguardando envio). */
+export interface ValePassFlowStatus {
+  readonly twoVoucherFlow: boolean;
+  readonly unitRefunds: boolean;
+  readonly heldByIntegration: number;
+  readonly notices: readonly string[];
+  readonly heldPayments: number;
+  readonly heldUnits: number;
+  readonly byCause: { readonly integrationDisabled: number; readonly paymentTimeUnknown: number; readonly quantityIncreased: number; readonly financialMismatch: number; readonly capacityOrCampaign: number };
+  readonly ordersWithoutTreatment: readonly { readonly orderId: string; readonly orderName: string | null; readonly quantity: number; readonly issuedUnits: number; readonly missing: number; readonly kind: 'NOT_PROCESSED' | 'QUANTITY_INCREASED' }[];
+  readonly unitsWithoutTreatment: number;
+  readonly emails: { readonly awaitingSend: number; readonly needsAttention: number; readonly unknownResult: number };
+}
+
+export interface ValePassRegularizeResult {
+  readonly outcome: { readonly status: string; readonly issuedUnits?: number; readonly vouchersCreated?: number; readonly missing?: number };
+  readonly emailsQueued: number;
+}
+
+export function getValePassFlowStatus(adminUserId: string): Promise<ValePassFlowStatus> {
+  return adminGet('/admin/vale-pass/flow', adminUserId);
+}
+
+/** Regulariza UM pedido pago com unidades sem voucher (revalida os fatos financeiros na API). Só ADMIN. */
+export function regularizeValePassOrder(input: { orderId: string; note: string }, adminUserId: string): Promise<ValePassRegularizeResult> {
+  return adminPost('/admin/vale-pass/flow/regularize', { ...input, adminUserId });
 }
 
 /** Descartar uma retenção cujo pedido deixou de estar pago. */

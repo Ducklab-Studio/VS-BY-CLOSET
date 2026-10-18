@@ -25,6 +25,7 @@ import type {
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
 import { EmailsPanel } from './EmailsPanel';
+import { FlowPanel } from './FlowPanel';
 import { formatVoucherDisplayDay, formatVoucherFirstDay, formatVoucherLastDay } from '@/lib/valle-pass-dates';
 import { EmptyState } from '@/components/closetadmin/ui';
 import { notifyValePassAttentionChanged } from '@/components/closetadmin/useValePassAttention';
@@ -358,6 +359,8 @@ export function ValePassSection({
           </div>
         )}
       </section>
+
+      <FlowPanel canManage={canManageCampaigns} />
 
       <EmailsPanel canManage={canManageCampaigns} />
 

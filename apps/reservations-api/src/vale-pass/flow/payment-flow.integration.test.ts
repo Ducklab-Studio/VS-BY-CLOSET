@@ -1,20 +1,27 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
-import { ConflictException, Module } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Module, UnprocessableEntityException } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { ValePassCampaign } from '@prisma/client';
+import { createHmac } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WebhooksController } from '../../webhooks/webhooks.controller';
+import { WebhooksService } from '../../webhooks/webhooks.service';
+import { ShopifyOrderSyncService } from '../../webhooks/shopify-order-sync.service';
 import { REQUIRE_ROLE_KEY } from '../../admin/require-role.decorator';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { loadEmailConfig } from '../email/email-config';
 import { EMAIL_CONFIG_TOKEN } from '../email/email-tokens';
 import { ValePassEmailOutboxService } from '../email/email-outbox.service';
 import { ValePassFinancialGuard } from '../financial/financial-guard.service';
-import { ValePassHoldsService } from '../vale-pass-holds.service';
+import { ValePassHoldsService, type IssueHoldInput } from '../vale-pass-holds.service';
 import { ValePassIssuanceService } from '../vale-pass-issuance.service';
 import { ValePassLotsService } from '../vale-pass-lots.service';
 import { ValePassRefundService } from '../refunds/refund.service';
+import { ValePassRegularizationService } from '../refunds/regularization.service';
 import { ValePassWebhookService } from '../vale-pass-webhook.service';
+import { KNOWN_VALE_PASS_PRODUCT_ID } from '../vale-pass-order-status';
 import { FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, type FlowFlags } from './flow-flags';
+import { flagNotices } from './flow.controller';
 import { ValePassFlowController } from './flow.controller';
 import { ValePassPaymentFlowService } from './payment-flow.service';
 
@@ -39,9 +46,12 @@ const orderIds: string[] = [];
 
 /** Chaves controladas pelo teste (o padrão de produção é tudo DESLIGADO). */
 const flags = { twoVoucher: false, unitRefunds: false };
+const PIPELINE_STORE = `${TAG.toLowerCase()}.myshopify.com`;
 const flagFns: FlowFlags = { twoVoucher: () => flags.twoVoucher, unitRefunds: () => flags.unitRefunds };
-const service = () => new ValePassWebhookService(new ValePassPaymentFlowService(new ValePassFinancialGuard(), issuance, outbox, flagFns, prisma), refunds, flagFns);
-const flowService = () => new ValePassPaymentFlowService(new ValePassFinancialGuard(), issuance, outbox, flagFns, prisma);
+const regularization = new ValePassRegularizationService(prisma, new ValePassFinancialGuard(), issuance);
+const holdsService = new ValePassHoldsService(prisma, issuance, outbox);
+const service = () => new ValePassWebhookService(new ValePassPaymentFlowService(new ValePassFinancialGuard(), issuance, outbox, flagFns, prisma, regularization), refunds, flagFns);
+const flowService = () => new ValePassPaymentFlowService(new ValePassFinancialGuard(), issuance, outbox, flagFns, prisma, regularization);
 
 const money = (amount: string) => ({ shop_money: { amount, currency_code: 'BRL' }, presentment_money: { amount, currency_code: 'BRL' } });
 
@@ -81,10 +91,11 @@ function paidPayload(campaign: Campaign, quantity: number, over: Record<string, 
 }
 const withStatus = (payload: Record<string, unknown>, financialStatus: string, updatedOffsetMs: number): Record<string, unknown> => ({ ...payload, financial_status: financialStatus, updated_at: new Date(clock + updatedOffsetMs).toISOString() });
 
-const run = (svc: ValePassWebhookService, topic: string, payload: unknown) =>
+/** `triggeredAt`: o X-Shopify-Triggered-At da entrega. Padrão do teste: orders/paid chega logo após o pagamento (o instante do próprio payload). */
+const run = (svc: ValePassWebhookService, topic: string, payload: unknown, meta?: { triggeredAt: string | null }) =>
   prisma.$transaction(async (tx) => {
     await lockShopifyOrder(tx, String((payload as { id?: unknown; order_id?: unknown }).order_id ?? (payload as { id: unknown }).id));
-    return svc.handleOrderWebhook(tx, topic, payload);
+    return svc.handleOrderWebhook(tx, topic, payload, meta ?? { triggeredAt: topic === 'orders/paid' ? String((payload as { updated_at?: unknown }).updated_at ?? '') || null : null });
   }, { timeout: 30_000, maxWait: 20_000 });
 /** O que o WebhooksService faz num refunds/create: tratamento do Valle Pass e depois o registro do pedido. */
 const runRefund = (svc: ValePassWebhookService, refund: Record<string, unknown>) =>
@@ -124,7 +135,7 @@ async function cleanRows() {
     const outboxRows = await tx.valePassEmailOutbox.findMany({ where: { shopifyOrderId: { in: orders } }, select: { id: true } });
     await tx.valePassEmailEvent.deleteMany({ where: { outboxId: { in: outboxRows.map((row) => row.id) } } });
     await tx.valePassEmailOutbox.deleteMany({ where: { shopifyOrderId: { in: orders } } });
-    await tx.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: [...holds.map((h) => h.id), ...refundRows.map((r) => r.id), ...vouchers.map((v) => v.id)] } }, { adminUserId: adminId, action: 'VALE_PASS_HOLDS_RESUMED' }] } });
+    await tx.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: [...holds.map((h) => h.id), ...refundRows.map((r) => r.id), ...vouchers.map((v) => v.id)] } }, { adminUserId: adminId }] } });
     await tx.valePassRefundApplication.deleteMany({ where: { shopifyOrderId: { in: orders } } });
     await tx.valePassEvent.deleteMany({ where: { valePassId: { in: vouchers.map((v) => v.id) } } });
     await tx.valePass.deleteMany({ where: { campaignId: { in: ids } } });
@@ -135,7 +146,7 @@ async function cleanRows() {
     await tx.valePassOrderEvent.deleteMany({ where: { valePassOrderId: { in: regs.map((r) => r.id) } } });
     await tx.valePassOrderCancellation.deleteMany({ where: { shopifyOrderId: { in: orders } } });
     await tx.valePassOrder.deleteMany({ where: { shopifyOrderId: { in: orders } } });
-    await tx.webhookEvent.deleteMany({ where: { storeId: `${TAG}-store` } });
+    await tx.webhookEvent.deleteMany({ where: { OR: [{ storeId: `${TAG}-store` }, { storeId: PIPELINE_STORE }] } });
   });
   flags.twoVoucher = false;
   flags.unitRefunds = false;
@@ -146,7 +157,7 @@ afterEach(async () => {
 afterAll(async () => {
   if (localDatabase) {
     await cleanRows();
-    await prisma.store.deleteMany({ where: { id: `${TAG}-store` } });
+    await prisma.store.deleteMany({ where: { id: { in: [`${TAG}-store`, PIPELINE_STORE] } } });
     await prisma.adminUser.deleteMany({ where: { id: adminId } });
   }
   await prisma.$disconnect();
@@ -257,10 +268,19 @@ localDescribe('chave LIGADA: validação financeira → dois vouchers por unidad
     await run(service(), 'orders/create', withStatus(base, 'pending', -2_000)); // Pix gerado, ainda não pago
     expect(await vouchersOf(orderId)).toHaveLength(0);
     expect((await registryOf(orderId)).status).toBe('PENDING');
-    const events = await run(service(), 'orders/updated', withStatus(base, 'paid', 2_000)); // pago, mas o orders/paid se perdeu/atrasou
+    // pago, mas o orders/paid se perdeu/atrasou: o orders/updated NÃO diz quando o pagamento aconteceu → retenção PAYMENT_TIME_UNKNOWN (nada emitido às cegas)
+    const events = await run(service(), 'orders/updated', withStatus(base, 'paid', 2_000));
     expect(events.map((e) => e.type)).toContain('VALE_PASS_PAYMENT_RECOVERED');
+    expect(events.map((e) => e.type)).toContain('VALE_PASS_ISSUANCE_HELD');
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect(issueCodes((await holdsOf(orderId))[0])).toEqual(['PAYMENT_TIME_UNKNOWN']);
+    expect((await registryOf(orderId)).paymentConfirmedAt).toBeNull();
+    // o orders/paid chega atrasado (updated_at mais antigo) MAS traz o instante real do pagamento: emite uma vez e resolve a retenção
+    await run(service(), 'orders/paid', withStatus(base, 'paid', 1_000));
     expect(await vouchersOf(orderId)).toHaveLength(4);
-    await run(service(), 'orders/paid', withStatus(base, 'paid', 1_000)); // chega atrasado (mais antigo)
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    expect((await holdsOf(orderId)).every((hold) => hold.status !== 'OPEN')).toBe(true);
+    await run(service(), 'orders/paid', withStatus(base, 'paid', 1_000));
     expect(await vouchersOf(orderId)).toHaveLength(4);
     expect(await outboxOf(orderId)).toHaveLength(2);
   });
@@ -328,7 +348,7 @@ localDescribe('chave LIGADA: validação financeira → dois vouchers por unidad
     const orderId = String(base.id);
     await run(service(), 'orders/create', withStatus(base, 'pending', -1_000));
     const registry = await registryOf(orderId);
-    await prisma.valePassOrder.update({ where: { id: registry.id }, data: { status: 'CONFIRMED', statusChangedAt: new Date() } });
+    await prisma.valePassOrder.update({ where: { id: registry.id }, data: { status: 'CONFIRMED', statusChangedAt: new Date(), paymentConfirmedAt: new Date() } });
     // O que a reconciliação monta a partir da Admin API: pedido pago e linhas, SEM os campos financeiros (total, desconto, moeda, saldo).
     const reconciled = { id: orderId, admin_graphql_api_id: `gid://shopify/Order/${orderId}`, name: '#R1', financial_status: 'paid', cancelled_at: null, line_items: [{ variant_id: campaign.numericVariant, product_id: null, quantity: 1 }] };
     const events = await prisma.$transaction(async (tx) => {
@@ -340,17 +360,18 @@ localDescribe('chave LIGADA: validação financeira → dois vouchers por unidad
     expect(issueCodes((await holdsOf(orderId))[0])).toEqual(['FINANCIALS_UNDEFINED']);
   });
 
-  test('cancelamento/reembolso nunca param com a chave ligada ou desligada: legado cancela os vouchers ativos do pedido', async () => {
+  test('reembolso nunca para com a chave ligada ou desligada: desligar a emissão depois não cancela unidade nenhuma — o reembolso vira revisão de um ADMIN', async () => {
     flags.twoVoucher = true;
     const campaign = await newCampaign(true);
     const payload = paidPayload(campaign, 2);
     const orderId = String(payload.id);
     await run(service(), 'orders/paid', payload);
     flags.twoVoucher = false; // alguém desligou a chave depois da emissão
-    await runRefund(service(), refundFor(campaign, orderId, 1));
-    const rows = await vouchersOf(orderId);
-    expect(rows.every((v) => v.status === 'CANCELLED')).toBe(true); // legado: cancela tudo (seguro), mesmo com a chave desligada
-    expect(await prisma.valePassOrderCancellation.count({ where: { shopifyOrderId: orderId } })).toBe(1);
+    const refund = refundFor(campaign, orderId, 1);
+    await runRefund(service(), refund);
+    expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true); // unidade NÃO reembolsada nunca é cancelada sozinha
+    expect(await prisma.valePassOrderCancellation.count({ where: { shopifyOrderId: orderId } })).toBe(0);
+    expect(await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { shopifyRefundId: refund.id as string } })).toMatchObject({ status: 'NEEDS_REVIEW', classification: 'UNITS' });
   });
 });
 
@@ -437,14 +458,22 @@ localDescribe('reembolso por unidade integrado ao webhook (chave VALE_PASS_UNIT_
     return payload;
   }
 
-  test('chave desligada (padrão): reembolso de FRETE ainda cancela tudo pelo caminho legado e marca o pedido REFUNDED — comportamento de sempre preservado', async () => {
+  test('chave desligada (padrão): reembolso de FRETE de pedido dos dois vouchers NÃO cancela nada nem derruba o pedido; o pedido LEGADO segue o caminho de sempre (cancela e marca REFUNDED)', async () => {
     const campaign = await newCampaign(true);
     const payload = await issued(campaign, 2);
     const orderId = String(payload.id);
     await runRefund(service(), refundFor(campaign, orderId, 0, { refund_line_items: [], refund_shipping_lines: [{ id: 1, subtotal_amount_set: money('22.00') }] }));
-    expect((await vouchersOf(orderId)).every((v) => v.status === 'CANCELLED')).toBe(true);
-    expect((await registryOf(orderId)).status).toBe('REFUNDED');
-    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: orderId } })).toBe(0);
+    expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true);
+    expect((await registryOf(orderId)).status).toBe('CONFIRMED');
+    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: orderId } })).toBe(1);
+
+    const legacy = await newCampaign(false);
+    const legacyPayload = paidPayload(legacy, 2);
+    await run(service(), 'orders/paid', legacyPayload);
+    await runRefund(service(), refundFor(legacy, String(legacyPayload.id), 0, { refund_line_items: [], refund_shipping_lines: [{ id: 1, subtotal_amount_set: money('22.00') }] }));
+    expect((await vouchersOf(String(legacyPayload.id))).every((v) => v.status === 'CANCELLED')).toBe(true);
+    expect((await registryOf(String(legacyPayload.id))).status).toBe('REFUNDED');
+    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: String(legacyPayload.id) } })).toBe(0);
   });
 
   test('chave ligada: frete não toca em voucher nem no status do pedido; reembolso parcial vira revisão ADMIN (ADMIN_CONFIRM) e o pedido segue pago; orders/updated partially_refunded não o derruba', async () => {
@@ -505,13 +534,13 @@ localDescribe('reembolso por unidade integrado ao webhook (chave VALE_PASS_UNIT_
 });
 
 localDescribe('alertas de prazo (3 dias)', () => {
-  test('retenção com mais de 48 h → crítico "perto do prazo"; mais de 72 h → crítico "prazo vencido"; nova (< 24 h) sem alerta de prazo', async () => {
+  test('retenção cujo PAGAMENTO tem mais de 48 h → crítico "perto do prazo"; mais de 72 h → crítico "prazo vencido"; nova (< 24 h) sem alerta de prazo', async () => {
     const campaign = await newCampaign(true);
     const young = paidPayload(campaign, 1);
     const near = paidPayload(campaign, 1);
     const late = paidPayload(campaign, 1);
     for (const p of [young, near, late]) await run(service(), 'orders/paid', p);
-    const age = (p: Record<string, unknown>, hours: number) => prisma.$transaction(async (tx) => { await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica'); await tx.$executeRawUnsafe(`UPDATE vale_pass_issuance_holds SET created_at = now() - interval '${hours} hours' WHERE shopify_order_id = '${String(p.id)}'`); });
+    const age = (p: Record<string, unknown>, hours: number) => prisma.$transaction(async (tx) => { await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica'); await tx.$executeRawUnsafe(`UPDATE vale_pass_orders SET payment_confirmed_at = now() - interval '${hours} hours' WHERE shopify_order_id = '${String(p.id)}'`); });
     const codes = async () => (await lots.getCapacity(campaign.id)).alerts.map((a) => a.code);
     expect(await codes()).not.toContain('HOLD_NEAR_DEADLINE'); // todas novas
     expect(await codes()).not.toContain('HOLD_DEADLINE_EXCEEDED');
@@ -526,6 +555,515 @@ localDescribe('alertas de prazo (3 dias)', () => {
   });
 });
 
+
+const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+const DAY = 86_400_000;
+const storeStaff = async () => (await prisma.adminUser.create({ data: { name: 'Funcionário Teste Fluxo', phone: TAG + '-staff', pinHash: 'x', role: 'STAFF', active: true } })).id;
+
+localDescribe('ALTO-1 — reembolso: pedido dos dois vouchers NUNCA cai no cancelamento integral, em nenhuma combinação das chaves', () => {
+  const combos: [boolean, boolean][] = [[false, false], [false, true], [true, false], [true, true]];
+  const refundKinds: [string, (campaign: Campaign, orderId: string) => Record<string, unknown>, number][] = [
+    ['parcial (1 de 3 unidades)', (campaign, orderId) => refundFor(campaign, orderId, 1), 1],
+    ['só de frete', (_campaign, orderId) => ({ id: TAG + '-rf' + counter++, order_id: orderId, refund_line_items: [], refund_shipping_lines: [{ id: 1, subtotal_amount_set: money('22.00') }], transactions: [], order_adjustments: [] }), 0],
+    ['de outro produto', (_campaign, orderId) => ({ id: TAG + '-rf' + counter++, order_id: orderId, refund_shipping_lines: [], transactions: [], order_adjustments: [], refund_line_items: [{ id: 9, line_item_id: 9, quantity: 1, subtotal: 80, total_tax: 0, restock_type: 'return', line_item: { variant_id: 777000111, product_id: 555000222, price: '80.00', quantity: 1 } }] }), 0],
+  ];
+  for (const [two, unit] of combos) {
+    for (const [label, build, refundedUnits] of refundKinds) {
+      test('TWO_VOUCHER=' + (two ? 'on' : 'off') + ' / UNIT_REFUNDS=' + (unit ? 'on' : 'off') + ' — reembolso ' + label + ': nenhum voucher cancelado, pedido segue pago, fila de e-mail intacta, capacidade igual', async () => {
+        flags.twoVoucher = true;
+        const campaign = await newCampaign(true, { globalLimit: 10 });
+        const payload = paidPayload(campaign, 3);
+        const orderId = String(payload.id);
+        await run(service(), 'orders/paid', payload);
+        expect(await vouchersOf(orderId)).toHaveLength(6);
+        const before = (await lots.getCapacity(campaign.id)).totals;
+        flags.twoVoucher = two;
+        flags.unitRefunds = unit;
+        const refund = build(campaign, orderId);
+        await runRefund(service(), refund);
+        expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true);
+        expect(await prisma.valePassOrderCancellation.count({ where: { shopifyOrderId: orderId } })).toBe(0);
+        expect((await registryOf(orderId)).status).toBe('CONFIRMED');
+        expect((await outboxOf(orderId)).every((row) => row.status === 'QUEUED')).toBe(true);
+        expect((await outboxOf(orderId))).toHaveLength(3);
+        expect((await lots.getCapacity(campaign.id)).totals.consumed).toBe(before.consumed);
+        const row = await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { shopifyRefundId: refund.id as string } });
+        expect(row.refundedUnits).toBe(refundedUnits);
+        expect(row.status).toBe(refundedUnits > 0 ? 'NEEDS_REVIEW' : 'APPLIED');
+        await runRefund(service(), refund); // reentrega: nada muda
+        expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: orderId } })).toBe(1);
+        expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true);
+      });
+    }
+  }
+
+  test('pagamento RETIDO (TWO_VOUCHER desligada) + reembolso parcial com UNIT_REFUNDS desligada: a retenção continua, nada vira "cancelado"; ao ligar, a emissão desconta a unidade devolvida antes da emissão', async () => {
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 3);
+    const orderId = String(payload.id);
+    flags.twoVoucher = false;
+    await run(service(), 'orders/paid', payload);
+    await storeEvent('orders/paid', payload);
+    const refund = refundFor(campaign, orderId, 1);
+    await runRefund(service(), refund);
+    expect(await prisma.valePassOrderCancellation.count({ where: { shopifyOrderId: orderId } })).toBe(0);
+    expect((await holdsOf(orderId))[0]).toMatchObject({ status: 'OPEN', units: 3 });
+    // unidade paga e AINDA NÃO emitida: o reembolso é registrado na trilha e descontado da emissão futura (nenhum voucher existe para cancelar)
+    const application = await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { shopifyRefundId: refund.id as string } });
+    expect((application.detail as { unissuedAbsorbed?: number }).unissuedAbsorbed).toBe(1);
+    flags.twoVoucher = true;
+    const report = await flowService().resumeHeldPayments({ id: adminId, name: ADMIN_NAME }, { limit: 5 });
+    expect(report.issued).toBe(1);
+    expect(new Set((await vouchersOf(orderId)).map((v) => v.groupId)).size).toBe(2); // 3 pagas − 1 devolvida
+  });
+
+  test('os avisos das chaves nunca sugerem que desligar uma chave cancela algo, e a combinação TWO on / UNIT off é explicada como segura', () => {
+    expect(flagNotices({ twoVoucherFlow: true, unitRefunds: false }).join(' ')).toMatch(/SEMPRE por unidade/);
+    expect(flagNotices({ twoVoucherFlow: false, unitRefunds: false }).join(' ')).toMatch(/continuam sendo tratados/);
+    expect(flagNotices({ twoVoucherFlow: true, unitRefunds: true })).toEqual([]);
+  });
+});
+
+localDescribe('ALTO-2 — o prazo de 3 dias conta do PAGAMENTO real (X-Shopify-Triggered-At do orders/paid), nunca do processamento', () => {
+  test('webhook 80 h atrasado com a chave LIGADA: emite, mas o prazo do e-mail é pagamento + 3 dias (JÁ vencido), não processamento + 3 dias', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const paidAt = hoursAgo(80);
+    const payload = paidPayload(campaign, 1, { created_at: hoursAgo(81) });
+    await run(service(), 'orders/paid', payload, { triggeredAt: paidAt });
+    const orderId = String(payload.id);
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect((await registryOf(orderId)).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+    const [mail] = await outboxOf(orderId);
+    expect(mail.deadlineAt.getTime()).toBe(new Date(paidAt).getTime() + 3 * DAY);
+    expect(mail.deadlineAt.getTime()).toBeLessThan(Date.now()); // já venceu: o painel de e-mails mostra "atrasado"
+    const event = await prisma.valePassEmailEvent.findFirstOrThrow({ where: { outboxId: mail.id, type: 'ENQUEUED' } });
+    expect((event.detail as { deadlineBasis?: string }).deadlineBasis).toBe('PAYMENT');
+  });
+
+  test('webhook 80 h atrasado com a chave DESLIGADA: a retenção JÁ nasce com os alertas de prazo vencido (idade desde o pagamento, não desde a retenção)', async () => {
+    flags.twoVoucher = false;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1, { created_at: hoursAgo(81) });
+    await run(service(), 'orders/paid', payload, { triggeredAt: hoursAgo(80) });
+    const capacity = await lots.getCapacity(campaign.id);
+    const codes = capacity.alerts.map((a) => a.code);
+    expect(codes).toEqual(expect.arrayContaining(['HOLD_DEADLINE_EXCEEDED', 'ISSUANCE_HOLD_STALE', 'INTEGRATION_HOLDS_OPEN']));
+    expect(codes).not.toContain('PAYMENT_TIME_UNKNOWN');
+    expect(capacity.holds[0].paymentConfirmedAt).toBe((await registryOf(String(payload.id))).paymentConfirmedAt?.toISOString());
+  });
+
+  test('pagamento entre 48 h e 72 h: alerta "perto do prazo"; menos de 24 h: nenhum alerta de prazo', async () => {
+    flags.twoVoucher = false;
+    const campaign = await newCampaign(true);
+    const fresh = paidPayload(campaign, 1);
+    await run(service(), 'orders/paid', fresh, { triggeredAt: hoursAgo(2) });
+    const afterFresh = (await lots.getCapacity(campaign.id)).alerts.map((a) => a.code);
+    expect(afterFresh).not.toEqual(expect.arrayContaining(['HOLD_NEAR_DEADLINE']));
+    const near = paidPayload(campaign, 1, { created_at: hoursAgo(60) });
+    await run(service(), 'orders/paid', near, { triggeredAt: hoursAgo(55) });
+    const codes = (await lots.getCapacity(campaign.id)).alerts.map((a) => a.code);
+    expect(codes).toContain('HOLD_NEAR_DEADLINE');
+    expect(codes).not.toContain('HOLD_DEADLINE_EXCEEDED');
+  });
+
+  test.each([
+    ['cabeçalho ausente', null],
+    ['cabeçalho vazio', '   '],
+    ['texto que não é data', 'ontem à noite'],
+    ['data sem fuso', '2026-10-18T10:00:00'],
+    ['data impossível', '2026-13-45T00:00:00Z'],
+    ['instante no futuro', new Date(Date.now() + 3_600_000).toISOString()],
+    ['instante ANTERIOR à criação do pedido', new Date(Date.now() - 10 * 3_600_000).toISOString()],
+  ])('instante do pagamento não confiável (%s): nada é emitido, nenhum horário é inventado, a retenção e o alerta crítico aparecem', async (_label, header) => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1, { created_at: hoursAgo(1) });
+    const events = await run(service(), 'orders/paid', payload, { triggeredAt: header as string | null });
+    const orderId = String(payload.id);
+    expect(events.map((e) => e.type)).toEqual(expect.arrayContaining(['VALE_PASS_PAYMENT_INSTANT_UNRELIABLE', 'VALE_PASS_ISSUANCE_HELD']));
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect(await outboxOf(orderId)).toHaveLength(0);
+    expect((await registryOf(orderId)).paymentConfirmedAt).toBeNull();
+    expect(issueCodes((await holdsOf(orderId))[0])).toEqual(['PAYMENT_TIME_UNKNOWN']);
+    expect((await lots.getCapacity(campaign.id)).alerts.find((a) => a.code === 'PAYMENT_TIME_UNKNOWN')).toMatchObject({ severity: 'critical' });
+  });
+
+  test('o instante NÃO vem de orders/updated nem de orders/create (atualização genérica ≠ pagamento), mesmo com o cabeçalho válido', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const base = paidPayload(campaign, 1, { created_at: hoursAgo(5) });
+    const orderId = String(base.id);
+    await run(service(), 'orders/create', withStatus(base, 'pending', -1_000), { triggeredAt: hoursAgo(4) });
+    await run(service(), 'orders/updated', withStatus(base, 'paid', 1_000), { triggeredAt: hoursAgo(3) });
+    expect((await registryOf(orderId)).paymentConfirmedAt).toBeNull();
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect(issueCodes((await holdsOf(orderId))[0])).toEqual(['PAYMENT_TIME_UNKNOWN']);
+  });
+
+  test('vale o instante MAIS ANTIGO: reentrega ou segundo orders/paid mais tarde nunca empurra o prazo para frente; um mais antigo o corrige', async () => {
+    flags.twoVoucher = false;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1, { created_at: hoursAgo(10) });
+    const orderId = String(payload.id);
+    await run(service(), 'orders/paid', payload, { triggeredAt: hoursAgo(5) });
+    const first = (await registryOf(orderId)).paymentConfirmedAt as Date;
+    await run(service(), 'orders/paid', payload, { triggeredAt: hoursAgo(1) });
+    expect((await registryOf(orderId)).paymentConfirmedAt).toEqual(first);
+    await run(service(), 'orders/paid', payload, { triggeredAt: hoursAgo(6) });
+    expect((await registryOf(orderId)).paymentConfirmedAt?.getTime()).toBeLessThan(first.getTime());
+  });
+
+  test('reconciliação tardia (sem orders/paid): pedido pago fica retido como PAYMENT_TIME_UNKNOWN; quando o orders/paid chega, a retomada emite com o prazo do pagamento', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const base = paidPayload(campaign, 1, { created_at: hoursAgo(30) });
+    const orderId = String(base.id);
+    await run(service(), 'orders/updated', withStatus(base, 'paid', 0));
+    await storeEvent('orders/updated', withStatus(base, 'paid', 0));
+    expect(issueCodes((await holdsOf(orderId))[0])).toEqual(['PAYMENT_TIME_UNKNOWN']);
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    const report0 = await flowService().resumeHeldPayments({ id: adminId, name: ADMIN_NAME });
+    expect(report0).toMatchObject({ considered: 1, issued: 0, reclassified: 1 }); // sem o instante, continua retido
+    const paidAt = hoursAgo(29);
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: orderId }, data: { paymentConfirmedAt: new Date(paidAt) } }); // o instante chegou (ex.: orders/paid atrasado)
+    const report = await flowService().resumeHeldPayments({ id: adminId, name: ADMIN_NAME });
+    expect(report).toMatchObject({ considered: 1, issued: 1 });
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect((await outboxOf(orderId))[0].deadlineAt.getTime()).toBe(new Date(paidAt).getTime() + 3 * DAY);
+  });
+});
+
+localDescribe('MÉDIO-1/2 — pagamento sem tratamento: variante sem campanha e aumento de quantidade viram pendência rastreável e regularização ADMIN auditada', () => {
+  const prodLine = (variant: number, quantity: number) => ({ variant_id: variant, product_id: Number(KNOWN_VALE_PASS_PRODUCT_ID), quantity, current_quantity: quantity, price: '350.00', price_set: money('350.00'), discount_allocations: [] });
+  async function campaignFor(variant: string): Promise<Campaign> {
+    const campaign = await prisma.valePassCampaign.create({
+      data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, shopifyVariantId: variant, voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') },
+    });
+    campaignIds.push(campaign.id);
+    await prisma.valePassCampaignBenefit.createMany({
+      data: [
+        { campaignId: campaign.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'Voucher Valle Showroom', amountCents: 50_000, sortOrder: 0 },
+        { campaignId: campaign.id, code: 'vs_by_closet_50', kind: 'VOUCHER', company: 'VS_BY_CLOSET', label: 'Voucher VS BY CLOSET', amountCents: 5_000, sortOrder: 1 },
+      ],
+    });
+    return { ...campaign, numericVariant: variant };
+  }
+  const increased = (payload: Record<string, unknown>, variant: number, quantity: number, total: string, offset = 4_000) => ({ ...payload, line_items: [prodLine(variant, quantity)], current_total_price: total, updated_at: new Date(clock + offset).toISOString() });
+
+  test('NOVA variante do produto Valle Pass sem campanha: pedido pago fica visível em "pagamentos sem tratamento"; regularizar antes de existir campanha não faz nada; com a campanha cadastrada, emite com validação e e-mail enfileirado', async () => {
+    flags.twoVoucher = true;
+    const variant = 920_000_000_000 + counter++;
+    const payload: Record<string, unknown> = { ...paidPayload({ numericVariant: String(variant) } as Campaign, 2), line_items: [prodLine(variant, 2)] };
+    const orderId = String(payload.id);
+    const events = await run(service(), 'orders/paid', payload);
+    expect(events.map((e) => e.type)).toContain('VALE_PASS_ORDER_WITHOUT_CAMPAIGN');
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect((await registryOf(orderId)).status).toBe('CONFIRMED');
+    const overview = await flowService().overview();
+    expect(overview.ordersWithoutTreatment.map((o) => o.orderId)).toContain(orderId);
+    expect(overview.unitsWithoutTreatment).toBeGreaterThanOrEqual(2);
+    await storeEvent('orders/paid', payload);
+    const none = await flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId, note: 'Tentativa antes de existir campanha' });
+    expect(none.outcome.status).toBe('CAMPAIGN_UNRESOLVED');
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    await campaignFor(String(variant)); // a campanha passa a existir
+    const done = await flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId, note: 'Campanha cadastrada; pagamento conferido na Shopify' });
+    expect(done.outcome).toMatchObject({ status: 'ISSUED', issuedUnits: 2, vouchersCreated: 4 });
+    expect(done.emailsQueued).toBe(2);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { adminUserId: adminId, action: 'VALE_PASS_ORDER_REGULARIZED' } });
+    expect(audit).toMatchObject({ isCritical: true });
+    expect(JSON.stringify(audit.detail)).toContain('Campanha cadastrada');
+    const again = await flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId, note: 'Segunda tentativa (idempotente)' });
+    expect(again.outcome.status).toBe('NOTHING_TO_DO');
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    expect((await flowService().overview()).ordersWithoutTreatment.map((o) => o.orderId)).not.toContain(orderId);
+  });
+
+  test('compra que CRESCEU depois da emissão (2 → 3): retenção QUANTITY_INCREASED visível, nada emitido sozinho; a regularização ADMIN valida o pagamento do acréscimo e emite só a unidade que falta (+1 e-mail)', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const variant = Number(campaign.numericVariant);
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    await run(service(), 'orders/paid', payload);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    const edit = increased(payload, variant, 3, '1050.00');
+    const events = await run(service(), 'orders/updated', edit);
+    expect(events.map((e) => e.type)).toContain('VALE_PASS_QUANTITY_INCREASE_HELD');
+    expect(await vouchersOf(orderId)).toHaveLength(4); // nada emitido sozinho
+    const holds = await holdsOf(orderId);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ status: 'OPEN', units: 1, reason: 'FINANCIAL_MISMATCH' });
+    expect(issueCodes(holds[0])).toEqual(['QUANTITY_INCREASED']);
+    expect((await flowService().overview()).byCause.quantityIncreased).toBeGreaterThanOrEqual(1);
+    await run(service(), 'orders/updated', edit); // reentrega: continua UMA retenção
+    expect(await holdsOf(orderId)).toHaveLength(1);
+
+    await storeEvent('orders/updated', edit);
+    const done = await flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId, note: 'Pagamento do acréscimo conferido na Shopify' });
+    expect(done.outcome).toMatchObject({ status: 'ISSUED', vouchersCreated: 2 });
+    expect(await vouchersOf(orderId)).toHaveLength(6);
+    expect(new Set((await vouchersOf(orderId)).map((v) => v.groupId)).size).toBe(3);
+    expect(await outboxOf(orderId)).toHaveLength(3); // exatamente um e-mail inicial por unidade; as 2 primeiras não foram duplicadas
+    expect((await holdsOf(orderId))[0].status).not.toBe('OPEN');
+  });
+
+  test('regularização concorrente (duas chamadas simultâneas): exatamente +1 unidade e +1 e-mail', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const variant = Number(campaign.numericVariant);
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    await run(service(), 'orders/paid', payload);
+    const edit = increased(payload, variant, 3, '1050.00');
+    await run(service(), 'orders/updated', edit);
+    await storeEvent('orders/updated', edit);
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId, note: 'Regularização concorrente de teste' })));
+    expect(results.filter((r) => r.status === 'fulfilled' && (r.value as { outcome: { status: string } }).outcome.status === 'ISSUED')).toHaveLength(1);
+    expect(await vouchersOf(orderId)).toHaveLength(6);
+    expect(await outboxOf(orderId)).toHaveLength(3);
+  });
+
+  test('NÃO emite sem comprovante: valor do acréscimo não pago, último evento não pago, sem evento guardado, sem instante do pagamento, chave desligada, funcionário comum ou justificativa curta', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const variant = Number(campaign.numericVariant);
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    await run(service(), 'orders/paid', payload);
+    const actor = { id: adminId, name: ADMIN_NAME };
+    const note = 'Conferência administrativa de teste';
+    // aumento de quantidade, mas o total pago continua o antigo (acréscimo NÃO pago) → vira retenção com o motivo financeiro, nada emitido
+    const unpaid = increased(payload, variant, 3, '700.00');
+    await run(service(), 'orders/updated', unpaid);
+    await storeEvent('orders/updated', unpaid);
+    const held = await flowService().regularizeOrder(actor, { orderId, note });
+    expect(held.outcome.status).toBe('HELD');
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    expect(issueCodes((await holdsOf(orderId))[0]).length).toBeGreaterThan(0);
+    // último evento guardado não está pago
+    await storeEvent('orders/updated', { ...increased(payload, variant, 3, '1050.00', 9_000), financial_status: 'partially_paid' });
+    await expect(flowService().regularizeOrder(actor, { orderId, note })).rejects.toBeInstanceOf(ConflictException);
+    // sem evento guardado
+    const bare = paidPayload(campaign, 1);
+    await run(service(), 'orders/paid', bare);
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: String(bare.id) }, data: { quantity: 2 } });
+    await expect(flowService().regularizeOrder(actor, { orderId: String(bare.id), note })).rejects.toThrow(/Nenhum evento/);
+    // sem instante do pagamento
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: String(bare.id) }, data: { paymentConfirmedAt: null } });
+    await expect(flowService().regularizeOrder(actor, { orderId: String(bare.id), note })).rejects.toThrow(/instante real do pagamento/);
+    // funcionário comum, justificativa curta, chave desligada, pedido inexistente
+    const staffId = await storeStaff();
+    try {
+      await expect(flowService().regularizeOrder({ id: staffId, name: 'x' }, { orderId, note })).rejects.toBeInstanceOf(ForbiddenException);
+    } finally {
+      await prisma.adminUser.delete({ where: { id: staffId } });
+    }
+    await expect(flowService().regularizeOrder(actor, { orderId, note: 'curta' })).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(flowService().regularizeOrder(actor, { orderId: 'nao-existe', note })).rejects.toThrow(/não encontrado/);
+    flags.twoVoucher = false;
+    await expect(flowService().regularizeOrder(actor, { orderId, note })).rejects.toBeInstanceOf(ConflictException);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    const proto = ValePassFlowController.prototype as unknown as Record<string, unknown>;
+    expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto.regularize as object)).toBe('ADMIN');
+  });
+
+  test('pedido de Valle Pass cancelado/reembolsado, excluído ou LEGADO nunca é regularizado; legado e limites da campanha seguem como eram', async () => {
+    flags.twoVoucher = true;
+    const legacy = await newCampaign(false);
+    const lp = paidPayload(legacy, 1);
+    await run(service(), 'orders/paid', lp);
+    await storeEvent('orders/paid', lp);
+    expect((await vouchersOf(String(lp.id))).every((v) => v.groupId === null)).toBe(true);
+    const out = await flowService().regularizeOrder({ id: adminId, name: ADMIN_NAME }, { orderId: String(lp.id), note: 'Pedido legado: não regulariza' });
+    expect(['LEGACY_ORDER', 'NOTHING_TO_DO']).toContain(out.outcome.status);
+    expect(await vouchersOf(String(lp.id))).toHaveLength(1);
+    expect((await flowService().overview()).ordersWithoutTreatment.map((o) => o.orderId)).not.toContain(String(lp.id));
+  });
+});
+
+localDescribe('MÉDIO-3 — a emissão excepcional do ADMIN registra a mensagem de e-mail na MESMA transação (sem enviar), uma por unidade', () => {
+  test('retenção por capacidade: ao emitir com justificativa, 1 mensagem por unidade; repetir não duplica; a base do prazo é o pagamento', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true, { globalLimit: 1 });
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    const paidAt = hoursAgo(10);
+    await run(service(), 'orders/paid', { ...payload, created_at: hoursAgo(11) }, { triggeredAt: paidAt });
+    const [hold] = await holdsOf(orderId);
+    expect(hold.reason).toBe('CAPACITY_EXCEEDED');
+    expect(await outboxOf(orderId)).toHaveLength(0);
+    const preview = await holdsService.preview(hold.id);
+    const input: IssueHoldInput = { note: 'Excedente aprovado pela diretoria (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } };
+    await holdsService.issue(hold.id, input, adminId, ADMIN_NAME);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    const rows = await outboxOf(orderId);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.status === 'QUEUED' && row.kind === 'INITIAL')).toBe(true);
+    expect(new Set(rows.map((row) => row.groupId)).size).toBe(2);
+    expect(rows[0].deadlineAt.toISOString()).toBe(new Date(new Date(paidAt).getTime() + 3 * DAY).toISOString());
+    const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { adminUserId: adminId, action: 'VALE_PASS_HOLD_ISSUED' } });
+    expect((audit.detail as { emailsQueued?: number }).emailsQueued).toBe(2);
+    const again = await prisma.$transaction((tx) => outbox.enqueueForOrder(tx, orderId));
+    expect(again).toMatchObject({ enqueued: 0, alreadyQueued: 2 });
+    await expect(holdsService.issue(hold.id, { ...input, note: 'segunda emissão do mesmo pedido' }, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(ConflictException);
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+  });
+
+  test('sem o instante do pagamento, a base do prazo é o momento em que a retenção foi aberta (registrada na linha do tempo), nunca um horário inventado', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const base = paidPayload(campaign, 1, { created_at: hoursAgo(3) });
+    const orderId = String(base.id);
+    await run(service(), 'orders/updated', withStatus(base, 'paid', 0)); // pagamento visto só por orders/updated
+    const [hold] = await holdsOf(orderId);
+    expect(issueCodes(hold)).toEqual(['PAYMENT_TIME_UNKNOWN']);
+    const preview = await holdsService.preview(hold.id);
+    await holdsService.issue(hold.id, { note: 'Pagamento conferido na Shopify (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } }, adminId, ADMIN_NAME);
+    const [mail] = await outboxOf(orderId);
+    expect(mail.deadlineAt.getTime()).toBe(hold.createdAt.getTime() + 3 * DAY);
+    const event = await prisma.valePassEmailEvent.findFirstOrThrow({ where: { outboxId: mail.id, type: 'ENQUEUED' } });
+    expect((event.detail as { deadlineBasis?: string }).deadlineBasis).toBe('HOLD_OPENED');
+  });
+});
+
+localDescribe('MÉDIO-4 — a auditoria da retomada é gravada na MESMA transação da emissão (uma linha por pedido)', () => {
+  test('cada pedido retomado tem o seu evento VALE_PASS_HOLD_RESUMED (crítico) com a retenção e o desfecho', async () => {
+    const campaign = await newCampaign(true);
+    flags.twoVoucher = false;
+    const payload = paidPayload(campaign, 1);
+    await run(service(), 'orders/paid', payload);
+    await storeEvent('orders/paid', payload);
+    flags.twoVoucher = true;
+    await flowService().resumeHeldPayments({ id: adminId, name: ADMIN_NAME }, { note: 'Retomada de teste da auditoria' });
+    const [hold] = await holdsOf(String(payload.id));
+    const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { adminUserId: adminId, action: 'VALE_PASS_HOLD_RESUMED', entityId: hold.id } });
+    expect(audit).toMatchObject({ isCritical: true });
+    expect((audit.after as { outcome?: string }).outcome).toBe('ISSUED');
+  });
+
+  test('se a auditoria falhar (ADMIN inexistente), a emissão do pedido é DESFEITA junto: nada de voucher sem trilha; a retenção continua aberta', async () => {
+    const campaign = await newCampaign(true);
+    flags.twoVoucher = false;
+    const payload = paidPayload(campaign, 1);
+    await run(service(), 'orders/paid', payload);
+    await storeEvent('orders/paid', payload);
+    flags.twoVoucher = true;
+    await expect(flowService().resumeHeldPayments({ id: '00000000-0000-4000-8000-00000000dead', name: 'Fantasma' }, { note: 'Retomada com ator inexistente' })).rejects.toThrow();
+    expect(await vouchersOf(String(payload.id))).toHaveLength(0);
+    expect(await outboxOf(String(payload.id))).toHaveLength(0);
+    expect((await holdsOf(String(payload.id)))[0].status).toBe('OPEN');
+  });
+});
+
+localDescribe('GET /admin/vale-pass/flow — estado das duas chaves e pendências (retidos × unidades pendentes × e-mails aguardando)', () => {
+  test('mostra as chaves, os avisos, as retenções por causa, as unidades sem tratamento e os e-mails aguardando envio — sem dados pessoais', async () => {
+    const campaign = await newCampaign(true);
+    flags.twoVoucher = false;
+    await run(service(), 'orders/paid', paidPayload(campaign, 2)); // retido (integração desligada)
+    flags.twoVoucher = true;
+    await run(service(), 'orders/paid', paidPayload(campaign, 1)); // emitido: 1 e-mail QUEUED
+    const status = await new ValePassFlowController(flowService(), prisma).status();
+    expect(status).toMatchObject({ twoVoucherFlow: true, unitRefunds: false });
+    expect(status.notices.join(' ')).toMatch(/SEMPRE por unidade/);
+    expect(status.byCause.integrationDisabled).toBeGreaterThanOrEqual(1);
+    expect(status.heldPayments).toBeGreaterThanOrEqual(1);
+    expect(status.heldUnits).toBeGreaterThanOrEqual(2);
+    expect(status.emails.awaitingSend).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(status)).not.toMatch(/cliente\d+@exemplo/);
+    flags.twoVoucher = false;
+    expect((await new ValePassFlowController(flowService(), prisma).status()).twoVoucherFlow).toBe(false);
+  });
+});
+
+localDescribe('pipeline REAL (WebhooksController → WebhooksService → Valle Pass): o cabeçalho X-Shopify-Triggered-At chega ao registro e ao prazo; reembolso passa pelo tratamento por unidade', () => {
+  const SECRET = 'segredo-de-teste-' + TAG;
+  const saved = { secret: process.env.SHOPIFY_CLIENT_SECRET, domain: process.env.SHOPIFY_STORE_DOMAIN, currency: process.env.SHOPIFY_STORE_CURRENCY };
+  const controller = () => new WebhooksController(new WebhooksService(prisma, service(), new ShopifyOrderSyncService()));
+  beforeAll(() => {
+    process.env.SHOPIFY_CLIENT_SECRET = SECRET;
+    process.env.SHOPIFY_STORE_DOMAIN = PIPELINE_STORE;
+    process.env.SHOPIFY_STORE_CURRENCY = 'BRL';
+  });
+  afterAll(() => {
+    for (const [key, value] of [['SHOPIFY_CLIENT_SECRET', saved.secret], ['SHOPIFY_STORE_DOMAIN', saved.domain], ['SHOPIFY_STORE_CURRENCY', saved.currency]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  const deliver = (topic: string, body: unknown, webhookId: string, triggeredAt?: string) => {
+    const raw = Buffer.from(JSON.stringify(body), 'utf8');
+    const hmac = createHmac('sha256', SECRET).update(raw).digest('base64');
+    return controller().receive({ rawBody: raw } as never, hmac, topic, webhookId, PIPELINE_STORE, triggeredAt);
+  };
+
+  test('orders/paid atrasado 80 h: o instante do cabeçalho vira o prazo; a reentrega do mesmo webhook não duplica nada; sem o cabeçalho o pedido fica retido', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const paidAt = hoursAgo(80);
+    const payload = paidPayload(campaign, 1, { created_at: hoursAgo(81) });
+    const orderId = String(payload.id);
+    await deliver('orders/paid', payload, TAG + '-hook-' + counter++, paidAt);
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect((await registryOf(orderId)).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+    expect((await outboxOf(orderId))[0].deadlineAt.getTime()).toBe(new Date(paidAt).getTime() + 3 * DAY);
+    const sameHook = TAG + '-hook-' + counter++;
+    const second = paidPayload(campaign, 1);
+    await deliver('orders/paid', second, sameHook); // sem o cabeçalho
+    await deliver('orders/paid', second, sameHook, hoursAgo(1)); // reentrega do MESMO webhook: ignorada como duplicada
+    expect(await vouchersOf(String(second.id))).toHaveLength(0);
+    expect((await registryOf(String(second.id))).paymentConfirmedAt).toBeNull();
+    expect(issueCodes((await holdsOf(String(second.id)))[0])).toEqual(['PAYMENT_TIME_UNKNOWN']);
+  });
+
+  test('refunds/create parcial pelo pipeline completo, TWO_VOUCHER ligada e UNIT_REFUNDS desligada: nenhum voucher cancelado', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    await deliver('orders/paid', payload, TAG + '-hook-' + counter++, new Date().toISOString());
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    await deliver('refunds/create', refundFor(campaign, orderId, 1), TAG + '-hook-' + counter++, new Date().toISOString());
+    expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true);
+    expect((await registryOf(orderId)).status).toBe('CONFIRMED');
+    expect(await prisma.valePassRefundApplication.count({ where: { shopifyOrderId: orderId } })).toBe(1);
+  });
+});
+
+localDescribe('concorrência e fora de ordem com o instante do pagamento', () => {
+  test('8 entregas simultâneas do orders/paid com instantes DIFERENTES (+ orders/updated no meio): uma emissão, 1 e-mail por unidade e vale o instante mais antigo', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 2, { created_at: hoursAgo(30) });
+    const orderId = String(payload.id);
+    const instants = [20, 5, 12, 26, 1, 9, 15, 3].map(hoursAgo);
+    await Promise.all([
+      ...instants.map((at) => run(service(), 'orders/paid', payload, { triggeredAt: at })),
+      run(service(), 'orders/updated', withStatus(payload, 'paid', 3_000)),
+    ]);
+    expect(await vouchersOf(orderId)).toHaveLength(4);
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    expect(await holdsOf(orderId)).toHaveLength(0);
+    const oldest = Math.min(...instants.map((at) => new Date(at).getTime()));
+    expect((await registryOf(orderId)).paymentConfirmedAt?.getTime()).toBe(oldest);
+  });
+
+  test('o orders/paid de OUTRO pedido nunca empresta o instante: cada pedido tem o seu', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const a = paidPayload(campaign, 1, { created_at: hoursAgo(50) });
+    const b = paidPayload(campaign, 1, { created_at: hoursAgo(5) });
+    await Promise.all([run(service(), 'orders/paid', a, { triggeredAt: hoursAgo(48) }), run(service(), 'orders/paid', b, { triggeredAt: hoursAgo(4) })]);
+    const [ra, rb] = await Promise.all([registryOf(String(a.id)), registryOf(String(b.id))]);
+    expect(rb.paymentConfirmedAt!.getTime() - ra.paymentConfirmedAt!.getTime()).toBeGreaterThan(40 * 3_600_000);
+  });
+});
+
 localDescribe('injeção de dependências REAL do Nest', () => {
   test('o fluxo de pagamento recebe a caixa de saída e o prisma, e o webhook recebe o fluxo e o reembolso (tipo "| null" perderia o token)', async () => {
     @Module({
@@ -537,6 +1075,7 @@ localDescribe('injeção de dependências REAL do Nest', () => {
         ValePassFinancialGuard,
         ValePassIssuanceService,
         ValePassRefundService,
+        ValePassRegularizationService,
         ValePassPaymentFlowService,
         ValePassWebhookService,
       ],
@@ -549,6 +1088,7 @@ localDescribe('injeção de dependências REAL do Nest', () => {
       expect(flow.prisma).toBe(prisma);
       expect(flow.guard).toBeInstanceOf(ValePassFinancialGuard);
       expect(flow.issuance).toBeInstanceOf(ValePassIssuanceService);
+      expect((flow as unknown as { regularization: unknown }).regularization).toBeInstanceOf(ValePassRegularizationService);
       const webhook = app.get(ValePassWebhookService) as unknown as { flow: unknown; refunds: unknown };
       expect(webhook.flow).toBeInstanceOf(ValePassPaymentFlowService);
       expect(webhook.refunds).toBeInstanceOf(ValePassRefundService);

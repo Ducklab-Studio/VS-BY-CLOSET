@@ -60,6 +60,9 @@ const CRITICAL_ACTIONS = new Set([
   'VALE_PASS_REFUND_REVIEW_RESOLVED',
   // Retomada (ADMIN) das retenções feitas com a integração desligada.
   'VALE_PASS_HOLDS_RESUMED',
+  // Uma retenção retomada (uma linha por pedido, na mesma transação da emissão) e a regularização de pedido pago com unidades sem voucher.
+  'VALE_PASS_HOLD_RESUMED',
+  'VALE_PASS_ORDER_REGULARIZED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

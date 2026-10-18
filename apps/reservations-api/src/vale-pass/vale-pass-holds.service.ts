@@ -1,9 +1,10 @@
-import { ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, HttpException, Inject, Injectable, Logger, Optional, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import type { Prisma, ValePassHoldReason, ValePassHoldStatus, ValePassIssuanceHold } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { ValePassIssuanceService } from './vale-pass-issuance.service';
+import { ValePassEmailOutboxService } from './email/email-outbox.service';
 import { PASS_UNIT_KEY, loadCapacity } from './vale-pass-capacity';
 
 export interface HoldItem {
@@ -86,6 +87,8 @@ export class ValePassHoldsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly issuance: ValePassIssuanceService,
+    // Emissão excepcional também registra a mensagem inicial de e-mail (só enfileira — quem envia é o worker, desligado por padrão).
+    @Optional() @Inject(ValePassEmailOutboxService) private readonly outbox: ValePassEmailOutboxService | null = null,
   ) {}
 
   async list(options: { includeResolved?: boolean } = {}): Promise<HoldItem[]> {
@@ -240,6 +243,10 @@ export class ValePassHoldsService {
           throw new ConflictException('O consumo da campanha divergiu do total projetado após a emissão. Nada foi emitido: reabra a confirmação.');
         }
 
+        // Uma mensagem INICIAL por unidade COMPLETA emitida, na MESMA transação (idempotente: `dedupe_key` por unidade; unidade incompleta, cancelada ou de
+        // pedido não pago não entra). Não envia nada. Prazo: o pagamento real; sem ele, o instante em que o sistema abriu a retenção (base registrada).
+        const queued = this.outbox ? await this.outbox.enqueueForOrder(tx, hold.shopifyOrderId, new Date(), { fallbackConfirmedAt: hold.createdAt }) : null;
+
         await writeAdminAuditEvent(tx, {
           adminUserId: actorId,
           adminUserName: actorName,
@@ -257,7 +264,7 @@ export class ValePassHoldsService {
             consumed: after.totals.consumed,
             exceededBy: projection.exceededBy,
           },
-          detail: { orderId: hold.shopifyOrderId, note: reason, override: true, exceedsLimit: projection.exceedsLimit, confirmedTotal: input.confirmTotal },
+          detail: { orderId: hold.shopifyOrderId, note: reason, override: true, exceedsLimit: projection.exceedsLimit, confirmedTotal: input.confirmTotal, emailsQueued: queued?.enqueued ?? 0, emailsAlreadyQueued: queued?.alreadyQueued ?? 0 },
         });
       }, TX);
     } catch (err) {

@@ -49,6 +49,8 @@ const ISSUE_LABELS: Record<string, string> = {
   TOTAL_MISMATCH: 'total pago diferente do esperado',
   REFUND_PENDING_REVIEW: 'reembolso aguardando decisão de um administrador',
   INTEGRATION_DISABLED: 'o pagamento chegou com a integração dos dois vouchers desligada',
+  PAYMENT_TIME_UNKNOWN: 'instante real do pagamento desconhecido (prazo de 3 dias não calculável)',
+  QUANTITY_INCREASED: 'a compra aumentou depois da emissão (unidades pagas sem voucher)',
   ORDER_NOT_REGISTERED: 'pedido ainda não registrado',
   MULTIPLE_CAMPAIGNS: 'mais de uma campanha no mesmo pedido',
 };
@@ -60,7 +62,7 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
   return (
     <section aria-label="Pagamentos retidos">
       <h4 className="mb-2 text-xs font-semibold text-red-500">Pagamentos confirmados aguardando resolução ({holds.length})</h4>
-      {canManage && holds.some((hold) => hold.issues.includes('INTEGRATION_DISABLED')) ? <ResumeHeldPayments onChanged={onChanged} /> : null}
+      {canManage && holds.some((hold) => ['INTEGRATION_DISABLED', 'PAYMENT_TIME_UNKNOWN', 'QUANTITY_INCREASED'].some((code) => hold.issues.includes(code))) ? <ResumeHeldPayments onChanged={onChanged} /> : null}
       <ul className="space-y-2">
         {holds.map((hold) => (
           <HoldRow key={hold.id} hold={hold} canManage={canManage} onChanged={onChanged} />
@@ -144,7 +146,7 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
     <li className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-ink dark:text-dark-text">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span>
-          Pedido {hold.shopifyOrderName ?? hold.shopifyOrderId}: {hold.units} unidade(s) · {REASON_LABELS[hold.reason]} · {formatDateTime(hold.createdAt)}
+          Pedido {hold.shopifyOrderName ?? hold.shopifyOrderId}: {hold.units} unidade(s) · {REASON_LABELS[hold.reason]} · retido em {formatDateTime(hold.createdAt)} · {hold.paymentConfirmedAt ? `pago em ${formatDateTime(hold.paymentConfirmedAt)} (prazo de 3 dias conta daqui)` : 'instante do pagamento DESCONHECIDO'}
           {hold.reason === 'FINANCIAL_MISMATCH' && hold.issues.length > 0 ? (
             <span className="mt-0.5 block text-ink/60 dark:text-dark-muted">Divergências: {hold.issues.map((code) => ISSUE_LABELS[code] ?? code).join('; ')}.</span>
           ) : null}
@@ -402,7 +404,7 @@ function ResumeHeldPayments({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div role="group" aria-label="Retomada das retenções" className="mb-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-ink dark:text-dark-text">
-      <p>Há pagamentos retidos porque a integração dos dois vouchers estava desligada. Depois de LIGAR a integração, retome-os aqui (mais antigos primeiro, em lotes).</p>
+      <p>Há pagamentos retidos que a retomada pode reprocessar (integração desligada na hora do pagamento, instante do pagamento que chegou depois ou compra que aumentou). Depois de LIGAR a integração, retome-os aqui (mais antigos primeiro, em lotes; cada pedido é revalidado).</p>
       <button type="button" className={`${secondaryButton} mt-2`} onClick={() => setOpen((value) => !value)}>
         {open ? 'Fechar' : 'Retomar retenções'}
       </button>

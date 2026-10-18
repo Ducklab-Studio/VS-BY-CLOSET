@@ -983,10 +983,10 @@ localDescribe('E-mail dos vouchers — garantias do banco e isolamento', () => {
       }
     };
     walk(root);
-    expect(users.sort()).toEqual(['vale-pass/email/email-outbox.service.ts', 'vale-pass/email/email-worker.service.ts', 'vale-pass/email/email.controller.ts', 'vale-pass/email/resend-webhook.controller.ts', 'vale-pass/flow/payment-flow.service.ts', 'vale-pass/vale-pass.module.ts']);
-    // só o serviço da caixa de saída e o fluxo de pagamento (atrás da chave VALE_PASS_TWO_VOUCHER_FLOW, desligada por padrão) chamam enqueueForOrder
+    expect(users.sort()).toEqual(['vale-pass/email/email-outbox.service.ts', 'vale-pass/email/email-worker.service.ts', 'vale-pass/email/email.controller.ts', 'vale-pass/email/resend-webhook.controller.ts', 'vale-pass/flow/payment-flow.service.ts', 'vale-pass/vale-pass-holds.service.ts', 'vale-pass/vale-pass.module.ts']);
+    // só o serviço da caixa de saída, o fluxo de pagamento (atrás da chave VALE_PASS_TWO_VOUCHER_FLOW, desligada por padrão) e a emissão excepcional do ADMIN chamam enqueueForOrder
     const callers = users.filter((file) => /\.enqueueForOrder\(/.test(readFileSync(join(root, file), 'utf8')));
-    expect(callers).toEqual(['vale-pass/email/email-outbox.service.ts', 'vale-pass/flow/payment-flow.service.ts']);
+    expect(callers).toEqual(['vale-pass/email/email-outbox.service.ts', 'vale-pass/flow/payment-flow.service.ts', 'vale-pass/vale-pass-holds.service.ts']);
     expect(new ValePassWebhookService()).toBeDefined();
   });
 

@@ -27,3 +27,12 @@ export function envFlowFlags(env: Record<string, string | undefined> = process.e
 
 /** Código do motivo guardado na retenção quando o pagamento chega com a chave desligada. */
 export const INTEGRATION_DISABLED = 'INTEGRATION_DISABLED';
+
+/** Código da retenção quando o pedido está pago mas o instante REAL do pagamento é desconhecido (cabeçalho ausente/inválido): o prazo de 3 dias não pode ser calculado. */
+export const PAYMENT_TIME_UNKNOWN = 'PAYMENT_TIME_UNKNOWN';
+
+/** Código da retenção quando a compra CRESCEU depois da emissão (unidades pagas a mais sem voucher): nunca emite sozinho; um ADMIN regulariza com a validação financeira. */
+export const QUANTITY_INCREASED = 'QUANTITY_INCREASED';
+
+/** Códigos de retenção que a retomada pelo ADMIN sabe reprocessar (a causa pode ter sido sanada: chave ligada / instante do pagamento chegou). */
+export const RESUMABLE_HOLD_CODES: readonly string[] = [INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED];

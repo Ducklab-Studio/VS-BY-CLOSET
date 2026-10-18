@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, Optional, UnprocessableEntityException } from '@nestjs/common';
 import type { Prisma, ValePassCampaign, ValePassIssuanceHold, ValePassOrder } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../../admin/admin-audit';
@@ -8,10 +8,12 @@ import { ValePassEmailOutboxService } from '../email/email-outbox.service';
 import { ValePassFinancialGuard, summarizeIssues } from '../financial/financial-guard.service';
 import { factsFromWebhookPayload } from '../financial/order-facts';
 import { PASS_UNIT_KEY } from '../vale-pass-capacity';
+import { numericShopifyId } from '../vale-pass-order-status';
 import { ValePassIssuanceService, type IssuanceOrder } from '../vale-pass-issuance.service';
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { absorbedUnissuedUnits } from '../refunds/refund.service';
-import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, type FlowFlags } from './flow-flags';
+import { ValePassRegularizationService, type RegularizationCandidate, type RegularizationOutcome } from '../refunds/regularization.service';
+import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
 
 type Tx = Prisma.TransactionClient;
 
@@ -28,6 +30,22 @@ export interface ResumeReport {
 }
 
 export const MAX_RESUME_BATCH = 25;
+
+export interface FlowOverview {
+  readonly heldPayments: number;
+  readonly heldUnits: number;
+  readonly byCause: { readonly integrationDisabled: number; readonly paymentTimeUnknown: number; readonly quantityIncreased: number; readonly financialMismatch: number; readonly capacityOrCampaign: number };
+  /** Pedidos pagos com unidades sem voucher e SEM retenção aberta (ex.: variante sem campanha). Candidatos à regularização. */
+  readonly ordersWithoutTreatment: readonly RegularizationCandidate[];
+  readonly unitsWithoutTreatment: number;
+  /** Mensagens iniciais de e-mail (nada é enviado enquanto o envio estiver desligado). */
+  readonly emails: { readonly awaitingSend: number; readonly needsAttention: number; readonly unknownResult: number };
+}
+
+export interface RegularizeResult {
+  readonly outcome: RegularizationOutcome;
+  readonly emailsQueued: number;
+}
 
 /**
  * Caminho do pagamento confirmado no modelo de DOIS VOUCHERS por unidade (Valle Pass 2027). Roda DENTRO da transação e do lock do pedido do webhook.
@@ -50,6 +68,7 @@ export class ValePassPaymentFlowService {
     @Optional() @Inject(ValePassEmailOutboxService) private readonly outbox: ValePassEmailOutboxService | null = null,
     @Optional() @Inject(FLOW_FLAGS_TOKEN) private readonly flags: FlowFlags = envFlowFlags(),
     @Optional() @Inject(PrismaService) private readonly prisma: PrismaService | null = null,
+    @Optional() @Inject(ValePassRegularizationService) private readonly regularization: ValePassRegularizationService | null = null,
   ) {}
 
   enabled(): boolean {
@@ -58,6 +77,25 @@ export class ValePassPaymentFlowService {
 
   unitRefundsEnabled(): boolean {
     return this.flags.unitRefunds();
+  }
+
+  /**
+   * Pedido do MODELO NOVO (dois vouchers por unidade): tem voucher de unidade, retenção de pagamento ou linha de campanha com benefícios. Esse pedido NUNCA
+   * pode cair no cancelamento integral legado — o reembolso (parcial, só de frete, de outro produto) é sempre tratado POR UNIDADE (trilha idempotente,
+   * política ADMIN_CONFIRM: o sistema só propõe, quem cancela é um ADMIN), independentemente das chaves. A chave VALE_PASS_UNIT_REFUNDS só decide o
+   * mesmo tratamento para pedidos que ainda não têm nenhum sinal do modelo novo (ex.: campanha legada).
+   */
+  async usesUnitModel(tx: Tx, orderId: string, variantIds: readonly (string | number | null | undefined)[]): Promise<boolean> {
+    if (this.flags.unitRefunds()) return true;
+    if (await tx.valePass.findFirst({ where: { shopifyOrderId: orderId, groupId: { not: null } }, select: { id: true } })) return true;
+    if (await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: orderId }, select: { id: true } })) return true;
+    const wanted = new Set(variantIds.map((id) => numericShopifyId(id)).filter((id): id is string => id !== null));
+    if (wanted.size === 0) return false;
+    const withBenefits = await tx.valePassCampaign.findMany({ where: { benefits: { some: {} } }, select: { shopifyVariantId: true } });
+    return withBenefits.some((campaign) => {
+      const variant = numericShopifyId(campaign.shopifyVariantId);
+      return variant !== null && wanted.has(variant);
+    });
   }
 
   /** Quantas unidades da campanha o pedido ainda precisa receber: pagas − emitidas (inclui canceladas) − devolvidas por reembolso antes da emissão. */
@@ -97,6 +135,9 @@ export class ValePassPaymentFlowService {
     if (campaigns.length !== 1) return hold([{ code: 'MULTIPLE_CAMPAIGNS' }], 'FINANCIAL_MISMATCH');
     if (!registry) return hold([{ code: 'ORDER_NOT_REGISTERED' }], 'FINANCIAL_MISMATCH');
     if (!this.flags.twoVoucher()) return hold([{ code: INTEGRATION_DISABLED }], INTEGRATION_DISABLED);
+    // Prazo de 3 dias = desde o PAGAMENTO real. Sem esse instante (cabeçalho do orders/paid ausente/inválido, ou pagamento só visto por orders/updated ou
+    // reconciliação) o pedido NÃO é emitido às cegas nem recebe horário inventado: fica retido, com alerta, para um administrador.
+    if (!registry.paymentConfirmedAt) return hold([{ code: PAYMENT_TIME_UNKNOWN }], 'FINANCIAL_MISMATCH');
 
     const verdict = await this.guard.evaluate(tx, factsFromWebhookPayload(payload));
     const issues = verdict.ok
@@ -117,6 +158,103 @@ export class ValePassPaymentFlowService {
   }
 
   /**
+   * A compra CRESCEU depois da emissão (ex.: pedido editado de 2 para 3 unidades): as unidades extras ficariam sem voucher e sem nenhum registro. Aqui vira
+   * RETENÇÃO visível (fila do ClosetAdmin, alertas por idade). NUNCA emite sozinho: o pagamento do acréscimo só é aceito por um ADMIN, por `regularizeOrder`
+   * (que revalida os fatos financeiros atuais). Idempotente: já havendo retenção aberta do pedido, não mexe nela.
+   */
+  async holdQuantityIncrease(tx: Tx, input: { registry: ValePassOrder; campaigns: readonly ValePassCampaign[] }): Promise<FlowEvent[]> {
+    const { registry, campaigns } = input;
+    if (campaigns.length !== 1 || registry.status !== 'CONFIRMED' || registry.deletedInShopifyAt) return [];
+    if (await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: registry.shopifyOrderId } })) return [];
+    const campaign = campaigns[0];
+    const issuedGroups = await tx.valePass.findMany({ where: { shopifyOrderId: registry.shopifyOrderId, campaignId: campaign.id, groupId: { not: null } }, select: { groupId: true }, distinct: ['groupId'] });
+    if (issuedGroups.length === 0) return []; // nada emitido ainda: é o caso do pagamento (retenção própria), não de acréscimo
+    const missing = await this.missingUnits(tx, registry.shopifyOrderId, campaign.id, registry.quantity);
+    if (missing <= 0) return [];
+    if (await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: registry.shopifyOrderId, campaignId: campaign.id, status: 'OPEN' }, select: { id: true } })) return [];
+    const order: IssuanceOrder = { orderId: registry.shopifyOrderId, orderGid: registry.shopifyOrderGid, orderName: registry.shopifyOrderName, customerName: registry.customerName, customerPhone: registry.customerPhone, customerEmail: registry.customerEmail };
+    const held = await this.issuance.holdForFinancialReview(tx, { campaignId: campaign.id, order, units: missing, issues: [{ code: QUANTITY_INCREASED, detail: { registryUnits: registry.quantity, issuedUnits: issuedGroups.length } }], allowWithExistingVouchers: true });
+    this.logger.warn(`Pedido ${registry.shopifyOrderId}: compra cresceu depois da emissão — ${missing} unidade(s) retida(s) para regularização.`);
+    return [{ type: 'VALE_PASS_QUANTITY_INCREASE_HELD', detail: { orderId: registry.shopifyOrderId, campaignId: campaign.id, units: missing, holdId: held.holdId } }];
+  }
+
+  /** Visão administrativa do que NÃO está resolvido: retenções por causa, unidades pendentes e pedidos pagos sem tratamento nenhum (sem dados pessoais). */
+  async overview(): Promise<FlowOverview> {
+    if (!this.prisma || !this.regularization) throw new Error('PrismaService/Regularization não disponíveis');
+    const holds = await this.prisma.valePassIssuanceHold.findMany({ where: { status: 'OPEN' }, select: { reason: true, units: true, detail: true }, take: 500 });
+    const byCause = { integrationDisabled: 0, paymentTimeUnknown: 0, quantityIncreased: 0, financialMismatch: 0, capacityOrCampaign: 0 };
+    for (const hold of holds) {
+      const codes = financialIssueCodes(hold.detail);
+      if (codes.includes(INTEGRATION_DISABLED)) byCause.integrationDisabled++;
+      else if (codes.includes(PAYMENT_TIME_UNKNOWN)) byCause.paymentTimeUnknown++;
+      else if (codes.includes(QUANTITY_INCREASED)) byCause.quantityIncreased++;
+      else if (hold.reason === 'FINANCIAL_MISMATCH') byCause.financialMismatch++;
+      else byCause.capacityOrCampaign++;
+    }
+    const candidates = (await this.regularization.findCandidates(200)).filter((candidate) => !candidate.legacy && !candidate.hasOpenHold);
+    const emailRows = await this.prisma.valePassEmailOutbox.groupBy({ by: ['status'], where: { kind: 'INITIAL', status: { in: ['QUEUED', 'NEEDS_ATTENTION', 'UNKNOWN'] } }, _count: { _all: true } });
+    const emailCount = (status: string): number => emailRows.find((row) => row.status === status)?._count._all ?? 0;
+    return {
+      heldPayments: holds.length,
+      heldUnits: holds.reduce((sum, hold) => sum + hold.units, 0),
+      byCause,
+      ordersWithoutTreatment: candidates.slice(0, 50),
+      unitsWithoutTreatment: candidates.reduce((sum, candidate) => sum + candidate.missing, 0),
+      emails: { awaitingSend: emailCount('QUEUED'), needsAttention: emailCount('NEEDS_ATTENTION'), unknownResult: emailCount('UNKNOWN') },
+    };
+  }
+
+  /**
+   * Regularização administrativa de um pedido PAGO com unidades sem voucher (compra que cresceu, variante sem campanha agora cadastrada, pagamento nunca
+   * processado). ADMIN, justificativa, chave LIGADA. Reaproveita a regularização: revalida os fatos financeiros ATUAIS do pedido (último evento guardado,
+   * pago integralmente, preço/quantidade/desconto/frete conferem) e só então emite o que falta, mais a mensagem inicial de cada unidade completa na MESMA
+   * transação. Qualquer divergência vira retenção; nada é emitido às cegas. Idempotente: a segunda chamada não encontra nada a fazer.
+   */
+  async regularizeOrder(actor: { id: string; name: string }, input: { orderId: string; note: string }): Promise<RegularizeResult> {
+    if (!this.prisma || !this.regularization) throw new Error('PrismaService/Regularization não disponíveis');
+    const note = (input.note ?? '').trim();
+    if (note.length < 10) throw new UnprocessableEntityException('Informe a justificativa (mínimo de 10 caracteres).');
+    if (!this.flags.twoVoucher()) throw new ConflictException('A integração dos dois vouchers está desligada. Ligue VALE_PASS_TWO_VOUCHER_FLOW antes de regularizar pedidos.');
+    const regularization = this.regularization;
+    return this.prisma.$transaction(
+      async (tx) => {
+        await lockShopifyOrder(tx, input.orderId);
+        const admin = await tx.adminUser.findUnique({ where: { id: actor.id }, select: { role: true, active: true } });
+        if (!admin || !admin.active || admin.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador ativo pode regularizar pedidos.');
+        const registry = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: input.orderId } });
+        if (!registry) throw new NotFoundException('Pedido não encontrado no registro do Valle Pass.');
+        if (!registry.paymentConfirmedAt) throw new ConflictException('O instante real do pagamento é desconhecido: confira na Shopify e use a emissão excepcional da retenção (a base do prazo fica registrada).');
+        const latest = await tx.$queryRaw<{ payload: ShopifyOrderPayload }[]>`
+          SELECT payload FROM webhook_events
+          WHERE topic IN ('orders/paid', 'orders/updated') AND payload->>'id' = ${input.orderId}
+          ORDER BY processed_at DESC, id DESC LIMIT 1`;
+        const payload = latest[0]?.payload;
+        if (!payload) throw new ConflictException('Nenhum evento do pedido guardado: não há fatos financeiros para validar. Use a emissão excepcional da retenção.');
+        if (payload.financial_status !== 'paid') throw new ConflictException('O último evento do pedido não mostra pagamento integral: confira na Shopify.');
+
+        const outcome = await regularization.regularize(tx, { orderId: input.orderId, facts: factsFromWebhookPayload(payload) });
+        let emailsQueued = 0;
+        if (outcome.status === 'ISSUED' || outcome.status === 'HELD') {
+          if (this.outbox) emailsQueued = (await this.outbox.enqueueForOrder(tx, input.orderId)).enqueued;
+          await tx.valePassOrderEvent.create({ data: { valePassOrderId: registry.id, type: 'REGULARIZED', detail: { source: 'regularize', actorId: actor.id, outcome: outcome.status, emailsQueued } as Prisma.InputJsonValue } });
+          await writeAdminAuditEvent(tx, {
+            adminUserId: actor.id,
+            adminUserName: actor.name,
+            action: 'VALE_PASS_ORDER_REGULARIZED',
+            entityType: 'ValePassOrder',
+            entityId: registry.id,
+            before: { quantity: registry.quantity },
+            after: { outcome: outcome.status, issuedUnits: outcome.status === 'ISSUED' ? outcome.issuedUnits : 0, vouchersCreated: outcome.status === 'ISSUED' ? outcome.vouchersCreated : 0, emailsQueued },
+            detail: { orderId: input.orderId, note },
+          });
+        }
+        return { outcome, emailsQueued };
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    );
+  }
+
+  /**
    * Retomada das retenções feitas com a chave DESLIGADA (ação de ADMIN; nunca automática). Só funciona com a chave LIGADA. Processa em ordem de
    * pagamento (as mais antigas primeiro), em lotes pequenos, cada pedido na sua transação e sob o seu lock. Idempotente: pedido já tratado é pulado.
    * O que a validação financeira não aceitar continua retido, agora com os motivos reais. Cancelamento/reembolso nunca passa por aqui.
@@ -128,7 +266,7 @@ export class ValePassPaymentFlowService {
     }
     const limit = Math.min(Math.max(Math.floor(options.limit ?? 10), 1), MAX_RESUME_BATCH);
     const open = await this.prisma.valePassIssuanceHold.findMany({ where: { status: 'OPEN', reason: 'FINANCIAL_MISMATCH' }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 500 });
-    const candidates = open.filter((hold) => financialIssueCodes(hold.detail).includes(INTEGRATION_DISABLED)).slice(0, limit);
+    const candidates = open.filter((hold) => financialIssueCodes(hold.detail).some((code) => RESUMABLE_HOLD_CODES.includes(code))).slice(0, limit);
     const skipped: { orderName: string | null; reason: string }[] = [];
     let issued = 0;
     let reclassified = 0;
@@ -162,7 +300,7 @@ export class ValePassPaymentFlowService {
     const hold = await tx.valePassIssuanceHold.findUnique({ where: { id: candidate.id } });
     const registry = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: candidate.shopifyOrderId } });
     const skip = (reason: string) => ({ kind: 'SKIPPED' as const, orderName: registry?.shopifyOrderName ?? null, reason });
-    if (!hold || hold.status !== 'OPEN' || !financialIssueCodes(hold.detail).includes(INTEGRATION_DISABLED)) return skip('A retenção mudou desde a leitura.');
+    if (!hold || hold.status !== 'OPEN' || !financialIssueCodes(hold.detail).some((code) => RESUMABLE_HOLD_CODES.includes(code))) return skip('A retenção mudou desde a leitura.');
     if (!registry || registry.status !== 'CONFIRMED' || registry.deletedInShopifyAt) return skip('O pedido não está mais pago (confira na Shopify e descarte a retenção).');
     if (await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: candidate.shopifyOrderId } })) return skip('Pedido cancelado/reembolsado: descarte a retenção.');
     const campaign = await tx.valePassCampaign.findUnique({ where: { id: hold.campaignId } });
@@ -182,7 +320,18 @@ export class ValePassPaymentFlowService {
     await tx.valePassOrderEvent.create({
       data: { valePassOrderId: registry.id, type: 'HOLD_RESUMED', detail: { source: 'resume', actorId: actor.id, outcome: [...new Set(events.map((event) => event.type))] } as Prisma.InputJsonValue },
     });
-    if (after && after.status === 'OPEN') return { kind: 'RECLASSIFIED' };
-    return { kind: 'ISSUED' };
+    // Auditoria na MESMA transação da emissão: ou os dois acontecem, ou nenhum (uma queda no meio nunca deixa voucher emitido sem trilha administrativa).
+    const outcome = after && after.status === 'OPEN' ? 'RECLASSIFIED' : 'ISSUED';
+    await writeAdminAuditEvent(tx, {
+      adminUserId: actor.id,
+      adminUserName: actor.name,
+      action: 'VALE_PASS_HOLD_RESUMED',
+      entityType: 'ValePassIssuanceHold',
+      entityId: hold.id,
+      before: { status: 'OPEN', units: hold.units, issues: financialIssueCodes(hold.detail) },
+      after: { status: after?.status ?? null, outcome, issues: after ? financialIssueCodes(after.detail) : [] },
+      detail: { orderId: candidate.shopifyOrderId, events: [...new Set(events.map((event) => event.type))] },
+    });
+    return { kind: outcome };
   }
 }

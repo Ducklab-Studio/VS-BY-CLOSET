@@ -19,6 +19,9 @@ import {
   replaceValePassBenefits,
   dismissValePassHold,
   resumeValePassHeldPayments,
+  getValePassFlowStatus,
+  regularizeValePassOrder,
+  type ValePassFlowStatus,
   type ValePassResumeReport,
   resolveValePassRefundReview,
   type ValePassRefundReviewAction,
@@ -386,6 +389,42 @@ export async function resolveValePassRefundReviewAction(id: string, action: Vale
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a decisão.' };
+  }
+}
+
+/** Estado das chaves e das pendências da integração financeira (leitura: módulo VALLE_PASS). */
+export async function getValePassFlowStatusAction(): Promise<{ status: ValePassFlowStatus | null; error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    return { status: await getValePassFlowStatus(session.id), error: null };
+  } catch (err) {
+    return { status: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar o estado da integração.' };
+  }
+}
+
+const REGULARIZE_MESSAGES: Record<string, string> = {
+  ISSUED: 'Pedido regularizado: vouchers emitidos e e-mail(s) registrado(s) na fila (nenhum e-mail é enviado por aqui).',
+  HELD: 'Os fatos financeiros do pedido NÃO fecham: nada foi emitido e o pedido ficou na fila de retenções com os motivos.',
+  NOTHING_TO_DO: 'Nada a regularizar: o pedido já tem todas as unidades emitidas.',
+  CAMPAIGN_UNRESOLVED: 'Não há campanha única para este pedido: cadastre a campanha da variante comprada antes de regularizar.',
+  FACTS_MISMATCH: 'Os dados financeiros guardados não são deste pedido. Nada foi emitido.',
+  LEGACY_ORDER: 'Pedido do modelo antigo: não é regularizado por aqui.',
+  NOT_PAID: 'O pedido não está pago/ativo. Nada foi emitido.',
+};
+
+/** Regularização de pedido pago com unidades sem voucher (só ADMIN, justificativa ≥ 10; a API revalida o pagamento e audita). */
+export async function regularizeValePassOrderAction(orderId: string, note: string): Promise<{ error: string | null; message?: string }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    const result = await regularizeValePassOrder({ orderId, note: note.trim() }, session.id);
+    revalidateValePassPath();
+    return { error: null, message: REGULARIZE_MESSAGES[result.outcome.status] ?? 'Pedido avaliado.' };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível regularizar o pedido.' };
   }
 }
 

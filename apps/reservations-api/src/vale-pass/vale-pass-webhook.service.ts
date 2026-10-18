@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
 import { ValePassPaymentFlowService } from './flow/payment-flow.service';
+import { resolvePaymentInstant, type ValePassWebhookMeta } from './flow/payment-instant';
 import { envFlowFlags, FLOW_FLAGS_TOKEN, type FlowFlags } from './flow/flow-flags';
 import { ValePassRefundService } from './refunds/refund.service';
 import { factsFromRefundWebhook } from './refunds/refund-facts';
@@ -87,7 +88,7 @@ export class ValePassWebhookService {
    * (regra de sempre) ou, se esse webhook se perdeu, o `orders/updated` que
    * mostra o pedido pago. `orders/create` nunca emite vale.
    */
-  async handleOrderWebhook(tx: Prisma.TransactionClient, topic: string, payload: unknown): Promise<EventInput[]> {
+  async handleOrderWebhook(tx: Prisma.TransactionClient, topic: string, payload: unknown, meta: ValePassWebhookMeta = { triggeredAt: null }): Promise<EventInput[]> {
     const source = `webhook:${topic}`;
     switch (topic) {
       case 'refunds/create':
@@ -106,8 +107,23 @@ export class ValePassWebhookService {
     const order = payload as ShopifyOrderPayload;
     const quantity = await this.valePassQuantity(tx, order);
     if (quantity === 0) return [];
-    const result = await this.orders.apply(tx, { ...snapshotFromPayload(order, quantity), keepPaidOnPartialRefund: this.flags.unitRefunds() }, source);
+    const unitModel = await this.flow.usesUnitModel(tx, String(order.id), (order.line_items ?? []).map((line) => line.variant_id));
+    const result = await this.orders.apply(tx, { ...snapshotFromPayload(order, quantity), keepPaidOnPartialRefund: unitModel }, source);
     const events: EventInput[] = [...result.events];
+
+    // Instante REAL do pagamento: só a entrega de `orders/paid` (cabeçalho X-Shopify-Triggered-At, validado) o define. Ausente/inválido → fica desconhecido
+    // e o fluxo retém o pedido com alerta (nunca se usa o horário do processamento). Gravado ANTES da emissão: retenção, alertas e prazo do e-mail leem dele.
+    let registered = result.order;
+    if (topic === 'orders/paid' && order.financial_status === 'paid' && !registered.deletedInShopifyAt) {
+      const instant = resolvePaymentInstant({ topic, triggeredAt: meta.triggeredAt, orderCreatedAt: registered.orderCreatedAt ?? parseDate(order.created_at), payloadUpdatedAt: parseDate(order.updated_at) });
+      if (instant.at) {
+        const recorded = await this.orders.recordPaymentInstant(tx, registered.id, instant.at, source);
+        registered = recorded.order;
+        events.push(...recorded.events);
+      } else {
+        events.push({ type: 'VALE_PASS_PAYMENT_INSTANT_UNRELIABLE', detail: { orderId: registered.shopifyOrderId, reason: instant.reason, note: 'sem instante confiável do pagamento: o prazo de 3 dias não é calculado; o pedido fica retido para um administrador' } });
+      }
+    }
 
     if (result.order.deletedInShopifyAt && (topic === 'orders/paid' || topic === 'orders/updated') && order.financial_status === 'paid') {
       // Pagamento entregue depois da exclusão do pedido na Shopify: registra e
@@ -118,24 +134,38 @@ export class ValePassWebhookService {
       // atrasado): pedido expirado não fica confirmado nem ganha vale ativo.
       events.push({ type: 'VALE_PASS_PAYMENT_NOT_APPLIED', detail: { orderId: result.order.shopifyOrderId, status: result.order.status, reason: 'estado mais recente do pedido é expirado/recusado' } });
     } else if (topic === 'orders/paid' && order.financial_status === 'paid') {
-      const issued = await this.handleOrderPaid(tx, order, result.order);
+      const issued = await this.handleOrderPaid(tx, order, registered);
       events.push(...issued);
-      await this.orders.markVouchersProcessed(tx, result.order.id, source, issued);
+      await this.orders.markVouchersProcessed(tx, registered.id, source, issued);
     } else if (topic === 'orders/updated') {
-      events.push(...(await this.issueForConfirmedOrder(tx, result.order, order, source)));
+      events.push(...(await this.issueForConfirmedOrder(tx, registered, order, source)));
+      // Compra que CRESCEU depois da emissão: retenção visível (nunca emissão automática do acréscimo).
+      if (order.financial_status === 'paid' && registered.status === 'CONFIRMED' && registered.vouchersProcessedAt && !registered.deletedInShopifyAt) {
+        events.push(...(await this.flow.holdQuantityIncrease(tx, { registry: registered, campaigns: await this.benefitCampaigns(tx, order) })));
+      }
     }
     return events;
   }
 
+  /** Campanhas do pedido que seguem o modelo de dois vouchers (com benefícios cadastrados). */
+  private async benefitCampaigns(tx: Prisma.TransactionClient, order: ShopifyOrderPayload) {
+    const variantIds = [...new Set(extractOrderLineVariants(order).map((line) => line.variantId))];
+    if (variantIds.length === 0) return [];
+    return tx.valePassCampaign.findMany({ where: { shopifyVariantId: { in: variantIds }, benefits: { some: {} } } });
+  }
+
   /**
-   * `refunds/create` do Valle Pass. Chave VALE_PASS_UNIT_REFUNDS desligada (padrão): comportamento legado de sempre (cancela os vales ativos do pedido).
-   * Ligada: tratamento por unidade (trilha idempotente, política ADMIN_CONFIRM, revisão administrativa). Pedido sem vouchers de unidade (legado) ou que não é
-   * de Valle Pass continua no caminho legado. Desligar a chave NUNCA impede cancelar/reembolsar: só volta ao legado, que cancela tudo.
+   * `refunds/create` do Valle Pass. Pedido do modelo novo (ver `usesUnitModel`): sempre por unidade, com as chaves ligadas ou não — desligar uma chave NUNCA
+   * volta ao cancelamento integral, nunca impede o registro do reembolso e nunca cancela unidade não reembolsada. Pedido legado (vouchers sem unidade) ou que
+   * não é de Valle Pass continua no caminho legado de sempre (cancela os vales ativos do pedido).
    */
   async handleRefund(tx: Prisma.TransactionClient, refund: ShopifyRefundPayload): Promise<EventInput[]> {
     const orderId = String(refund.order_id);
-    if (this.flags.unitRefunds() && this.refunds) {
-      const outcome = await this.refunds.apply(tx, factsFromRefundWebhook(refund));
+    const facts = factsFromRefundWebhook(refund);
+    if (await this.flow.usesUnitModel(tx, orderId, facts.lines.map((line) => line.variantId))) {
+      // Sem o serviço de reembolso por unidade não há como proteger o pedido: falha fechada (503 → a Shopify reentrega), nunca cancelamento integral.
+      if (!this.refunds) throw new Error('Reembolso de pedido do modelo de dois vouchers sem o serviço de reembolso por unidade.');
+      const outcome = await this.refunds.apply(tx, facts);
       if (outcome.status === 'APPLIED' || outcome.status === 'NEEDS_REVIEW' || outcome.status === 'DUPLICATE') {
         const cancelledVouchers = 'cancelledVouchers' in outcome ? outcome.cancelledVouchers : 0;
         return [{ type: 'VALE_PASS_REFUND_BY_UNIT', detail: { orderId, refundId: String(refund.id), outcome: outcome.status, cancelledVouchers } }];
@@ -147,12 +177,11 @@ export class ValePassWebhookService {
   /** Registro do pedido após um reembolso: parcial por unidade (chave ligada) mantém o pedido pago; o resto segue a regra de sempre. */
   private async markOrderRefunded(tx: Prisma.TransactionClient, refund: ShopifyRefundPayload, source: string): Promise<EventInput[]> {
     const orderId = String(refund.order_id);
-    if (this.flags.unitRefunds()) {
-      const row = await tx.valePassRefundApplication.findUnique({ where: { shopifyRefundId: String(refund.id) } });
-      const fullyRefunded = (row?.detail as { orderFullyRefunded?: unknown } | null)?.orderFullyRefunded === true;
-      if (row && row.classification !== 'ALREADY_CANCELLED' && !fullyRefunded) {
-        return [{ type: 'VALE_PASS_ORDER_SYNCED', detail: { orderId, source, changed: false, note: 'reembolso por unidade: o pedido segue pago para as unidades que restam' } }];
-      }
+    // Só existe linha na trilha se o reembolso foi tratado por unidade (modelo novo ou chave ligada).
+    const row = await tx.valePassRefundApplication.findUnique({ where: { shopifyRefundId: String(refund.id) } });
+    const fullyRefunded = (row?.detail as { orderFullyRefunded?: unknown } | null)?.orderFullyRefunded === true;
+    if (row && row.classification !== 'ALREADY_CANCELLED' && !fullyRefunded) {
+      return [{ type: 'VALE_PASS_ORDER_SYNCED', detail: { orderId, source, changed: false, note: 'reembolso por unidade: o pedido segue pago para as unidades que restam' } }];
     }
     return this.orders.markRefunded(tx, orderId, source);
   }
@@ -200,11 +229,13 @@ export class ValePassWebhookService {
       // manual em vez de desaparecer sem rastro (ver comentário de
       // KNOWN_VALE_PASS_VARIANT_ID acima). Nunca cria vale aqui: só
       // torna o caso visível, quem decide é uma pessoa.
-      if (variantIds.includes(KNOWN_VALE_PASS_VARIANT_ID)) {
-        this.logger.error(`Pedido ${orderId} pago com a variante conhecida do Valle Pass (${KNOWN_VALE_PASS_VARIANT_ID}), mas nenhuma ValePassCampaign existe para ela — nenhum vale foi emitido.`);
+      // Variante conhecida OU qualquer variante (inclusive NOVA) do produto do Valle Pass: o registro do pedido (CONFIRMED, com unidades e sem vouchers) é a
+      // pendência rastreável — aparece em "Pagamentos sem tratamento" (/admin/vale-pass/flow) e no alerta do painel até um ADMIN regularizar.
+      if (valePassUnits((order.line_items ?? []).map((line) => ({ variantId: line.variant_id, productId: line.product_id, quantity: typeof line.quantity === 'number' ? line.quantity : 0 })), []) > 0) {
+        this.logger.error(`Pedido ${orderId} pago com Valle Pass, mas nenhuma ValePassCampaign existe para a variante (${variantIds.join(', ')}) — nenhum vale foi emitido.`);
         return [{
           type: 'VALE_PASS_ORDER_WITHOUT_CAMPAIGN',
-          detail: { orderId, variantId: KNOWN_VALE_PASS_VARIANT_ID, reason: 'pedido pago da variante do Valle Pass sem nenhuma campanha cadastrada — revisão manual necessária, nenhum vale foi criado automaticamente' },
+          detail: { orderId, variantIds, reason: 'pedido pago do produto Valle Pass sem campanha cadastrada para a variante — revisão manual necessária, nenhum vale foi criado automaticamente' },
         }];
       }
       return [];

@@ -25,7 +25,7 @@ export const IN_FLIGHT_STATUSES: readonly ValePassEmailStatus[] = ['QUEUED', 'SE
 export const SATISFIED_STATUSES: readonly ValePassEmailStatus[] = ['ACCEPTED', 'DELIVERED'];
 
 export type GroupVerdict =
-  | { readonly ok: true; readonly order: { readonly orderId: string; readonly orderName: string | null; readonly customerName: string | null; readonly customerEmail: string | null; readonly confirmedAt: Date }; readonly vouchers: readonly (ValePass & { benefit: ValePassCampaignBenefit | null })[]; readonly unit: { readonly index: number; readonly total: number } }
+  | { readonly ok: true; readonly order: { readonly orderId: string; readonly orderName: string | null; readonly customerName: string | null; readonly customerEmail: string | null; readonly confirmedAt: Date; readonly paymentConfirmedAt: Date | null }; readonly vouchers: readonly (ValePass & { benefit: ValePassCampaignBenefit | null })[]; readonly unit: { readonly index: number; readonly total: number } }
   | { readonly ok: false; readonly outcome: 'CANCELLED' | 'NEEDS_ATTENTION' | 'WAIT'; readonly reason: string };
 
 /**
@@ -53,7 +53,7 @@ export async function evaluateGroup(db: Db, orderId: string, groupId: string): P
   const ordered = groups.map((group) => ({ id: group.groupId as string, at: group._min.createdAt as Date })).sort((a, b) => a.at.getTime() - b.at.getTime() || a.id.localeCompare(b.id));
   return {
     ok: true,
-    order: { orderId, orderName: order.shopifyOrderName, customerName: order.customerName, customerEmail: order.customerEmail, confirmedAt: order.statusChangedAt },
+    order: { orderId, orderName: order.shopifyOrderName, customerName: order.customerName, customerEmail: order.customerEmail, confirmedAt: order.statusChangedAt, paymentConfirmedAt: order.paymentConfirmedAt },
     vouchers,
     unit: { index: Math.max(1, ordered.findIndex((group) => group.id === groupId) + 1), total: Math.max(1, ordered.length) },
   };
@@ -118,7 +118,7 @@ export class ValePassEmailOutboxService {
    * unidades são emitidas/completadas — ou pelo reconciliador. Idempotente: a segunda chamada não cria nada (\`dedupe_key\` único).
    * Não envia: só grava na caixa de saída. Pedido não pago/cancelado/reembolsado e unidade incompleta nunca entram.
    */
-  async enqueueForOrder(tx: Tx, orderId: string, now: Date = new Date()): Promise<EnqueueResult> {
+  async enqueueForOrder(tx: Tx, orderId: string, now: Date = new Date(), options: { fallbackConfirmedAt?: Date | null } = {}): Promise<EnqueueResult> {
     const withGroups = await tx.valePass.findMany({
       where: { shopifyOrderId: orderId, groupId: { not: null } },
       select: { groupId: true, campaignId: true },
@@ -137,7 +137,12 @@ export class ValePassEmailOutboxService {
       const recipient = verdict.order.customerEmail?.trim() ?? '';
       const valid = isValidRecipient(recipient);
       const id = randomUUID();
-      const deadlineAt = new Date(verdict.order.confirmedAt.getTime() + DELIVERY_DEADLINE_DAYS * DAY_MS);
+      // O prazo de 3 dias conta do PAGAMENTO real (X-Shopify-Triggered-At do orders/paid). Sem ele, o chamador pode indicar o único instante real que o sistema
+      // conhece (ex.: quando a retenção foi aberta); por último, a mudança de status do registro. A base usada fica na linha do tempo da mensagem.
+      const paymentAt = verdict.order.paymentConfirmedAt;
+      const deadlineBasis = paymentAt ? 'PAYMENT' : options.fallbackConfirmedAt ? 'HOLD_OPENED' : 'STATUS_CHANGED';
+      const deadlineFrom = paymentAt ?? options.fallbackConfirmedAt ?? verdict.order.confirmedAt;
+      const deadlineAt = new Date(deadlineFrom.getTime() + DELIVERY_DEADLINE_DAYS * DAY_MS);
       const inserted = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO vale_pass_email_outbox (id, shopify_order_id, campaign_id, group_id, kind, dedupe_key, to_email, recipient_name, status, next_attempt_at, idempotency_key, last_error, deadline_at, updated_at)
         VALUES (${id}::uuid, ${orderId}, ${campaignId}::uuid, ${groupId}::uuid, 'INITIAL', ${`initial:${groupId}`}, ${valid ? recipient : ''}, ${verdict.order.customerName},
@@ -149,7 +154,7 @@ export class ValePassEmailOutboxService {
         continue;
       }
       enqueued++;
-      await this.recordEvent(tx, id, valid ? 'ENQUEUED' : 'ENQUEUED_NO_RECIPIENT', { unit: verdict.unit, deadlineAt: deadlineAt.toISOString() });
+      await this.recordEvent(tx, id, valid ? 'ENQUEUED' : 'ENQUEUED_NO_RECIPIENT', { unit: verdict.unit, deadlineAt: deadlineAt.toISOString(), deadlineBasis });
     }
     return { enqueued, alreadyQueued, notEligible };
   }
