@@ -8,6 +8,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { INTEGRATION_DISABLED } from './flow-flags';
 import { MAX_RESUME_BATCH, ValePassPaymentFlowService, type FlowOverview, type RegularizeResult, type ResumeReport } from './payment-flow.service';
+import { ValePassPaymentTimeService, type PaymentTimeCandidate, type VerifyOutcome } from './payment-time.service';
+import { paymentTimeOf } from './flow-flags';
+import { ValePassOperationalAlertsService } from './operational-alerts.service';
+import type { OperationalSnapshot } from './operational-alerts';
+import type { PaymentTimeConfig } from './payment-time-policy';
 
 export class ResumeHeldPaymentsDto {
   // O guard de sessão lê `adminUserId` do body.
@@ -44,7 +49,36 @@ export class RegularizeOrderDto {
   note!: string;
 }
 
+export class PaymentTimeVerifyDto {
+  @IsOptional()
+  @IsUUID()
+  adminUserId?: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  orderId!: string;
+
+  @IsString()
+  @MinLength(10)
+  @MaxLength(500)
+  note!: string;
+}
+
+export class PaymentTimeConfirmDto extends PaymentTimeVerifyDto {
+  /** ISO 8601 com fuso. */
+  @IsString()
+  @MinLength(20)
+  @MaxLength(40)
+  confirmedAt!: string;
+}
+
 export interface FlowStatus extends FlowOverview {
+  /** Política do horário do pagamento em vigor (estrita por padrão) e pedidos retidos por horário desconhecido, com os candidatos. */
+  readonly paymentTimePolicy: PaymentTimeConfig;
+  readonly paymentTimePending: readonly PaymentTimeCandidate[];
+  /** Contador específico: pagamentos confirmados sem benefício, 48–72 h, prazo de 72 h vencido, e-mails vencidos. */
+  readonly operational: OperationalSnapshot;
   /** Chaves lidas do ambiente do serviço (nunca valores de segredo). */
   readonly twoVoucherFlow: boolean;
   readonly unitRefunds: boolean;
@@ -74,7 +108,15 @@ export class ValePassFlowController {
   constructor(
     private readonly flow: ValePassPaymentFlowService,
     private readonly prisma: PrismaService,
+    private readonly paymentTime: ValePassPaymentTimeService,
+    private readonly operationalAlerts: ValePassOperationalAlertsService,
   ) {}
+
+  /** Contador específico (menu do ClosetAdmin) dos pagamentos confirmados sem benefício, retenções acima de 48 h e prazo de 72 h vencido. Leitura. */
+  @Get('alerts')
+  alerts(): Promise<OperationalSnapshot> {
+    return this.operationalAlerts.snapshot();
+  }
 
   @Get()
   async status(): Promise<FlowStatus> {
@@ -84,6 +126,9 @@ export class ValePassFlowController {
       ...flags,
       heldByIntegration: open.filter((hold) => financialIssueCodes(hold.detail).includes(INTEGRATION_DISABLED)).length,
       notices: flagNotices(flags),
+      paymentTimePolicy: paymentTimeOf(this.flow.flagSet()),
+      paymentTimePending: await this.paymentTime.candidates(),
+      operational: await this.operationalAlerts.snapshot(),
       ...(await this.flow.overview()),
     };
   }
@@ -93,6 +138,20 @@ export class ValePassFlowController {
   @RequireRole('ADMIN')
   resume(@Body() dto: ResumeHeldPaymentsDto, @Req() req: RequestWithAdminUser): Promise<ResumeReport> {
     return this.flow.resumeHeldPayments({ id: req.adminUser!.id, name: req.adminUser!.name }, { limit: dto.limit, note: dto.note });
+  }
+
+  /** Confere o horário do pagamento na Shopify Admin API (somente leitura) e só o confirma se a transação financeira concordar com o webhook. Só ADMIN. */
+  @Post('payment-time/verify')
+  @RequireRole('ADMIN')
+  verifyPaymentTime(@Body() dto: PaymentTimeVerifyDto, @Req() req: RequestWithAdminUser): Promise<VerifyOutcome> {
+    return this.paymentTime.verifyFromShopify({ id: req.adminUser!.id, name: req.adminUser!.name }, { orderId: dto.orderId, note: dto.note });
+  }
+
+  /** O ADMIN informa o horário do pagamento (conferido na Shopify), com justificativa. Só ADMIN. */
+  @Post('payment-time/confirm')
+  @RequireRole('ADMIN')
+  confirmPaymentTime(@Body() dto: PaymentTimeConfirmDto, @Req() req: RequestWithAdminUser): Promise<{ confirmedAt: string }> {
+    return this.paymentTime.confirmManually({ id: req.adminUser!.id, name: req.adminUser!.name }, { orderId: dto.orderId, confirmedAt: dto.confirmedAt, note: dto.note });
   }
 
   /** Regulariza UM pedido pago com unidades sem voucher (acréscimo de compra, variante sem campanha agora cadastrada). Só ADMIN; revalida os fatos financeiros. */

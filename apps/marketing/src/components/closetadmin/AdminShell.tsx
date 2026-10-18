@@ -22,7 +22,8 @@ import {
   type AdminModuleName,
   type AdminSessionUser,
 } from '@/lib/admin-permissions';
-import { attentionBadgeText, attentionLabel } from '@/lib/valle-pass-attention';
+import { attentionBadgeText, attentionLabel, financialLabel } from '@/lib/valle-pass-attention';
+import { useValePassFinancialAttention } from './useValePassFinancialAttention';
 import { reservationAttentionLabel } from '@/lib/reservation-attention';
 import { logoutAction } from '@/app/closetadmin/actions';
 import { AdminThemeToggle } from './AdminThemeToggle';
@@ -39,6 +40,9 @@ interface MenuBadge {
   /** `alerts` = parte de `count` que são pagamentos a tratar (só Reservas usa). */
   readonly label: (count: number | null, alerts?: number) => string;
   readonly testId: string;
+  /** Segundo contador no mesmo item (ex.: Valle Pass: pagamentos sem benefício), em vermelho. */
+  readonly extra?: MenuBadge;
+  readonly tone?: 'danger';
 }
 
 interface NavItem {
@@ -88,9 +92,15 @@ export function AdminShell({
     href === '/closetadmin' ? pathname === href : pathname?.startsWith(href);
   // Só quem tem o módulo pergunta pelo contador; os outros nunca recebem o dado.
   const valePass = useValePassAttention(hasAdminModule(session, 'VALLE_PASS'));
+  const valePassFinancial = useValePassFinancialAttention(hasAdminModule(session, 'VALLE_PASS'));
   const reservations = useReservationAttention(hasAdminModule(session, 'RESERVATIONS'));
   const badges: Record<string, MenuBadge> = {
-    [VALLE_PASS_HREF]: { attention: valePass, label: attentionLabel, testId: 'valle-pass-badge' },
+    [VALLE_PASS_HREF]: {
+      attention: valePass,
+      label: attentionLabel,
+      testId: 'valle-pass-badge',
+      extra: { attention: valePassFinancial, label: financialLabel, testId: 'valle-pass-financial-badge', tone: 'danger' },
+    },
     [RESERVATIONS_HREF]: {
       attention: reservations,
       label: reservationAttentionLabel,
@@ -102,6 +112,7 @@ export function AdminShell({
   const menuLabel = [
     reservationsPending ? `Reservas: ${reservationAttentionLabel(reservations.count, reservations.alerts)}` : null,
     valePassPending ? `Valle Pass: ${attentionLabel(valePass.count)}` : null,
+    attentionBadgeText(valePassFinancial.count) ? `Valle Pass: ${financialLabel(valePassFinancial.count, valePassFinancial.alerts)}` : null,
   ].filter(Boolean);
 
   return (
@@ -252,9 +263,20 @@ function SidebarContent({
  * falhou, mantém o último número, esmaecido.
  */
 function AttentionBadge({ badge }: { badge: MenuBadge }) {
+  return (
+    <>
+      {/* O contador vermelho (pagamentos sem benefício) fica À ESQUERDA do de pedidos novos: este continua encostado na borda direita, como sempre. */}
+      {badge.extra ? <SingleBadge badge={badge.extra} first /> : null}
+      <SingleBadge badge={badge} first={!badge.extra || !attentionBadgeText(badge.extra.attention.count)} />
+    </>
+  );
+}
+
+function SingleBadge({ badge, first }: { badge: MenuBadge; first: boolean }) {
   const { attention } = badge;
   const text = attentionBadgeText(attention.count);
   if (!text) return null;
+  const tone = badge.tone === 'danger' ? 'bg-red-600 text-white ring-1 ring-red-600/30 dark:bg-red-500 dark:text-white' : 'bg-marsala text-cream ring-1 ring-marsala/20 dark:bg-gold dark:text-neutral-950 dark:ring-gold/30';
   return (
     <>
       <span
@@ -266,7 +288,7 @@ function AttentionBadge({ badge }: { badge: MenuBadge }) {
             ? 'Não foi possível atualizar agora — mostrando o último valor.'
             : undefined
         }
-        className={`ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-marsala px-1.5 text-[11px] font-semibold leading-none tabular-nums text-cream ring-1 ring-marsala/20 dark:bg-gold dark:text-neutral-950 dark:ring-gold/30 ${
+        className={`${first ? 'ml-auto' : 'ml-1'} inline-flex h-5 min-w-5 items-center justify-center rounded-full ${tone} px-1.5 text-[11px] font-semibold leading-none tabular-nums ${
           attention.stale ? 'opacity-60' : ''
         } ${attention.bump > 0 ? 'motion-safe:animate-[pulse_1s_ease-in-out_3]' : ''}`}
       >

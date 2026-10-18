@@ -13,6 +13,17 @@ export const VALLE_PASS_ATTENTION_EVENT = 'closetadmin:valle-pass-attention';
 /** Outras abas do mesmo navegador (BroadcastChannel). */
 export const VALLE_PASS_ATTENTION_CHANNEL = 'closetadmin-valle-pass-attention';
 
+/** Segundo contador do menu do Valle Pass: pagamentos confirmados SEM benefício / prazo de 72 h (GET /admin/vale-pass/flow/alerts). */
+export const VALLE_PASS_FINANCIAL_EVENT = 'closetadmin:valle-pass-financial';
+export const VALLE_PASS_FINANCIAL_CHANNEL = 'closetadmin-valle-pass-financial';
+
+/** Texto para leitor de tela do contador financeiro. */
+export function financialLabel(count: number | null, critical?: number): string {
+  if (!count || count <= 0) return 'nenhum pagamento sem benefício';
+  const base = count === 1 ? '1 pagamento confirmado sem benefício' : `${count > 99 ? 'mais de 99' : count} pagamentos confirmados sem benefício`;
+  return critical && critical > 0 ? `${base}, ${critical} crítico(s)` : base;
+}
+
 /** `null` = sem badge (zero, ainda não carregado ou sem permissão). */
 export function attentionBadgeText(count: number | null): string | null {
   if (count === null || !Number.isFinite(count) || count <= 0) return null;

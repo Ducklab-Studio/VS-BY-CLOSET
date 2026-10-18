@@ -6,6 +6,7 @@ import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { ValePassIssuanceService } from './vale-pass-issuance.service';
 import { ValePassEmailOutboxService } from './email/email-outbox.service';
 import { PASS_UNIT_KEY, loadCapacity } from './vale-pass-capacity';
+import { absorbedUnissuedUnits } from './refunds/refund.service';
 
 export interface HoldItem {
   readonly id: string;
@@ -147,7 +148,10 @@ export class ValePassHoldsService {
     const [own] = await client.$queryRaw<{ n: number }[]>`
       SELECT count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v
       WHERE v.shopify_order_id = ${hold.shopifyOrderId} AND v.campaign_id = ${hold.campaignId}::uuid AND v.status <> 'CANCELLED'`;
-    const projectedTotal = others.totals.consumed + (own?.n ?? 0) + hold.units;
+    // O que este pedido já ocupa na capacidade (vendido + pago aguardando) pode ser MAIOR que a retenção (ex.: o pedido cresceu e o acréscimo ainda não foi
+    // comprovado): emitir a retenção só troca "pago aguardando" por "vendido", então o total depois da emissão não cai abaixo do que o pedido já ocupa.
+    const ownOccupied = Math.max(0, full.totals.consumed - others.totals.consumed - (own?.n ?? 0));
+    const projectedTotal = others.totals.consumed + (own?.n ?? 0) + Math.max(hold.units, ownOccupied);
     const globalLimit = hold.campaign.globalLimit;
     const exceededBy = globalLimit === null ? 0 : Math.max(0, projectedTotal - globalLimit);
     const paid = Boolean(order && order.status === 'CONFIRMED' && !order.deletedInShopifyAt && !cancelled);
@@ -196,6 +200,14 @@ export class ValePassHoldsService {
 
         const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true } } } });
         if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
+        // A retenção nunca pode emitir MAIS do que o pedido ainda deve (ex.: a quantidade diminuiu e ninguém sincronizou a retenção).
+        const registryOrder = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId }, select: { quantity: true } });
+        const [issuedBefore] = await tx.$queryRaw<{ n: number }[]>`
+          SELECT count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v WHERE v.shopify_order_id = ${hold.shopifyOrderId} AND v.campaign_id = ${hold.campaignId}::uuid`;
+        const stillOwed = (registryOrder?.quantity ?? 0) - (issuedBefore?.n ?? 0) - (await absorbedUnissuedUnits(tx, hold.shopifyOrderId));
+        if (registryOrder && hold.units > stillOwed) {
+          throw new ConflictException(`A quantidade do pedido diminuiu (restam ${Math.max(0, stillOwed)} unidade(s) a emitir; a retenção mostra ${hold.units}). Nada foi emitido: a retenção é atualizada pelo próximo evento do pedido; reabra a confirmação.`);
+        }
         const projection = await this.project(tx, hold);
         if (!projection.canIssue) throw new ConflictException(projection.blockedReason ?? 'O pedido não está mais pago.');
 

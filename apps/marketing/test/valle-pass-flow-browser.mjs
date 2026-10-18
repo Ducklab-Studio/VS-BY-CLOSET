@@ -283,6 +283,49 @@ try {
   assert.equal(await db.valePass.count({ where: { shopifyOrderId: o4 } }), 0);
   pass('5) sem perfil ADMIN: sem botões; a API recusa regularizar e retomar (403)');
 
+  // 5b) Contador operacional, política do horário e horário do pagamento desconhecido (só ADMIN resolve).
+  const counters = page.getByRole('group', { name: 'Alertas operacionais' });
+  await counters.waitFor();
+  const severity = await counters.getAttribute('data-severity');
+  assert.ok(['warning', 'critical'].includes(severity), 'severidade ' + severity);
+  assert.match(await counters.innerText(), /Pagamentos confirmados sem benefício:\s*4\s*pedido\(s\)/);
+  assert.match(await counters.innerText(), /Horário do pagamento desconhecido:\s*1/);
+  assert.match(await page.getByTestId('payment-time-policy').innerText(), /política ESTRITA \(padrão\)/);
+  const pending = panel().getByLabel('Horário do pagamento desconhecido');
+  const pendingRow = pending.locator('li').filter({ hasText: `${prefix}#2` });
+  await pendingRow.getByText(/Webhook: sem sinal válido/).waitFor();
+  await pendingRow.getByRole('button', { name: 'Resolver' }).click();
+  const verifyButton = pendingRow.getByRole('button', { name: 'Conferir na Shopify' });
+  assert.equal(await verifyButton.isDisabled(), true); // justificativa vazia
+  await pendingRow.getByPlaceholder(/Justificativa/).fill('Conferindo o horário do pagamento (teste)');
+  await verifyButton.click();
+  await pendingRow.getByRole('alert').filter({ hasText: /Shopify Admin API não está configurada/ }).waitFor(); // sem credenciais: nada de rede
+  const confirmButton = pendingRow.getByRole('button', { name: 'Confirmar manualmente' });
+  assert.equal(await confirmButton.isDisabled(), true); // sem horário
+  const half = new Date(Date.now() - 30 * 60_000);
+  await pendingRow.getByLabel('Horário do pagamento (Brasília)').fill(new Date(half.getTime() - 3 * HOUR).toISOString().slice(0, 16)); // relógio de Brasília (UTC-3)
+  await confirmButton.click();
+  for (let i = 0; i < 60 && !(await db.valePassOrder.findUnique({ where: { shopifyOrderId: o2 } }))?.paymentConfirmedAt; i++) await delay(500);
+  const confirmedOrder = await db.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: o2 } });
+  assert.equal(confirmedOrder.paymentConfirmedSource, 'ADMIN_MANUAL');
+  assert.ok(Math.abs(confirmedOrder.paymentConfirmedAt.getTime() - half.getTime()) < 60_000);
+  const timeAudit = await db.adminAuditEvent.findFirst({ where: { action: 'VALE_PASS_PAYMENT_TIME_CONFIRMED', adminUserId: admin.id } });
+  assert.ok(timeAudit && timeAudit.isCritical === true);
+  assert.equal(await db.valePass.count({ where: { shopifyOrderId: o2 } }), 0); // confirmar o horário NÃO emite nada
+  pass('5b) contador operacional, política estrita à vista, "Conferir na Shopify" sem credenciais não faz rede e a confirmação manual do ADMIN fica ADMIN_MANUAL, auditada, sem emitir');
+
+  // 5c) Contador específico no menu (independe de "pedidos novos") e funcionário sem ADMIN não vê "Resolver".
+  const financialBadge = page.getByTestId('valle-pass-financial-badge');
+  await financialBadge.waitFor();
+  assert.match((await financialBadge.innerText()).trim(), /^[1-9]\d?$/);
+  assert.equal(await staffPage.getByLabel('Integração financeira').getByRole('button', { name: 'Resolver' }).count(), 0);
+  const forbiddenTime = await fetch(`${API_OFF}/admin/vale-pass/flow/payment-time/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': staff.token },
+    body: JSON.stringify({ adminUserId: staff.id, orderId: o1, confirmedAt: new Date().toISOString(), note: 'tentativa sem perfil de administrador' }),
+  });
+  assert.equal(forbiddenTime.status, 403);
+  pass('5c) contador vermelho do menu aparece; sem ADMIN não há "Resolver" e a API recusa confirmar horário (403)');
+
   // 6) Chave de emissão LIGADA (processo de teste local): o painel mostra LIGADA e a regularização emite com validação, e-mail só na fila, auditada.
   const onCtx = await newContext(admin.token, WEB_ON, { viewport: { width: 1280, height: 1400 } });
   const onPage = await newPage(onCtx, errors);

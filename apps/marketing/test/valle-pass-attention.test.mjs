@@ -15,7 +15,18 @@ runInNewContext(
   }).outputText,
   { exports, Number, Math, String, Promise },
 );
-const { attentionBadgeText, attentionLabel, startAttentionPoller, VALLE_PASS_ATTENTION_POLL_MS } = exports;
+const { attentionBadgeText, attentionLabel, financialLabel, startAttentionPoller, VALLE_PASS_ATTENTION_POLL_MS, VALLE_PASS_FINANCIAL_EVENT, VALLE_PASS_FINANCIAL_CHANNEL, VALLE_PASS_ATTENTION_EVENT, VALLE_PASS_ATTENTION_CHANNEL } = exports;
+
+test('contador ESPECÍFICO dos pagamentos sem benefício: texto para leitor de tela e canais próprios (não misturam com o de pedidos novos)', () => {
+  assert.equal(financialLabel(0), 'nenhum pagamento sem benefício');
+  assert.equal(financialLabel(null), 'nenhum pagamento sem benefício');
+  assert.equal(financialLabel(1), '1 pagamento confirmado sem benefício');
+  assert.equal(financialLabel(3, 2), '3 pagamentos confirmados sem benefício, 2 crítico(s)');
+  assert.equal(financialLabel(150), 'mais de 99 pagamentos confirmados sem benefício');
+  assert.notEqual(VALLE_PASS_FINANCIAL_EVENT, VALLE_PASS_ATTENTION_EVENT);
+  assert.notEqual(VALLE_PASS_FINANCIAL_CHANNEL, VALLE_PASS_ATTENTION_CHANNEL);
+  assert.equal(attentionBadgeText(3), '3'); // o mesmo texto de badge serve aos dois contadores
+});
 
 test('badge oculto sem pedido para ver (zero, ainda não carregado ou inválido)', () => {
   assert.equal(attentionBadgeText(0), null);

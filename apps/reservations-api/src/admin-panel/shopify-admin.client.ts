@@ -41,6 +41,12 @@ export interface ShopifyOrderState {
 /** Pedido com linhas (só ids e quantidade), para a reconciliação do Valle
  *  Pass. Sem dados de cliente: exigiriam escopo extra e não são necessários
  *  para decidir o status — o webhook é quem traz o contato. */
+export interface ShopifyOrderTransactionsResult {
+  readonly totalAmount: string | null;
+  readonly currency: string | null;
+  readonly transactions: readonly { readonly id: string; readonly kind: string; readonly status: string; readonly test: boolean; readonly processedAt: string | null; readonly amount: string | null; readonly currency: string | null }[];
+}
+
 export interface ShopifyOrderWithLines {
   readonly gid: string;
   readonly orderId: string;
@@ -175,6 +181,39 @@ const ORDERS_WITH_LINES_BY_ID_QUERY = `
     }
   }
 `;
+
+/** Transações financeiras do pedido (SOMENTE LEITURA): fonte autoritativa do horário do pagamento do Valle Pass. Sem dados do cliente. */
+const ORDER_TRANSACTIONS_QUERY = `
+  query ClosetAdminOrderTransactions($id: ID!) {
+    order(id: $id) {
+      id
+      currentTotalPriceSet { shopMoney { amount currencyCode } }
+      transactions(first: 50) {
+        id
+        kind
+        status
+        test
+        processedAt
+        amountSet { shopMoney { amount currencyCode } }
+      }
+    }
+  }
+`;
+
+interface RawOrderTransactions {
+  readonly order: {
+    readonly id: string;
+    readonly currentTotalPriceSet: { readonly shopMoney: { readonly amount: string; readonly currencyCode: string } } | null;
+    readonly transactions: readonly {
+      readonly id: string;
+      readonly kind: string;
+      readonly status: string;
+      readonly test: boolean;
+      readonly processedAt: string | null;
+      readonly amountSet: { readonly shopMoney: { readonly amount: string; readonly currencyCode: string } } | null;
+    }[];
+  } | null;
+}
 
 interface RawShopifyOrderWithLines {
   readonly id: string;
@@ -313,6 +352,29 @@ export class ShopifyAdminClient {
       });
     }
     return result;
+  }
+
+  /**
+   * Transações financeiras do pedido, por GID. `null` = a Shopify não devolveu o pedido. Consulta de LEITURA (escopo `read_orders`, o mesmo da reconciliação);
+   * nunca altera nada. Chamar FORA de transação de banco (é rede).
+   */
+  async getOrderPaymentTransactions(gid: string): Promise<ShopifyOrderTransactionsResult | null> {
+    const data = await this.graphql<RawOrderTransactions>(ORDER_TRANSACTIONS_QUERY, { id: gid });
+    const order = data.order;
+    if (!order) return null;
+    return {
+      totalAmount: order.currentTotalPriceSet?.shopMoney.amount ?? null,
+      currency: order.currentTotalPriceSet?.shopMoney.currencyCode ?? null,
+      transactions: order.transactions.map((tx) => ({
+        id: tx.id,
+        kind: tx.kind,
+        status: tx.status,
+        test: tx.test === true,
+        processedAt: tx.processedAt,
+        amount: tx.amountSet?.shopMoney.amount ?? null,
+        currency: tx.amountSet?.shopMoney.currencyCode ?? null,
+      })),
+    };
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {

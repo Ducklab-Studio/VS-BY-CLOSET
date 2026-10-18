@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react';
 import type { ValePassFlowStatus } from '@/lib/admin-data';
-import { getValePassFlowStatusAction, regularizeValePassOrderAction } from './actions';
+import { notifyValePassFinancialChanged } from '@/components/closetadmin/useValePassFinancialAttention';
+import { confirmValePassPaymentTimeAction, getValePassFlowStatusAction, regularizeValePassOrderAction, verifyValePassPaymentTimeAction } from './actions';
 
 /**
  * Integração financeira do Valle Pass 2027 (ClosetAdmin): estado das DUAS chaves e o que ainda não está resolvido.
@@ -52,6 +53,10 @@ export function FlowPanel({ canManage }: { canManage: boolean }) {
   }, [expanded, refresh]);
 
   const pending = status ? status.heldPayments + status.ordersWithoutTreatment.length : 0;
+  const refreshAll = useCallback(async () => {
+    await refresh();
+    notifyValePassFinancialChanged(); // o contador do menu acompanha na hora
+  }, [refresh]);
 
   return (
     <section className="space-y-4" aria-label="Integração financeira">
@@ -72,7 +77,7 @@ export function FlowPanel({ canManage }: { canManage: boolean }) {
             </p>
           ) : null}
           {!status && loading ? <p className="text-xs text-ink/45 dark:text-dark-subtle">Carregando…</p> : null}
-          {status ? <FlowView status={status} canManage={canManage} onChanged={refresh} /> : null}
+          {status ? <FlowView status={status} canManage={canManage} onChanged={refreshAll} /> : null}
         </div>
       ) : null}
     </section>
@@ -94,6 +99,11 @@ function FlowView({ status, canManage, onChanged }: { status: ValePassFlowStatus
         </ul>
       ) : null}
       <p className={hintClass}>As chaves são lidas do servidor (Railway) e não são alteradas por esta tela. Nada é ligado sem autorização expressa.</p>
+
+      <OperationalCounters status={status} />
+      <p className={hintClass} data-testid="payment-time-policy">
+        Horário do pagamento — política {status.paymentTimePolicy.mode === 'strict' ? 'ESTRITA (padrão): o webhook sozinho não confirma; vale a transação da Shopify ou a confirmação de um ADMIN' : `concordância do webhook (tolerância de ${status.paymentTimePolicy.toleranceSeconds} s)`}.
+      </p>
 
       <div className="grid gap-3 sm:grid-cols-3" role="group" aria-label="Resumo das pendências">
         <div className="rounded-xl border border-ink/10 p-3 dark:border-white/10">
@@ -118,6 +128,21 @@ function FlowView({ status, canManage, onChanged }: { status: ValePassFlowStatus
         </div>
       </div>
 
+      {status.paymentTimePending.length > 0 ? (
+        <section aria-label="Horário do pagamento desconhecido">
+          <h4 className="mb-2 text-xs font-semibold text-red-500">Horário do pagamento desconhecido ({status.paymentTimePending.length})</h4>
+          <ul className="space-y-2">
+            {status.paymentTimePending.map((candidate) => (
+              <PaymentTimeRow key={candidate.orderId} candidate={candidate} canManage={canManage} onChanged={onChanged} />
+            ))}
+          </ul>
+          <p className={hintClass}>
+            Sem o horário real do pagamento o prazo de 3 dias não pode ser calculado e nada é emitido. &quot;Conferir na Shopify&quot; lê a transação financeira (somente leitura) e só confirma se ela concordar com o webhook;
+            se divergir, confira o horário na Shopify e confirme manualmente. Depois de confirmar, use &quot;Retomar retenções&quot;.
+          </p>
+        </section>
+      ) : null}
+
       {status.ordersWithoutTreatment.length > 0 ? (
         <section aria-label="Pedidos pagos sem tratamento">
           <h4 className="mb-2 text-xs font-semibold text-red-500">Pedidos pagos sem tratamento ({status.ordersWithoutTreatment.length})</h4>
@@ -133,6 +158,99 @@ function FlowView({ status, canManage, onChanged }: { status: ValePassFlowStatus
         </section>
       ) : null}
     </div>
+  );
+}
+
+const formatDateTime = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+function OperationalCounters({ status }: { status: ValePassFlowStatus }) {
+  const o = status.operational;
+  const tone = o.severity === 'critical' ? 'border-red-500/40 bg-red-500/[0.07]' : o.severity === 'warning' ? 'border-amber-500/40 bg-amber-500/[0.07]' : 'border-emerald-500/30 bg-emerald-500/[0.06]';
+  return (
+    <div role="group" aria-label="Alertas operacionais" className={`rounded-xl border p-3 text-xs text-ink dark:text-dark-text ${tone}`} data-severity={o.severity}>
+      <p className="font-semibold">
+        {o.severity === 'ok' ? 'Nenhum pagamento confirmado sem benefício.' : o.severity === 'critical' ? 'CRÍTICO: há pagamento confirmado sem benefício fora do prazo (ou e-mail vencido).' : 'Atenção: há pagamento confirmado sem benefício.'}
+      </p>
+      <ul className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+        <li>Pagamentos confirmados sem benefício: <strong>{o.withoutBenefit.orders}</strong> pedido(s), {o.withoutBenefit.units} unidade(s)</li>
+        <li>Entre 48 h e 72 h (faltam menos de 24 h): <strong>{o.nearDeadline.orders}</strong></li>
+        <li>72 h ou mais (prazo de 3 dias vencido): <strong>{o.overdue.orders}</strong></li>
+        <li>Horário do pagamento desconhecido: <strong>{o.paymentTimeUnknown.orders}</strong></li>
+        <li>E-mails de voucher fora do prazo: <strong>{o.emailsOverdue.units}</strong></li>
+        <li>Mais antigo: <strong>{o.oldestHours === null ? '—' : `${o.oldestHours} h`}</strong></li>
+      </ul>
+      <p className={hintClass}>O contador vermelho do menu e o aviso ativo (log/webhook, desligados por padrão) usam estes mesmos números; não dependem de abrir esta tela.</p>
+    </div>
+  );
+}
+
+function PaymentTimeRow({ candidate, canManage, onChanged }: { candidate: ValePassFlowStatus['paymentTimePending'][number]; canManage: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [local, setLocal] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function verify() {
+    setPending(true);
+    setError(null);
+    const result = await verifyValePassPaymentTimeAction(candidate.orderId, note);
+    setPending(false);
+    if (result.error) return setError(result.error);
+    setMessage(result.message ?? 'Conferido.');
+    onChanged();
+  }
+
+  async function confirm() {
+    setPending(true);
+    setError(null);
+    // O campo é horário de Brasília (sem horário de verão desde 2019): enviado com o fuso explícito.
+    const withSeconds = /T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
+    const result = await confirmValePassPaymentTimeAction(candidate.orderId, local ? `${withSeconds}-03:00` : '', note);
+    setPending(false);
+    if (result.error) return setError(result.error);
+    setMessage('Horário confirmado manualmente. Agora use "Retomar retenções".');
+    onChanged();
+  }
+
+  return (
+    <li className="rounded-lg border border-red-500/20 px-3 py-2 text-xs text-ink dark:text-dark-text">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          Pedido {candidate.orderName ?? candidate.orderId}: {candidate.quantity} unidade(s) · retido desde {formatDateTime(candidate.heldSince)}
+          <span className="mt-0.5 block text-ink/60 dark:text-dark-muted">
+            Webhook: {candidate.webhookTriggeredAt ? formatDateTime(candidate.webhookTriggeredAt) : 'sem sinal válido'}
+            {candidate.webhookDeltaSeconds !== null ? ` (diferença entre os sinais: ${candidate.webhookDeltaSeconds} s)` : ''} · Transação da Shopify:{' '}
+            {candidate.transactionInstant ? formatDateTime(candidate.transactionInstant) : candidate.transactionReason ? `não confirmou (${candidate.transactionReason})` : 'ainda não conferida'}
+          </span>
+        </span>
+        {canManage ? (
+          <button type="button" className={secondaryButton} onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+            {open ? 'Fechar' : 'Resolver'}
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          <textarea className={inputClass} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Justificativa (mínimo de 10 caracteres)" />
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 10} onClick={verify}>
+              Conferir na Shopify
+            </button>
+            <label className="inline-flex items-center gap-1.5">
+              <span>Ou informe o horário (Brasília):</span>
+              <input type="datetime-local" className={`${inputClass} w-auto`} value={local} onChange={(event) => setLocal(event.target.value)} aria-label="Horário do pagamento (Brasília)" />
+            </label>
+            <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 10 || !local} onClick={confirm}>
+              Confirmar manualmente
+            </button>
+          </div>
+          {error ? <p role="alert" className="text-red-500">{error}</p> : null}
+          {message ? <p role="status">{message}</p> : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 

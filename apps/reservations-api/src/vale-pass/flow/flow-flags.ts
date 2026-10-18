@@ -1,3 +1,4 @@
+import { paymentTimeConfigFromEnv, STRICT_PAYMENT_TIME_CONFIG, type PaymentTimeConfig } from './payment-time-policy';
 /**
  * Chaves do Valle Pass 2027 (integração financeira — PR F). TODAS DESLIGADAS POR PADRÃO: variável ausente, vazia ou qualquer valor que não seja
  * exatamente "on" mantém o comportamento de sempre. Lidas a cada uso (não no boot): desligar a chave no Railway vale após o reinício do serviço.
@@ -12,7 +13,12 @@
 export interface FlowFlags {
   twoVoucher(): boolean;
   unitRefunds(): boolean;
+  /** Política do horário do pagamento (padrão ESTRITO: o webhook sozinho não confirma). Ausente = estrita. */
+  paymentTime?(): PaymentTimeConfig;
 }
+
+/** Política efetiva do horário do pagamento (estrita quando a implementação não informa). */
+export const paymentTimeOf = (flags: FlowFlags): PaymentTimeConfig => flags.paymentTime?.() ?? STRICT_PAYMENT_TIME_CONFIG;
 
 export const FLOW_FLAGS_TOKEN = 'VALE_PASS_FLOW_FLAGS';
 
@@ -22,6 +28,7 @@ export function envFlowFlags(env: Record<string, string | undefined> = process.e
   return {
     twoVoucher: () => isOn(env.VALE_PASS_TWO_VOUCHER_FLOW),
     unitRefunds: () => isOn(env.VALE_PASS_UNIT_REFUNDS),
+    paymentTime: () => paymentTimeConfigFromEnv(env),
   };
 }
 
@@ -33,6 +40,9 @@ export const PAYMENT_TIME_UNKNOWN = 'PAYMENT_TIME_UNKNOWN';
 
 /** Código da retenção quando a compra CRESCEU depois da emissão (unidades pagas a mais sem voucher): nunca emite sozinho; um ADMIN regulariza com a validação financeira. */
 export const QUANTITY_INCREASED = 'QUANTITY_INCREASED';
+
+/** Retenção aberta cuja quantidade do pedido AUMENTOU sem comprovação do pagamento do acréscimo: a retenção não cresce; o que sobra exige regularização do ADMIN. */
+export const QUANTITY_INCREASED_UNPROVEN = 'QUANTITY_INCREASED_UNPROVEN';
 
 /** Códigos de retenção que a retomada pelo ADMIN sabe reprocessar (a causa pode ter sido sanada: chave ligada / instante do pagamento chegou). */
 export const RESUMABLE_HOLD_CODES: readonly string[] = [INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED];

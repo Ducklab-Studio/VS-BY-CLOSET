@@ -63,6 +63,8 @@ const CRITICAL_ACTIONS = new Set([
   // Uma retenção retomada (uma linha por pedido, na mesma transação da emissão) e a regularização de pedido pago com unidades sem voucher.
   'VALE_PASS_HOLD_RESUMED',
   'VALE_PASS_ORDER_REGULARIZED',
+  // Horário do pagamento confirmado (transação da Shopify ou decisão manual do ADMIN).
+  'VALE_PASS_PAYMENT_TIME_CONFIRMED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

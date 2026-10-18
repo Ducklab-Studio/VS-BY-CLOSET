@@ -2,8 +2,9 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
 import { ValePassPaymentFlowService } from './flow/payment-flow.service';
-import { resolvePaymentInstant, type ValePassWebhookMeta } from './flow/payment-instant';
-import { envFlowFlags, FLOW_FLAGS_TOKEN, type FlowFlags } from './flow/flow-flags';
+import { resolveWebhookSignal, type ValePassWebhookMeta } from './flow/payment-instant';
+import { decidePaymentTime } from './flow/payment-time-policy';
+import { envFlowFlags, FLOW_FLAGS_TOKEN, paymentTimeOf, type FlowFlags } from './flow/flow-flags';
 import { ValePassRefundService } from './refunds/refund.service';
 import { factsFromRefundWebhook } from './refunds/refund-facts';
 import { KNOWN_VALE_PASS_VARIANT_ID, valePassUnits } from './vale-pass-order-status';
@@ -111,18 +112,19 @@ export class ValePassWebhookService {
     const result = await this.orders.apply(tx, { ...snapshotFromPayload(order, quantity), keepPaidOnPartialRefund: unitModel }, source);
     const events: EventInput[] = [...result.events];
 
-    // Instante REAL do pagamento: só a entrega de `orders/paid` (cabeçalho X-Shopify-Triggered-At, validado) o define. Ausente/inválido → fica desconhecido
-    // e o fluxo retém o pedido com alerta (nunca se usa o horário do processamento). Gravado ANTES da emissão: retenção, alertas e prazo do e-mail leem dele.
+    // Horário do pagamento: o webhook `orders/paid` traz SINAIS (cabeçalho X-Shopify-Triggered-At e updated_at), que NÃO provam a confirmação financeira. A política
+    // (estrita por padrão) decide se algum horário passa a valer; sem horário confiável o fluxo retém o pedido (PAYMENT_TIME_UNKNOWN) — nunca se usa o horário do
+    // processamento. Gravado ANTES da emissão: retenção, alertas e prazo do e-mail leem dele.
     let registered = result.order;
-    if (topic === 'orders/paid' && order.financial_status === 'paid' && !registered.deletedInShopifyAt) {
-      const instant = resolvePaymentInstant({ topic, triggeredAt: meta.triggeredAt, orderCreatedAt: registered.orderCreatedAt ?? parseDate(order.created_at), payloadUpdatedAt: parseDate(order.updated_at) });
-      if (instant.at) {
-        const recorded = await this.orders.recordPaymentInstant(tx, registered.id, instant.at, source);
-        registered = recorded.order;
-        events.push(...recorded.events);
-      } else {
-        events.push({ type: 'VALE_PASS_PAYMENT_INSTANT_UNRELIABLE', detail: { orderId: registered.shopifyOrderId, reason: instant.reason, note: 'sem instante confiável do pagamento: o prazo de 3 dias não é calculado; o pedido fica retido para um administrador' } });
-      }
+    // Só pedidos do modelo novo (campanha com benefícios): o pedido LEGADO não usa o horário do pagamento, então nada é gravado nem entra na linha do tempo dele.
+    if (topic === 'orders/paid' && order.financial_status === 'paid' && !registered.deletedInShopifyAt && (await this.needsPaymentTime(tx, order))) {
+      const signal = resolveWebhookSignal({ topic, triggeredAt: meta.triggeredAt, payloadUpdatedAt: order.updated_at, orderCreatedAt: registered.orderCreatedAt ?? parseDate(order.created_at) });
+      const stored = (registered.paymentTimeEvidence as { transaction?: { instant: string | null; reason: string } } | null)?.transaction;
+      const transaction = stored ? { instant: stored.instant ? new Date(stored.instant) : null, reason: stored.reason } : null;
+      const decision = decidePaymentTime({ config: paymentTimeOf(this.flags), webhook: signal, transaction });
+      const recorded = await this.orders.recordPaymentTime(tx, registered.id, { signal, decision }, source);
+      registered = recorded.order;
+      events.push(...recorded.events);
     }
 
     if (result.order.deletedInShopifyAt && (topic === 'orders/paid' || topic === 'orders/updated') && order.financial_status === 'paid') {
@@ -141,10 +143,21 @@ export class ValePassWebhookService {
       events.push(...(await this.issueForConfirmedOrder(tx, registered, order, source)));
       // Compra que CRESCEU depois da emissão: retenção visível (nunca emissão automática do acréscimo).
       if (order.financial_status === 'paid' && registered.status === 'CONFIRMED' && registered.vouchersProcessedAt && !registered.deletedInShopifyAt) {
-        events.push(...(await this.flow.holdQuantityIncrease(tx, { registry: registered, campaigns: await this.benefitCampaigns(tx, order) })));
+        events.push(...(await this.flow.holdQuantityIncrease(tx, { registry: registered, campaigns: await this.benefitCampaigns(tx, order), payload: order })));
       }
     }
     return events;
+  }
+
+  /**
+   * O pedido pode vir a ser do modelo de dois vouchers? Sim se alguma linha cai numa campanha COM benefícios ou em nenhuma campanha (a campanha pode ser
+   * cadastrada depois e o pedido regularizado). Só o pedido certamente LEGADO (todas as campanhas das linhas sem benefícios) dispensa o horário do pagamento.
+   */
+  private async needsPaymentTime(tx: Prisma.TransactionClient, order: ShopifyOrderPayload): Promise<boolean> {
+    const variantIds = [...new Set(extractOrderLineVariants(order).map((line) => line.variantId))];
+    if (variantIds.length === 0) return true;
+    const campaigns = await tx.valePassCampaign.findMany({ where: { shopifyVariantId: { in: variantIds } }, select: { _count: { select: { benefits: true } } } });
+    return campaigns.length === 0 || campaigns.some((campaign) => campaign._count.benefits > 0);
   }
 
   /** Campanhas do pedido que seguem o modelo de dois vouchers (com benefícios cadastrados). */

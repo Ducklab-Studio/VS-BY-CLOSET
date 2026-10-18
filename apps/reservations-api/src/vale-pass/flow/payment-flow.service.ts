@@ -13,7 +13,7 @@ import { ValePassIssuanceService, type IssuanceOrder } from '../vale-pass-issuan
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { absorbedUnissuedUnits } from '../refunds/refund.service';
 import { ValePassRegularizationService, type RegularizationCandidate, type RegularizationOutcome } from '../refunds/regularization.service';
-import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
+import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, QUANTITY_INCREASED_UNPROVEN, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
 
 type Tx = Prisma.TransactionClient;
 
@@ -30,6 +30,18 @@ export interface ResumeReport {
 }
 
 export const MAX_RESUME_BATCH = 25;
+
+interface UnitHistoryEntry {
+  readonly at: string;
+  readonly from: number;
+  readonly to: number;
+  readonly proven: boolean;
+  readonly source: string;
+}
+const unitHistoryOf = (detail: unknown): UnitHistoryEntry[] => {
+  const raw = detail && typeof detail === 'object' ? (detail as { unitHistory?: unknown }).unitHistory : null;
+  return Array.isArray(raw) ? (raw.filter((entry) => entry && typeof entry === 'object') as UnitHistoryEntry[]) : [];
+};
 
 export interface FlowOverview {
   readonly heldPayments: number;
@@ -75,6 +87,11 @@ export class ValePassPaymentFlowService {
     return this.flags.twoVoucher();
   }
 
+  /** As chaves em vigor (leitura). */
+  flagSet(): FlowFlags {
+    return this.flags;
+  }
+
   unitRefundsEnabled(): boolean {
     return this.flags.unitRefunds();
   }
@@ -86,8 +103,14 @@ export class ValePassPaymentFlowService {
    * mesmo tratamento para pedidos que ainda não têm nenhum sinal do modelo novo (ex.: campanha legada).
    */
   async usesUnitModel(tx: Tx, orderId: string, variantIds: readonly (string | number | null | undefined)[]): Promise<boolean> {
+    // 1) O que foi EMITIDO manda (não a configuração atual da campanha, que pode ter ganhado benefícios depois da compra):
+    //    qualquer voucher SEM unidade = pedido legado, mesmo com a chave de reembolso ligada (a mesma regra do ValePassRefundService: LEGACY_ORDER);
+    //    vouchers com unidade = modelo novo.
+    const issued = await tx.valePass.findMany({ where: { shopifyOrderId: orderId }, select: { groupId: true }, take: 100 });
+    if (issued.some((voucher) => voucher.groupId === null)) return false;
+    if (issued.length > 0) return true;
+    // 2) Nada emitido ainda (pagamento retido, reembolso antes da emissão, evento fora de ordem): sinais do modelo novo.
     if (this.flags.unitRefunds()) return true;
-    if (await tx.valePass.findFirst({ where: { shopifyOrderId: orderId, groupId: { not: null } }, select: { id: true } })) return true;
     if (await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: orderId }, select: { id: true } })) return true;
     const wanted = new Set(variantIds.map((id) => numericShopifyId(id)).filter((id): id is string => id !== null));
     if (wanted.size === 0) return false;
@@ -158,24 +181,84 @@ export class ValePassPaymentFlowService {
   }
 
   /**
-   * A compra CRESCEU depois da emissão (ex.: pedido editado de 2 para 3 unidades): as unidades extras ficariam sem voucher e sem nenhum registro. Aqui vira
-   * RETENÇÃO visível (fila do ClosetAdmin, alertas por idade). NUNCA emite sozinho: o pagamento do acréscimo só é aceito por um ADMIN, por `regularizeOrder`
-   * (que revalida os fatos financeiros atuais). Idempotente: já havendo retenção aberta do pedido, não mexe nela.
+   * A quantidade do pedido mudou depois da emissão/retenção (ex.: pedido editado de 2 para 3 unidades). Nunca emite: só mantém a RETENÇÃO fiel ao que falta.
+   *  - sem retenção aberta e com unidades já emitidas: abre a retenção `QUANTITY_INCREASED` (visível na fila e nos alertas);
+   *  - com retenção aberta (qualquer motivo, ex.: `CAPACITY_EXCEEDED`): acompanha a quantidade. AUMENTO só entra com o pagamento do acréscimo COMPROVADO (validação
+   *    financeira do evento atual: pago integralmente e total que cobre as unidades); sem comprovação a retenção NÃO cresce, ganha o motivo
+   *    `QUANTITY_INCREASED_UNPROVEN` e o que sobra continua visível em "pedidos sem tratamento" até a regularização do ADMIN. REDUÇÃO sempre é acompanhada
+   *    (nunca se emite o que deixou de ser pago). Cada ajuste é gravado na retenção (`unitHistory`) e na linha do tempo do pedido.
+   * Idempotente (reprocessar o mesmo evento não muda nada) e serializado pelo lock do pedido + trava da campanha.
    */
-  async holdQuantityIncrease(tx: Tx, input: { registry: ValePassOrder; campaigns: readonly ValePassCampaign[] }): Promise<FlowEvent[]> {
+  async holdQuantityIncrease(tx: Tx, input: { registry: ValePassOrder; campaigns: readonly ValePassCampaign[]; payload?: ShopifyOrderPayload }): Promise<FlowEvent[]> {
     const { registry, campaigns } = input;
     if (campaigns.length !== 1 || registry.status !== 'CONFIRMED' || registry.deletedInShopifyAt) return [];
     if (await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: registry.shopifyOrderId } })) return [];
     const campaign = campaigns[0];
-    const issuedGroups = await tx.valePass.findMany({ where: { shopifyOrderId: registry.shopifyOrderId, campaignId: campaign.id, groupId: { not: null } }, select: { groupId: true }, distinct: ['groupId'] });
+    const orderId = registry.shopifyOrderId;
+    const required = await this.missingUnits(tx, orderId, campaign.id, registry.quantity);
+    const open = await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: orderId, campaignId: campaign.id, status: 'OPEN' } });
+    if (open) return this.syncOpenHold(tx, { registry, campaign, hold: open, required, payload: input.payload });
+
+    const issuedGroups = await tx.valePass.findMany({ where: { shopifyOrderId: orderId, campaignId: campaign.id, groupId: { not: null } }, select: { groupId: true }, distinct: ['groupId'] });
     if (issuedGroups.length === 0) return []; // nada emitido ainda: é o caso do pagamento (retenção própria), não de acréscimo
-    const missing = await this.missingUnits(tx, registry.shopifyOrderId, campaign.id, registry.quantity);
-    if (missing <= 0) return [];
-    if (await tx.valePassIssuanceHold.findFirst({ where: { shopifyOrderId: registry.shopifyOrderId, campaignId: campaign.id, status: 'OPEN' }, select: { id: true } })) return [];
-    const order: IssuanceOrder = { orderId: registry.shopifyOrderId, orderGid: registry.shopifyOrderGid, orderName: registry.shopifyOrderName, customerName: registry.customerName, customerPhone: registry.customerPhone, customerEmail: registry.customerEmail };
-    const held = await this.issuance.holdForFinancialReview(tx, { campaignId: campaign.id, order, units: missing, issues: [{ code: QUANTITY_INCREASED, detail: { registryUnits: registry.quantity, issuedUnits: issuedGroups.length } }], allowWithExistingVouchers: true });
-    this.logger.warn(`Pedido ${registry.shopifyOrderId}: compra cresceu depois da emissão — ${missing} unidade(s) retida(s) para regularização.`);
-    return [{ type: 'VALE_PASS_QUANTITY_INCREASE_HELD', detail: { orderId: registry.shopifyOrderId, campaignId: campaign.id, units: missing, holdId: held.holdId } }];
+    if (required <= 0) return [];
+    const order = this.issuanceOrder(registry);
+    const held = await this.issuance.holdForFinancialReview(tx, { campaignId: campaign.id, order, units: required, issues: [{ code: QUANTITY_INCREASED, detail: { registryUnits: registry.quantity, issuedUnits: issuedGroups.length } }], allowWithExistingVouchers: true });
+    this.logger.warn(`Pedido ${orderId}: compra cresceu depois da emissão — ${required} unidade(s) retida(s) para regularização.`);
+    return [{ type: 'VALE_PASS_QUANTITY_INCREASE_HELD', detail: { orderId, campaignId: campaign.id, units: required, holdId: held.holdId } }];
+  }
+
+  private issuanceOrder(registry: ValePassOrder): IssuanceOrder {
+    return { orderId: registry.shopifyOrderId, orderGid: registry.shopifyOrderGid, orderName: registry.shopifyOrderName, customerName: registry.customerName, customerPhone: registry.customerPhone, customerEmail: registry.customerEmail };
+  }
+
+  private async syncOpenHold(
+    tx: Tx,
+    input: { registry: ValePassOrder; campaign: ValePassCampaign; hold: ValePassIssuanceHold; required: number; payload?: ShopifyOrderPayload },
+  ): Promise<FlowEvent[]> {
+    const { registry, campaign, required } = input;
+    if (required < 1 || required === input.hold.units) {
+      // Em dia (ou o pedido foi todo devolvido: quem decide é o ADMIN, com o descarte). Se a quantidade voltou ao que a retenção já mostra, o aviso de "sem comprovação" cai.
+      if (required === input.hold.units && financialIssueCodes(input.hold.detail).includes(QUANTITY_INCREASED_UNPROVEN)) return this.writeHold(tx, input, input.hold.units, { proven: true, resolved: true });
+      return [];
+    }
+    // Mesma trava da emissão e do painel; relê a retenção já sob a trava (outro webhook ou a emissão do ADMIN podem tê-la mudado).
+    await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${campaign.id}::uuid FOR UPDATE`;
+    const hold = await tx.valePassIssuanceHold.findUnique({ where: { id: input.hold.id } });
+    if (!hold || hold.status !== 'OPEN') return [];
+    if (required === hold.units) return [];
+    if (required < hold.units) return this.writeHold(tx, { ...input, hold }, required, { proven: true });
+
+    let proven = false;
+    if (input.payload) {
+      const verdict = await this.guard.evaluate(tx, factsFromWebhookPayload(input.payload));
+      proven = verdict.ok && verdict.units === registry.quantity;
+    }
+    if (proven) return this.writeHold(tx, { ...input, hold }, required, { proven: true });
+    // Sem comprovação: não cresce. Registra a tentativa uma vez só (idempotente) e deixa o aviso na retenção.
+    const history = unitHistoryOf(hold.detail);
+    const last = history[history.length - 1];
+    if (last && last.to === required && last.proven === false && financialIssueCodes(hold.detail).includes(QUANTITY_INCREASED_UNPROVEN)) return [];
+    return this.writeHold(tx, { ...input, hold }, hold.units, { proven: false, attempted: required });
+  }
+
+  private async writeHold(
+    tx: Tx,
+    input: { registry: ValePassOrder; campaign: ValePassCampaign; hold: ValePassIssuanceHold },
+    units: number,
+    mode: { proven: boolean; attempted?: number; resolved?: boolean },
+  ): Promise<FlowEvent[]> {
+    const { hold, registry } = input;
+    const detail = ((hold.detail as Record<string, unknown> | null) ?? {}) as { issues?: { code: string; detail?: unknown }[]; unitHistory?: UnitHistoryEntry[] };
+    const issues = (detail.issues ?? []).filter((issue) => issue.code !== QUANTITY_INCREASED_UNPROVEN);
+    if (!mode.proven) issues.push({ code: QUANTITY_INCREASED_UNPROVEN, detail: { registryUnits: registry.quantity, heldUnits: hold.units } });
+    const history = [...unitHistoryOf(hold.detail), { at: new Date().toISOString(), from: hold.units, to: mode.attempted ?? units, proven: mode.proven, source: 'orders/updated' }].slice(-20);
+    if (mode.resolved) history.pop(); // só limpa o aviso; não é uma mudança de unidades
+    await tx.valePassIssuanceHold.update({ where: { id: hold.id }, data: { units, detail: { ...detail, issues, unitHistory: history } as unknown as Prisma.InputJsonValue } });
+    await tx.valePassOrderEvent.create({
+      data: { valePassOrderId: registry.id, type: 'HOLD_UNITS_UPDATED', detail: { holdId: hold.id, from: hold.units, to: units, attempted: mode.attempted ?? null, proven: mode.proven, source: 'orders/updated' } as Prisma.InputJsonValue },
+    });
+    return [{ type: 'VALE_PASS_HOLD_UNITS_UPDATED', detail: { orderId: registry.shopifyOrderId, holdId: hold.id, from: hold.units, to: units, proven: mode.proven } }];
   }
 
   /** Visão administrativa do que NÃO está resolvido: retenções por causa, unidades pendentes e pedidos pagos sem tratamento nenhum (sem dados pessoais). */

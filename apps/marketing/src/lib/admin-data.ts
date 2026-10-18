@@ -658,7 +658,34 @@ export function resumeValePassHeldPayments(input: { note: string; limit?: number
 }
 
 /** Estado das duas chaves da integração financeira e o que ainda não está resolvido (retidos × unidades pendentes × e-mails aguardando envio). */
+export interface ValePassPaymentTimeCandidate {
+  readonly orderId: string;
+  readonly orderName: string | null;
+  readonly quantity: number;
+  readonly webhookTriggeredAt: string | null;
+  readonly webhookUpdatedAt: string | null;
+  readonly webhookDeltaSeconds: number | null;
+  readonly transactionInstant: string | null;
+  readonly transactionReason: string | null;
+  readonly heldSince: string;
+}
+
+export interface ValePassOperationalAlerts {
+  readonly generatedAt: string;
+  readonly severity: 'ok' | 'warning' | 'critical';
+  readonly withoutBenefit: { readonly orders: number; readonly units: number };
+  readonly nearDeadline: { readonly orders: number };
+  readonly overdue: { readonly orders: number };
+  readonly paymentTimeUnknown: { readonly orders: number };
+  readonly emailsOverdue: { readonly units: number };
+  readonly oldestHours: number | null;
+  readonly worst: readonly { readonly orderName: string | null; readonly ageHours: number; readonly missing: number; readonly held: boolean }[];
+}
+
 export interface ValePassFlowStatus {
+  readonly paymentTimePolicy: { readonly mode: 'strict' | 'webhook-agreement'; readonly toleranceSeconds: number };
+  readonly paymentTimePending: readonly ValePassPaymentTimeCandidate[];
+  readonly operational: ValePassOperationalAlerts;
   readonly twoVoucherFlow: boolean;
   readonly unitRefunds: boolean;
   readonly heldByIntegration: number;
@@ -674,6 +701,25 @@ export interface ValePassFlowStatus {
 export interface ValePassRegularizeResult {
   readonly outcome: { readonly status: string; readonly issuedUnits?: number; readonly vouchersCreated?: number; readonly missing?: number };
   readonly emailsQueued: number;
+}
+
+export function getValePassOperationalAlerts(adminUserId: string): Promise<ValePassOperationalAlerts> {
+  return adminGet('/admin/vale-pass/flow/alerts', adminUserId);
+}
+
+export type ValePassPaymentTimeVerify =
+  | { readonly status: 'CONFIRMED'; readonly confirmedAt: string; readonly source: string }
+  | { readonly status: 'ALREADY_CONFIRMED'; readonly confirmedAt: string }
+  | { readonly status: 'UNKNOWN'; readonly reason: string; readonly transactionInstant: string | null; readonly webhookTriggeredAt: string | null };
+
+/** Confere o horário do pagamento na Shopify (somente leitura). Só ADMIN. */
+export function verifyValePassPaymentTime(input: { orderId: string; note: string }, adminUserId: string): Promise<ValePassPaymentTimeVerify> {
+  return adminPost('/admin/vale-pass/flow/payment-time/verify', { ...input, adminUserId });
+}
+
+/** O ADMIN informa o horário do pagamento (ISO com fuso), com justificativa. */
+export function confirmValePassPaymentTime(input: { orderId: string; confirmedAt: string; note: string }, adminUserId: string): Promise<{ confirmedAt: string }> {
+  return adminPost('/admin/vale-pass/flow/payment-time/confirm', { ...input, adminUserId });
 }
 
 export function getValePassFlowStatus(adminUserId: string): Promise<ValePassFlowStatus> {
