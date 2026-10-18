@@ -51,6 +51,7 @@ import {
 } from '@/lib/rental-price';
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
 import { isValePassProduct } from '@/lib/vale-pass-product';
+import { optionLabel as optionsLabel, productHref } from '@/lib/product-options';
 import { RentalAction } from './RentalAction';
 import { useRentalDraft } from './useRentalDraft';
 
@@ -84,12 +85,18 @@ export function RentalCalendar({
   productHandle,
   locale = 'pt-BR',
   whatsapp,
+  optionLabel = null,
+  onBusyChange,
 }: {
   variant: StorefrontVariant;
   productTitle: string;
   productHandle: string;
   locale?: string;
   whatsapp?: string;
+  /** Escolha da peça como a Shopify cadastrou ("Tamanho: M"); só aparece no resumo. */
+  optionLabel?: string | null;
+  /** Avisa a página quando há inclusão/remoção em andamento (a escolha de tamanho trava até acabar). */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const sku = variant.sku ?? '';
   const today = useMemo(() => startOfDay(new Date()), []);
@@ -108,8 +115,9 @@ export function RentalCalendar({
       handle: productHandle,
       priceAmount,
       currencyCode: priceCurrency,
+      ...(optionLabel ? { optionLabel } : {}),
     }),
-    [variant.id, sku, productTitle, productHandle, priceAmount, priceCurrency],
+    [variant.id, sku, productTitle, productHandle, priceAmount, priceCurrency, optionLabel],
   );
   const selectionPieces = useMemo(() => selectionWith(draft, currentPiece), [draft, currentPiece]);
 
@@ -490,6 +498,20 @@ export function RentalCalendar({
   }
 
   const busy = submitting || removing !== null;
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
+  /** Escolha (tamanho etc.) de cada peça do resumo: a do rascunho ou a que a Shopify devolveu no carrinho. */
+  const optionLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const line of cart?.lines ?? []) {
+      const label = optionsLabel(line.merchandise.selectedOptions);
+      if (label) labels.set(line.merchandise.id, label);
+    }
+    for (const piece of selectionPieces) if (piece.optionLabel) labels.set(piece.variantId, piece.optionLabel);
+    return labels;
+  }, [cart, selectionPieces]);
   const selectedUnavailable = !!selected && !!selectedInfo && !selectedInfo.bookable;
   const inspectedExplanation = inspected
     ? unavailableExplanation(dayMap.get(toISO(inspected)))
@@ -755,11 +777,14 @@ export function RentalCalendar({
                           <span className="font-medium text-ink/80">{row.title}</span>
                         ) : (
                           <Link
-                            href={`/pecas/${row.handle}`}
+                            href={productHref(row.handle, row.variantId)}
                             className="font-medium text-ink/80 hover:text-marsala focus-visible:underline focus-visible:outline-none transition-colors"
                           >
                             {row.title}
                           </Link>
+                        )}
+                        {optionLabels.get(row.variantId) && (
+                          <span className="text-ink/55" data-testid="piece-option"> · {optionLabels.get(row.variantId)}</span>
                         )}
                         {row.quantity > 1 && (
                           <span className="text-ink/50 ml-1">× {row.quantity}</span>
@@ -785,7 +810,7 @@ export function RentalCalendar({
                             type="button"
                             disabled={busy}
                             onClick={() => void handleRemove(row)}
-                            aria-label={`Remover ${row.title} da reserva`}
+                            aria-label={`Remover ${row.title}${optionLabels.get(row.variantId) ? ` (${optionLabels.get(row.variantId)})` : ''} da reserva`}
                             className="text-[0.65rem] uppercase tracking-wider text-ink/40 transition hover:text-red-600 focus-visible:text-red-600 disabled:opacity-40"
                           >
                             {removing === row.variantId ? 'Removendo…' : 'Remover'}

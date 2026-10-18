@@ -43,16 +43,18 @@ test('variante inicial: a pedida se existir; senão a primeira à venda; senão 
 
 test('página da peça: usa o seletor, mostra o preço da variante escolhida e não duplica o preço fixo quando há várias', () => {
   const page = read('src/app/pecas/[handle]/page.tsx');
-  assert.match(page, /<RentalVariantPicker\s+variants=\{product\.variants\}/);
-  assert.match(page, /variant && !multipleVariants/);
+  // O seletor atual (ProductVariantSelection) substituiu o RentalVariantPicker: nenhuma variante vem escolhida e o preço é o da escolhida.
+  assert.match(page, /<VariantScope[\s\S]*variants=\{product\.variants\}/);
+  assert.match(page, /<VariantPrice\s*\/>/);
+  assert.match(page, /<VariantPicker\s*\/>/);
   assert.equal(page.includes('variants[0]') && /<RentalCalendar/.test(page), false, 'a página não monta o calendário direto com a primeira variante');
 });
 
 test('seletor: cada tamanho reinicia o calendário (key pela variante) — datas de um tamanho nunca vazam para outro', () => {
-  const picker = read('src/components/RentalVariantPicker.tsx');
-  assert.match(picker, /<RentalCalendar key=\{selected\.id\}/);
+  const picker = read('src/components/ProductVariantSelection.tsx');
+  assert.match(picker, /<RentalCalendar\s+key=\{variant\.id\}/);
   assert.match(picker, /role="radiogroup"/);
-  assert.match(picker, /aria-checked=\{active\}/);
-  // identificação sempre pelo ID da variante, nunca pelo título ou SKU
-  assert.match(picker, /data-variant-option=\{variant\.id\}/);
+  assert.match(picker, /aria-checked=\{checked\}/);
+  // a variante que alimenta o calendário é achada pelo ID (nunca pelo título ou SKU)
+  assert.match(picker, /findVariant\(variants, groups, selection, isSellable\)/);
 });

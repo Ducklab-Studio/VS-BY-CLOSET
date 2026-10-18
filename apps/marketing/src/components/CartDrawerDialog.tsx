@@ -19,6 +19,7 @@ import {
   type RentalStockMap,
 } from '@/lib/rental-stock';
 import { formatPrice } from '@/lib/shopify';
+import { optionLabel, productHref } from '@/lib/product-options';
 import { customerFacingCartError } from '@/lib/customer-messages';
 
 export default function CartDrawerDialog({
@@ -281,12 +282,17 @@ export default function CartDrawerDialog({
 
                   <div className="min-w-0 flex-1 flex flex-col">
                     <Link
-                      href={`/pecas/${line.merchandise.product.handle}`}
+                      href={productHref(line.merchandise.product.handle, line.merchandise.id)}
                       onClick={onClose}
                       className="font-heading text-lg leading-tight text-ink/90 transition-colors hover:text-marsala mb-1"
                     >
                       {line.merchandise.product.title}
                     </Link>
+                    {optionLabel(line.merchandise.selectedOptions) && (
+                      <p className="mb-1 text-[0.72rem] text-ink/60" data-testid="line-option">
+                        {optionLabel(line.merchandise.selectedOptions)}
+                      </p>
+                    )}
 
                     <div className="space-y-1 text-[0.7rem] text-ink/50 flex-1">
                       <p
