@@ -88,6 +88,12 @@ async function clean() {
     const passes = await db.valePass.findMany({ where: { campaignId }, select: { id: true } });
     await db.adminAuditEvent.deleteMany({ where: { entityId: { in: [campaignId, ...holds.map((h) => h.id), ...passes.map((p) => p.id)] } } });
     await db.valePassEvent.deleteMany({ where: { valePassId: { in: passes.map((p) => p.id) } } });
+    // A emissão excepcional agora registra a mensagem inicial na caixa de saída (linha do tempo append-only: só este teste descartável a limpa).
+    await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.valePassEmailEvent.deleteMany({ where: { outbox: { campaignId } } });
+      await tx.valePassEmailOutbox.deleteMany({ where: { campaignId } });
+    });
     await db.valePass.deleteMany({ where: { campaignId } });
     await db.valePassIssuanceHold.deleteMany({ where: { campaignId } });
     await db.valePassCampaignBenefit.deleteMany({ where: { campaignId } });
