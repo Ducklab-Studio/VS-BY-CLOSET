@@ -268,3 +268,24 @@ describe('fail-closed: remover QUALQUER campo obrigatório torna o pedido invál
     expect(codes).toEqual(expect.arrayContaining(['NOT_FULLY_PAID', 'CURRENCY_MISMATCH', 'OUTSTANDING_BALANCE', 'DISCOUNT_PRESENT', 'TOTAL_MISMATCH']));
   });
 });
+
+describe('validação: pedido de TESTE e pagamento MANUAL nunca valem como compra comercial', () => {
+  test('test: true → TEST_ORDER (webhook e Admin API); test: false/ausente não bloqueia', () => {
+    expect(codesOf(webhookOrder({ test: true }))).toContain('TEST_ORDER');
+    expect(codesOf(webhookOrder({ test: false }))).toEqual([]);
+    expect(codesOf(webhookOrder())).toEqual([]);
+    const admin = validateValePassFinancials(factsFromAdminOrder(adminOrder(1, { test: true })), expected);
+    expect(admin.ok ? [] : admin.issues.map((issue) => issue.code)).toContain('TEST_ORDER');
+  });
+
+  test('gateway manual/teste/offline → MANUAL_PAYMENT; Pix e cartão reais não bloqueiam', () => {
+    for (const gateways of [['manual'], ['Mercado Pago Pix', 'manual'], ['bogus'], ['Cash on Delivery (COD)'], ['Bank Deposit'], ['Money Order'], ['for testing']]) {
+      expect(codesOf(webhookOrder({ payment_gateway_names: gateways })), gateways.join()).toContain('MANUAL_PAYMENT');
+    }
+    for (const gateways of [['Mercado Pago Pix'], ['shopify_payments'], ['mercado_pago'], []]) {
+      expect(codesOf(webhookOrder({ payment_gateway_names: gateways })), gateways.join()).toEqual([]);
+    }
+    const admin = validateValePassFinancials(factsFromAdminOrder(adminOrder(1, { paymentGatewayNames: ['manual'] })), expected);
+    expect(admin.ok ? [] : admin.issues.map((issue) => issue.code)).toContain('MANUAL_PAYMENT');
+  });
+});

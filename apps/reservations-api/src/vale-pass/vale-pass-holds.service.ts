@@ -7,6 +7,7 @@ import { ValePassIssuanceService } from './vale-pass-issuance.service';
 import { ValePassEmailOutboxService } from './email/email-outbox.service';
 import { PASS_UNIT_KEY, loadCapacity } from './vale-pass-capacity';
 import { absorbedUnissuedUnits } from './refunds/refund.service';
+import { financialIssueCodes } from './vale-pass-lots.service';
 
 export interface HoldItem {
   readonly id: string;
@@ -208,6 +209,8 @@ export class ValePassHoldsService {
         if (registryOrder && hold.units > stillOwed) {
           throw new ConflictException(`A quantidade do pedido diminuiu (restam ${Math.max(0, stillOwed)} unidade(s) a emitir; a retenção mostra ${hold.units}). Nada foi emitido: a retenção é atualizada pelo próximo evento do pedido; reabra a confirmação.`);
         }
+        // Pedido de TESTE da Shopify nunca recebe voucher comercial, nem por emissão excepcional (descarte a retenção). Pagamento MANUAL pode ser aprovado aqui, com justificativa.
+        if (financialIssueCodes(hold.detail).includes('TEST_ORDER')) throw new ConflictException('Este pedido é um pedido de TESTE da Shopify (test: true): não recebe vouchers comerciais. Descarte a retenção.');
         const projection = await this.project(tx, hold);
         if (!projection.canIssue) throw new ConflictException(projection.blockedReason ?? 'O pedido não está mais pago.');
 
@@ -300,7 +303,8 @@ export class ValePassHoldsService {
         const order = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
         const cancelled = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
         const stillPaid = order && order.status === 'CONFIRMED' && !order.deletedInShopifyAt && !cancelled;
-        if (stillPaid) {
+        // Pedido de TESTE da Shopify nunca recebe voucher: a retenção pode ser descartada mesmo com o pedido "pago".
+        if (stillPaid && !financialIssueCodes(hold.detail).includes('TEST_ORDER')) {
           throw new ConflictException('O pedido continua pago na Shopify. Emita os vouchers ou faça o reembolso na Shopify primeiro; depois descarte.');
         }
         await tx.valePassIssuanceHold.update({

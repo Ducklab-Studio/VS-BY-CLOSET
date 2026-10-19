@@ -27,6 +27,7 @@ import { ValePassRefundReviewsController } from './refunds/refund-reviews.contro
 import { ValePassRegularizationService } from './refunds/regularization.service';
 import { ValePassPaymentFlowService } from './flow/payment-flow.service';
 import { ValePassPaymentTimeService } from './flow/payment-time.service';
+import { ValePassAutoVerifyScheduler, ValePassAutoVerifyService } from './flow/auto-verify.service';
 import { ValePassAlertsScheduler, ValePassOperationalAlertsService } from './flow/operational-alerts.service';
 import { ValePassFlowController } from './flow/flow.controller';
 import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
@@ -63,6 +64,8 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     { provide: FLOW_FLAGS_TOKEN, useFactory: () => envFlowFlags() },
     ValePassPaymentFlowService,
     ValePassPaymentTimeService,
+    ValePassAutoVerifyService,
+    ValePassAutoVerifyScheduler,
     ValePassOperationalAlertsService,
     ValePassAlertsScheduler,
   ],

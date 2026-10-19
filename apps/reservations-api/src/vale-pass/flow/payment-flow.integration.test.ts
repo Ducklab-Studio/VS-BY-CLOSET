@@ -1304,7 +1304,7 @@ localDescribe('HORÁRIO DO PAGAMENTO — política estrita por padrão; fonte au
   const txn = (over: Partial<{ kind: string; status: string; test: boolean; processedAt: string | null; amount: string }> = {}) => ({
     id: 'gid://shopify/OrderTransaction/' + counter++, kind: 'SALE', status: 'SUCCESS', test: false, processedAt: hoursAgo(9), amount: '350.00', currency: 'BRL', ...over,
   });
-  const shopify = (orderId: string, transactions: ReturnType<typeof txn>[], total = '350.00') => fakeTransactions.set(gidOf(orderId), { totalAmount: total, currency: 'BRL', transactions });
+  const shopify = (orderId: string, transactions: ReturnType<typeof txn>[], total = '350.00') => fakeTransactions.set(gidOf(orderId), { orderGid: gidOf(orderId), totalAmount: total, currency: 'BRL', transactions });
   /** Pedido pago, entregue com sinais PERFEITOS do webhook (cabeçalho = updated_at), na política ESTRITA de produção. */
   async function strictPaid(quantity = 1, paidHoursAgo = 9) {
     paymentTimeCfg.mode = 'strict';

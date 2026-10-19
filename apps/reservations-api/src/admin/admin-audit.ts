@@ -65,6 +65,7 @@ const CRITICAL_ACTIONS = new Set([
   'VALE_PASS_ORDER_REGULARIZED',
   // Horário do pagamento confirmado (transação da Shopify ou decisão manual do ADMIN).
   'VALE_PASS_PAYMENT_TIME_CONFIRMED',
+  'VALE_PASS_PAYMENT_TIME_AUTO_CONFIRMED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

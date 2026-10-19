@@ -1,4 +1,5 @@
 import { formatCentsBRL, multiplyCents } from './money';
+import { hasManualOrTestGateway } from './gateway';
 import type { FinancialLineFacts, OrderFinancialFacts } from './order-facts';
 
 /**
@@ -34,7 +35,9 @@ export type FinancialIssueCode =
   | 'REFUND_PRESENT'
   | 'EXTRA_CHARGES' // frete
   | 'TOTAL_UNDEFINED'
-  | 'TOTAL_MISMATCH';
+  | 'TOTAL_MISMATCH'
+  | 'TEST_ORDER' // pedido de TESTE da Shopify (`test: true`): nunca emite voucher comercial
+  | 'MANUAL_PAYMENT'; // pagamento marcado manualmente (gateway manual/teste/offline): revisão do ADMIN
 
 export interface FinancialIssue {
   readonly code: FinancialIssueCode;
@@ -76,6 +79,10 @@ export function validateValePassFinancials(facts: OrderFinancialFacts, expected:
   if (facts.totalOutstandingCents === null) add('OUTSTANDING_UNDEFINED');
   else if (facts.totalOutstandingCents > 0) add('OUTSTANDING_BALANCE', { outstandingCents: facts.totalOutstandingCents });
   if (facts.refundCount !== null && facts.refundCount > 0) add('REFUND_PRESENT', { refunds: facts.refundCount });
+
+  // 1b) Pedido de teste e pagamento manual nunca valem como pagamento comercial automático.
+  if (facts.testOrder === true) add('TEST_ORDER');
+  if (hasManualOrTestGateway(facts.gatewayNames)) add('MANUAL_PAYMENT', { gateways: (facts.gatewayNames ?? []).length });
 
   // 2) Moeda: a da loja e a que o cliente viu precisam ser BRL.
   for (const [field, value] of [['shop', facts.currency], ['presentment', facts.presentmentCurrency]] as const) {

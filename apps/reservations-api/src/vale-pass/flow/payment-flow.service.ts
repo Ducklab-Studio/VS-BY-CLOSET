@@ -374,10 +374,11 @@ export class ValePassPaymentFlowService {
     return { considered: candidates.length, issued, reclassified, skipped };
   }
 
-  private async resumeOne(
+  /** Retoma UMA retenção sob o lock do pedido (a mesma validação financeira completa). `actor.id` nulo = o próprio sistema (verificação automática). */
+  async resumeOne(
     tx: Tx,
     candidate: ValePassIssuanceHold,
-    actor: { id: string; name: string },
+    actor: { id: string | null; name: string },
   ): Promise<{ kind: 'ISSUED' | 'RECLASSIFIED' } | { kind: 'SKIPPED'; orderName: string | null; reason: string }> {
     await lockShopifyOrder(tx, candidate.shopifyOrderId);
     const hold = await tx.valePassIssuanceHold.findUnique({ where: { id: candidate.id } });
