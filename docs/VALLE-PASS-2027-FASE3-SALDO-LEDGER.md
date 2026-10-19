@@ -64,3 +64,41 @@ Concorrência: dois operadores serializam no `FOR UPDATE` do voucher (a ordem de
 
 ## 4. Testes (PostgreSQL descartável)
 `ledger/ledger.integration.test.ts`: saldo nasce cheio, independência por empresa, 500→200→100, total/USED/reversão, acima do saldo/zero/sinal errado, empresa trocada, idempotência (também em paralelo), reversão dupla/alheia/valor errado, tipos desabilitados, imutabilidade (UPDATE/DELETE/TRUNCATE), saldo direto, cancelado/expirado/bloqueado/sem validade/legado, reembolso em revisão, 12 resgates simultâneos (exatamente 5 passam), resgate×reversão simultâneos, conciliação, propriedade (300 operações aleatórias), rollback de transação e a compatibilidade do endpoint legado. Mais: `refund-pure` (unidade tocada), e-mail com voucher parcial e o verificador de drift do schema.
+
+---
+
+# PR B — resgate parcial e reversão (serviço e endpoints)
+
+> Depende do PR A (migration `20261025100000_vale_pass_saldo_ledger`). Sem ela, nada disto funciona. Nenhum endpoint público; nada ativado em produção.
+
+## 5. Regras do serviço (`ledger/redemption.service.ts`)
+- Resgate = prévia (`prepare`, não grava) + confirmação (grava). **A confirmação revalida tudo no servidor**, dentro da transação, sob a ordem de locks existente (pedido → linha do voucher): empresa, saldo esperado, saldo suficiente, estado, validade, bloqueio, pedido cancelado/reembolsado, revisão de reembolso, idempotência. O frontend nunca é a proteção.
+- **Dinheiro**: só centavos inteiros (`amountCents`, 1..100.000.000); decimal, texto, NaN/Infinity, zero e negativo ⇒ 400.
+- **Idempotência**: `operationId` (gerado na prévia) + `request_hash` do conteúdo. Mesma chave e mesmo conteúdo ⇒ `replayed: true`, nada é descontado de novo; mesma chave com outro conteúdo ⇒ 409 `IDEMPOTENCY_CONFLICT`. Em paralelo, o lock do voucher serializa: um lançamento só.
+- **Confirmação explícita**: `confirmAmountCents` (valor digitado de novo) deve ser igual; `expectedBalanceCents` (saldo da prévia) deve ser igual ao atual, senão 409 `BALANCE_CHANGED` com o saldo novo.
+- **Reversão**: lançamento compensatório (`REVERSAL`, referencia o resgate); justificativa ≥ 10 caracteres; uma vez por resgate (409 `ALREADY_REVERSED`); histórico nunca é apagado; auditoria CRÍTICA (`VALE_PASS_REDEMPTION_REVERSED`). Não mexe na Shopify nem em pagamento.
+- **Autorização**: resgate e reversão exigem **ADMIN/SUPER_ADMIN**. **Lacuna registrada:** não existe vínculo seguro operador↔empresa (só o módulo `VALLE_PASS`); por isso STAFF **não** opera (403) — só consulta, com nome abreviado e telefone/e-mail mascarados. O endpoint legado `/use` também passou a exigir ADMIN para voucher com saldo. Para liberar STAFF por empresa é preciso criar o vínculo (decisão de produto/permissão; não foi inventado).
+- Consulta: código inexistente e malformado dão a mesma resposta (404 `Voucher não encontrado.`); rate limit (60/min por IP nas consultas, 30/min nas escritas).
+
+## 6. Contrato HTTP (`/admin/vale-pass`, sessão administrativa + módulo VALLE_PASS)
+
+| Método e rota | Papel | Corpo | Resposta 200 |
+|---|---|---|---|
+| `GET vouchers/:code/balance` | qualquer do módulo | — | `VoucherBalanceView`: código, empresa, benefício, status, `amountCents`, `balanceCents`, `usedCents`, validade, `blockedAt`, `redeemable`, `restrictions[{code,message}]`, `holder` (mascarado), `entries[]` (até 100, mais recente primeiro) |
+| `GET vouchers/:code/ledger` | idem | — | `LedgerEntryView[]` |
+| `POST vouchers/:code/redeem/prepare` | ADMIN | `{ company, amountCents, reference }` | `{ canRedeem, problems[], balanceBeforeCents, balanceAfterCents, operationId, expectedBalanceCents }` |
+| `POST vouchers/:code/redeem` | ADMIN | prévia + `{ operationId, expectedBalanceCents, confirmAmountCents }` | `{ replayed, entry, balanceCents, usedCents, status }` |
+| `POST vouchers/:code/ledger/:entryId/reverse/prepare` | ADMIN | — | `{ canReverse, problems[], entry, balanceBeforeCents, balanceAfterCents, operationId, expectedBalanceCents }` |
+| `POST vouchers/:code/ledger/:entryId/reverse` | ADMIN | `{ reason, operationId, expectedBalanceCents, confirmAmountCents }` | `{ replayed, entry, balanceCents, usedCents, status }` |
+| `GET ledger/reconcile` | ADMIN | — | `LedgerProblem[]` (vazio = consistente) |
+
+Erros (corpo `{ statusCode, error, code?, message, balanceCents? }`; nunca texto de SQL, código completo ou dado pessoal):
+- **400** valor inválido (decimal/texto/≤0/acima do teto), confirmação que não confere, referência/motivo curtos, campo extra (ValidationPipe `whitelist + forbidNonWhitelisted`).
+- **403** papel insuficiente (STAFF em resgate/reversão).
+- **404** voucher inexistente/malformado.
+- **409** com `code`: `COMPANY_MISMATCH`, `INSUFFICIENT_BALANCE`, `BALANCE_CHANGED`, `IDEMPOTENCY_CONFLICT`, `OPERATION_IN_PROGRESS`, `ALREADY_REVERSED`, `NOT_A_REDEMPTION`, `ENTRY_NOT_FOUND`, `OVER_CREDIT` e restrições: `CANCELLED`, `EXPIRED`, `NOT_YET_VALID`, `BLOCKED`, `USED_UP`, `REFUND_UNDER_REVIEW`, `ORDER_CANCELLED`, `LEGACY_NO_BALANCE`.
+- **503** falha técnica (transação desfeita; "nada foi alterado").
+- **429** rate limit.
+
+## 7. Testes do PR B
+`ledger/redemption.integration.test.ts` (35): exemplos 500→200→100 e 50→20, resgate total/USED, prévia sem gravação e prévia antiga, valores inválidos e de borda, idempotência (repetida, conteúdo diferente, 8 em paralelo), 10 operadores com a mesma prévia, 12 resgates simultâneos, empresa errada, cancelado/expirado/bloqueado/pedido cancelado/reembolso em revisão/fora da validade/antes do início/legado, STAFF (403) e máscaras, `/use` legado, enumeração, contrato HTTP (guards/papéis), validação de entrada, reversão (única, idempotente, concorrente, recusas), auditoria sem dado pessoal, falha no meio da transação, alteração direta de saldo.
