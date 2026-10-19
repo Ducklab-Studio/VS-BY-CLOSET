@@ -160,3 +160,19 @@ Cada pedido retomado grava `VALE_PASS_HOLD_RESUMED` (crítico, com a retenção 
 - **O que NÃO fazer:** não editar o arquivo da migration (alteraria o histórico e criaria divergência real), não usar `prisma migrate resolve`, não "corrigir" o checksum no banco e **nunca** rodar `migrate deploy` de um checkout local contra o Neon (as migrations de produção só rodam no deploy do Railway, a partir de checkout Linux/LF).
 - **Como conferir sem tocar em nada:** `SELECT checksum FROM _prisma_migrations WHERE migration_name = '20260911220000_reservation_archive'` em transação `READ ONLY` e comparar com `git show <ref>:apps/reservations-api/prisma/migrations/20260911220000_reservation_archive/migration.sql | sha256sum` (LF) e com a versão CRLF do mesmo conteúdo.
 - **Recomendação:** apenas registrar. As migrations novas deste PR são aplicadas pelo Railway (LF) e não terão divergência.
+
+## Verificação financeira automática (desligada por padrão)
+
+Chave: `VALE_PASS_AUTO_VERIFY=on` (exige também `VALE_PASS_TWO_VOUCHER_FLOW=on`; intervalo `VALE_PASS_AUTO_VERIFY_INTERVAL_SECONDS`, padrão 60, faixa 20–900). Sem a chave nada é consultado nem emitido.
+
+- **O que faz:** para retenções cujo único motivo é `PAYMENT_TIME_UNKNOWN`, consulta as transações do pedido na Shopify (somente leitura, fora de transação de banco), decide em `auto-verify-decision.ts` e, se TUDO bate, confirma o horário (`ADMIN_API_TRANSACTION_AUTO`) e retoma pelo mesmo caminho do ADMIN (`resumeOne`), que repete a validação financeira completa, a capacidade e enfileira o e-mail na mesma transação. Auditoria `VALE_PASS_PAYMENT_TIME_AUTO_CONFIRMED` (ator: sistema).
+- **Só confirma se:** transações do MESMO pedido (GID); SALE/CAPTURE com SUCCESS, não-teste, gateway não-manual, sem estorno, soma exatamente igual ao total; moeda BRL; total = preço da campanha × quantidade registrada; ao menos um sinal do webhook corrobora a transação; instante nem futuro nem anterior ao pedido.
+- **Retém (ADMIN decide) em:** Pix pendente, autorização isolada, recusa, estorno, parcial, pago a mais, teste, manual, pedido diferente, total/moeda divergentes, sem sinal de webhook, Shopify indisponível, 50+ transações. Tentativas com intervalo crescente (1/2/5/10/30/60 min; motivos definitivos, 6 h), motivo visível na lista de "horário desconhecido".
+- **Pedido de teste (`test: true`) e pagamento manual** passam a ser bloqueados pela validação financeira (`TEST_ORDER`, `MANUAL_PAYMENT`), inclusive nas retomadas e regularizações do ADMIN. `TEST_ORDER` não pode ser emitido nem por emissão excepcional (só descartado, mesmo com o pedido "pago"); `MANUAL_PAYMENT` pode ser aprovado por ADMIN com justificativa.
+- **Concorrência:** a confirmação revalida tudo sob o lock do pedido (quantidade, `updated_at`, cancelamento, retenção aberta, horário ainda ausente); qualquer mudança aborta sem gravar.
+
+### Estorno entre a consulta e a emissão (contenção)
+- A consulta da Shopify é sempre posterior a qualquer estorno já feito (não depende do webhook de reembolso, que pode atrasar): estorno com transação `REFUND`, total corrente reduzido ou soma divergente retém.
+- Janela residual (estorno DEPOIS da consulta e antes do webhook): o e-mail de uma emissão automática só fica elegível após o **assentamento** (`VALE_PASS_AUTO_VERIFY_SETTLE_MINUTES`, padrão 10, faixa 0–120; o prazo de 3 dias não muda). Nesse intervalo o webhook/reconciliação registra o reembolso.
+- O worker de e-mail NÃO envia enquanto o pedido tem reembolso em revisão (`NEEDS_REVIEW`, motivo `refund_under_review`) — vale para qualquer emissão, não só a automática. Os vouchers seguem bloqueados para resgate pela própria revisão.
+- Contenção operacional antes da ativação real: ligar primeiro com assentamento ≥ 10 min e acompanhar o painel de revisões de reembolso.

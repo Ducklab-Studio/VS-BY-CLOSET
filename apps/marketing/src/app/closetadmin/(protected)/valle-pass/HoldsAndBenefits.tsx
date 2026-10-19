@@ -51,6 +51,8 @@ const ISSUE_LABELS: Record<string, string> = {
   INTEGRATION_DISABLED: 'o pagamento chegou com a integração dos dois vouchers desligada',
   PAYMENT_TIME_UNKNOWN: 'instante real do pagamento desconhecido (prazo de 3 dias não calculável)',
   QUANTITY_INCREASED: 'a compra aumentou depois da emissão (unidades pagas sem voucher)',
+  TEST_ORDER: 'pedido de TESTE da Shopify (nunca emite voucher comercial)',
+  MANUAL_PAYMENT: 'pagamento marcado manualmente na Shopify (revisão do administrador)',
   ORDER_NOT_REGISTERED: 'pedido ainda não registrado',
   MULTIPLE_CAMPAIGNS: 'mais de uma campanha no mesmo pedido',
 };

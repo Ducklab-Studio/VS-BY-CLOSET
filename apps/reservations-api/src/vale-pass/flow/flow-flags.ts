@@ -5,6 +5,7 @@ import { paymentTimeConfigFromEnv, STRICT_PAYMENT_TIME_CONFIG, type PaymentTimeC
  *
  *  - VALE_PASS_TWO_VOUCHER_FLOW=on  → pagamento confirmado de campanha COM benefícios cadastrados passa pela validação financeira e pela emissão dos
  *    dois vouchers (+ fila de e-mail). Desligada, esse pagamento vira RETENÇÃO visível (nunca emite voucher único, nunca some).
+ *  - VALE_PASS_AUTO_VERIFY=on       → (exige a chave acima) consulta as transações na Shopify e retoma sozinha as retenções PAYMENT_TIME_UNKNOWN que passarem em TODAS as validações.
  *  - VALE_PASS_UNIT_REFUNDS=on      → `refunds/create` passa pelo tratamento por unidade (ledger, revisão, política ADMIN_CONFIRM). Desligada, vale o
  *    comportamento legado (cancela os vouchers ativos do pedido).
  *
@@ -15,7 +16,12 @@ export interface FlowFlags {
   unitRefunds(): boolean;
   /** Política do horário do pagamento (padrão ESTRITO: o webhook sozinho não confirma). Ausente = estrita. */
   paymentTime?(): PaymentTimeConfig;
+  /** Verificação financeira AUTOMÁTICA do horário do pagamento (consulta as transações na Shopify e retoma sozinha). Ausente = desligada. */
+  autoVerify?(): boolean;
 }
+
+/** A verificação automática só roda com a chave própria E a integração dos dois vouchers ligadas. */
+export const autoVerifyEnabled = (flags: FlowFlags): boolean => flags.twoVoucher() && (flags.autoVerify?.() ?? false);
 
 /** Política efetiva do horário do pagamento (estrita quando a implementação não informa). */
 export const paymentTimeOf = (flags: FlowFlags): PaymentTimeConfig => flags.paymentTime?.() ?? STRICT_PAYMENT_TIME_CONFIG;
@@ -29,6 +35,7 @@ export function envFlowFlags(env: Record<string, string | undefined> = process.e
     twoVoucher: () => isOn(env.VALE_PASS_TWO_VOUCHER_FLOW),
     unitRefunds: () => isOn(env.VALE_PASS_UNIT_REFUNDS),
     paymentTime: () => paymentTimeConfigFromEnv(env),
+    autoVerify: () => isOn(env.VALE_PASS_AUTO_VERIFY),
   };
 }
 

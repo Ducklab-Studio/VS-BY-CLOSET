@@ -42,9 +42,11 @@ export interface ShopifyOrderState {
  *  Pass. Sem dados de cliente: exigiriam escopo extra e não são necessários
  *  para decidir o status — o webhook é quem traz o contato. */
 export interface ShopifyOrderTransactionsResult {
+  /** GID devolvido pela Shopify: o consumidor confere se é o do pedido consultado. */
+  readonly orderGid: string | null;
   readonly totalAmount: string | null;
   readonly currency: string | null;
-  readonly transactions: readonly { readonly id: string; readonly kind: string; readonly status: string; readonly test: boolean; readonly processedAt: string | null; readonly amount: string | null; readonly currency: string | null }[];
+  readonly transactions: readonly { readonly id: string; readonly kind: string; readonly status: string; readonly test: boolean; readonly processedAt: string | null; readonly amount: string | null; readonly currency: string | null; readonly gateway?: string | null }[];
 }
 
 export interface ShopifyOrderWithLines {
@@ -193,6 +195,7 @@ const ORDER_TRANSACTIONS_QUERY = `
         kind
         status
         test
+        gateway
         processedAt
         amountSet { shopMoney { amount currencyCode } }
       }
@@ -209,6 +212,7 @@ interface RawOrderTransactions {
       readonly kind: string;
       readonly status: string;
       readonly test: boolean;
+      readonly gateway?: string | null;
       readonly processedAt: string | null;
       readonly amountSet: { readonly shopMoney: { readonly amount: string; readonly currencyCode: string } } | null;
     }[];
@@ -363,6 +367,7 @@ export class ShopifyAdminClient {
     const order = data.order;
     if (!order) return null;
     return {
+      orderGid: order.id ?? null,
       totalAmount: order.currentTotalPriceSet?.shopMoney.amount ?? null,
       currency: order.currentTotalPriceSet?.shopMoney.currencyCode ?? null,
       transactions: order.transactions.map((tx) => ({
@@ -370,6 +375,7 @@ export class ShopifyAdminClient {
         kind: tx.kind,
         status: tx.status,
         test: tx.test === true,
+        gateway: tx.gateway ?? null,
         processedAt: tx.processedAt,
         amount: tx.amountSet?.shopMoney.amount ?? null,
         currency: tx.amountSet?.shopMoney.currencyCode ?? null,

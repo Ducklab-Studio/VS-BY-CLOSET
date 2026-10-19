@@ -121,7 +121,7 @@ export class ValePassPaymentTimeService {
       throw new ServiceUnavailableException('Não foi possível consultar a Shopify agora. Nada foi alterado: tente de novo ou confirme o horário manualmente.');
     }
     if (!fetched) throw new ConflictException('A Shopify não devolveu o pedido (fora da janela de acesso da API ou sem permissão): confirme o horário manualmente.');
-    const verdict = paymentInstantFromTransactions(fetched, { allowTest: process.env.VALE_PASS_PAYMENT_TIME_ALLOW_TEST_TRANSACTIONS?.trim().toLowerCase() === 'on' });
+    const verdict = paymentInstantFromTransactions(fetched, { expectedOrderGid: gid, allowTest: process.env.VALE_PASS_PAYMENT_TIME_ALLOW_TEST_TRANSACTIONS?.trim().toLowerCase() === 'on' });
 
     return this.prisma.$transaction(
       async (tx) => {

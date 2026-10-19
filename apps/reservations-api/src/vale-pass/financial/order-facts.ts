@@ -45,6 +45,10 @@ export interface OrderFinancialFacts {
   readonly discountCodes: readonly string[];
   readonly refundCount: number | null;
   readonly lines: readonly FinancialLineFacts[];
+  /** Pedido de TESTE da Shopify (`test: true`). Ausente/nulo = a fonte não informou. */
+  readonly testOrder?: boolean | null;
+  /** `payment_gateway_names` (ex.: ["Gateway Pix"], ["Gateway Pix","manual"]). Ausente/nulo = a fonte não informou. */
+  readonly gatewayNames?: readonly string[] | null;
 }
 
 const rec = (value: unknown): Record<string, unknown> | null => (value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
@@ -102,6 +106,8 @@ export function factsFromWebhookPayload(payload: unknown): OrderFinancialFacts {
     discountCodes: (codes ?? []).map((entry) => text(rec(entry)?.code) ?? '(sem código)'),
     refundCount: list(order.refunds)?.length ?? null,
     lines,
+    testOrder: typeof order.test === 'boolean' ? order.test : null,
+    gatewayNames: list(order.payment_gateway_names)?.map((entry) => text(entry) ?? '').filter(Boolean) ?? null,
   };
 }
 
@@ -138,6 +144,8 @@ export function factsFromAdminOrder(node: unknown): OrderFinancialFacts {
     // O Admin GraphQL desta consulta não lista reembolsos como objetos: o efeito aparece em `currentQuantity` e `currentTotalPrice`.
     refundCount: null,
     lines,
+    testOrder: typeof order.test === 'boolean' ? order.test : null,
+    gatewayNames: list(order.paymentGatewayNames)?.map((entry) => text(entry) ?? '').filter(Boolean) ?? null,
   };
 }
 
@@ -150,6 +158,8 @@ export const ADMIN_ORDER_FINANCIAL_FIELDS = `
   presentmentCurrencyCode
   displayFinancialStatus
   cancelledAt
+  test
+  paymentGatewayNames
   discountCodes
   taxesIncluded
   currentTotalPriceSet { shopMoney { amount currencyCode } }
