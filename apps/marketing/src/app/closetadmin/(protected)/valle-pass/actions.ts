@@ -3,6 +3,16 @@
 import { revalidatePath } from 'next/cache';
 import { getAdminSession, hasAdminModule, requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import {
+  confirmValePassRedeem,
+  confirmValePassReverse,
+  getValePassBalance,
+  prepareValePassRedeem,
+  prepareValePassReverse,
+  type ValePassBalanceView,
+  type ValePassOperationResult,
+  type ValePassRedeemInput,
+  type ValePassRedeemPreview,
+  type ValePassReversePreview,
   activateValePassCampaign,
   actOnValePassLot,
   cancelValePassVoucher,
@@ -162,6 +172,92 @@ export async function markValePassVoucherUsedAction(code: string): Promise<{ vou
     return { voucher, error: null };
   } catch (err) {
     return { voucher: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível marcar o vale como utilizado.' };
+  }
+}
+
+// ── Saldo, resgate parcial e reversão (Fase 3) ───────────────────────────────────────────────────────────────────────────────────────────────────
+// Estas ações só ENCAMINHAM para a API (que valida tudo: empresa, saldo, validade, bloqueio, reembolso, idempotência). Resgate e reversão exigem ADMIN também
+// aqui (a API revalida o papel). Erros chegam ao navegador com `code` e mensagem seguros — nunca corpo bruto, SQL ou dado pessoal.
+
+export interface BalanceActionError {
+  readonly message: string;
+  /** Código da recusa (ex.: INSUFFICIENT_BALANCE, BALANCE_CHANGED). */
+  readonly code: string | null;
+  /** Saldo atual informado pela API quando a recusa depende dele. */
+  readonly balanceCents: number | null;
+}
+export type BalanceActionResult<T> = { readonly data: T; readonly error: null } | { readonly data: null; readonly error: BalanceActionError };
+
+function balanceError(err: unknown, fallback: string): BalanceActionError {
+  if (err instanceof AdminApiError) {
+    const body = err.body && typeof err.body === 'object' ? (err.body as { code?: unknown; balanceCents?: unknown }) : {};
+    return { message: err.message, code: typeof body.code === 'string' ? body.code : null, balanceCents: typeof body.balanceCents === 'number' ? body.balanceCents : null };
+  }
+  return { message: fallback, code: null, balanceCents: null };
+}
+
+export async function lookupValePassBalanceAction(code: string): Promise<BalanceActionResult<ValePassBalanceView>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  try {
+    return { data: await getValePassBalance(code.trim()), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível consultar o voucher.') };
+  }
+}
+
+export async function prepareValePassRedeemAction(code: string, input: ValePassRedeemInput): Promise<BalanceActionResult<ValePassRedeemPreview>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    return { data: await prepareValePassRedeem(code, input), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível conferir o resgate.') };
+  }
+}
+
+export async function confirmValePassRedeemAction(
+  code: string,
+  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+): Promise<BalanceActionResult<ValePassOperationResult>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const data = await confirmValePassRedeem(code, input);
+    revalidateValePassPath();
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível registrar o resgate. Consulte o voucher antes de tentar de novo.') };
+  }
+}
+
+export async function prepareValePassReverseAction(code: string, entryId: string): Promise<BalanceActionResult<ValePassReversePreview>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    return { data: await prepareValePassReverse(code, entryId), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível conferir a reversão.') };
+  }
+}
+
+export async function confirmValePassReverseAction(
+  code: string,
+  entryId: string,
+  input: { reason: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+): Promise<BalanceActionResult<ValePassOperationResult>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const data = await confirmValePassReverse(code, entryId, input);
+    revalidateValePassPath();
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível registrar a reversão. Consulte o voucher antes de tentar de novo.') };
   }
 }
 

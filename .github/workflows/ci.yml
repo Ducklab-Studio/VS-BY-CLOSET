@@ -38,7 +38,7 @@ jobs:
         run: pnpm lint
 
       - name: Checkout flow and legacy guards
-        run: node scripts/no-real-network.mjs node --test apps/marketing/test/shopify-network-guard.test.mjs scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/valle-pass-attention.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs apps/marketing/test/rental-draft.test.mjs apps/marketing/test/rental-price.test.mjs apps/marketing/test/rental-cart.test.mjs apps/marketing/test/shopify-stock.test.mjs apps/marketing/test/reservation-attention.test.mjs apps/marketing/test/unavailable-reason.test.mjs apps/marketing/test/availability-client.test.mjs apps/marketing/test/catalog-eligibility.test.mjs apps/marketing/test/reconciliation-report.test.mjs apps/marketing/test/return-inspection.test.mjs apps/marketing/test/held-alerts.test.mjs apps/marketing/test/payment-window.test.mjs apps/marketing/test/payment-conflict.test.mjs apps/marketing/test/variant-selection.test.mjs apps/marketing/test/product-options.test.mjs apps/marketing/test/catalog-revalidate.test.mjs apps/marketing/test/customer-messages.test.mjs apps/marketing/test/catalog-sync-view.test.mjs apps/marketing/test/catalog-sync-actions.test.mjs
+        run: node scripts/no-real-network.mjs node --test apps/marketing/test/shopify-network-guard.test.mjs scripts/checkout-flow.test.mjs scripts/closetadmin-login.test.mjs scripts/closetadmin-presence.test.mjs apps/marketing/test/product-image.test.mjs apps/marketing/test/admin-path.test.mjs apps/marketing/test/client-ip.test.mjs apps/marketing/test/session-memo.test.mjs apps/marketing/test/browser-id.test.mjs apps/marketing/test/valle-pass-attention.test.mjs apps/marketing/test/rental-selection.test.mjs apps/marketing/test/csp.test.mjs apps/marketing/test/rental-draft.test.mjs apps/marketing/test/rental-price.test.mjs apps/marketing/test/rental-cart.test.mjs apps/marketing/test/shopify-stock.test.mjs apps/marketing/test/reservation-attention.test.mjs apps/marketing/test/unavailable-reason.test.mjs apps/marketing/test/availability-client.test.mjs apps/marketing/test/catalog-eligibility.test.mjs apps/marketing/test/reconciliation-report.test.mjs apps/marketing/test/return-inspection.test.mjs apps/marketing/test/held-alerts.test.mjs apps/marketing/test/payment-window.test.mjs apps/marketing/test/payment-conflict.test.mjs apps/marketing/test/variant-selection.test.mjs apps/marketing/test/product-options.test.mjs apps/marketing/test/catalog-revalidate.test.mjs apps/marketing/test/customer-messages.test.mjs apps/marketing/test/catalog-sync-view.test.mjs apps/marketing/test/catalog-sync-actions.test.mjs apps/marketing/test/valle-pass-balance.test.mjs
 
   reservations-api:
     name: API — typecheck, testes e build
@@ -125,6 +125,9 @@ jobs:
 
       - name: Testar o acompanhamento dos e-mails dos vouchers no ClosetAdmin (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-emails
+
+      - name: Testar saldo e resgate parcial dos vouchers do Valle Pass no ClosetAdmin (navegador isolado)
+        run: pnpm --filter @valle/marketing run test:valle-pass-balance
 
       - name: Testar a fila de reembolsos em revisão do Valle Pass no ClosetAdmin (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-refund-reviews
