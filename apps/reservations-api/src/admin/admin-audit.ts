@@ -66,6 +66,8 @@ const CRITICAL_ACTIONS = new Set([
   // Horário do pagamento confirmado (transação da Shopify ou decisão manual do ADMIN).
   'VALE_PASS_PAYMENT_TIME_CONFIRMED',
   'VALE_PASS_PAYMENT_TIME_AUTO_CONFIRMED',
+  // Reversão de resgate por saldo (devolve valor ao voucher): sempre crítica. O resgate em si é operação do dia a dia (visível aos operadores).
+  'VALE_PASS_REDEMPTION_REVERSED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
-import type { ValePassStatus } from '@prisma/client';
+import type { AdminRole, ValePassStatus } from '@prisma/client';
 import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../admin/admin-role.guard';
 import { RequireRole } from '../admin/require-role.decorator';
@@ -9,7 +9,7 @@ import { CancelValePassDto } from './dto/cancel-vale-pass.dto';
 import { RestoreValePassDto } from './dto/restore-vale-pass.dto';
 
 interface RequestWithAdminUser {
-  adminUser?: { id: string; name: string };
+  adminUser?: { id: string; name: string; role: AdminRole };
 }
 
 const VALID_STATUSES: readonly ValePassStatus[] = ['ACTIVE', 'USED', 'EXPIRED', 'CANCELLED'];
@@ -39,7 +39,7 @@ export class ValePassVouchersController {
 
   @Post(':code/use')
   markUsed(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
-    return this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name);
+    return this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name, { role: req.adminUser!.role });
   }
 
   @Post(':code/cancel')

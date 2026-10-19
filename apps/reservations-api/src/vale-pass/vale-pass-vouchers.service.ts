@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import type { Prisma, ValePass, ValePassStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import type { AdminRole, Prisma, ValePass, ValePassStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { ledgerRefusal } from './ledger/ledger-errors';
@@ -102,7 +102,7 @@ export class ValePassVouchersService {
     return this.toItemFresh(await this.requireByCode(code));
   }
 
-  async markUsed(code: string, actorId: string, actorName: string): Promise<ValePassVoucherItem> {
+  async markUsed(code: string, actorId: string, actorName: string, options: { role?: AdminRole } = {}): Promise<ValePassVoucherItem> {
     const updated = await this.inVoucherTransaction(code, 'Não foi possível marcar o Valle Pass como utilizado no momento.', async (tx, target) => {
       if (target.status !== 'ACTIVE') {
         throw new BadRequestException(`Este Valle Pass não pode ser utilizado — status atual: ${STATUS_LABELS[target.status]}.`);
@@ -132,6 +132,10 @@ export class ValePassVouchersService {
       }
 
       if (target.company !== null) {
+        // Resgate de saldo exige administrador (não existe vínculo seguro operador↔empresa): o caminho HTTP sempre informa o papel; STAFF não consome saldo por aqui.
+        if (options.role !== undefined && options.role !== 'ADMIN' && options.role !== 'SUPER_ADMIN') {
+          throw new ForbiddenException('Resgate de voucher com saldo exige um administrador.');
+        }
         // Voucher do modelo novo (com empresa) controla SALDO: "marcar como usado" é o resgate INTEGRAL do que resta, e só vale para voucher ainda NÃO tocado
         // (utilização parcial se registra pelo valor). Passa pelo livro-razão — o banco recusa qualquer outro caminho para USED.
         if (target.balanceCents !== target.amountCents || target.balanceCents <= 0) {
