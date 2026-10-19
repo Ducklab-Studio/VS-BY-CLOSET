@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { DEFAULT_FROM, canSendLive, liveBlockers, loadEmailConfig, publicEmailStatus, senderAddress } from './email-config';
 import { maskCode, maskEmail, safeReason, scrubSensitive } from './email-mask';
 import { ResendEmailProvider, type SendEmailInput } from './email-provider';
-import { EMAIL_TERMS, escapeHtml, renderVoucherEmail } from './email-template';
+import { EMAIL_TERMS, OFFICIAL_LOGO_URL, escapeHtml, renderVoucherEmail } from './email-template';
 import { BACKOFF_MINUTES, backoffMs } from './email-worker.service';
 import { parseResendEvent, verifySvixSignature } from './resend-webhook';
 import { isValidRecipient } from './email-outbox.service';
@@ -206,6 +206,112 @@ describe('template do e-mail', () => {
   test('nome absurdamente longo ou ausente cai para a saudação neutra', () => {
     expect(renderVoucherEmail({ customerName: 'x'.repeat(80), orderName: null, vouchers, timeZone: 'UTC' }).text).toContain('Olá!');
     expect(renderVoucherEmail({ customerName: '  ', orderName: null, vouchers, timeZone: 'UTC' }).text).toContain('Olá!');
+  });
+});
+
+describe('template do e-mail — redesign editorial (compatibilidade, segurança e acessibilidade)', () => {
+  const base = { company: 'VALLE_SHOWROOM' as const, amountCents: 50_000, code: 'VALLE-AAAA-1111', validFrom: new Date('2027-01-01T03:00:00Z'), expiresAt: new Date('2028-01-01T03:00:00Z') };
+  const two = [base, { ...base, company: 'VS_BY_CLOSET' as const, amountCents: 5_000, code: 'VALLE-BBBB-2222' }];
+  const render = (over: Record<string, unknown> = {}) => renderVoucherEmail({ customerName: 'Maria', orderName: '#1001', vouchers: two, timeZone: 'America/Sao_Paulo', ...over });
+
+  test('estrutura editorial: título, subtítulo, selo, "Como utilizar seus benefícios", aviso de empresas diferentes e encerramento', () => {
+    const { html, text } = render();
+    for (const part of ['Sua experiência começa aqui.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'Valle Pass &bull; 2027', 'Como utilizar seus benefícios', 'Os vouchers pertencem a empresas diferentes', 'Obrigada por escolher o Valle Pass 2027.']) expect(html, part).toContain(part);
+    for (const part of ['SUA EXPERIÊNCIA COMEÇA AQUI.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'COMO UTILIZAR SEUS BENEFÍCIOS', 'Os vouchers pertencem a empresas diferentes', 'Obrigada por escolher o Valle Pass 2027.', 'Voucher Valle Showroom — R$ 500,00', 'Voucher VS BY CLOSET — R$ 50,00', 'Código: VALLE-AAAA-1111', 'Código: VALLE-BBBB-2222']) expect(text, part).toContain(part);
+    for (const line of EMAIL_TERMS) expect(text).toContain(line); // a versão texto é completa
+  });
+
+  test('compatibilidade: tabelas + estilos inline, 600 px, sem JavaScript, CSS/fonte/imagem externa ou imagem de fundo; códigos são TEXTO (selecionável), nunca imagem', () => {
+    const { html } = render();
+    expect(html).toMatch(/<table role="presentation"/);
+    expect(html).toContain('max-width:600px');
+    expect(html).toContain('width=device-width');
+    expect(html).not.toMatch(/<script|<link|@import|@font-face|background-image|url\(|<iframe|javascript:/i);
+    // a única imagem é o logotipo oficial (HTTPS, decorativo); nada essencial depende dela e os códigos são texto
+    expect(html.match(/<img/gi)).toHaveLength(2);
+    expect([...html.matchAll(/<img[^>]*src="([^"]+)"/g)].map((m) => m[1])).toEqual([OFFICIAL_LOGO_URL, OFFICIAL_LOGO_URL]);
+    expect(html).toMatch(/<td[^>]*class="code"[^>]*>VALLE-BBBB-2222<\/td>/);
+    expect(html).toContain('@media only screen and (max-width:480px)');
+    expect(html).toContain('prefers-color-scheme:dark');
+    expect(html).toContain('<meta name="color-scheme" content="light dark">');
+    expect(html).toContain('word-break:break-all'); // código longo nunca estoura o cartão
+  });
+
+  test('redação: nunca apresenta os vouchers como pessoais/intransferíveis (são transferíveis) nem inventa procedimento de transferência; a validade vem dos dados do voucher', () => {
+    const { html, text } = render();
+    for (const content of [html, text]) {
+      expect(content).not.toMatch(/pessoai|intransfer|n[ãa]o compartilh|nominal|exclusivo do titular/i);
+      expect(content).not.toMatch(/transfer[ií]/i);
+    }
+    expect(EMAIL_TERMS).toContain('Guarde este e-mail com segurança: ele contém os códigos dos seus vouchers.');
+    // validade dinâmica: outra janela no voucher muda o texto (nenhuma data fixa no template)
+    const other = render({ vouchers: [{ ...base, validFrom: new Date('2026-12-15T03:00:00Z'), expiresAt: new Date('2027-10-01T03:00:00Z') }] }).html;
+    expect(other).toContain('Válido de 15/12/2026 a 30/09/2027');
+    expect(other).not.toContain('31/12/2027');
+  });
+
+  test('logotipo oficial por padrão (HTTPS); VALE_PASS_EMAIL_LOGO_URL troca; vazio ou logoUrl nulo desliga; sem a imagem o e-mail funciona igual (texto alternativo e monograma)', () => {
+    expect(OFFICIAL_LOGO_URL).toBe('https://vsbycloset.vercel.app/brand/logo-horizontal-cream.png');
+    const original = process.env.VALE_PASS_EMAIL_LOGO_URL;
+    try {
+      delete process.env.VALE_PASS_EMAIL_LOGO_URL;
+      expect(render().html).toContain(`src="${OFFICIAL_LOGO_URL}"`);
+      process.env.VALE_PASS_EMAIL_LOGO_URL = 'https://logo.exemplo.invalid/l.png';
+      expect(render().html).toContain('src="https://logo.exemplo.invalid/l.png"');
+      process.env.VALE_PASS_EMAIL_LOGO_URL = '';
+      expect(render().html).not.toMatch(/<img/i);
+      delete process.env.VALE_PASS_EMAIL_LOGO_URL;
+      expect(render({ logoUrl: null }).html).not.toMatch(/<img/i);
+    } finally {
+      if (original === undefined) delete process.env.VALE_PASS_EMAIL_LOGO_URL;
+      else process.env.VALE_PASS_EMAIL_LOGO_URL = original;
+    }
+    // sem carregar a imagem: texto alternativo legível sobre a faixa vinho (cor creme no próprio <img>) e todo o conteúdo essencial como texto
+    const { html, text } = render();
+    expect(html).toMatch(/<img[^>]*alt="VS BY CLOSET"[^>]*color:#FFFCF6/);
+    for (const code of ['VALLE-AAAA-1111', 'VALLE-BBBB-2222']) {
+      expect(html).toContain(code);
+      expect(text).toContain(code);
+    }
+  });
+
+  test('logotipo opcional: só HTTPS e escapado; qualquer outra coisa cai para o monograma em texto (sem imagem)', () => {
+    const withLogo = render({ logoUrl: 'https://vsbycloset.exemplo.invalid/brand/logo-horizontal-cream.png' }).html;
+    expect(withLogo).toContain('<img class="logo" src="https://vsbycloset.exemplo.invalid/brand/logo-horizontal-cream.png"');
+    expect(withLogo).toContain('alt="VS BY CLOSET"');
+    for (const bad of ['http://x.invalid/a.png', 'javascript:alert(1)', 'https://x.invalid/a.png" onerror="alert(1)', 'https://x.invalid/a b.png', "https://x.invalid/<a>.png", 'data:image/png;base64,AAAA', '']) {
+      const html = render({ logoUrl: bad }).html;
+      expect(html, bad).not.toMatch(/<img/i);
+      expect(html).not.toContain('onerror');
+      expect(html).toContain('CLOSET'); // monograma em texto
+    }
+  });
+
+  test('injeção de HTML: nome, pedido, código, contato e logotipo são escapados em TODOS os pontos; o texto simples não é HTML', () => {
+    const evil = '<img src=x onerror=alert(1)>"\'&';
+    const { html, text } = render({ customerName: evil.slice(0, 30), orderName: evil, replyTo: evil, vouchers: [{ ...base, code: evil }, { ...two[1], code: '</td><script>x</script>' }], logoUrl: 'https://x.invalid/l.png' });
+    expect(html).not.toMatch(/<script|<img src=x/i);
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(html).toContain('&lt;/td&gt;&lt;script&gt;x&lt;/script&gt;');
+    expect(text).toContain('<img src=x onerror=alert(1)>'); // texto puro: sem escape HTML
+  });
+
+  test('textos longos: nome acima de 40 letras vira saudação neutra; pedido, código e contato longos continuam no layout (quebra permitida) e aparecem inteiros', () => {
+    const longCode = 'VALLE-' + 'A'.repeat(80);
+    const { html, text } = render({ orderName: '#' + '9'.repeat(60), replyTo: 'suporte-' + 'x'.repeat(60) + '@vallebycloset.com', vouchers: [{ ...base, code: longCode }, two[1]] });
+    expect(html).toContain(longCode);
+    expect(text).toContain(longCode);
+    expect(html).toContain('Olá, Maria!');
+    expect(html).toMatch(/word-break:break-all/);
+  });
+
+  test('o contrato de retorno e as promessas continuam: { subject, html, text }; sem desconto, uso parcial, transferência ou reembolso; contato só se configurado', () => {
+    const email = render();
+    expect(Object.keys(email).sort()).toEqual(['html', 'subject', 'text']);
+    for (const text of [email.html, email.text]) expect(text).not.toMatch(/10\s?%|desconto|passeio|parcial|transfer|reembols|saldo/i);
+    expect(email.text).toContain('Dúvidas? Responda este e-mail.');
+    expect(render({ replyTo: 'suporte@vallebycloset.com' }).text).toContain('escreva para suporte@vallebycloset.com');
+    expect(email.html).not.toMatch(/instagram|facebook|whatsapp|href=/i); // nada de links ou redes sociais inventados
   });
 });
 
