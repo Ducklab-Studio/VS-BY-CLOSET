@@ -110,10 +110,10 @@ export class ValePassRefundService {
       return { status: 'APPLIED', application, cancelledVouchers: 0 };
     }
 
-    const byGroup = new Map<string, { createdAt: Date; vouchers: { id: string; status: VoucherStatus }[] }>();
+    const byGroup = new Map<string, { createdAt: Date; vouchers: { id: string; status: VoucherStatus; touched: boolean }[] }>();
     for (const voucher of vouchers) {
       const entry = byGroup.get(voucher.groupId as string) ?? { createdAt: voucher.createdAt, vouchers: [] };
-      entry.vouchers.push({ id: voucher.id, status: voucher.status });
+      entry.vouchers.push({ id: voucher.id, status: voucher.status, touched: voucher.company !== null && voucher.balanceCents < voucher.amountCents });
       if (voucher.createdAt < entry.createdAt) entry.createdAt = voucher.createdAt;
       byGroup.set(voucher.groupId as string, entry);
     }

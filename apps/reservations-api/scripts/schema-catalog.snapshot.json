@@ -267,6 +267,34 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_reverses_entry_id_fkey": {
+      "columns": [
+        "reverses_entry_id"
+      ],
+      "references": "vale_pass_ledger_entries",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_vale_pass_id_fkey": {
+      "columns": [
+        "vale_pass_id"
+      ],
+      "references": "vale_passes",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_pass_lots.vale_pass_lots_campaign_id_fkey": {
       "columns": [
         "campaign_id"
@@ -1277,6 +1305,73 @@
       ],
       "predicate": null
     },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_reverses_entry_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "reverses_entry_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_vale_pass_id_idempotency_key_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "vale_pass_id",
+        "idempotency_key"
+      ],
+      "predicate": null
+    },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_vale_pass_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "vale_pass_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_ledger_entries.vale_pass_ledger_entries_vale_pass_id_seq_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "vale_pass_id",
+        "seq"
+      ],
+      "predicate": null
+    },
     "vale_pass_lots.vale_pass_lots_campaign_id_idx": {
       "method": "btree",
       "unique": false,
@@ -1989,6 +2084,16 @@
       "generated": null,
       "identity": null
     },
+    "vale_pass_ledger_entries.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_ledger_entries.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
     "vale_pass_lots.created_at": {
       "default": "current_timestamp",
       "generated": null,
@@ -2066,6 +2171,11 @@
     },
     "vale_pass_refund_applications.review_reasons": {
       "default": "'[]'::jsonb",
+      "generated": null,
+      "identity": null
+    },
+    "vale_passes.balance_cents": {
+      "default": "0",
       "generated": null,
       "identity": null
     },

@@ -669,13 +669,15 @@ localDescribe('Valle Pass — permissões e isolamento da emissão', () => {
     }
   });
 
-  test('migrações aditivas: as colunas originais dos passes continuam as mesmas (só 4 novas, nulas, no fim)', async () => {
+  test('migrações aditivas: as colunas originais dos passes continuam as mesmas (só 4 novas, nulas, no fim; depois, as do saldo)', async () => {
     const columns = await prisma.$queryRaw<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name = 'vale_passes' ORDER BY ordinal_position`;
     expect(columns.map((c) => c.column_name)).toEqual([
       'id', 'code', 'campaign_id', 'amount_cents', 'status', 'purchased_at', 'expires_at', 'customer_name', 'customer_phone', 'customer_email',
       'shopify_order_id', 'shopify_order_gid', 'shopify_order_name', 'used_at', 'used_by', 'cancelled_at', 'cancelled_by', 'cancel_reason', 'created_at', 'updated_at',
       // PR B (dois vouchers): só 4 colunas NOVAS e NULAS — todo voucher existente continua legado
       'benefit_id', 'company', 'group_id', 'valid_from',
+      // Fase 3 / PR A (saldo e ledger): saldo (nasce = valor) e bloqueio administrativo (nulo)
+      'balance_cents', 'blocked_at', 'blocked_by', 'block_reason',
     ]);
   });
 });

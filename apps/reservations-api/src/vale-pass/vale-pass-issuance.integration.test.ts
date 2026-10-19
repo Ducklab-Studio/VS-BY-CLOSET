@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { REQUIRE_ROLE_KEY } from '../admin/require-role.decorator';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { ValePassWebhookService } from './vale-pass-webhook.service';
+import { purgeLedgerForTest } from './ledger/ledger-test-utils';
 import { ValePassIssuanceService, type IssuanceOutcome } from './vale-pass-issuance.service';
 import { ValePassHoldsService, type IssueHoldExpected, type IssueHoldInput } from './vale-pass-holds.service';
 import { ValePassHoldsController } from './vale-pass-holds.controller';
@@ -164,6 +165,7 @@ afterAll(async () => {
     const voucherRows = await prisma.valePass.findMany({ where: { campaignId: { in: createdCampaigns } }, select: { id: true } });
     await prisma.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: [...createdCampaigns, ...holdRows.map((h) => h.id), ...lotRows.map((l) => l.id), ...voucherRows.map((v) => v.id)] } }, { adminUserId: adminId }] } });
     await prisma.valePassEvent.deleteMany({ where: { valePassId: { in: voucherRows.map((v) => v.id) } } });
+    await prisma.$transaction((tx) => purgeLedgerForTest(tx, { campaignIds: createdCampaigns }));
     await prisma.valePass.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
     await prisma.valePassIssuanceHold.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
     await prisma.valePassLot.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
@@ -728,8 +730,14 @@ localDescribe('Valle Pass 2027 — imutabilidade e benefícios', () => {
     ]) {
       await expect(prisma.valePass.update({ where: { id: v.id }, data }), JSON.stringify(Object.keys(data))).rejects.toThrow(/vale_pass_immutable|23514/);
     }
-    // o que continua livre: status, uso, cancelamento
-    await prisma.valePass.update({ where: { id: v.id }, data: { status: 'USED', usedAt: new Date() } });
+    // o que continua livre: cancelamento. "Usado" só pelo livro-razão (saldo zero); UPDATE direto é recusado; saldo não muda por UPDATE.
+    await expect(prisma.valePass.update({ where: { id: v.id }, data: { status: 'USED', usedAt: new Date() } })).rejects.toThrow(/vale_pass_used_requires_zero_balance/);
+    await expect(prisma.valePass.update({ where: { id: v.id }, data: { balanceCents: 0 } })).rejects.toThrow(/vale_pass_balance_direct_update/);
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica'); // início de uso em 2027: recuado só neste voucher para exercitar o resgate
+      await tx.$executeRaw`UPDATE vale_passes SET valid_from = now() - interval '1 day' WHERE id = ${v.id}::uuid`;
+    });
+    await prisma.valePassLedgerEntry.create({ data: { valePassId: v.id, seq: 1, balanceAfterCents: 0, kind: 'REDEEM', deltaCents: -v.amountCents, reference: 'teste', idempotencyKey: `all-${v.id}` } });
     expect((await prisma.valePass.findUniqueOrThrow({ where: { id: v.id } })).status).toBe('USED');
   });
 

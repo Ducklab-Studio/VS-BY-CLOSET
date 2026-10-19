@@ -20,7 +20,8 @@ export type VoucherStatus = 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
 export interface UnitState {
   readonly groupId: string;
   readonly createdAt: Date;
-  readonly vouchers: readonly { readonly id: string; readonly status: VoucherStatus }[];
+  /** `touched` = voucher do modelo de saldo com utilização parcial (saldo < valor): conta como usado, mesmo ACTIVE. */
+  readonly vouchers: readonly { readonly id: string; readonly status: VoucherStatus; readonly touched?: boolean }[];
 }
 
 export type UnitStanding = 'UNUSED' | 'CANCELLED' | 'TOUCHED';
@@ -28,6 +29,7 @@ export type UnitStanding = 'UNUSED' | 'CANCELLED' | 'TOUCHED';
 export function standingOf(unit: UnitState): UnitStanding {
   if (unit.vouchers.length === 0) return 'TOUCHED';
   if (unit.vouchers.every((voucher) => voucher.status === 'CANCELLED')) return 'CANCELLED';
+  if (unit.vouchers.some((voucher) => voucher.touched)) return 'TOUCHED'; // utilização parcial: nunca cancelada automaticamente
   if (unit.vouchers.every((voucher) => voucher.status === 'ACTIVE')) return 'UNUSED';
   return 'TOUCHED'; // algum usado/expirado, ou metade cancelada: nunca decidido automaticamente
 }

@@ -914,12 +914,20 @@ model ValePass {
   benefitId         String?        @db.Uuid @map("benefit_id")
   /// Início do uso (ex.: 01/01/2027, no fuso adotado). Nulo = vale desde a emissão (legado).
   validFrom         DateTime?      @map("valid_from") @db.Timestamptz(6)
+  /// Saldo disponível, em centavos inteiros (cache do livro-razão). NASCE igual a `amountCents` (gatilho) e só muda por lançamento em
+  /// `vale_pass_ledger_entries` (gatilho do banco recusa qualquer UPDATE direto). Nunca negativo nem acima de `amountCents`.
+  balanceCents      Int            @default(0) @map("balance_cents")
+  /// Bloqueio administrativo (fraude, conflito de titularidade). Enquanto preenchido, nenhum resgate. Quem aplica/remove: serviço auditado (PR C).
+  blockedAt         DateTime?      @map("blocked_at") @db.Timestamptz(6)
+  blockedBy         String?        @db.Uuid @map("blocked_by")
+  blockReason       String?        @map("block_reason")
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   campaign ValePassCampaign         @relation(fields: [campaignId], references: [id])
   benefit  ValePassCampaignBenefit? @relation(fields: [benefitId], references: [id], onDelete: Restrict)
   events   ValePassEvent[]
+  ledger   ValePassLedgerEntry[]
 
   @@unique([groupId, benefitId])
   @@unique([groupId, company])
@@ -929,6 +937,55 @@ model ValePass {
   @@index([groupId])
   @@index([benefitId])
   @@map("vale_passes")
+}
+
+/// Tipos de lançamento do livro-razão de saldo. Hoje o banco só aceita REDEEM e REVERSAL (`vale_pass_ledger_kind_enabled`); ADJUSTMENT e
+/// REFUND_WRITEOFF existem para o desenho, mas ficam DESABILITADOS até haver política comercial aprovada.
+enum ValePassLedgerKind {
+  REDEEM
+  REVERSAL
+  ADJUSTMENT
+  REFUND_WRITEOFF
+
+  @@map("vale_pass_ledger_kind")
+}
+
+/// Livro-razão IMUTÁVEL (só INSERT; UPDATE/DELETE/TRUNCATE recusados pelo banco) dos saldos dos vouchers. Fonte de verdade: o saldo é
+/// `amount_cents + Σ delta_cents`. `seq`, `company` e `balance_after_cents` são calculados/validados pelo gatilho sob o lock da linha do voucher.
+model ValePassLedgerEntry {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  valePassId        String             @map("vale_pass_id") @db.Uuid
+  /// 1, 2, 3… por voucher, sem buracos (gatilho).
+  seq               Int
+  kind              ValePassLedgerKind
+  /// Empresa do voucher (copiada dele pelo gatilho; um lançamento nunca contradiz a empresa do voucher). Nulo só no backfill de voucher legado.
+  company           ValePassCompany?
+  /// Centavos com sinal: REDEEM < 0, REVERSAL > 0.
+  deltaCents        Int                @map("delta_cents")
+  balanceAfterCents Int                @map("balance_after_cents")
+  /// Sem FK de propósito (mesmo padrão de `cancelledBy`): remover o operador nunca apaga nem trava o histórico. O nome fica como retrato.
+  actorAdminId      String?            @db.Uuid @map("actor_admin_id")
+  actorName         String?            @map("actor_name")
+  reason            String?
+  /// Referência da utilização (nota, pedido da loja, comanda…).
+  reference         String?
+  /// Chave de idempotência da operação (única por voucher).
+  idempotencyKey    String             @map("idempotency_key")
+  /// SHA-256 do conteúdo canônico da operação: a mesma chave com conteúdo diferente é conflito.
+  requestHash       String?            @map("request_hash")
+  /// Só REVERSAL: o lançamento revertido (cada lançamento só pode ser revertido UMA vez).
+  reversesEntryId   String?            @unique @map("reverses_entry_id") @db.Uuid
+  detail            Json?
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  valePass   ValePass              @relation(fields: [valePassId], references: [id])
+  reverses   ValePassLedgerEntry?  @relation("LedgerReversal", fields: [reversesEntryId], references: [id], onDelete: Restrict)
+  reversedBy ValePassLedgerEntry?  @relation("LedgerReversal")
+
+  @@unique([valePassId, seq])
+  @@unique([valePassId, idempotencyKey])
+  @@index([valePassId])
+  @@map("vale_pass_ledger_entries")
 }
 
 enum ValePassCompany {
