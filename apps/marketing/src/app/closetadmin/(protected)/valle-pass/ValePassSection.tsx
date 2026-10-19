@@ -24,6 +24,7 @@ import type {
 } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
+import { BalanceDesk } from './BalanceDesk';
 import { EmailsPanel } from './EmailsPanel';
 import { FlowPanel } from './FlowPanel';
 import { formatVoucherDisplayDay, formatVoucherFirstDay, formatVoucherLastDay } from '@/lib/valle-pass-dates';
@@ -141,6 +142,12 @@ export function ValePassSection({
   // novo, então não vira um parâmetro de /admin/vale-pass/vouchers).
   const [restorableOnly, setRestorableOnly] = useState(false);
   const [vouchersError, setVouchersError] = useState<string | null>(null);
+  // "Resgatar por saldo" na lista abre o voucher no balcão de saldo (consulta nova a cada clique).
+  const [deskRequest, setDeskRequest] = useState<{ code: string; nonce: number } | null>(null);
+  function openDesk(code: string) {
+    setDeskRequest((prev) => ({ code, nonce: (prev?.nonce ?? 0) + 1 }));
+    document.getElementById('balance-desk-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const visibleVouchers = useMemo(
     () =>
@@ -364,6 +371,8 @@ export function ValePassSection({
 
       <EmailsPanel canManage={canManageCampaigns} />
 
+      <BalanceDesk canOperate={canManageCampaigns} request={deskRequest} />
+
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Ticket size={18} className="text-marsala dark:text-gold" />
@@ -474,6 +483,7 @@ export function ValePassSection({
                 voucher={voucher}
                 canManage={canManageCampaigns}
                 onChanged={() => refreshVouchers()}
+                onOpenDesk={openDesk}
               />
             ))}
           </div>
@@ -801,10 +811,12 @@ function VoucherCard({
   voucher,
   canManage,
   onChanged,
+  onOpenDesk,
 }: {
   voucher: ValePassVoucher;
   canManage: boolean;
   onChanged: () => void;
+  onOpenDesk: (code: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -848,6 +860,12 @@ function VoucherCard({
           <p className="mt-0.5 text-xs text-ink/45 dark:text-dark-subtle">
             {voucher.campaignName} · {formatCurrency(voucher.amountCents)}
           </p>
+          {voucher.company && voucher.balanceCents !== undefined ? (
+            <p className="mt-1 text-xs font-medium text-ink/70 dark:text-dark-text">
+              Saldo disponível: {formatCurrency(voucher.balanceCents)}
+              {voucher.usedCents ? <span className="font-normal text-ink/45 dark:text-dark-subtle"> · utilizado {formatCurrency(voucher.usedCents)}</span> : null}
+            </p>
+          ) : null}
           {voucher.company ? (
             <p className="mt-1 inline-flex rounded-full bg-marsala/10 px-2 py-0.5 text-[0.7rem] font-semibold text-marsala dark:bg-gold/15 dark:text-gold">
               {voucher.company === 'VALLE_SHOWROOM' ? 'Válido só na Valle Showroom' : 'Válido só na VS BY CLOSET'}
@@ -886,6 +904,15 @@ function VoucherCard({
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ink/5 pt-3.5 dark:border-white/5">
         {voucher.status === 'ACTIVE' ? (
           <>
+            {voucher.company !== null ? (
+              <button
+                type="button"
+                onClick={() => onOpenDesk(voucher.code)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-marsala px-2.5 py-1.5 text-xs font-medium text-cream shadow-sm transition hover:bg-marsala/90 dark:bg-gold dark:text-dark-bg dark:hover:bg-gold/90"
+              >
+                <CheckCircle2 size={13} /> Ver saldo e resgatar
+              </button>
+            ) : (
             <ConfirmDialog
               trigger={
                 <button
@@ -900,6 +927,7 @@ function VoucherCard({
               confirmLabel="Marcar como utilizado"
               onConfirm={handleMarkUsed}
             />
+            )}
             {canManage ? (
               <ConfirmDialog
                 trigger={

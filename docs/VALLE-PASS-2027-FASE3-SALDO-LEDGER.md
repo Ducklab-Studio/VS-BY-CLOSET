@@ -102,3 +102,16 @@ Erros (corpo `{ statusCode, error, code?, message, balanceCents? }`; nunca texto
 
 ## 7. Testes do PR B
 `ledger/redemption.integration.test.ts` (35): exemplos 500→200→100 e 50→20, resgate total/USED, prévia sem gravação e prévia antiga, valores inválidos e de borda, idempotência (repetida, conteúdo diferente, 8 em paralelo), 10 operadores com a mesma prévia, 12 resgates simultâneos, empresa errada, cancelado/expirado/bloqueado/pedido cancelado/reembolso em revisão/fora da validade/antes do início/legado, STAFF (403) e máscaras, `/use` legado, enumeração, contrato HTTP (guards/papéis), validação de entrada, reversão (única, idempotente, concorrente, recusas), auditoria sem dado pessoal, falha no meio da transação, alteração direta de saldo.
+
+---
+
+# PR D1 — interface de consulta, resgate e histórico (ClosetAdmin)
+
+> Depende do PR B (endpoints) e, por ele, do PR A. Seção **"Saldo e resgate"** em `/closetadmin/valle-pass` (`BalanceDesk.tsx`).
+
+- **Consulta** por código: empresa, benefício, status, valor inicial / utilizado / saldo (barra de uso), validade, bloqueio, restrições ("Resgate indisponível: …"), titular mascarado e histórico (valor, saldo resultante, data/hora, operador, referência, motivo, "Revertido").
+- **Resgate** (somente ADMIN): valor em reais (convertido para centavos inteiros por texto, sem float; `200`, `200,50`, `1.234,56`; recusa `200.50`, zero, negativo, letras), referência obrigatória → **Conferir** (prévia: saldo antes/depois, nada gravado) → redigitar o valor → **Confirmar resgate**. Duplo clique não duplica (trava + `operationId` idempotente reenviado em falha de rede). O saldo exibido vem da **resposta do backend**; recusas (`BALANCE_CHANGED`, restrições) recarregam o voucher.
+- **Reversão** (somente ADMIN): por lançamento, com justificativa (≥ 10) e valor redigitado; o resgate revertido passa a "Revertido" e não oferece nova reversão.
+- **STAFF**: só consulta; a tela diz explicitamente que resgate/reversão exigem administrador (sem botões decorativos). A lista de vouchers do modelo novo troca "Marcar como utilizado" por "Ver saldo e resgatar" (abre o balcão); o "usado" por inteiro continua só para voucher legado.
+- Responsiva (cartões, sem tabela larga), com estados de carregamento, vazio, erro e sucesso; erros da API traduzidos (`describeBalanceError`).
+- Testes: `test/valle-pass-balance.test.mjs` (parser de reais, BRL, erros) e `test/valle-pass-balance-browser.mjs` (navegador real, API e site locais, banco descartável: STAFF só consulta; 500→200→100→200; 50→20→30; duplo clique = 1 lançamento; acima do saldo/valor inválido/código inexistente; reversão; celular 375 px sem rolagem horizontal; nenhum erro de console nem tráfego externo). Ambos entram na CI.

@@ -2,7 +2,7 @@ import { toInspectionBody, type InspectionInput, type ReturnCondition } from './
 import 'server-only';
 import { pathSegment } from './admin-path';
 
-import { AdminApiError, adminGet, adminPatch, adminPost, adminPut } from './admin-api';
+import { AdminApiError, adminGet, adminGetPlain, adminPatch, adminPost, adminPut } from './admin-api';
 import type { AdminModuleName } from './admin-session';
 
 /** Fase 9 — tipos e chamadas ao reservations-api usadas pelas páginas
@@ -897,6 +897,10 @@ export interface ValePassVoucher {
   readonly shopifyOrderId: string | null;
   readonly shopifyOrderName: string | null;
   readonly usedAt: string | null;
+  /** Saldo disponível / utilizado em centavos (Fase 3). Voucher legado (sem empresa) não tem controle de saldo. */
+  readonly balanceCents?: number;
+  readonly usedCents?: number;
+  readonly blockedAt?: string | null;
   readonly cancelledAt: string | null;
   readonly cancelReason: string | null;
   /** Só tem sentido quando `status === 'CANCELLED'`. O backend já checa
@@ -981,6 +985,98 @@ export function cancelValePassVoucher(code: string, reason: string, adminUserId:
  *  em outras ações administrativas deste projeto). */
 export function restoreValePassVoucher(code: string, reason: string): Promise<ValePassVoucher> {
   return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/restore`, { reason });
+}
+
+// ── Saldo, resgate parcial e reversão (Fase 3) ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// Contratos da API (`/admin/vale-pass/vouchers/:code/...`). A identidade vem SEMPRE da sessão (nunca no corpo/consulta): o DTO da API recusa campos extras.
+
+export interface ValePassLedgerEntry {
+  readonly id: string;
+  readonly seq: number;
+  readonly kind: 'REDEEM' | 'REVERSAL' | 'ADJUSTMENT' | 'REFUND_WRITEOFF';
+  readonly company: ValePassCompany | null;
+  /** Centavos com sinal: resgate negativo, reversão positiva. */
+  readonly deltaCents: number;
+  readonly balanceAfterCents: number;
+  readonly reference: string | null;
+  readonly reason: string | null;
+  readonly actorName: string | null;
+  readonly createdAt: string;
+  readonly reversesEntryId: string | null;
+  readonly reversed: boolean;
+}
+
+export interface ValePassBalanceView {
+  readonly code: string;
+  readonly company: ValePassCompany | null;
+  readonly benefitLabel: string | null;
+  readonly status: ValePassStatus;
+  readonly amountCents: number;
+  readonly balanceCents: number;
+  readonly usedCents: number;
+  readonly validFrom: string | null;
+  readonly expiresAt: string;
+  readonly blockedAt: string | null;
+  readonly orderName: string | null;
+  readonly holder: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null };
+  readonly redeemable: boolean;
+  readonly restrictions: readonly { readonly code: string; readonly message: string }[];
+  readonly entries: readonly ValePassLedgerEntry[];
+}
+
+export interface ValePassRedeemInput {
+  readonly company: ValePassCompany;
+  readonly amountCents: number;
+  readonly reference: string;
+}
+export interface ValePassRedeemPreview {
+  readonly canRedeem: boolean;
+  readonly problems: readonly { readonly code: string; readonly message: string }[];
+  readonly company: string;
+  readonly amountCents: number;
+  readonly balanceBeforeCents: number;
+  readonly balanceAfterCents: number | null;
+  readonly operationId: string;
+  readonly expectedBalanceCents: number;
+}
+export interface ValePassOperationResult {
+  readonly replayed: boolean;
+  readonly entry: ValePassLedgerEntry;
+  readonly balanceCents: number;
+  readonly usedCents: number;
+  readonly status: ValePassStatus;
+}
+export interface ValePassReversePreview {
+  readonly canReverse: boolean;
+  readonly problems: readonly { readonly code: string; readonly message: string }[];
+  readonly entry: ValePassLedgerEntry | null;
+  readonly balanceBeforeCents: number;
+  readonly balanceAfterCents: number | null;
+  readonly operationId: string;
+  readonly expectedBalanceCents: number;
+}
+
+export function getValePassBalance(code: string): Promise<ValePassBalanceView> {
+  return adminGetPlain(`/admin/vale-pass/vouchers/${pathSegment(code)}/balance`);
+}
+export function prepareValePassRedeem(code: string, input: ValePassRedeemInput): Promise<ValePassRedeemPreview> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/redeem/prepare`, input);
+}
+export function confirmValePassRedeem(
+  code: string,
+  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+): Promise<ValePassOperationResult> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/redeem`, input);
+}
+export function prepareValePassReverse(code: string, entryId: string): Promise<ValePassReversePreview> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/ledger/${pathSegment(entryId)}/reverse/prepare`, {});
+}
+export function confirmValePassReverse(
+  code: string,
+  entryId: string,
+  input: { reason: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+): Promise<ValePassOperationResult> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/ledger/${pathSegment(entryId)}/reverse`, input);
 }
 
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
