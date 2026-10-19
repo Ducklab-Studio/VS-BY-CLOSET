@@ -6,7 +6,7 @@ import { STRICT_PAYMENT_TIME_CONFIG } from './payment-time-policy';
 const GID = 'gid://shopify/Order/1';
 const NOW = new Date('2026-10-18T15:00:00Z');
 const PAID = '2026-10-18T12:00:00Z';
-const tx = (over: Partial<ShopifyTransaction> = {}): ShopifyTransaction => ({ id: 'gid://shopify/OrderTransaction/' + Math.random(), kind: 'SALE', status: 'SUCCESS', test: false, processedAt: PAID, amount: '350.00', currency: 'BRL', gateway: 'mercado_pago', ...over });
+const tx = (over: Partial<ShopifyTransaction> = {}): ShopifyTransaction => ({ id: 'gid://shopify/OrderTransaction/' + Math.random(), kind: 'SALE', status: 'SUCCESS', test: false, processedAt: PAID, amount: '350.00', currency: 'BRL', gateway: 'gateway_pix', ...over });
 const input = (over: Partial<AutoVerifyInput> = {}, transactions: ShopifyTransaction[] = [tx()], total = '350.00'): AutoVerifyInput => ({
   fetched: { orderGid: GID, totalAmount: total, currency: 'BRL', transactions },
   expectedOrderGid: GID,

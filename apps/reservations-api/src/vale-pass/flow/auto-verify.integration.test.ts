@@ -80,7 +80,7 @@ function paidPayload(campaign: Campaign, quantity: number, over: Record<string, 
   orderIds.push(orderId);
   return {
     id: orderId, admin_graphql_api_id: gidOf(orderId), name: `#${TAG}${counter}`, financial_status: 'paid', cancelled_at: null, currency: 'BRL', presentment_currency: 'BRL',
-    created_at: hoursAgo(10), updated_at: hoursAgo(9), test: false, payment_gateway_names: ['Mercado Pago Pix'],
+    created_at: hoursAgo(10), updated_at: hoursAgo(9), test: false, payment_gateway_names: ['Gateway Pix'],
     current_total_price: ((35000 * quantity) / 100).toFixed(2), total_outstanding: '0.00', total_discounts: '0.00', discount_codes: [], refunds: [],
     total_shipping_price_set: money('0.00'), email: `cliente${counter}@exemplo.invalid`, customer: { first_name: 'Cliente', last_name: 'Sintético', email: `cliente${counter}@exemplo.invalid` },
     line_items: [{ variant_id: Number(campaign.numericVariant), product_id: null, quantity, current_quantity: quantity, price: '350.00', price_set: money('350.00'), discount_allocations: [] }],
@@ -97,7 +97,7 @@ async function storeEvent(topic: string, payload: Record<string, unknown>) {
   await prisma.webhookEvent.create({ data: { shopifyWebhookId: `${TAG}-wh${counter++}`, storeId: `${TAG}-store`, topic, payload: payload as never, status: 'processed' as never, orderId: String(payload.id) } });
 }
 
-const txn = (over: Partial<Tx> = {}): Tx => ({ id: `gid://shopify/OrderTransaction/${counter++}`, kind: 'SALE', status: 'SUCCESS', test: false, processedAt: hoursAgo(9), amount: '350.00', currency: 'BRL', gateway: 'mercado_pago', ...over });
+const txn = (over: Partial<Tx> = {}): Tx => ({ id: `gid://shopify/OrderTransaction/${counter++}`, kind: 'SALE', status: 'SUCCESS', test: false, processedAt: hoursAgo(9), amount: '350.00', currency: 'BRL', gateway: 'gateway_pix', ...over });
 const shopify = (orderId: string, transactions: Tx[], total = '350.00') => fakeTransactions.set(gidOf(orderId), { orderGid: gidOf(orderId), totalAmount: total, currency: 'BRL', transactions });
 
 /** Pedido pago (política ESTRITA de produção), entregue com sinais perfeitos do webhook → retenção PAYMENT_TIME_UNKNOWN. */
@@ -323,7 +323,7 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — confirmar o horário NÃO libera a 
   });
 
   test('pagamento MANUAL no pedido (payment_gateway_names inclui "manual") → reclassifica como MANUAL_PAYMENT; nenhum voucher automático', async () => {
-    const { orderId, paidAt } = await heldOrder({ payment_gateway_names: ['Mercado Pago Pix', 'manual'] });
+    const { orderId, paidAt } = await heldOrder({ payment_gateway_names: ['Gateway Pix', 'manual'] });
     shopify(orderId, [txn({ processedAt: paidAt })]);
     expect(await auto().runOnce()).toMatchObject({ issued: 0, reclassified: 1 });
     expect(await vouchersOf(orderId)).toHaveLength(0);

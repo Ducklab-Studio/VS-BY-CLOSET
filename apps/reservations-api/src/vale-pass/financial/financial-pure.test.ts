@@ -284,10 +284,10 @@ describe('validação: pedido de TESTE e pagamento MANUAL nunca valem como compr
   });
 
   test('gateway manual/teste/offline → MANUAL_PAYMENT; Pix e cartão reais não bloqueiam', () => {
-    for (const gateways of [['manual'], ['Mercado Pago Pix', 'manual'], ['bogus'], ['Cash on Delivery (COD)'], ['Bank Deposit'], ['Money Order'], ['for testing']]) {
+    for (const gateways of [['manual'], ['Gateway Pix', 'manual'], ['bogus'], ['Cash on Delivery (COD)'], ['Bank Deposit'], ['Money Order'], ['for testing']]) {
       expect(codesOf(webhookOrder({ payment_gateway_names: gateways })), gateways.join()).toContain('MANUAL_PAYMENT');
     }
-    for (const gateways of [['Mercado Pago Pix'], ['shopify_payments'], ['mercado_pago'], []]) {
+    for (const gateways of [['Gateway Pix'], ['shopify_payments'], ['gateway_pix'], []]) {
       expect(codesOf(webhookOrder({ payment_gateway_names: gateways })), gateways.join()).toEqual([]);
     }
     const admin = validateValePassFinancials(factsFromAdminOrder(adminOrder(1, { paymentGatewayNames: ['manual'] })), expected);

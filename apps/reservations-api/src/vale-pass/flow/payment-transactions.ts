@@ -23,7 +23,7 @@ export interface ShopifyTransaction {
   readonly processedAt: string | null;
   readonly amount: string | null;
   readonly currency: string | null;
-  /** Gateway da transação (ex.: "mercado_pago", "manual"). Ausente = a fonte não informou. */
+  /** Gateway da transação (ex.: "gateway_pix", "manual"). Ausente = a fonte não informou. */
   readonly gateway?: string | null;
 }
 

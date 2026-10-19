@@ -47,7 +47,7 @@ export interface OrderFinancialFacts {
   readonly lines: readonly FinancialLineFacts[];
   /** Pedido de TESTE da Shopify (`test: true`). Ausente/nulo = a fonte não informou. */
   readonly testOrder?: boolean | null;
-  /** `payment_gateway_names` (ex.: ["Mercado Pago Pix"], ["Mercado Pago Pix","manual"]). Ausente/nulo = a fonte não informou. */
+  /** `payment_gateway_names` (ex.: ["Gateway Pix"], ["Gateway Pix","manual"]). Ausente/nulo = a fonte não informou. */
   readonly gatewayNames?: readonly string[] | null;
 }
 
