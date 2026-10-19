@@ -6,6 +6,7 @@ import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { REQUIRE_ROLE_KEY } from '../../admin/require-role.decorator';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
+import { purgeLedgerForTest } from '../ledger/ledger-test-utils';
 import { ValePassIssuanceService } from '../vale-pass-issuance.service';
 import { ValePassWebhookService } from '../vale-pass-webhook.service';
 import { loadEmailConfig, type EmailConfig } from './email-config';
@@ -174,6 +175,7 @@ async function cleanRows() {
     await tx.valePassEmailOutbox.deleteMany({ where: { campaignId: { in: ids } } });
     const vouchers = await tx.valePass.findMany({ where: { campaignId: { in: ids } }, select: { id: true } });
     await tx.valePassEvent.deleteMany({ where: { valePassId: { in: vouchers.map((v) => v.id) } } });
+    await purgeLedgerForTest(tx, { campaignIds: ids });
     await tx.valePass.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassIssuanceHold.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassCampaignBenefit.deleteMany({ where: { campaignId: { in: ids } } });
@@ -389,7 +391,15 @@ localDescribe('E-mail dos vouchers — envio, reavaliação e confidencialidade'
     const { outbox, worker, provider } = stack(liveConfig());
     const f = await paidOrder(1);
     await enqueue(outbox, f.orderId);
-    await prisma.valePass.updateMany({ where: { groupId: f.groupIds[0], company: 'VS_BY_CLOSET' }, data: { status: 'USED', usedAt: new Date() } });
+    // utilização PARCIAL (R$ 10 dos R$ 50): o voucher segue ACTIVE, mas já foi tocado — o código não pode mais ser enviado
+    const touched = await prisma.valePass.findFirstOrThrow({ where: { groupId: f.groupIds[0], company: 'VS_BY_CLOSET' } });
+    // a campanha do teste começa em 2027 (ainda não vale): o banco recusa resgate antes do início — recuamos o início só neste voucher (gatilhos desligados na transação)
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.$executeRaw`UPDATE vale_passes SET valid_from = now() - interval '1 day' WHERE id = ${touched.id}::uuid`;
+    });
+    await prisma.valePassLedgerEntry.create({ data: { valePassId: touched.id, seq: 1, balanceAfterCents: 0, kind: 'REDEEM', deltaCents: -1000, reference: 'teste', idempotencyKey: `part-${touched.id}` } });
+    expect(await prisma.valePass.findUniqueOrThrow({ where: { id: touched.id } })).toMatchObject({ status: 'ACTIVE', balanceCents: 4000 });
     await worker.tick(soon());
     expect((await rowsOf(f.orderId))[0]).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'voucher_already_used' });
     expect(provider.calls).toHaveLength(0);

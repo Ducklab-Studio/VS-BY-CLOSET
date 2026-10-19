@@ -97,6 +97,24 @@ describe('plano: reembolso por UNIDADE (cada unidade = 2 vouchers vinculados)', 
   });
 });
 
+const touchedUnit = (groupId: string, minutes: number): UnitState => ({ ...unit(groupId, minutes), vouchers: [{ id: groupId + '-v0', status: 'ACTIVE', touched: true }, { id: groupId + '-v1', status: 'ACTIVE', touched: false }] });
+
+describe('plano: utilização PARCIAL (saldo) — voucher ACTIVE com saldo gasto conta como usado', () => {
+  test('uma empresa parcialmente utilizada torna a unidade TOCADA: nunca UNUSED, nunca cancelada sozinha', () => {
+    expect(standingOf(touchedUnit('x', 1))).toBe('TOUCHED');
+    expect(standingOf({ ...unit('x', 1), vouchers: [{ id: 'a', status: 'ACTIVE', touched: false }, { id: 'b', status: 'ACTIVE' }] })).toBe('UNUSED');
+    expect(standingOf({ ...unit('x', 1), vouchers: [{ id: 'a', status: 'CANCELLED', touched: true }, { id: 'b', status: 'CANCELLED' }] })).toBe('CANCELLED');
+  });
+  test('reembolso de 1 unidade com a mais nova parcialmente usada: pula para a intocada anterior', () => {
+    const units = [unit('g1', 1), unit('g2', 2), touchedUnit('g3', 3)];
+    expect(plan(refundPayload({ lines: [valeLine(1)] }), units)).toMatchObject({ cancelGroupIds: ['g2'], reviewReasons: [], reviewGroupIds: [] });
+  });
+  test('todas parcialmente usadas: nada é cancelado e tudo vai para revisão (decisão do Anderson/ADMIN)', () => {
+    const units = [touchedUnit('g1', 1), touchedUnit('g2', 2)];
+    expect(plan(refundPayload({ lines: [valeLine(1)] }), units)).toMatchObject({ cancelGroupIds: [], reviewReasons: ['USED_VOUCHERS'], reviewGroupIds: ['g2'], unitsNeedingReview: 1 });
+  });
+});
+
 describe('plano: vouchers já usados — fail-closed', () => {
   test('a unidade mais nova foi usada: pula para as intocadas; nunca cancela voucher usado', () => {
     const units = [unit('g1', 1), unit('g2', 2), unit('g3', 3, ['USED', 'ACTIVE'])];

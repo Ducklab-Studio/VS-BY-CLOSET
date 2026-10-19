@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, HttpException, Injectable, Logg
 import type { Prisma, ValePass, ValePassStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
+import { ledgerRefusal } from './ledger/ledger-errors';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 
 export interface ValePassVoucherItem {
@@ -27,6 +28,11 @@ export interface ValePassVoucherItem {
   readonly shopifyOrderId: string | null;
   readonly shopifyOrderName: string | null;
   readonly usedAt: string | null;
+  /** Saldo disponível (centavos). Voucher legado (sem empresa) não tem controle de saldo: vale o valor inteiro enquanto ACTIVE. */
+  readonly balanceCents: number;
+  /** Quanto já foi utilizado (valor − saldo). Sempre derivável do livro-razão. */
+  readonly usedCents: number;
+  readonly blockedAt: string | null;
   readonly cancelledAt: string | null;
   readonly cancelReason: string | null;
   /** Só tem sentido quando `status === 'CANCELLED'`; `false`/`null` nos
@@ -125,13 +131,31 @@ export class ValePassVouchersService {
         }
       }
 
-      // Status no WHERE + contagem: dois resgates simultâneos do mesmo
-      // código nunca gravam USED os dois.
-      const changed = await tx.valePass.updateMany({
-        where: { id: target.id, status: 'ACTIVE' },
-        data: { status: 'USED', usedAt: new Date(), usedBy: actorId },
-      });
-      if (changed.count !== 1) throw new ConflictException(STATUS_CHANGED_MESSAGE);
+      if (target.company !== null) {
+        // Voucher do modelo novo (com empresa) controla SALDO: "marcar como usado" é o resgate INTEGRAL do que resta, e só vale para voucher ainda NÃO tocado
+        // (utilização parcial se registra pelo valor). Passa pelo livro-razão — o banco recusa qualquer outro caminho para USED.
+        if (target.balanceCents !== target.amountCents || target.balanceCents <= 0) {
+          throw new ConflictException('Este voucher já teve utilização parcial: registre o resgate pelo valor utilizado. A marcação "usado" por inteiro só vale para voucher ainda não utilizado.');
+        }
+        try {
+          await tx.valePassLedgerEntry.create({
+            data: {
+              valePassId: target.id, seq: 1, balanceAfterCents: 0, // seq e saldo resultante são calculados pelo gatilho do banco
+              kind: 'REDEEM', deltaCents: -target.balanceCents, actorAdminId: actorId, actorName,
+              reason: 'Uso integral (marcação de utilizado)', reference: 'LEGACY_USE_ENDPOINT', idempotencyKey: `use-all:${target.id}`,
+            },
+          });
+        } catch (err) {
+          throw ledgerRefusal(err) ?? err;
+        }
+      } else {
+        // Legado (sem empresa): tudo ou nada, como sempre. Status no WHERE + contagem: dois resgates simultâneos do mesmo código nunca gravam USED os dois.
+        const changed = await tx.valePass.updateMany({
+          where: { id: target.id, status: 'ACTIVE' },
+          data: { status: 'USED', usedAt: new Date(), usedBy: actorId },
+        });
+        if (changed.count !== 1) throw new ConflictException(STATUS_CHANGED_MESSAGE);
+      }
 
       await tx.valePassEvent.create({ data: { valePassId: target.id, type: 'USED', detail: { actorId } } });
       await writeAdminAuditEvent(tx, {
@@ -152,6 +176,10 @@ export class ValePassVouchersService {
   async cancel(code: string, reason: string, actorId: string, actorName: string): Promise<ValePassVoucherItem> {
     const updated = await this.inVoucherTransaction(code, 'Não foi possível cancelar o Valle Pass no momento.', async (tx, target) => {
       if (target.status === 'USED') throw new ConflictException('Este Valle Pass já foi utilizado — não pode ser cancelado.');
+      // Utilização parcial = voucher "tocado": cancelar apagaria o saldo restante do cliente sem a decisão (reembolso/exceção) que ainda não existe.
+      if (target.company !== null && target.balanceCents < target.amountCents) {
+        throw new ConflictException('Este voucher já teve utilização parcial — não pode ser cancelado por aqui. Trate pela revisão de reembolso ou pela decisão de um administrador.');
+      }
       if (target.status === 'CANCELLED') throw new BadRequestException('Este Valle Pass já está cancelado.');
 
       const changed = await tx.valePass.updateMany({
@@ -383,6 +411,9 @@ function toItem(row: ValePass, campaignName: string, cancelledOrderIds: Readonly
     shopifyOrderId: row.shopifyOrderId,
     shopifyOrderName: row.shopifyOrderName,
     usedAt: row.usedAt?.toISOString() ?? null,
+    balanceCents: row.balanceCents,
+    usedCents: row.amountCents - row.balanceCents,
+    blockedAt: row.blockedAt?.toISOString() ?? null,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     cancelReason: row.cancelReason,
     canBeRestored,

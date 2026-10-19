@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
+import { purgeLedgerForTest } from '../ledger/ledger-test-utils';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConflictException, ForbiddenException, UnprocessableEntityException } from '@nestjs/common';
@@ -115,6 +116,7 @@ async function cleanRows() {
     await tx.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: [...holdRows.map((h) => h.id), ...refundRows.map((r) => r.id), ...vouchers.map((v) => v.id)] } }, { adminUserId: { in: [adminId, staffId] } }] } });
     await tx.valePassRefundApplication.deleteMany({ where: { shopifyOrderId: { in: orders } } });
     await tx.valePassEvent.deleteMany({ where: { valePassId: { in: vouchers.map((v) => v.id) } } });
+    await purgeLedgerForTest(tx, { campaignIds: ids });
     await tx.valePass.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassIssuanceHold.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassCampaignBenefit.deleteMany({ where: { campaignId: { in: ids } } });
@@ -200,6 +202,7 @@ localDescribe('reembolso parcial por UNIDADE: aplicação real', () => {
   test('pedido não pago cancelado (sem vouchers): registra e não gera revisão-ruído; pedido que não é de Valle Pass é ignorado', async () => {
     const f = await paidOrderWithUnits(1);
     await prisma.valePassEvent.deleteMany({ where: { valePass: { shopifyOrderId: f.orderId } } });
+    await prisma.$transaction((tx) => purgeLedgerForTest(tx, { orderIds: [f.orderId] }));
     await prisma.valePass.deleteMany({ where: { shopifyOrderId: f.orderId } });
     const outcome = await apply(refundFor(f, { quantity: 1 }));
     expect(outcome).toMatchObject({ status: 'APPLIED', cancelledVouchers: 0 });
@@ -370,6 +373,7 @@ localDescribe('unidades adicionais pagas: regularização segura', () => {
   test('pedido pago e nunca processado (0 unidades): candidato NOT_PROCESSED; regulariza as unidades pagas', async () => {
     const f = await paidOrderWithUnits(1);
     await prisma.valePassEvent.deleteMany({ where: { valePass: { shopifyOrderId: f.orderId } } });
+    await prisma.$transaction((tx) => purgeLedgerForTest(tx, { orderIds: [f.orderId] }));
     await prisma.valePass.deleteMany({ where: { shopifyOrderId: f.orderId } });
     await prisma.valePassOrder.update({ where: { shopifyOrderId: f.orderId }, data: { quantity: 2 } });
     expect(await regularization.findCandidates()).toEqual(expect.arrayContaining([expect.objectContaining({ orderId: f.orderId, kind: 'NOT_PROCESSED', missing: 2 })]));
@@ -608,8 +612,11 @@ localDescribe('F2 — voucher de unidade em revisão NEEDS_REVIEW não pode ser 
 
   test('trava no BANCO: UPDATE direto para USED do voucher bloqueado falha; de outra unidade e outras mudanças passam', async () => {
     const { blocked, free } = await underReview();
-    await expect(prisma.valePass.update({ where: { id: blocked[0].id }, data: { status: 'USED', usedAt: new Date() } })).rejects.toThrow(/vale_pass_use_blocked_refund_review/);
-    await expect(prisma.valePass.update({ where: { id: free[0].id }, data: { status: 'USED', usedAt: new Date() } })).resolves.toMatchObject({ status: 'USED' });
+    // Fase 3: o saldo só muda por lançamento — UPDATE direto para USED é recusado pelo banco; o caminho é o livro-razão, que repete a trava de revisão de reembolso.
+    await expect(prisma.valePass.update({ where: { id: blocked[0].id }, data: { status: 'USED', usedAt: new Date() } })).rejects.toThrow(/vale_pass_used_requires_zero_balance/);
+    await expect(redeemAllViaLedger(blocked[0])).rejects.toThrow(/vale_pass_use_blocked_refund_review/);
+    await expect(redeemAllViaLedger(free[0])).resolves.toBeTruthy();
+    expect(await prisma.valePass.findUniqueOrThrow({ where: { id: free[0].id } })).toMatchObject({ status: 'USED', balanceCents: 0 });
     await expect(prisma.valePass.update({ where: { id: blocked[0].id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'teste' } })).resolves.toMatchObject({ status: 'CANCELLED' }); // cancelar continua possível
   });
 
@@ -666,6 +673,9 @@ localDescribe('F2 — voucher de unidade em revisão NEEDS_REVIEW não pode ser 
 
 const amountOnly = (f: Fixture, id?: string) => refundFor(f, { id, lines: [], transactions: [{ amount: '100.00', kind: 'refund', status: 'success' }] });
 const markUsed = (code: string) => vouchersService.markUsed(code, adminId, ADMIN_NAME);
+/** Resgate integral direto no livro-razão (o banco aplica as mesmas travas dos serviços). */
+const redeemAllViaLedger = (voucher: { id: string; amountCents: number }) =>
+  prisma.valePassLedgerEntry.create({ data: { valePassId: voucher.id, seq: 1, balanceAfterCents: 0, kind: 'REDEEM', deltaCents: -voucher.amountCents, reference: 'teste', idempotencyKey: `redeem-all:${voucher.id}` } });
 
 localDescribe('revisão SEM unidade identificada bloqueia o resgate do pedido todo', () => {
   test('dinheiro devolvido sem unidade: os 4 vouchers do pedido ficam bloqueados (409) e nada é alterado; outro pedido e voucher legado de outro pedido seguem utilizáveis', async () => {
@@ -685,7 +695,7 @@ localDescribe('revisão SEM unidade identificada bloqueia o resgate do pedido to
     const f = await paidOrderWithUnits(1);
     await applyDefault(amountOnly(f));
     const [a, b] = await vouchersOf(f.orderId);
-    await expect(prisma.valePass.update({ where: { id: a.id }, data: { status: 'USED', usedAt: new Date() } })).rejects.toThrow(/vale_pass_use_blocked_refund_review/);
+    await expect(redeemAllViaLedger(a)).rejects.toThrow(/vale_pass_use_blocked_refund_review/);
     await expect(prisma.valePass.update({ where: { id: b.id }, data: { status: 'EXPIRED' } })).resolves.toMatchObject({ status: 'EXPIRED' });
   });
 
