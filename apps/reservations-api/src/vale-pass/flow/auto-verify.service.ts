@@ -10,7 +10,22 @@ import { decideAutoVerification, nextAttemptAt } from './auto-verify-decision';
 import { ValePassPaymentFlowService } from './payment-flow.service';
 
 export const AUTO_VERIFY_BATCH = 10;
+export const AUTO_SETTLE_TOKEN = 'VALE_PASS_AUTO_VERIFY_SETTLE_MS';
 export const AUTO_SOURCE = 'ADMIN_API_TRANSACTION_AUTO';
+
+/**
+ * Janela de ASSENTAMENTO: o e-mail dos vouchers emitidos automaticamente só fica elegível a envio depois desta espera (padrão 10 min, 0–120).
+ * Motivo: a consulta das transações e a emissão são separadas (a Shopify nunca é chamada dentro da transação do banco); um estorno feito nesse intervalo
+ * só chega pelo webhook `refunds/create`, que pode atrasar. Enquanto o e-mail não sai, o webhook (ou a reconciliação) cancela/segura os vouchers e o worker,
+ * que reavalia o pedido antes de cada envio, não envia nada. O prazo de 3 dias não é afetado.
+ */
+export const DEFAULT_SETTLE_MINUTES = 10;
+export function settleMsFromEnv(env: Record<string, string | undefined> = process.env): number {
+  const raw = env.VALE_PASS_AUTO_VERIFY_SETTLE_MINUTES;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SETTLE_MINUTES * 60_000;
+  const minutes = Number(raw);
+  return Number.isInteger(minutes) && minutes >= 0 && minutes <= 120 ? minutes * 60_000 : DEFAULT_SETTLE_MINUTES * 60_000;
+}
 const SYSTEM_ACTOR = { id: null, name: 'Sistema (verificação automática)' } as const;
 
 export interface AutoVerifyReport {
@@ -58,6 +73,7 @@ export class ValePassAutoVerifyService {
     @Optional() @Inject(ShopifyAdminClient) private readonly shopify: ShopifyAdminClient | null = null,
     @Optional() @Inject(ValePassPaymentFlowService) private readonly flow: ValePassPaymentFlowService | null = null,
     @Optional() @Inject(FLOW_FLAGS_TOKEN) private readonly flags: FlowFlags = envFlowFlags(),
+    @Optional() @Inject(AUTO_SETTLE_TOKEN) private readonly settleMs: number = settleMsFromEnv(),
   ) {}
 
   async runOnce(now: Date = new Date()): Promise<AutoVerifyReport> {
@@ -173,6 +189,8 @@ export class ValePassAutoVerifyService {
 
     const result = await (this.flow as ValePassPaymentFlowService).resumeOne(tx, live, SYSTEM_ACTOR);
     if (result.kind === 'SKIPPED') throw new AutoAbort('RESUME_SKIPPED', true); // reverte também o horário: nada fica confirmado sem a retomada ter rodado
+    // Assentamento: nenhum e-mail sai antes da janela (mesma transação da emissão; mensagens já tentadas não são mexidas).
+    if (this.settleMs > 0) await tx.valePassEmailOutbox.updateMany({ where: { shopifyOrderId: seen.shopifyOrderId, status: 'QUEUED', attempts: 0 }, data: { nextAttemptAt: new Date(Date.now() + this.settleMs) } });
     await writeAdminAuditEvent(tx, {
       adminUserId: null,
       adminUserName: SYSTEM_ACTOR.name,

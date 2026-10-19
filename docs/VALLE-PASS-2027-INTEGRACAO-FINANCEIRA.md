@@ -170,3 +170,9 @@ Chave: `VALE_PASS_AUTO_VERIFY=on` (exige também `VALE_PASS_TWO_VOUCHER_FLOW=on`
 - **Retém (ADMIN decide) em:** Pix pendente, autorização isolada, recusa, estorno, parcial, pago a mais, teste, manual, pedido diferente, total/moeda divergentes, sem sinal de webhook, Shopify indisponível, 50+ transações. Tentativas com intervalo crescente (1/2/5/10/30/60 min; motivos definitivos, 6 h), motivo visível na lista de "horário desconhecido".
 - **Pedido de teste (`test: true`) e pagamento manual** passam a ser bloqueados pela validação financeira (`TEST_ORDER`, `MANUAL_PAYMENT`), inclusive nas retomadas e regularizações do ADMIN. `TEST_ORDER` não pode ser emitido nem por emissão excepcional (só descartado, mesmo com o pedido "pago"); `MANUAL_PAYMENT` pode ser aprovado por ADMIN com justificativa.
 - **Concorrência:** a confirmação revalida tudo sob o lock do pedido (quantidade, `updated_at`, cancelamento, retenção aberta, horário ainda ausente); qualquer mudança aborta sem gravar.
+
+### Estorno entre a consulta e a emissão (contenção)
+- A consulta da Shopify é sempre posterior a qualquer estorno já feito (não depende do webhook de reembolso, que pode atrasar): estorno com transação `REFUND`, total corrente reduzido ou soma divergente retém.
+- Janela residual (estorno DEPOIS da consulta e antes do webhook): o e-mail de uma emissão automática só fica elegível após o **assentamento** (`VALE_PASS_AUTO_VERIFY_SETTLE_MINUTES`, padrão 10, faixa 0–120; o prazo de 3 dias não muda). Nesse intervalo o webhook/reconciliação registra o reembolso.
+- O worker de e-mail NÃO envia enquanto o pedido tem reembolso em revisão (`NEEDS_REVIEW`, motivo `refund_under_review`) — vale para qualquer emissão, não só a automática. Os vouchers seguem bloqueados para resgate pela própria revisão.
+- Contenção operacional antes da ativação real: ligar primeiro com assentamento ≥ 10 min e acompanhar o painel de revisões de reembolso.

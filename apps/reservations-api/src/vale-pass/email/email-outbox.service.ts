@@ -38,6 +38,8 @@ export async function evaluateGroup(db: Db, orderId: string, groupId: string): P
   if (order.deletedInShopifyAt) return { ok: false, outcome: 'CANCELLED', reason: 'order_deleted' };
   const cancelled = await db.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: orderId } });
   if (cancelled || order.status !== 'CONFIRMED') return { ok: false, outcome: 'CANCELLED', reason: 'order_not_paid' };
+  // Reembolso do pedido aguardando decisão do ADMIN: os vouchers seguem ACTIVE (bloqueados para uso), mas NÃO se entrega o código ao cliente até a revisão ser resolvida.
+  if ((await db.valePassRefundApplication.count({ where: { shopifyOrderId: orderId, status: 'NEEDS_REVIEW' } })) > 0) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'refund_under_review' };
 
   const vouchers = await db.valePass.findMany({ where: { shopifyOrderId: orderId, groupId }, include: { benefit: true }, orderBy: { createdAt: 'asc' } });
   if (vouchers.length === 0) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'group_missing' };

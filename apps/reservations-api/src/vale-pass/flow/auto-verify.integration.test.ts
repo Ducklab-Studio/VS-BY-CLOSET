@@ -51,7 +51,7 @@ const fakeShopify = { getOrderPaymentTransactions: async (gid: string) => { shop
 const regularization = new ValePassRegularizationService(prisma, new ValePassFinancialGuard(), issuance);
 const flow = new ValePassPaymentFlowService(new ValePassFinancialGuard(), issuance, outbox, flagFns, prisma, regularization);
 const webhook = new ValePassWebhookService(flow, new ValePassRefundService(prisma), flagFns);
-const auto = () => new ValePassAutoVerifyService(prisma, fakeShopify, flow, flagFns);
+const auto = (settleMs = 0) => new ValePassAutoVerifyService(prisma, fakeShopify, flow, flagFns, settleMs);
 const holdsService = new ValePassHoldsService(prisma, issuance, outbox);
 const timeService = new ValePassPaymentTimeService(prisma, fakeShopify, flagFns);
 
@@ -142,6 +142,7 @@ async function cleanRows() {
     await tx.valePassIssuanceHold.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassCampaignBenefit.deleteMany({ where: { campaignId: { in: ids } } });
     await tx.valePassCampaign.deleteMany({ where: { id: { in: ids } } });
+    await tx.valePassRefundApplication.deleteMany({ where: { shopifyOrderId: { in: orders } } });
     await tx.valePassOrderEvent.deleteMany({ where: { valePassOrderId: { in: regs.map((r) => r.id) } } });
     await tx.valePassOrderCancellation.deleteMany({ where: { shopifyOrderId: { in: orders } } });
     await tx.valePassOrder.deleteMany({ where: { shopifyOrderId: { in: orders } } });
@@ -451,6 +452,60 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — falha de envio e recuperação segu
     expect((await outboxOf(orderId))[0].status).toBe('ACCEPTED');
     expect(await auto().runOnce()).toMatchObject({ considered: 0 });
     expect(await outboxOf(orderId)).toHaveLength(1);
+  });
+});
+
+localDescribe('VERIFICAÇÃO AUTOMÁTICA — estorno entre a consulta e a emissão (risco residual)', () => {
+  const refundOf = (campaign: Campaign, orderId: string) => ({
+    id: `${TAG}-rf${counter++}`, order_id: orderId, refund_shipping_lines: [], transactions: [], order_adjustments: [],
+    refund_line_items: [{ id: 1, line_item_id: 1, quantity: 1, subtotal: 350, total_tax: 0, restock_type: 'return', line_item: { variant_id: Number(campaign.numericVariant), product_id: null, price: '350.00', quantity: 1 } }],
+  });
+  const workerWith = (provider: EmailProvider) => {
+    const config = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
+    const worker = new ValePassEmailWorkerService(prisma, new ValePassEmailOutboxService(prisma, config), config, provider);
+    worker.rng = () => 0.5;
+    return worker;
+  };
+
+  test('estorno PARCIAL já visível na Shopify, com o webhook de reembolso ainda atrasado: a consulta enxerga e RETÉM (webhook atrasado não engana a verificação)', async () => {
+    const { orderId, paidAt } = await heldOrder();
+    shopify(orderId, [txn({ processedAt: paidAt }), txn({ kind: 'REFUND', amount: '100.00', processedAt: hoursAgo(1) })], '250.00'); // total corrente já reduzido
+    expect(await auto().runOnce()).toMatchObject({ issued: 0, held: [{ reason: 'REFUND_TRANSACTION_PRESENT' }] });
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    shopify(orderId, [txn({ processedAt: paidAt })], '250.00'); // só o total reduzido (ajuste/estorno sem transação listada)
+    expect(await auto().runOnce(new Date(Date.now() + 7 * 3_600_000))).toMatchObject({ issued: 0, held: [{ reason: 'AMBIGUOUS_OVERPAYMENT' }] });
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+  });
+
+  test('assentamento: o e-mail da emissão automática NÃO sai durante a janela; reembolso que chega nesse intervalo cancela os vouchers e nenhuma mensagem é enviada', async () => {
+    const { campaign, orderId, paidAt } = await heldOrder();
+    shopify(orderId, [txn({ processedAt: paidAt })]);
+    expect(await auto(600_000).runOnce()).toMatchObject({ issued: 1 });
+    const [row] = await outboxOf(orderId);
+    expect(row.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 590_000);
+    const sent: string[] = [];
+    const provider = { send: async (input: { idempotencyKey: string }): Promise<SendEmailResult> => { sent.push(input.idempotencyKey); return { kind: 'accepted', messageId: 'm' }; } } as unknown as EmailProvider;
+    await workerWith(provider).tick(new Date(Date.now() + 30_000));
+    expect(sent).toHaveLength(0); // dentro da janela: nada sai
+    // o estorno (feito logo depois da consulta) chega pelo webhook atrasado, ainda dentro da janela
+    await prisma.$transaction(async (tx) => {
+      await lockShopifyOrder(tx, orderId);
+      await webhook.handleRefund(tx, refundOf(campaign, orderId) as never);
+    }, { timeout: 30_000, maxWait: 20_000 });
+    await workerWith(provider).tick(new Date(Date.now() + 11 * 60_000)); // janela já vencida
+    expect(sent).toHaveLength(0); // o worker reavaliou o pedido e NÃO enviou
+    expect((await outboxOf(orderId))[0]).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'refund_under_review' });
+    expect((await vouchersOf(orderId)).every((v) => v.status === 'ACTIVE')).toBe(true); // continuam bloqueados para uso pela revisão; só o e-mail foi contido
+  });
+
+  test('sem estorno, depois da janela o e-mail sai normalmente (uma vez)', async () => {
+    const { orderId, paidAt } = await heldOrder();
+    shopify(orderId, [txn({ processedAt: paidAt })]);
+    await auto(600_000).runOnce();
+    const sent: string[] = [];
+    const provider = { send: async (input: { idempotencyKey: string }): Promise<SendEmailResult> => { sent.push(input.idempotencyKey); return { kind: 'accepted', messageId: 'm' }; } } as unknown as EmailProvider;
+    await workerWith(provider).tick(new Date(Date.now() + 11 * 60_000));
+    expect(sent).toHaveLength(1);
   });
 });
 
