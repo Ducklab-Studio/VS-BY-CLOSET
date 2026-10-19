@@ -158,6 +158,8 @@ export const ADMIN_ORDER_FINANCIAL_FIELDS = `
   presentmentCurrencyCode
   displayFinancialStatus
   cancelledAt
+  test
+  paymentGatewayNames
   discountCodes
   taxesIncluded
   currentTotalPriceSet { shopMoney { amount currencyCode } }

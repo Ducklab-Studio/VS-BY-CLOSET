@@ -269,6 +269,11 @@ describe('fail-closed: remover QUALQUER campo obrigatório torna o pedido invál
   });
 });
 
+test('a consulta da Admin API pede os campos que decidem pedido de teste e pagamento manual', () => {
+  expect(ADMIN_ORDER_FINANCIAL_FIELDS).toMatch(/test/);
+  expect(ADMIN_ORDER_FINANCIAL_FIELDS).toContain('paymentGatewayNames');
+});
+
 describe('validação: pedido de TESTE e pagamento MANUAL nunca valem como compra comercial', () => {
   test('test: true → TEST_ORDER (webhook e Admin API); test: false/ausente não bloqueia', () => {
     expect(codesOf(webhookOrder({ test: true }))).toContain('TEST_ORDER');

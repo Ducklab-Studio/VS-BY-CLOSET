@@ -420,6 +420,19 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — webhooks duplicados/fora de ordem, 
   });
 });
 
+localDescribe('VERIFICAÇÃO AUTOMÁTICA — fila justa', () => {
+  test('retenções ignoradas (pedido excluído na Shopify) não ocupam o lote: o pedido pago atrás delas ainda é verificado', async () => {
+    for (let i = 0; i < 11; i++) {
+      const dead = await heldOrder();
+      await prisma.valePassOrder.update({ where: { shopifyOrderId: dead.orderId }, data: { deletedInShopifyAt: new Date() } });
+    }
+    const { orderId, paidAt } = await heldOrder();
+    shopify(orderId, [txn({ processedAt: paidAt })]);
+    expect(await auto().runOnce()).toMatchObject({ considered: 1, issued: 1 });
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+  });
+});
+
 localDescribe('VERIFICAÇÃO AUTOMÁTICA — falha de envio e recuperação segura', () => {
   test('a emissão grava os vouchers e a fila mesmo se o envio falhar; o worker recupera sem duplicar e sem perder', async () => {
     const { orderId, paidAt } = await heldOrder();

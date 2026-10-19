@@ -73,7 +73,8 @@ export class ValePassAutoVerifyService {
     for (const hold of candidates) {
       if (report.considered >= AUTO_VERIFY_BATCH) break;
       const outcome = await this.processOne(hold, now);
-      if (outcome.kind === 'NOT_DUE') continue;
+      // Fora do limite do lote: retenções que não estão no prazo ou que foram ignoradas (sem registro/já tratadas) — senão 10 delas travariam a fila.
+      if (outcome.kind === 'NOT_DUE' || outcome.kind === 'SKIPPED') continue;
       report.considered++;
       if (outcome.kind === 'ISSUED') {
         report.confirmed++;
