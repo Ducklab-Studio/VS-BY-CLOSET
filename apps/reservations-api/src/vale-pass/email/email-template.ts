@@ -2,8 +2,8 @@ import { resolveValidityTimezone } from '../vale-pass-validity';
 
 /**
  * E-mail com os vouchers de UMA unidade do Valle Pass 2027: o voucher de cada empresa, separados, com valor, código e validade.
- * Só diz o que já está confirmado: crédito exclusivo na empresa indicada, uso durante o período de validade, código pessoal.
- * NÃO menciona o desconto de 10% em passeios (condições ainda pendentes) nem regras de uso parcial, transferência ou reembolso.
+ * Só diz o que já está confirmado: crédito exclusivo na empresa indicada, uso durante o período de validade, guarda do e-mail com os códigos.
+ * NÃO menciona o desconto de 10% em passeios (condições ainda pendentes) nem regras de uso parcial, transferência (os vouchers SÃO transferíveis, mas o procedimento ainda não foi definido: o e-mail não diz que são pessoais nem intransferíveis) ou reembolso.
  *
  * Design editorial (VS BY CLOSET): faixa vinho com a marca, selo "VALLE PASS • 2027", título serifado, dois cartões de voucher com borda dupla fina e
  * código em destaque (TEXTO selecionável, nunca imagem), seção "Como utilizar seus benefícios" só com as regras confirmadas e rodapé da marca.
@@ -65,7 +65,7 @@ function firstName(name: string | null): string | null {
 export const EMAIL_TERMS: readonly string[] = [
   'Cada voucher vale somente na empresa indicada e não pode ser usado na outra.',
   'Os vouchers podem ser usados durante o período de validade informado em cada um.',
-  'Os códigos são pessoais: guarde este e-mail e não compartilhe os códigos.',
+  'Guarde este e-mail com segurança: ele contém os códigos dos seus vouchers.',
 ];
 
 const SUBTITLE = 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.';

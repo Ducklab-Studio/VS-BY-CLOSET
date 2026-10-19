@@ -237,6 +237,19 @@ describe('template do e-mail — redesign editorial (compatibilidade, segurança
     expect(html).toContain('word-break:break-all'); // código longo nunca estoura o cartão
   });
 
+  test('redação: nunca apresenta os vouchers como pessoais/intransferíveis (são transferíveis) nem inventa procedimento de transferência; a validade vem dos dados do voucher', () => {
+    const { html, text } = render();
+    for (const content of [html, text]) {
+      expect(content).not.toMatch(/pessoai|intransfer|n[ãa]o compartilh|nominal|exclusivo do titular/i);
+      expect(content).not.toMatch(/transfer[ií]/i);
+    }
+    expect(EMAIL_TERMS).toContain('Guarde este e-mail com segurança: ele contém os códigos dos seus vouchers.');
+    // validade dinâmica: outra janela no voucher muda o texto (nenhuma data fixa no template)
+    const other = render({ vouchers: [{ ...base, validFrom: new Date('2026-12-15T03:00:00Z'), expiresAt: new Date('2027-10-01T03:00:00Z') }] }).html;
+    expect(other).toContain('Válido de 15/12/2026 a 30/09/2027');
+    expect(other).not.toContain('31/12/2027');
+  });
+
   test('logotipo oficial por padrão (HTTPS); VALE_PASS_EMAIL_LOGO_URL troca; vazio ou logoUrl nulo desliga; sem a imagem o e-mail funciona igual (texto alternativo e monograma)', () => {
     expect(OFFICIAL_LOGO_URL).toBe('https://vsbycloset.vercel.app/brand/logo-horizontal-cream.png');
     const original = process.env.VALE_PASS_EMAIL_LOGO_URL;
