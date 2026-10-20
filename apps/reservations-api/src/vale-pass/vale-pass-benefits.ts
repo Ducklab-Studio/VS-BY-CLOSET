@@ -5,7 +5,7 @@ import type { ValePassBenefitKind, ValePassCompany } from '@prisma/client';
  * com código e saldo próprios por unidade); `DISCOUNT` = direito comercial DESCRITIVO (ex.: 10% em passeios): não gera código, saldo nem
  * abatimento automático — as condições são texto livre aprovado pelo cliente e nunca são interpretadas pelo sistema.
  *
- * Nada aqui define regra de uso: uso parcial, cumulatividade, transferência, reembolso de saldo e forma de validação em cada empresa
+ * Nada aqui define regra de uso: uso parcial, cumulatividade, reembolso de saldo e forma de validação em cada empresa
  * continuam DECISÕES PENDENTES do Anderson e não são modelados.
  */
 

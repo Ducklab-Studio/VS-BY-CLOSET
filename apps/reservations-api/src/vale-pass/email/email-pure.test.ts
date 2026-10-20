@@ -237,11 +237,11 @@ describe('template do e-mail — redesign editorial (compatibilidade, segurança
     expect(html).toContain('word-break:break-all'); // código longo nunca estoura o cartão
   });
 
-  test('redação: nunca apresenta os vouchers como pessoais/intransferíveis (são transferíveis) nem inventa procedimento de transferência; a validade vem dos dados do voucher', () => {
+  test('redação: nunca promete transferência nem inventa procedimento de transferência (vouchers intransferíveis); a validade vem dos dados do voucher', () => {
     const { html, text } = render();
     for (const content of [html, text]) {
-      expect(content).not.toMatch(/pessoai|intransfer|n[ãa]o compartilh|nominal|exclusivo do titular/i);
-      expect(content).not.toMatch(/transfer[ií]/i);
+      expect(content).not.toMatch(/(pode|podem|permit[a-z]*|poder[aá])[^.<]{0,40}transfer/i);
+      expect(content).not.toMatch(/(?<!in)transfer[ií]ve/i); // 'transferíveis' nunca; 'intransferíveis' fica para a redação aprovada
     }
     expect(EMAIL_TERMS).toContain('Guarde este e-mail com segurança: ele contém os códigos dos seus vouchers.');
     // validade dinâmica: outra janela no voucher muda o texto (nenhuma data fixa no template)
