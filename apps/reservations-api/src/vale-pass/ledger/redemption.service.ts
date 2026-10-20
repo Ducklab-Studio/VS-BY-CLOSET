@@ -7,6 +7,8 @@ import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { maskCode, maskEmail } from '../email/email-mask';
 import { ledgerRefusal } from './ledger-errors';
 import { formatBRL, parsePositiveCents } from './money';
+import { activeCompanies, authorizeCompany } from './operator-scope.service';
+import { decideCompanyAccess, describeOperatorAccess, operableCompanies, type OperatorCompany } from './operator-scope';
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaService;
@@ -67,6 +69,8 @@ export interface VoucherBalanceView {
   /** Dados pessoais mascarados (o nome completo só para administrador). Sem telefone/e-mail completos. */
   readonly holder: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null };
   readonly redeemable: boolean;
+  /** O que ESTE operador pode fazer com ESTE voucher (a decisão final é sempre do servidor, a cada operação). */
+  readonly operatorAccess: { readonly canOperate: boolean; readonly message: string | null; readonly summary: string; readonly companies: readonly OperatorCompany[] };
   readonly restrictions: readonly { readonly code: Restriction; readonly message: string }[];
   readonly entries: readonly LedgerEntryView[];
 }
@@ -117,7 +121,9 @@ const conflict = (code: string, message: string, extra: Record<string, unknown> 
  * bloqueio, revisão de reembolso, idempotência e reversão única são validados DENTRO da transação, sob o lock do pedido e a trava da linha do voucher
  * (mesma ordem de locks do restante do módulo: pedido → voucher). A prévia (`prepare*`) é só conferência: a confirmação revalida TUDO.
  *
- * Autorização: não existe vínculo operador↔empresa confiável, então resgate e reversão exigem ADMIN (ou SUPER_ADMIN); STAFF só consulta, com dados mascarados.
+ * Autorização por ESTABELECIMENTO (backend, dentro da transação, sob o lock do voucher): o operador só resgata/reverte vouchers da empresa em que está
+ * explicitamente autorizado (`vale_pass_operator_scopes`). Sem autorização nenhuma, STAFF não opera; ADMIN sem autorização explícita mantém o acesso administrativo
+ * atual até a política de migração ser definida; SUPER_ADMIN opera as duas. Ver `operator-scope.ts`. STAFF só consulta, com dados mascarados.
  * Nenhum endpoint público; conhecer o código do voucher não dá acesso a nada.
  */
 @Injectable()
@@ -141,9 +147,10 @@ export class ValePassRedemptionService {
   // ─── Resgate ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   async prepareRedeem(code: string, input: { company: string; amountCents: number; reference: string }, actor: Actor): Promise<RedeemPreview> {
-    this.requireOperator(actor);
+    await this.requireAnyAuthorization(actor);
     const amount = parsePositiveCents(input.amountCents);
     const voucher = await this.requireByCode(code);
+    await this.authorizeVoucher(this.prisma, actor, voucher);
     const problems = await this.redeemProblems(this.prisma, voucher, input.company, amount);
     return {
       canRedeem: problems.length === 0,
@@ -162,7 +169,7 @@ export class ValePassRedemptionService {
     input: { company: string; amountCents: number; reference: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
     actor: Actor,
   ): Promise<OperationResult> {
-    this.requireOperator(actor);
+    await this.requireAnyAuthorization(actor);
     const amount = parsePositiveCents(input.amountCents);
     if (input.confirmAmountCents !== amount) throw new BadRequestException('A confirmação não confere com o valor do resgate. Digite novamente o valor em centavos.');
     const reference = input.reference.trim();
@@ -171,6 +178,8 @@ export class ValePassRedemptionService {
     const requestHash = hashOf({ voucher: located.id, kind: 'REDEEM', amount, company: input.company, reference });
 
     return this.run(located, async (tx, voucher) => {
+      // Autorização revalidada DENTRO da transação (sob o lock): revogar o vínculo vale na hora, e a prévia nunca é confiada.
+      const basis = await this.authorizeVoucher(tx, actor, voucher);
       const replay = await this.replayOf(tx, voucher, input.operationId, requestHash, 'REDEEM');
       if (replay) return replay;
       // Prévia antiga primeiro: se o saldo mudou, o operador precisa rever o voucher antes de qualquer outra coisa.
@@ -180,7 +189,7 @@ export class ValePassRedemptionService {
       const problems = await this.redeemProblems(tx, voucher, input.company, amount);
       if (problems.length > 0) throw conflict(problems[0].code, problems[0].message, { balanceCents: voucher.balanceCents, problems });
       const entry = await this.post(tx, voucher, { kind: 'REDEEM', deltaCents: -amount, operationId: input.operationId, requestHash, reference, reason: null, actor });
-      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference });
+      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference, accessBasis: basis });
       return this.result(tx, voucher.id, entry, false);
     });
   }
@@ -188,8 +197,9 @@ export class ValePassRedemptionService {
   // ─── Reversão ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   async prepareReverse(code: string, entryId: string, actor: Actor): Promise<{ canReverse: boolean; problems: { code: string; message: string }[]; entry: LedgerEntryView | null; balanceBeforeCents: number; balanceAfterCents: number | null; operationId: string; expectedBalanceCents: number }> {
-    this.requireOperator(actor);
+    await this.requireAnyAuthorization(actor);
     const voucher = await this.requireByCode(code);
+    await this.authorizeVoucher(this.prisma, actor, voucher);
     const { problems, entry } = await this.reverseProblems(this.prisma, voucher, entryId);
     return {
       canReverse: problems.length === 0,
@@ -208,13 +218,14 @@ export class ValePassRedemptionService {
     input: { reason: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
     actor: Actor,
   ): Promise<OperationResult> {
-    this.requireOperator(actor);
+    await this.requireAnyAuthorization(actor);
     const reason = input.reason.trim();
     if (reason.length < 10) throw new BadRequestException('Informe a justificativa da reversão (mínimo de 10 caracteres).');
     const located = await this.requireByCode(code);
     const requestHash = hashOf({ voucher: located.id, kind: 'REVERSAL', entry: entryId, reason });
 
     return this.run(located, async (tx, voucher) => {
+      const basis = await this.authorizeVoucher(tx, actor, voucher);
       const replay = await this.replayOf(tx, voucher, input.operationId, requestHash, 'REVERSAL');
       if (replay) return replay;
       const { problems, entry: original } = await this.reverseProblems(tx, voucher, entryId);
@@ -224,17 +235,30 @@ export class ValePassRedemptionService {
         throw conflict('BALANCE_CHANGED', `O saldo mudou desde a prévia (agora ${formatBRL(voucher.balanceCents)}). Confira e tente de novo.`, { balanceCents: voucher.balanceCents });
       }
       const entry = await this.post(tx, voucher, { kind: 'REVERSAL', deltaCents: -original.deltaCents, operationId: input.operationId, requestHash, reference: original.reference, reason, reversesEntryId: original.id, actor });
-      await this.record(tx, voucher, entry, 'VALE_PASS_REDEMPTION_REVERSED', 'REDEMPTION_REVERSED', actor, { reversesEntryId: original.id, reason });
+      await this.record(tx, voucher, entry, 'VALE_PASS_REDEMPTION_REVERSED', 'REDEMPTION_REVERSED', actor, { reversesEntryId: original.id, reason, accessBasis: basis });
       return this.result(tx, voucher.id, entry, false);
     });
   }
 
   // ─── Internos ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-  private requireOperator(actor: Actor): void {
-    if (!canOperate(actor.role)) {
-      throw new ForbiddenException('Resgate e reversão por saldo exigem um administrador: ainda não existe vínculo seguro entre operador e empresa para liberar STAFF.');
+  /**
+   * Barreira rápida ANTES de procurar o voucher (não revela se o código existe a quem não opera nada): STAFF sem nenhum estabelecimento autorizado não opera.
+   * A decisão de verdade, por empresa, é `authorizeVoucher` (dentro da transação).
+   */
+  private async requireAnyAuthorization(actor: Actor): Promise<void> {
+    if (actor.role === 'STAFF' && (await activeCompanies(this.prisma, actor.id)).length === 0) {
+      throw new ForbiddenException({ statusCode: 403, error: 'Forbidden', code: 'NO_COMPANY_AUTHORIZED', message: 'Seu usuário não está autorizado a resgatar vouchers de nenhum estabelecimento. Peça ao proprietário.' });
     }
+  }
+
+  /** Autoriza o operador para a empresa DESTE voucher. Voucher legado (sem empresa) não tem estabelecimento: segue exigindo ADMIN, como sempre. */
+  private async authorizeVoucher(db: Db, actor: Actor, voucher: ValePass): Promise<'OWNER' | 'LEGACY_ADMIN' | 'SCOPE' | 'LEGACY_VOUCHER'> {
+    if (voucher.company === null) {
+      if (!canOperate(actor.role)) throw new ForbiddenException('Resgate e reversão exigem um administrador.');
+      return 'LEGACY_VOUCHER';
+    }
+    return authorizeCompany(db, actor, voucher.company);
   }
 
   private async requireByCode(raw: string): Promise<ValePass> {
@@ -379,6 +403,8 @@ export class ValePassRedemptionService {
 
   private async view(db: Db, voucher: ValePass, actor: Actor): Promise<VoucherBalanceView> {
     const restrictions = await this.restrictionsOf(db, voucher);
+    const scopes = await activeCompanies(db, actor.id);
+    const decision = voucher.company === null ? null : decideCompanyAccess(actor.role, scopes, voucher.company);
     const benefit = voucher.benefitId ? await db.valePassCampaignBenefit.findUnique({ where: { id: voucher.benefitId }, select: { label: true } }) : null;
     return {
       code: voucher.code,
@@ -400,6 +426,12 @@ export class ValePassRedemptionService {
         emailMasked: voucher.customerEmail ? maskEmail(voucher.customerEmail) : null,
       },
       redeemable: restrictions.length === 0,
+      operatorAccess: {
+        canOperate: decision === null ? canOperate(actor.role) : decision.allowed,
+        message: decision !== null && !decision.allowed ? decision.message : null,
+        summary: describeOperatorAccess(actor.role, scopes),
+        companies: operableCompanies(actor.role, scopes),
+      },
       restrictions: restrictions.map((code) => ({ code, message: RESTRICTION_TEXT[code] })),
       entries: await this.entriesOf(db, voucher.id),
     };

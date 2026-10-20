@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { AdminRole, Prisma, ValePass, ValePassStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { ledgerRefusal } from './ledger/ledger-errors';
 import { maskCode } from './vale-pass-code-mask';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
+import { authorizeCompany } from './ledger/operator-scope.service';
 
 export interface ValePassVoucherItem {
   readonly id: string;
@@ -134,10 +135,9 @@ export class ValePassVouchersService {
       }
 
       if (target.company !== null) {
-        // Resgate de saldo exige administrador (não existe vínculo seguro operador↔empresa): o caminho HTTP sempre informa o papel; STAFF não consome saldo por aqui.
-        if (options.role !== undefined && options.role !== 'ADMIN' && options.role !== 'SUPER_ADMIN') {
-          throw new ForbiddenException('Resgate de voucher com saldo exige um administrador.');
-        }
+        // Mesmo isolamento por estabelecimento do resgate por saldo (este endpoint antigo NÃO é um atalho entre lojas): o caminho HTTP sempre informa o papel;
+        // quem não está autorizado na empresa DESTE voucher não o consome por aqui. Chamadas internas sem papel não passam por esta checagem.
+        if (options.role !== undefined) await authorizeCompany(tx, { id: actorId, role: options.role }, target.company);
         // Voucher do modelo novo (com empresa) controla SALDO: "marcar como usado" é o resgate INTEGRAL do que resta, e só vale para voucher ainda NÃO tocado
         // (utilização parcial se registra pelo valor). Passa pelo livro-razão — o banco recusa qualquer outro caminho para USED.
         if (target.balanceCents !== target.amountCents || target.balanceCents <= 0) {

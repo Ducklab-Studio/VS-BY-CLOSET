@@ -1048,6 +1048,8 @@ export interface ValePassBalanceView {
   readonly orderName: string | null;
   readonly holder: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null };
   readonly redeemable: boolean;
+  /** O que ESTE operador pode fazer com ESTE voucher (informativo: o servidor decide a cada operação). Ausente em respostas antigas = sem restrição extra. */
+  readonly operatorAccess?: { readonly canOperate: boolean; readonly message: string | null; readonly summary: string; readonly companies: readonly string[] };
   readonly restrictions: readonly { readonly code: string; readonly message: string }[];
   readonly entries: readonly ValePassLedgerEntry[];
 }

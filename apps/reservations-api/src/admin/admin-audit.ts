@@ -71,6 +71,8 @@ const CRITICAL_ACTIONS = new Set([
   // Bloqueio/desbloqueio administrativo de voucher (fraude, conflito de titularidade): sempre crítico.
   'VALE_PASS_BLOCKED',
   'VALE_PASS_UNBLOCKED',
+  'VALE_PASS_OPERATOR_SCOPE_GRANTED',
+  'VALE_PASS_OPERATOR_SCOPE_REVOKED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

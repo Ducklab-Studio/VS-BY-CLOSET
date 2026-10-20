@@ -131,7 +131,9 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.nonce]);
 
-  const canRedeemHere = canOperate && view !== null && view.company !== null && view.redeemable;
+  // Autorização por estabelecimento: a tela só ESCONDE o que o servidor já recusaria (a barreira de verdade é do backend).
+  const storeAllowed = view?.operatorAccess?.canOperate ?? true;
+  const canRedeemHere = canOperate && storeAllowed && view !== null && view.company !== null && view.redeemable;
 
   async function checkRedeem() {
     if (!view || !view.company) return;
@@ -359,6 +361,10 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
             <p className="flex items-start gap-2 rounded-lg bg-ink/[0.04] px-3 py-2.5 text-xs text-ink/60 dark:bg-white/5 dark:text-dark-subtle">
               <Lock size={14} className="mt-0.5 shrink-0" /> Resgate e reversão por saldo exigem um administrador. Você pode consultar o saldo e o histórico.
             </p>
+          ) : !storeAllowed ? (
+            <p className="flex items-start gap-2 rounded-lg bg-ink/[0.04] px-3 py-2.5 text-xs text-ink/60 dark:bg-white/5 dark:text-dark-subtle">
+              <Lock size={14} className="mt-0.5 shrink-0" /> {view.operatorAccess?.message ?? 'Seu usuário não está autorizado neste estabelecimento.'} Você pode consultar o saldo e o histórico.
+            </p>
           ) : canRedeemHere ? (
             <div className="space-y-3 rounded-xl border border-ink/10 p-3.5 dark:border-white/10">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink dark:text-dark-text"><ArrowDownCircle size={15} /> Registrar resgate ({COMPANY_LABELS[view.company]})</h3>
@@ -501,7 +507,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
                       {entry.reference ? ` · Ref.: ${entry.reference}` : ''}
                       {entry.reason ? ` · Motivo: ${entry.reason}` : ''}
                     </p>
-                    {canOperate && entry.kind === 'REDEEM' && !entry.reversed ? (
+                    {canOperate && storeAllowed && entry.kind === 'REDEEM' && !entry.reversed ? (
                       <div>
                         {reversing === entry.id && reversePreview?.entry ? (
                           <div className="space-y-2.5 rounded-lg border border-ink/10 p-3 dark:border-white/10">
