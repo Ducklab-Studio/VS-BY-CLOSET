@@ -50,3 +50,10 @@ Tudo isso com a campanha **sem estoque aberto/lote** — pedido pago nessa fase 
 3. Com a data de início aprovada: configurar a janela completa.
 4. Lote 1 (quantidade/datas aprovadas) → só então ajustar o estoque Shopify ao saldo do lote.
 5. Ensaio ponta a ponta em staging com a flag de dois vouchers; só depois ligar, em ordem: `VALE_PASS_TWO_VOUCHER_FLOW` → `VALE_PASS_AUTO_VERIFY` → `VALE_PASS_EMAIL_MODE` (cada uma com leitura de integridade antes/depois e rollback desligando a flag).
+
+## Recomendação: impedir novas compras até o lançamento (só o Valle Pass)
+Ação **manual na Shopify, só com autorização expressa** (o app não escreve na loja):
+1. **Preferida — estoque 0 na variante do Valle Pass** (com "continuar vendendo sem estoque" desmarcado). Reversível em segundos, não afeta outros produtos, preserva produto, preço, SKU e o vínculo com a campanha. A API pública passa a informar `availableForSale = false`.
+2. Complementar: tirar o produto da coleção/menu da vitrine, mantendo-o ativo — evita tráfego, mas não impede checkout por link direto; por isso não substitui o item 1.
+3. Despublicar o produto dos canais é a opção mais forte (some do Storefront), porém muda o vínculo público e exige republicar no lançamento; só se o item 1 não bastar.
+Depois de aplicar: conferir via consulta pública (somente leitura) que a variante deixou de estar à venda e que os demais produtos seguem normais. No lançamento, ajustar o estoque ao saldo do lote 1 aprovado.
