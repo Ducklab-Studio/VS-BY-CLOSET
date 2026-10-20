@@ -826,6 +826,7 @@ model ValePassCampaign {
   holds    ValePassIssuanceHold[]
   emails ValePassEmailOutbox[]
   refunds  ValePassRefundApplication[]
+  validityExtensions ValePassValidityExtension[]
 
   @@map("vale_pass_campaigns")
 }
@@ -1383,4 +1384,34 @@ model ValePassOperatorScope {
 
   @@index([adminUserId])
   @@map("vale_pass_operator_scopes")
+}
+
+/// Prorrogação COLETIVA da validade dos vouchers de uma campanha (Valle Pass 2027). Só INSERT (histórico imutável): o gatilho do banco valida (nova data > atual,
+/// prévia não vencida), numera, tira o retrato do que será alterado e aplica tudo na mesma transação. Vouchers cancelados/expirados ficam de fora; saldo nunca muda.
+model ValePassValidityExtension {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId           String   @map("campaign_id") @db.Uuid
+  seq                  Int
+  previousUntil        DateTime @map("previous_until") @db.Date
+  newUntil             DateTime @map("new_until") @db.Date
+  timezone             String
+  newExpiresAt         DateTime @map("new_expires_at") @db.Timestamptz(6)
+  reason               String
+  actorAdminId         String?  @map("actor_admin_id") @db.Uuid
+  actorName            String?  @map("actor_name")
+  idempotencyKey       String   @map("idempotency_key")
+  requestHash          String?  @map("request_hash")
+  extendedCount        Int      @default(0) @map("extended_count")
+  expiredNotIncluded   Int      @default(0) @map("expired_not_included")
+  cancelledNotIncluded Int      @default(0) @map("cancelled_not_included")
+  alreadyLongerCount   Int      @default(0) @map("already_longer_count")
+  balanceTotalCents    BigInt   @default(0) @map("balance_total_cents")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  campaign ValePassCampaign @relation(fields: [campaignId], references: [id])
+
+  @@unique([campaignId, seq])
+  @@unique([campaignId, idempotencyKey])
+  @@index([campaignId])
+  @@map("vale_pass_validity_extensions")
 }
