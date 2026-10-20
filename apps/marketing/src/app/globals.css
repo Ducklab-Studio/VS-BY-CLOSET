@@ -335,6 +335,12 @@ body {
 .collection-heading h2 {
   margin-bottom: 0;
 }
+.collection-description {
+  color: #6a615a;
+  font-size: 17px;
+  line-height: 1.7;
+  margin-top: 14px;
+}
 .winter-story {
   min-height: 640px;
   position: relative;
@@ -358,6 +364,14 @@ body {
 .winter-content h2 {
   font-size: clamp(48px, 6vw, 90px);
   margin: 32px 0 40px;
+}
+.winter-description {
+  color: theme('colors.cream');
+  font-size: 17px;
+  line-height: 1.7;
+  opacity: 0.85;
+  max-width: 540px;
+  margin-bottom: 32px;
 }
 .rental-steps {
   display: grid;
