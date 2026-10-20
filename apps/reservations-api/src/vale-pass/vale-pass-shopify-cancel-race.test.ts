@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ConflictException, HttpException, ServiceUnavailableException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { maskCode } from './vale-pass-code-mask';
 import { hashPin } from '../admin/admin-pin';
 import { ensureStoreConfig, resolveStoreConfig } from '../holds/store-config';
 import { WebhooksService } from '../webhooks/webhooks.service';
@@ -181,7 +182,7 @@ localDescribe('Valle Pass × webhooks Shopify — cancelamento, restauração e 
       const blocked = await prisma.adminAuditEvent.findFirstOrThrow({ where: { entityId: v.id, action: 'VALE_PASS_RESTORE_BLOCKED' } });
       expect(blocked.adminUserId).toBe(admin.id);
       expect(blocked.isCritical).toBe(true);
-      expect(blocked.detail).toMatchObject({ code: v.code, blockedBy: 'shopify_order_cancelled' });
+      expect(blocked.detail).toMatchObject({ code: maskCode(v.code), blockedBy: 'shopify_order_cancelled' });
 
       const listed = (await vouchers.list({ campaignId: campaign.id })).find((item) => item.id === v.id);
       expect(listed).toMatchObject({ canBeRestored: false, restoreBlockedReason: 'O pedido Shopify deste vale foi cancelado ou reembolsado.' });

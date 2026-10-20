@@ -3,6 +3,7 @@ import type { AdminRole, Prisma, ValePass, ValePassStatus } from '@prisma/client
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { ledgerRefusal } from './ledger/ledger-errors';
+import { maskCode } from './vale-pass-code-mask';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 
 export interface ValePassVoucherItem {
@@ -171,7 +172,7 @@ export class ValePassVouchersService {
         entityId: target.id,
         before: { status: target.status },
         after: { status: 'USED' },
-        detail: { code: target.code },
+        detail: { code: maskCode(target.code) },
       });
       return tx.valePass.findUniqueOrThrow({ where: { id: target.id } });
     });
@@ -202,7 +203,7 @@ export class ValePassVouchersService {
         entityId: target.id,
         before: { status: target.status },
         after: { status: 'CANCELLED' },
-        detail: { code: target.code, reason },
+        detail: { code: maskCode(target.code), reason },
       });
       return tx.valePass.findUniqueOrThrow({ where: { id: target.id } });
     });
@@ -237,7 +238,7 @@ export class ValePassVouchersService {
           entityType: 'ValePass',
           entityId: target.id,
           before: { status: target.status, cancelledBy: target.cancelledBy, cancelReason: target.cancelReason },
-          detail: { code: target.code, reason, blockedBy: 'shopify_order_cancelled' },
+          detail: { code: maskCode(target.code), reason, blockedBy: 'shopify_order_cancelled' },
         });
         return { blocked: new ConflictException(block.message) };
       }
@@ -267,7 +268,7 @@ export class ValePassVouchersService {
         entityId: target.id,
         before: { status: target.status, cancelledAt: target.cancelledAt, cancelledBy: target.cancelledBy, cancelReason: target.cancelReason },
         after: { status: 'ACTIVE' },
-        detail: { code: target.code, reason },
+        detail: { code: maskCode(target.code), reason },
       });
       return { restored: await tx.valePass.findUniqueOrThrow({ where: { id: target.id } }) };
     });

@@ -132,6 +132,30 @@ describe('ValePassVouchersService — listar/buscar/validar/usar/cancelar (integ
     expect(auditEvent!.isCritical).toBe(true);
   }, 15_000);
 
+  test('7b) auditoria administrativa (usar, cancelar, restaurar) NUNCA grava o código completo — só mascarado, com o id interno em entityId', async () => {
+    const owner = await createOwner();
+    const campaign = await createCampaign();
+    const used = await createVoucher(campaign.id);
+    const cancelled = await createVoucher(campaign.id);
+
+    await vouchers.markUsed(used.code, owner.id, owner.name);
+    await vouchers.cancel(cancelled.code, 'pedido cancelado pelo cliente', owner.id, owner.name);
+    await vouchers.restore(cancelled.code, 'cancelado por engano', owner.id, owner.name);
+
+    const rows = await prisma.adminAuditEvent.findMany({ where: { adminUserId: owner.id } });
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const row of rows) {
+      const raw = JSON.stringify(row);
+      expect(raw).not.toContain(used.code);
+      expect(raw).not.toContain(cancelled.code);
+    }
+    const markedUsed = rows.find((r) => r.action === 'VALE_PASS_MARKED_USED')!;
+    expect(markedUsed.entityId).toBe(used.id);
+    expect((markedUsed.detail as { code: string }).code).toBe(`${used.code.slice(0, -4)}****`);
+    const events = await prisma.valePassEvent.findMany({ where: { valePassId: { in: [used.id, cancelled.id] } } });
+    for (const ev of events) expect(JSON.stringify(ev)).not.toMatch(/VALLE-[A-Z0-9]{4}-[A-Z0-9]{4}/);
+  }, 15_000);
+
   test('8) não é possível cancelar um vale já USADO', async () => {
     const owner = await createOwner();
     const campaign = await createCampaign();
