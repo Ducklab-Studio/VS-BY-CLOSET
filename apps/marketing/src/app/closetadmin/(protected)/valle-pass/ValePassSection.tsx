@@ -25,6 +25,7 @@ import type {
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
 import { BalanceDesk } from './BalanceDesk';
+import { OperatorScopesPanel } from './OperatorScopesPanel';
 import { EmailsPanel } from './EmailsPanel';
 import { FlowPanel } from './FlowPanel';
 import { formatVoucherDisplayDay, formatVoucherFirstDay, formatVoucherLastDay } from '@/lib/valle-pass-dates';
@@ -114,11 +115,14 @@ export function ValePassSection({
   initialVouchers,
   initialOrders,
   canManageCampaigns,
+  isOwner = false,
 }: {
   initialCampaigns: ValePassCampaign[];
   initialVouchers: ValePassVoucher[];
   initialOrders: ValePassOrder[];
   canManageCampaigns: boolean;
+  /** Proprietário (SUPER_ADMIN): vê a gestão de vínculos operador↔estabelecimento. */
+  isOwner?: boolean;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   const [vouchers, setVouchers] = useState(initialVouchers);
@@ -372,6 +376,8 @@ export function ValePassSection({
       <EmailsPanel canManage={canManageCampaigns} />
 
       <BalanceDesk canOperate={canManageCampaigns} request={deskRequest} />
+
+      {isOwner ? <OperatorScopesPanel /> : null}
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">

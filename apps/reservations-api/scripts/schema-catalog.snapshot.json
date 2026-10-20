@@ -323,6 +323,20 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_operator_scopes.vale_pass_operator_scopes_admin_user_id_fkey": {
+      "columns": [
+        "admin_user_id"
+      ],
+      "references": "admin_users",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "CASCADE",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_pass_order_events.vale_pass_order_events_vale_pass_order_id_fkey": {
       "columns": [
         "vale_pass_order_id"
@@ -1480,6 +1494,46 @@
       ],
       "predicate": null
     },
+    "vale_pass_operator_scopes.vale_pass_operator_scopes_active_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "admin_user_id",
+        "company"
+      ],
+      "predicate": "revoked_atisnull"
+    },
+    "vale_pass_operator_scopes.vale_pass_operator_scopes_admin_user_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "admin_user_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_operator_scopes.vale_pass_operator_scopes_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
     "vale_pass_order_cancellations.vale_pass_order_cancellations_pkey": {
       "method": "btree",
       "unique": true,
@@ -2189,6 +2243,16 @@
     },
     "vale_pass_lots.status": {
       "default": "'planned'::vale_pass_lot_status",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_operator_scopes.granted_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_operator_scopes.id": {
+      "default": "gen_random_uuid()",
       "generated": null,
       "identity": null
     },

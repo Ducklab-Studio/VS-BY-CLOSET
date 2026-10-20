@@ -144,6 +144,7 @@ model AdminUser {
   removedBy String?   @map("removed_by") @db.Uuid
 
   sessions           AdminSession[]
+  valePassScopes     ValePassOperatorScope[]
   auditEvents        AdminAuditEvent[]
   createdBlocks      OperationalBlock[]
 
@@ -1363,4 +1364,23 @@ model ValePassRefundApplication {
   @@index([shopifyOrderId])
   @@index([status])
   @@map("vale_pass_refund_applications")
+}
+
+/// Vínculo explícito operador↔estabelecimento do Valle Pass 2027 (Valle Showroom / VS BY CLOSET). Uma linha por (operador, empresa) autorizada;
+/// revogar preenche `revokedAt` (histórico preservado). Nenhuma linha é criada por migration: quem opera cada loja é decisão do proprietário.
+model ValePassOperatorScope {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId   String          @map("admin_user_id") @db.Uuid
+  company       ValePassCompany
+  grantedBy     String?         @map("granted_by") @db.Uuid
+  grantedByName String?         @map("granted_by_name")
+  grantedAt     DateTime        @default(now()) @map("granted_at") @db.Timestamptz(6)
+  revokedAt     DateTime?       @map("revoked_at") @db.Timestamptz(6)
+  revokedBy     String?         @map("revoked_by") @db.Uuid
+  revokedByName String?         @map("revoked_by_name")
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+  @@map("vale_pass_operator_scopes")
 }
