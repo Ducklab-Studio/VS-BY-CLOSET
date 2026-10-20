@@ -243,7 +243,7 @@ localDescribe('empresa e restrições do voucher', () => {
   test.each([
     ['CANCELLED', async (u: Unit) => { await prisma.valePass.update({ where: { id: u.showroom.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'teste' } }); }],
     ['EXPIRED', async (u: Unit) => { await prisma.valePass.update({ where: { id: u.showroom.id }, data: { status: 'EXPIRED' } }); }],
-    ['BLOCKED', async (u: Unit) => { await prisma.valePass.update({ where: { id: u.showroom.id }, data: { blockedAt: new Date(), blockReason: 'suspeita' } }); }],
+    ['BLOCKED', async (u: Unit) => { await prisma.valePassBlockEvent.create({ data: { valePassId: u.showroom.id, seq: 1, kind: 'BLOCK', reason: 'suspeita de fraude (teste)', idempotencyKey: `blk-${randomUUID()}` } }); }],
     ['ORDER_CANCELLED', async (u: Unit) => { await prisma.valePassOrderCancellation.create({ data: { shopifyOrderId: u.orderId, topic: 'orders/cancelled' } }); }],
     ['REFUND_UNDER_REVIEW', async (u: Unit) => { await prisma.valePassRefundApplication.create({ data: { shopifyRefundId: `${TAG}-rf-${counter++}`, shopifyOrderId: u.orderId, classification: 'UNITS', refundedUnits: 1, status: 'NEEDS_REVIEW', reviewReasons: ['UNIT_CONFIRMATION_REQUIRED'], detail: { reviewGroupIds: [u.groupId] } } }); }],
   ])('voucher %s: resgate recusado (409) com o código do motivo; nada muda', async (code, arrange) => {

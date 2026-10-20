@@ -214,9 +214,9 @@ localDescribe('o resgate só é aceito em voucher resgatável', () => {
     const u = await newUnit();
     await prisma.valePass.update({ where: { id: u.showroom.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: 'teste' } });
     await expect(redeem(u.showroom.id, 100)).rejects.toThrow(/vale_pass_ledger_not_redeemable/);
-    await prisma.valePass.update({ where: { id: u.closet.id }, data: { blockedAt: new Date(), blockReason: 'suspeita de fraude' } });
+    await prisma.valePassBlockEvent.create({ data: { valePassId: u.closet.id, seq: 1, kind: 'BLOCK', reason: 'suspeita de fraude (teste)', idempotencyKey: `blk-${randomUUID()}` } });
     await expect(redeem(u.closet.id, 100)).rejects.toThrow(/vale_pass_ledger_blocked/);
-    await prisma.valePass.update({ where: { id: u.closet.id }, data: { blockedAt: null, blockReason: null } });
+    await prisma.valePassBlockEvent.create({ data: { valePassId: u.closet.id, seq: 1, kind: 'UNBLOCK', reason: 'conferido e liberado (teste)', idempotencyKey: `unb-${randomUUID()}` } });
     await expect(redeem(u.closet.id, 100)).resolves.toBeTruthy();
 
     const past = await newUnit({ expiresAt: new Date(Date.now() - 3_600_000), validFrom: new Date('2025-01-01') });

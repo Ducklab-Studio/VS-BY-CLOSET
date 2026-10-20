@@ -3,6 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { getAdminSession, hasAdminModule, requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
 import {
+  confirmValePassBlock,
+  confirmValePassUnblock,
+  prepareValePassBlock,
+  prepareValePassUnblock,
+  type ValePassBlockPreview,
+  type ValePassBlockResult,
   confirmValePassRedeem,
   confirmValePassReverse,
   getValePassBalance,
@@ -258,6 +264,31 @@ export async function confirmValePassReverseAction(
     return { data, error: null };
   } catch (err) {
     return { data: null, error: balanceError(err, 'Não foi possível registrar a reversão. Consulte o voucher antes de tentar de novo.') };
+  }
+}
+
+/** Bloqueio/desbloqueio de voucher (PR C1): só encaminha para a API (que exige ADMIN, justificativa, código redigitado e é idempotente). */
+export async function prepareValePassBlockAction(code: string, unblock: boolean): Promise<BalanceActionResult<ValePassBlockPreview>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    return { data: await (unblock ? prepareValePassUnblock(code) : prepareValePassBlock(code)), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível conferir a operação.') };
+  }
+}
+
+export async function confirmValePassBlockAction(code: string, unblock: boolean, input: { reason: string; operationId: string; confirmCode: string }): Promise<BalanceActionResult<ValePassBlockResult>> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  try {
+    const data = await (unblock ? confirmValePassUnblock(code, input) : confirmValePassBlock(code, input));
+    revalidateValePassPath();
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível concluir a operação. Consulte o voucher antes de tentar de novo.') };
   }
 }
 

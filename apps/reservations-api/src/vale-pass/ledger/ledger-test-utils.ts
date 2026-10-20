@@ -9,6 +9,8 @@ export async function purgeLedgerForTest(tx: Prisma.TransactionClient, where: { 
   const voucherIds = where.voucherIds ?? [];
   const campaignIds = where.campaignIds ?? [];
   const orderIds = where.orderIds ?? [];
+  await tx.$executeRaw`DELETE FROM vale_pass_block_events WHERE vale_pass_id IN (
+    SELECT id FROM vale_passes WHERE id = ANY(${voucherIds as string[]}::uuid[]) OR campaign_id = ANY(${campaignIds as string[]}::uuid[]) OR shopify_order_id = ANY(${orderIds as string[]}::text[]))`;
   await tx.$executeRaw`DELETE FROM vale_pass_ledger_entries WHERE vale_pass_id IN (
     SELECT id FROM vale_passes WHERE id = ANY(${voucherIds as string[]}::uuid[]) OR campaign_id = ANY(${campaignIds as string[]}::uuid[]) OR shopify_order_id = ANY(${orderIds as string[]}::text[]))`;
 }

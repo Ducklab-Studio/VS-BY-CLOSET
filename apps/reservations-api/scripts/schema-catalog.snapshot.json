@@ -197,6 +197,20 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_block_events.vale_pass_block_events_vale_pass_id_fkey": {
+      "columns": [
+        "vale_pass_id"
+      ],
+      "references": "vale_passes",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_pass_campaign_benefits.vale_pass_campaign_benefits_campaign_id_fkey": {
       "columns": [
         "campaign_id"
@@ -1036,6 +1050,60 @@
       "options": "0",
       "columns": [
         "shopify_domain"
+      ],
+      "predicate": null
+    },
+    "vale_pass_block_events.vale_pass_block_events_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_block_events.vale_pass_block_events_vale_pass_id_idempotency_key_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "vale_pass_id",
+        "idempotency_key"
+      ],
+      "predicate": null
+    },
+    "vale_pass_block_events.vale_pass_block_events_vale_pass_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "vale_pass_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_block_events.vale_pass_block_events_vale_pass_id_seq_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "vale_pass_id",
+        "seq"
       ],
       "predicate": null
     },
@@ -1981,6 +2049,21 @@
     },
     "stores.created_at": {
       "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_block_events.balance_cents": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_block_events.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_block_events.id": {
+      "default": "gen_random_uuid()",
       "generated": null,
       "identity": null
     },

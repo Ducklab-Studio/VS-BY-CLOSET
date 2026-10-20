@@ -64,3 +64,20 @@ export class ConfirmReverseDto {
   @Max(MAX_OPERATION_CENTS)
   confirmAmountCents!: number;
 }
+
+/** POST /admin/vale-pass/vouchers/:code/block e /unblock — justificativa obrigatória e o código redigitado (confirmação explícita). */
+export class ConfirmBlockDto {
+  @IsString()
+  @MinLength(10)
+  @MaxLength(500)
+  reason!: string;
+
+  @Matches(OPERATION_ID)
+  operationId!: string;
+
+  /** O código do voucher digitado de novo pelo administrador. */
+  @IsString()
+  @MinLength(4)
+  @MaxLength(40)
+  confirmCode!: string;
+}
