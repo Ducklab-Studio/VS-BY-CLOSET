@@ -13,20 +13,18 @@ export default function HomePage() {
             VS by Closet · Chile
           </p>
           <h1 data-intro>
-            Seu closet.
-            <br />
-            Em toda <em>estação.</em>
+            Seu closet em todas as <em>estações.</em>
           </h1>
           <p data-intro className="hero-description">
-            Santiago esquenta de dia e esfria à noite.
+            Alugue looks que traduzem seu estilo e viva Santiago com uma mala mais leve.
             <br />
-            Um closet pronto pra qualquer estação.
+            Do passeio na cidade ao brinde na vinícola, encontre o look para cada momento.
           </p>
           <Link data-intro href="/pecas" className="editorial-button">
-            Explore as peças <ArrowUpRight size={19} />
+            Explore os looks <ArrowUpRight size={19} />
           </Link>
           <p data-intro className="hero-note">
-            Alugue online. Retire ao chegar no Chile.
+            Reserve online. Retire em Santiago.
           </p>
         </div>
         <div className="hero-photo">
@@ -108,15 +106,18 @@ export default function HomePage() {
       <section id="colecao" className="collection-section">
         <div className="collection-heading" data-reveal>
           <div>
-            <p className="eyebrow">A seleção do closet</p>
+            <p className="eyebrow">EXPLORE O CLOSET</p>
             <h2>
-              Prontas para a sua
+              Seu próximo look favorito
               <br />
-              <em>próxima história.</em>
+              <em>está aqui.</em>
             </h2>
+            <p className="collection-description">
+              Escolha suas peças e reserve para as datas da sua viagem.
+            </p>
           </div>
           <Link href="/pecas" className="editorial-link">
-            Ver todas as peças <ArrowUpRight size={18} />
+            Ver todo o closet <ArrowUpRight size={18} />
           </Link>
         </div>
         <FeaturedProducts />
@@ -133,14 +134,17 @@ export default function HomePage() {
           />
         </div>
         <div className="winter-content">
-          <p className="eyebrow">A sua próxima parada</p>
+          <p className="eyebrow">ALUGUEL VS BY CLOSET</p>
           <h2 id="winter-title">
-            Frio à noite.
+            Por que comprar para uma viagem,
             <br />
-            <em>Estilo o ano inteiro.</em>
+            <em>se você pode ter um closet à disposição?</em>
           </h2>
-          <Link href="/pecas" className="editorial-button light">
-            Encontre seu look <ArrowUpRight size={18} />
+          <p className="winter-description">
+            Use os looks que deseja, sem precisar comprar. Ter seu closet em Santiago é mais simples do que você imagina.
+          </p>
+          <Link href="/como-funciona" className="editorial-button light">
+            Descubra como funciona o aluguel <ArrowUpRight size={18} />
           </Link>
         </div>
       </section>
