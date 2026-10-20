@@ -30,6 +30,7 @@ import { ValePassPaymentTimeService } from './flow/payment-time.service';
 import { ValePassLedgerService } from './ledger/ledger.service';
 import { ValePassLedgerController } from './ledger/ledger.controller';
 import { ValePassRedemptionService } from './ledger/redemption.service';
+import { ValePassBlockService } from './ledger/block.service';
 import { ValePassAutoVerifyScheduler, ValePassAutoVerifyService } from './flow/auto-verify.service';
 import { ValePassAlertsScheduler, ValePassOperationalAlertsService } from './flow/operational-alerts.service';
 import { ValePassFlowController } from './flow/flow.controller';
@@ -69,6 +70,7 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassPaymentTimeService,
     ValePassLedgerService,
     ValePassRedemptionService,
+    ValePassBlockService,
     ValePassAutoVerifyService,
     ValePassAutoVerifyScheduler,
     ValePassOperationalAlertsService,

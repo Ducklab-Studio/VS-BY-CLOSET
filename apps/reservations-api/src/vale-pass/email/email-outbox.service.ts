@@ -43,6 +43,7 @@ export async function evaluateGroup(db: Db, orderId: string, groupId: string): P
 
   const vouchers = await db.valePass.findMany({ where: { shopifyOrderId: orderId, groupId }, include: { benefit: true }, orderBy: { createdAt: 'asc' } });
   if (vouchers.length === 0) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'group_missing' };
+  if (vouchers.some((voucher) => voucher.blockedAt !== null)) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'voucher_blocked' };
   if (vouchers.some((voucher) => voucher.status === 'CANCELLED' || voucher.status === 'EXPIRED')) return { ok: false, outcome: 'CANCELLED', reason: 'voucher_not_active' };
   if (vouchers.some((voucher) => voucher.status === 'USED' || (voucher.company !== null && voucher.balanceCents < voucher.amountCents))) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'voucher_already_used' };
 

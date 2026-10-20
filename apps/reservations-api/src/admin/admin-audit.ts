@@ -68,6 +68,9 @@ const CRITICAL_ACTIONS = new Set([
   'VALE_PASS_PAYMENT_TIME_AUTO_CONFIRMED',
   // Reversão de resgate por saldo (devolve valor ao voucher): sempre crítica. O resgate em si é operação do dia a dia (visível aos operadores).
   'VALE_PASS_REDEMPTION_REVERSED',
+  // Bloqueio/desbloqueio administrativo de voucher (fraude, conflito de titularidade): sempre crítico.
+  'VALE_PASS_BLOCKED',
+  'VALE_PASS_UNBLOCKED',
   'VALE_PASS_CANCELLED_BY_ADMIN',
   'VALE_PASS_RESTORED',
   'VALE_PASS_RESTORE_BLOCKED',

@@ -1006,6 +1006,31 @@ export interface ValePassLedgerEntry {
   readonly reversed: boolean;
 }
 
+export interface ValePassBlockEntry {
+  readonly id: string;
+  readonly seq: number;
+  readonly kind: 'BLOCK' | 'UNBLOCK';
+  readonly reason: string | null;
+  readonly actorName: string | null;
+  readonly createdAt: string;
+}
+export interface ValePassBlockPreview {
+  readonly canProceed: boolean;
+  readonly problems: readonly { readonly code: string; readonly message: string }[];
+  readonly stillRestricted: readonly { readonly code: string; readonly message: string }[];
+  readonly blocked: boolean;
+  readonly status: ValePassStatus;
+  readonly balanceCents: number;
+  readonly operationId: string;
+}
+export interface ValePassBlockResult {
+  readonly replayed: boolean;
+  readonly event: ValePassBlockEntry & { readonly balanceCents: number };
+  readonly blocked: boolean;
+  readonly status: ValePassStatus;
+  readonly balanceCents: number;
+}
+
 export interface ValePassBalanceView {
   readonly code: string;
   readonly company: ValePassCompany | null;
@@ -1017,6 +1042,9 @@ export interface ValePassBalanceView {
   readonly validFrom: string | null;
   readonly expiresAt: string;
   readonly blockedAt: string | null;
+  /** Motivo do bloqueio atual (só administrador; STAFF recebe nulo). */
+  readonly blockedReason: string | null;
+  readonly blockHistory: readonly ValePassBlockEntry[];
   readonly orderName: string | null;
   readonly holder: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null };
   readonly redeemable: boolean;
@@ -1054,6 +1082,19 @@ export interface ValePassReversePreview {
   readonly balanceAfterCents: number | null;
   readonly operationId: string;
   readonly expectedBalanceCents: number;
+}
+
+export function prepareValePassBlock(code: string): Promise<ValePassBlockPreview> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/block/prepare`, {});
+}
+export function confirmValePassBlock(code: string, input: { reason: string; operationId: string; confirmCode: string }): Promise<ValePassBlockResult> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/block`, input);
+}
+export function prepareValePassUnblock(code: string): Promise<ValePassBlockPreview> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/unblock/prepare`, {});
+}
+export function confirmValePassUnblock(code: string, input: { reason: string; operationId: string; confirmCode: string }): Promise<ValePassBlockResult> {
+  return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/unblock`, input);
 }
 
 export function getValePassBalance(code: string): Promise<ValePassBalanceView> {

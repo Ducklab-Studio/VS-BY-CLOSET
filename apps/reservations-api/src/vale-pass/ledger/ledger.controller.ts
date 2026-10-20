@@ -5,7 +5,8 @@ import { AdminAuthGuard } from '../../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../../admin/admin-role.guard';
 import { RequireRole } from '../../admin/require-role.decorator';
 import { RequireModule } from '../../admin/require-module.decorator';
-import { ConfirmRedeemDto, ConfirmReverseDto, PrepareRedeemDto } from '../dto/voucher-balance.dto';
+import { ConfirmBlockDto, ConfirmRedeemDto, ConfirmReverseDto, PrepareRedeemDto } from '../dto/voucher-balance.dto';
+import { ValePassBlockService, type BlockPreview, type BlockResult } from './block.service';
 import { ValePassLedgerService, type LedgerProblem } from './ledger.service';
 import { ValePassRedemptionService, type Actor, type LedgerEntryView, type OperationResult, type RedeemPreview, type VoucherBalanceView } from './redemption.service';
 
@@ -31,6 +32,7 @@ export class ValePassLedgerController {
   constructor(
     private readonly redemption: ValePassRedemptionService,
     private readonly ledger: ValePassLedgerService,
+    private readonly blocks: ValePassBlockService,
   ) {}
 
   /** Voucher + saldo + restrições + histórico (últimos 100 lançamentos). */
@@ -79,6 +81,41 @@ export class ValePassLedgerController {
   @Throttle(WRITE_LIMIT)
   reverse(@Param('code') code: string, @Param('entryId') entryId: string, @Body() dto: ConfirmReverseDto, @Req() req: RequestWithAdminUser): Promise<OperationResult> {
     return this.redemption.confirmReverse(code, entryId, dto, actorOf(req));
+  }
+
+  /** Prévia do bloqueio (nada é gravado). */
+  @Post('vouchers/:code/block/prepare')
+  @HttpCode(200)
+  @RequireRole('ADMIN')
+  @Throttle(WRITE_LIMIT)
+  prepareBlock(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<BlockPreview> {
+    return this.blocks.prepareBlock(code, actorOf(req));
+  }
+
+  /** Bloqueia o voucher (não altera status nem saldo; histórico imutável; justificativa obrigatória; idempotente). */
+  @Post('vouchers/:code/block')
+  @HttpCode(200)
+  @RequireRole('ADMIN')
+  @Throttle(WRITE_LIMIT)
+  block(@Param('code') code: string, @Body() dto: ConfirmBlockDto, @Req() req: RequestWithAdminUser): Promise<BlockResult> {
+    return this.blocks.confirmBlock(code, dto, actorOf(req));
+  }
+
+  @Post('vouchers/:code/unblock/prepare')
+  @HttpCode(200)
+  @RequireRole('ADMIN')
+  @Throttle(WRITE_LIMIT)
+  prepareUnblock(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<BlockPreview> {
+    return this.blocks.prepareUnblock(code, actorOf(req));
+  }
+
+  /** Desbloqueia (nunca reativa cancelado/expirado/usado nem ignora reembolso em revisão). */
+  @Post('vouchers/:code/unblock')
+  @HttpCode(200)
+  @RequireRole('ADMIN')
+  @Throttle(WRITE_LIMIT)
+  unblock(@Param('code') code: string, @Body() dto: ConfirmBlockDto, @Req() req: RequestWithAdminUser): Promise<BlockResult> {
+    return this.blocks.confirmUnblock(code, dto, actorOf(req));
   }
 
   /** Conciliação livro-razão × saldo (somente leitura). Lista vazia = consistente. */

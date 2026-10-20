@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowDownCircle, CheckCircle2, Loader2, Lock, RotateCcw, Search, Wallet } from 'lucide-react';
-import type { ValePassBalanceView, ValePassLedgerEntry, ValePassRedeemPreview, ValePassReversePreview } from '@/lib/admin-data';
+import { AlertTriangle, ArrowDownCircle, CheckCircle2, Loader2, Lock, LockOpen, RotateCcw, Search, Wallet } from 'lucide-react';
+import type { ValePassBalanceView, ValePassBlockPreview, ValePassLedgerEntry, ValePassRedeemPreview, ValePassReversePreview } from '@/lib/admin-data';
 import { COMPANY_LABELS, describeBalanceError, formatCents, parseReaisToCents, usedPercent } from '@/lib/valle-pass-balance';
 import {
+  confirmValePassBlockAction,
+  prepareValePassBlockAction,
   confirmValePassRedeemAction,
   confirmValePassReverseAction,
   lookupValePassBalanceAction,
@@ -75,7 +77,21 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
   const [reverseBusy, setReverseBusy] = useState(false);
   const reverseLock = useRef(false);
 
+  // Bloqueio / desbloqueio (somente ADMIN; a API exige justificativa, código redigitado e é idempotente)
+  const [blockMode, setBlockMode] = useState<null | 'block' | 'unblock'>(null);
+  const [blockPreview, setBlockPreview] = useState<ValePassBlockPreview | null>(null);
+  const [blockReason, setBlockReason] = useState('');
+  const [blockConfirmCode, setBlockConfirmCode] = useState('');
+  const [blockError, setBlockError] = useState<string | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const blockLock = useRef(false);
+
   function resetForms() {
+    setBlockMode(null);
+    setBlockPreview(null);
+    setBlockReason('');
+    setBlockConfirmCode('');
+    setBlockError(null);
     setAmountText('');
     setReference('');
     setPreview(null);
@@ -173,6 +189,50 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
     setPreview(null);
     setConfirmText('');
     void consult(view.code, { keepFlash: true, keepForms: true }); // atualiza restrições e histórico completo
+  }
+
+  async function openBlock(mode: 'block' | 'unblock') {
+    if (!view) return;
+    setBlockError(null);
+    setBlockPreview(null);
+    setBlockReason('');
+    setBlockConfirmCode('');
+    setBlockMode(mode);
+    setBlockBusy(true);
+    const { data, error } = await prepareValePassBlockAction(view.code, mode === 'unblock');
+    setBlockBusy(false);
+    if (error || !data) return setBlockError(describeBalanceError(error?.code, error?.message ?? 'Não foi possível conferir a operação.'));
+    if (!data.canProceed) return setBlockError(data.problems.map((p) => describeBalanceError(p.code, p.message)).join(' '));
+    setBlockPreview(data);
+  }
+
+  async function confirmBlock() {
+    if (!view || !blockMode || !blockPreview || blockLock.current) return;
+    if (blockReason.trim().length < 10) return setBlockError('Informe a justificativa (mínimo de 10 caracteres).');
+    if (blockConfirmCode.trim().toUpperCase() !== view.code) return setBlockError('O código digitado não confere. Digite novamente o código do voucher.');
+    blockLock.current = true;
+    setBlockBusy(true);
+    setBlockError(null);
+    const unblock = blockMode === 'unblock';
+    const { data, error } = await confirmValePassBlockAction(view.code, unblock, { reason: blockReason.trim(), operationId: blockPreview.operationId, confirmCode: blockConfirmCode.trim() });
+    blockLock.current = false;
+    setBlockBusy(false);
+    if (error || !data) {
+      setBlockError(describeBalanceError(error?.code, error?.message ?? 'Não foi possível concluir a operação.'));
+      // Recusa definitiva (já bloqueado, cancelado, reembolso em revisão…): a prévia perdeu o sentido; falha de rede mantém (repetir é idempotente).
+      if (error?.code) {
+        setBlockPreview(null);
+        setBlockMode(null);
+        void consult(view.code, { keepFlash: true, keepForms: true });
+      }
+      return;
+    }
+    setFlash(data.replayed ? 'Esta operação já estava registrada: nada foi alterado de novo.' : unblock ? 'Voucher desbloqueado. O saldo e o status não mudaram.' : 'Voucher bloqueado. O saldo e o status não mudaram: nenhum resgate será aceito até o desbloqueio.');
+    setBlockMode(null);
+    setBlockPreview(null);
+    setBlockReason('');
+    setBlockConfirmCode('');
+    void consult(view.code, { keepFlash: true });
   }
 
   async function checkReverse(entry: ValePassLedgerEntry) {
@@ -340,6 +400,75 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
                 </div>
               )}
               {redeemError ? <Notice tone="error">{redeemError}</Notice> : null}
+            </div>
+          ) : null}
+
+          {/* ── Bloqueio (somente ADMIN) ───────────────────────────── */}
+          {view.blockedAt ? (
+            <Notice tone="warning">
+              <strong className="font-semibold">Voucher bloqueado</strong> em {dateTime(view.blockedAt)}.{view.blockedReason ? ` Motivo: ${view.blockedReason}` : ''} Nenhum resgate ou reversão é aceito até o desbloqueio.
+            </Notice>
+          ) : null}
+          {canOperate ? (
+            <div className="space-y-3 rounded-xl border border-ink/10 p-3.5 dark:border-white/10">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink dark:text-dark-text">{view.blockedAt ? <LockOpen size={15} /> : <Lock size={15} />} Bloqueio administrativo</h3>
+                {blockMode === null ? (
+                  <button type="button" className={secondaryButton} onClick={() => void openBlock(view.blockedAt ? 'unblock' : 'block')} disabled={blockBusy}>
+                    {view.blockedAt ? 'Desbloquear voucher…' : 'Bloquear voucher…'}
+                  </button>
+                ) : null}
+              </div>
+              <p className={hintClass}>
+                Bloquear não cancela o voucher nem altera saldo ou histórico. Desbloquear nunca reativa voucher cancelado, expirado ou com reembolso em análise.
+              </p>
+              {blockMode !== null ? (
+                <div className="space-y-3">
+                  {blockBusy && !blockPreview ? <p className="flex items-center gap-2 text-xs text-ink/60 dark:text-dark-subtle"><Loader2 size={14} className="animate-spin" /> Conferindo…</p> : null}
+                  {blockPreview ? (
+                    <>
+                      {blockMode === 'unblock' && blockPreview.stillRestricted.length > 0 ? (
+                        <Notice tone="warning">
+                          <strong className="font-semibold">Depois do desbloqueio, o resgate continuará indisponível:</strong>{' '}
+                          {blockPreview.stillRestricted.map((r) => describeBalanceError(r.code, r.message)).join(' ')}
+                        </Notice>
+                      ) : null}
+                      <div>
+                        <label htmlFor="block-reason" className={labelClass}>Justificativa (mínimo 10 caracteres)</label>
+                        <input id="block-reason" value={blockReason} onChange={(e) => setBlockReason(e.target.value)} maxLength={500} className={inputClass} disabled={blockBusy} />
+                      </div>
+                      <div>
+                        <label htmlFor="block-confirm" className={labelClass}>Digite novamente o código do voucher ({view.code}) para confirmar</label>
+                        <input id="block-confirm" value={blockConfirmCode} onChange={(e) => setBlockConfirmCode(e.target.value.toUpperCase())} autoComplete="off" spellCheck={false} maxLength={40} className={`${inputClass} font-mono tracking-wide`} disabled={blockBusy} />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className={primaryButton}
+                          onClick={() => void confirmBlock()}
+                          disabled={blockBusy || blockReason.trim().length < 10 || blockConfirmCode.trim().toUpperCase() !== view.code}
+                        >
+                          {blockBusy ? <Loader2 size={15} className="animate-spin" /> : blockMode === 'unblock' ? <LockOpen size={15} /> : <Lock size={15} />} {blockMode === 'unblock' ? 'Confirmar desbloqueio' : 'Confirmar bloqueio'}
+                        </button>
+                        <button type="button" className={secondaryButton} onClick={() => { setBlockMode(null); setBlockPreview(null); setBlockError(null); }} disabled={blockBusy}>Cancelar</button>
+                      </div>
+                    </>
+                  ) : (
+                    <button type="button" className={secondaryButton} onClick={() => { setBlockMode(null); setBlockError(null); }} disabled={blockBusy}>Fechar</button>
+                  )}
+                </div>
+              ) : null}
+              {blockError ? <Notice tone="error">{blockError}</Notice> : null}
+              {view.blockHistory.length > 0 ? (
+                <ul className="divide-y divide-ink/10 text-xs dark:divide-white/10">
+                  {view.blockHistory.map((entry) => (
+                    <li key={entry.id} className="py-1.5 text-ink/65 dark:text-dark-subtle">
+                      <span className="font-medium text-ink dark:text-dark-text">{entry.kind === 'BLOCK' ? 'Bloqueio' : 'Desbloqueio'}</span> · {dateTime(entry.createdAt)} · {entry.actorName ?? 'Sistema'}
+                      {entry.reason ? ` · ${entry.reason}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 

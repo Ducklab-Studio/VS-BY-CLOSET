@@ -56,7 +56,7 @@ test('erros da API: código conhecido vira texto claro; desconhecido usa a mensa
   assert.match(describeBalanceError('INSUFFICIENT_BALANCE', 'x'), /Saldo insuficiente/);
   assert.equal(describeBalanceError('CODIGO_NOVO', 'Mensagem da API'), 'Mensagem da API');
   assert.equal(describeBalanceError(null, 'Mensagem da API'), 'Mensagem da API');
-  for (const code of ['COMPANY_MISMATCH', 'BALANCE_CHANGED', 'IDEMPOTENCY_CONFLICT', 'ALREADY_REVERSED', 'REFUND_UNDER_REVIEW', 'BLOCKED', 'EXPIRED', 'CANCELLED', 'USED_UP', 'ORDER_CANCELLED', 'NOT_YET_VALID', 'LEGACY_NO_BALANCE']) {
+  for (const code of ['COMPANY_MISMATCH', 'BALANCE_CHANGED', 'IDEMPOTENCY_CONFLICT', 'ALREADY_REVERSED', 'REFUND_UNDER_REVIEW', 'BLOCKED', 'EXPIRED', 'CANCELLED', 'USED_UP', 'ORDER_CANCELLED', 'NOT_YET_VALID', 'LEGACY_NO_BALANCE', 'ALREADY_BLOCKED', 'NOT_BLOCKED']) {
     assert.ok(BALANCE_ERROR_TEXT[code], code);
   }
 });

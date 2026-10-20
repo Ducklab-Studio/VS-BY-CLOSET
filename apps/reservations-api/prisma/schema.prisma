@@ -928,6 +928,7 @@ model ValePass {
   benefit  ValePassCampaignBenefit? @relation(fields: [benefitId], references: [id], onDelete: Restrict)
   events   ValePassEvent[]
   ledger   ValePassLedgerEntry[]
+  blockEvents ValePassBlockEvent[]
 
   @@unique([groupId, benefitId])
   @@unique([groupId, company])
@@ -986,6 +987,40 @@ model ValePassLedgerEntry {
   @@unique([valePassId, idempotencyKey])
   @@index([valePassId])
   @@map("vale_pass_ledger_entries")
+}
+
+/// Bloqueio administrativo de voucher (fraude, conflito de titularidade). Bloquear NÃO altera status, saldo nem validade; desbloquear NÃO reativa nada.
+enum ValePassBlockKind {
+  BLOCK
+  UNBLOCK
+
+  @@map("vale_pass_block_kind")
+}
+
+/// Histórico IMUTÁVEL (só INSERT) de bloqueios e desbloqueios. `seq` e o retrato do saldo são calculados pelo gatilho sob o lock da linha do voucher; o gatilho
+/// também aplica `blocked_at/by/reason` em `vale_passes` (único caminho: UPDATE direto dessas colunas é recusado pelo banco).
+model ValePassBlockEvent {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  valePassId     String            @map("vale_pass_id") @db.Uuid
+  seq            Int
+  kind           ValePassBlockKind
+  /// Justificativa obrigatória (10–500 caracteres).
+  reason         String
+  /// Sem FK de propósito (mesmo padrão do ledger): remover o operador nunca apaga nem trava o histórico.
+  actorAdminId   String?           @db.Uuid @map("actor_admin_id")
+  actorName      String?           @map("actor_name")
+  idempotencyKey String            @map("idempotency_key")
+  requestHash    String?           @map("request_hash")
+  /// Saldo no instante da operação (prova de que bloquear/desbloquear não mexe no saldo).
+  balanceCents   Int               @default(0) @map("balance_cents")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  valePass ValePass @relation(fields: [valePassId], references: [id])
+
+  @@unique([valePassId, seq])
+  @@unique([valePassId, idempotencyKey])
+  @@index([valePassId])
+  @@map("vale_pass_block_events")
 }
 
 enum ValePassCompany {

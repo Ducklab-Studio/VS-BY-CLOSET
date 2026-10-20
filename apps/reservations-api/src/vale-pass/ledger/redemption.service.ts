@@ -59,6 +59,10 @@ export interface VoucherBalanceView {
   readonly validFrom: string | null;
   readonly expiresAt: string;
   readonly blockedAt: string | null;
+  /** Motivo do bloqueio atual: só administrador. */
+  readonly blockedReason: string | null;
+  /** Histórico de bloqueios/desbloqueios (justificativa só para administrador). */
+  readonly blockHistory: readonly { readonly id: string; readonly seq: number; readonly kind: 'BLOCK' | 'UNBLOCK'; readonly reason: string | null; readonly actorName: string | null; readonly createdAt: string }[];
   readonly orderName: string | null;
   /** Dados pessoais mascarados (o nome completo só para administrador). Sem telefone/e-mail completos. */
   readonly holder: { readonly name: string | null; readonly phoneMasked: string | null; readonly emailMasked: string | null };
@@ -351,6 +355,7 @@ export class ValePassRedemptionService {
       problems.push({ code: 'ENTRY_NOT_FOUND', message: 'Lançamento não encontrado neste voucher.' });
       return { problems, entry: null };
     }
+    if (voucher.blockedAt) problems.push({ code: 'BLOCKED', message: RESTRICTION_TEXT.BLOCKED });
     if (entry.kind !== 'REDEEM') problems.push({ code: 'NOT_A_REDEMPTION', message: 'Só um resgate pode ser revertido.' });
     if (await db.valePassLedgerEntry.findUnique({ where: { reversesEntryId: entry.id }, select: { id: true } })) problems.push({ code: 'ALREADY_REVERSED', message: 'Este resgate já foi revertido.' });
     if (entry.kind === 'REDEEM' && voucher.balanceCents - entry.deltaCents > voucher.amountCents) problems.push({ code: 'OVER_CREDIT', message: 'A reversão deixaria o saldo acima do crédito emitido.' });
@@ -386,6 +391,8 @@ export class ValePassRedemptionService {
       validFrom: voucher.validFrom?.toISOString() ?? null,
       expiresAt: voucher.expiresAt.toISOString(),
       blockedAt: voucher.blockedAt?.toISOString() ?? null,
+      blockedReason: canOperate(actor.role) ? voucher.blockReason : null,
+      blockHistory: (await db.valePassBlockEvent.findMany({ where: { valePassId: voucher.id }, orderBy: { seq: 'desc' }, take: 50 })).map((e) => ({ id: e.id, seq: e.seq, kind: e.kind, reason: canOperate(actor.role) ? e.reason : null, actorName: e.actorName, createdAt: e.createdAt.toISOString() })),
       orderName: voucher.shopifyOrderName,
       holder: {
         name: canOperate(actor.role) ? voucher.customerName : maskName(voucher.customerName),

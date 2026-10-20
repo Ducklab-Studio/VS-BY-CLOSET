@@ -50,6 +50,8 @@ export const BALANCE_ERROR_TEXT: Record<string, string> = {
   REFUND_UNDER_REVIEW: 'Pedido com reembolso aguardando decisão de um administrador. Resgate bloqueado até a decisão.',
   ORDER_CANCELLED: 'O pedido deste voucher foi cancelado ou reembolsado.',
   LEGACY_NO_BALANCE: 'Voucher legado: não tem controle de saldo.',
+  ALREADY_BLOCKED: 'Este voucher já está bloqueado.',
+  NOT_BLOCKED: 'Este voucher não está bloqueado.',
 };
 
 /** Texto mostrado ao operador: o da tabela quando o código é conhecido; senão a mensagem da API (já sem dados sensíveis). */

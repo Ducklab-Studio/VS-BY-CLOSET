@@ -87,6 +87,7 @@ async function clean() {
     const passes = await db.valePass.findMany({ where: { campaignId }, select: { id: true } });
     await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
+      await tx.$executeRaw`DELETE FROM vale_pass_block_events WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
       await tx.$executeRaw`DELETE FROM vale_pass_ledger_entries WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
     });
     await db.adminAuditEvent.deleteMany({ where: { entityId: { in: passes.map((p) => p.id) } } });
@@ -251,6 +252,49 @@ try {
   assert.equal(after[2].reversesEntryId, after[0].id);
   assert.equal(await page.getByRole('button', { name: 'Reverter este resgate' }).count(), 1, 'o resgate já revertido não oferece nova reversão');
   pass('6) reversão: justificativa + valor redigitado; saldo R$ 400,00; histórico preservado; não reverte duas vezes');
+
+  // 5b) Bloqueio administrativo: justificativa + código redigitado; bloqueia o resgate sem mexer em saldo/status; STAFF não vê a ação nem o motivo; desbloqueio.
+  await consult(page, A);
+  await metric(page, 'Saldo disponível').getByText('R$ 400,00').waitFor();
+  await page.getByRole('button', { name: 'Bloquear voucher…' }).click();
+  const blockBtn = page.getByRole('button', { name: 'Confirmar bloqueio' });
+  await blockBtn.waitFor();
+  assert.equal(await blockBtn.isDisabled(), true, 'bloquear exige justificativa e o código redigitado');
+  await page.getByLabel(/Justificativa \(mínimo 10/).first().fill('Suspeita de fraude: conferir com a loja');
+  await page.getByLabel(/Digite novamente o código do voucher/).fill('VALLE-ERRADO-0000');
+  assert.equal(await blockBtn.isDisabled(), true, 'código diferente não habilita');
+  await page.getByLabel(/Digite novamente o código do voucher/).fill(A);
+  await blockBtn.dblclick(); // duplo clique: um único evento
+  await page.getByText(/Voucher bloqueado\. O saldo e o status não mudaram/).waitFor();
+  await page.getByText('Voucher bloqueado', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('Valor a utilizar (R$)').count(), 0, 'sem formulário de resgate enquanto bloqueado');
+  const blockedRow = await db.valePass.findUniqueOrThrow({ where: { code: A } });
+  assert.equal(blockedRow.balanceCents, 40_000);
+  assert.equal(blockedRow.status, 'ACTIVE');
+  assert.ok(blockedRow.blockedAt);
+  assert.equal(await db.valePassBlockEvent.count({ where: { valePass: { code: A } } }), 1, 'duplo clique gravou UM evento');
+  await page.getByText(/Motivo: Suspeita de fraude/).first().waitFor();
+  const staffCtx = await newContext(staff.token, { viewport: { width: 1280, height: 900 } });
+  const staffPage = await newPage(staffCtx, errors);
+  await staffPage.goto(vallePass);
+  await staffPage.getByLabel('Código do voucher').waitFor();
+  await consult(staffPage, A);
+  await staffPage.getByText('Voucher bloqueado', { exact: true }).waitFor();
+  const staffDesk = await staffPage.locator('section[aria-labelledby="balance-desk-title"]').innerText();
+  assert.ok(!/Suspeita de fraude/.test(staffDesk), 'a justificativa do bloqueio não aparece para STAFF');
+  assert.equal(await staffPage.getByRole('button', { name: /Desbloquear voucher/ }).count(), 0, 'STAFF não vê a ação de desbloqueio');
+  await staffCtx.close();
+  await page.getByRole('button', { name: 'Desbloquear voucher…' }).click();
+  await page.getByLabel(/Justificativa \(mínimo 10/).first().fill('Conferido com a loja e liberado');
+  await page.getByLabel(/Digite novamente o código do voucher/).fill(A);
+  await page.getByRole('button', { name: 'Confirmar desbloqueio' }).click();
+  await page.getByText(/Voucher desbloqueado\. O saldo e o status não mudaram/).waitFor();
+  await page.getByLabel('Valor a utilizar (R$)').waitFor();
+  const freed = await db.valePass.findUniqueOrThrow({ where: { code: A } });
+  assert.equal(freed.blockedAt, null);
+  assert.equal(freed.balanceCents, 40_000);
+  assert.deepEqual((await db.valePassBlockEvent.findMany({ where: { valePass: { code: A } }, orderBy: { seq: 'asc' } })).map((e) => e.kind), ['BLOCK', 'UNBLOCK']);
+  pass('6b) bloqueio e desbloqueio: justificativa + código redigitado, duplo clique = 1 evento, saldo e status intactos, STAFF sem ação nem motivo');
 
   // 6) Celular: sem rolagem horizontal; resgate e histórico legíveis.
   const mobile = await newContext(admin.token, { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
