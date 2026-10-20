@@ -12,7 +12,7 @@ códigos por **e-mail em até 3 dias** após o pagamento, via **Resend** (aprova
 **encerramento das vendas em 30/05/2027** (confirmado em 18/10/2026; o PR A guarda a data só como informação — nenhum encerramento automático existe ainda,
 ele depende de decidir o fuso e o mecanismo no PR B/E).
 
-**NÃO definido (não implementar regra nenhuma sobre isso):** uso parcial, cumulatividade, transferência, reembolso de saldo,
+**NÃO definido (não implementar regra nenhuma sobre isso):** uso parcial, cumulatividade, reembolso de saldo (a transferência está DECIDIDA: vouchers intransferíveis, ver VALLE-PASS-2027-REGRAS-CONFIRMADAS.md),
 restrições de passeios, forma de validação em cada empresa, abatimento financeiro automático, fuso da "validade 2027"
 e do encerramento de 30/05/2027 (Brasil ou Chile), condições específicas dos 10% em passeios, texto das condições.
 

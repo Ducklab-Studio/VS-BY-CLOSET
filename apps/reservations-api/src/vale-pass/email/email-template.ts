@@ -3,7 +3,7 @@ import { resolveValidityTimezone } from '../vale-pass-validity';
 /**
  * E-mail com os vouchers de UMA unidade do Valle Pass 2027: o voucher de cada empresa, separados, com valor, código e validade.
  * Só diz o que já está confirmado: crédito exclusivo na empresa indicada, uso durante o período de validade, guarda do e-mail com os códigos.
- * NÃO menciona o desconto de 10% em passeios (condições ainda pendentes) nem regras de uso parcial, transferência (os vouchers SÃO transferíveis, mas o procedimento ainda não foi definido: o e-mail não diz que são pessoais nem intransferíveis) ou reembolso.
+ * NÃO menciona o desconto de 10% em passeios (condições ainda pendentes) nem regras de uso parcial, prorrogação ou reembolso. Os vouchers são INTRANSFERÍVEIS (confirmado pelo Anderson em 20/10/2026): o sistema não tem nem terá procedimento de transferência; o texto ao cliente sobre isso ainda aguarda redação aprovada, por isso o e-mail não o declara.
  *
  * Design editorial (VS BY CLOSET): faixa vinho com a marca, selo "VALLE PASS • 2027", título serifado, dois cartões de voucher com borda dupla fina e
  * código em destaque (TEXTO selecionável, nunca imagem), seção "Como utilizar seus benefícios" só com as regras confirmadas e rodapé da marca.
