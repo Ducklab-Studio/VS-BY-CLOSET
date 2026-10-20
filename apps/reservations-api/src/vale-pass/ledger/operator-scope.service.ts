@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { Prisma, type AdminRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../../admin/admin-audit';
-import { decideCompanyAccess, OPERATOR_COMPANIES, type AccessBasis, type OperatorCompany } from './operator-scope';
+import { decideCompanyAccess, OPERATOR_COMPANIES, OPERATOR_POLICY, type AccessBasis, type OperatorCompany, type OperatorPolicy } from './operator-scope';
 
 type Db = Pick<PrismaService | Prisma.TransactionClient, 'valePassOperatorScope'>;
 
@@ -33,6 +33,18 @@ export interface OperatorScopeView {
   readonly history: readonly { readonly company: OperatorCompany; readonly grantedAt: string; readonly grantedByName: string | null; readonly revokedAt: string | null; readonly revokedByName: string | null }[];
 }
 
+export interface OperatorOverview {
+  /** Usuários ativos que operam o Valle Pass (administradores e funcionários com o módulo), sem o proprietário. */
+  readonly users: readonly { readonly id: string; readonly name: string; readonly role: 'ADMIN' | 'STAFF'; readonly companies: readonly OperatorCompany[] }[];
+  readonly policy: OperatorPolicy;
+  readonly summary: {
+    /** Administradores ativos SEM vínculo: hoje mantêm acesso às duas lojas (legado). */
+    readonly adminsWithoutScope: number;
+    /** Resgates/reversões dos últimos 30 dias feitos pelo acesso administrativo legado (mede o que ainda depende dele). */
+    readonly legacyAdminOperationsLast30Days: number;
+  };
+}
+
 const isCompany = (value: string): value is OperatorCompany => (OPERATOR_COMPANIES as readonly string[]).includes(value);
 
 /**
@@ -42,6 +54,27 @@ const isCompany = (value: string): value is OperatorCompany => (OPERATOR_COMPANI
 @Injectable()
 export class ValePassOperatorScopeService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  /** Visão do proprietário: quem opera o quê hoje e quanto ainda depende do acesso administrativo legado. Só leitura. */
+  async overview(actor: { role: AdminRole }): Promise<OperatorOverview> {
+    this.requireOwner(actor);
+    const users = await this.prisma.adminUser.findMany({
+      where: { active: true, OR: [{ role: 'ADMIN' }, { role: 'STAFF', moduleAccess: { has: 'VALLE_PASS' } }] },
+      select: { id: true, name: true, role: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+    const rows = await this.prisma.valePassOperatorScope.findMany({ where: { adminUserId: { in: users.map((u) => u.id) }, revokedAt: null }, select: { adminUserId: true, company: true } });
+    const byUser = new Map<string, OperatorCompany[]>();
+    for (const row of rows) byUser.set(row.adminUserId, [...(byUser.get(row.adminUserId) ?? []), row.company]);
+    const legacy = await this.prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM admin_audit_events
+      WHERE action IN ('VALE_PASS_REDEEMED', 'VALE_PASS_REDEMPTION_REVERSED') AND detail->>'accessBasis' = 'LEGACY_ADMIN' AND created_at > now() - interval '30 days'`;
+    return {
+      users: users.map((u) => ({ id: u.id, name: u.name, role: u.role as 'ADMIN' | 'STAFF', companies: byUser.get(u.id) ?? [] })),
+      policy: OPERATOR_POLICY,
+      summary: { adminsWithoutScope: users.filter((u) => u.role === 'ADMIN' && !byUser.has(u.id)).length, legacyAdminOperationsLast30Days: legacy[0]?.n ?? 0 },
+    };
+  }
 
   async view(adminUserId: string, actor: { role: AdminRole }): Promise<OperatorScopeView> {
     this.requireOwner(actor);

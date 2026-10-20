@@ -296,6 +296,85 @@ try {
   assert.deepEqual((await db.valePassBlockEvent.findMany({ where: { valePass: { code: A } }, orderBy: { seq: 'asc' } })).map((e) => e.kind), ['BLOCK', 'UNBLOCK']);
   pass('6b) bloqueio e desbloqueio: justificativa + código redigitado, duplo clique = 1 evento, saldo e status intactos, STAFF sem ação nem motivo');
 
+  // 6c) Operador RESTRITO (ADMIN vinculado só à VS BY CLOSET): na Valle Showroom não há formulário nem botão de reversão e a mensagem de permissão aparece;
+  // na VS BY CLOSET opera normalmente; pela API direta (mesmos guards reais) o resgate/reversão/"usado" cruzados dão 403 e nada é gravado.
+  {
+    const restricted = await createUser(`Operador restrito sintético ${prefix}`, 'ADMIN');
+    await db.valePassOperatorScope.create({ data: { adminUserId: restricted.id, company: 'VS_BY_CLOSET', grantedByName: 'teste sintético' } });
+    const ctx = await newContext(restricted.token, { viewport: { width: 1280, height: 900 } });
+    const rp = await newPage(ctx, errors);
+    await rp.goto(vallePass);
+    await rp.getByLabel('Código do voucher').waitFor();
+    await consult(rp, A);
+    await metric(rp, 'Saldo disponível').getByText('R$ 400,00').waitFor();
+    await rp.getByText(/não está autorizado a resgatar vouchers da Valle Showroom/).waitFor();
+    assert.equal(await rp.getByLabel('Valor a utilizar (R$)').count(), 0, 'sem formulário de resgate na loja não autorizada');
+    assert.equal(await rp.getByRole('button', { name: /Reverter este resgate/ }).count(), 0, 'sem botão de reversão na loja não autorizada');
+    await shot(rp, '3-operador-restrito');
+    await consult(rp, B);
+    await metric(rp, 'Saldo disponível').getByText('R$ 30,00').waitFor();
+    await rp.getByLabel('Valor a utilizar (R$)').waitFor(); // na loja autorizada o formulário aparece
+    assert.equal(await rp.getByText(/não está autorizado a resgatar vouchers/).count(), 0);
+    await ctx.close();
+
+    // API direta, com os guards reais (bearer do ClosetAdmin + sessão do operador restrito)
+    const call = (method, url, body) => fetch(`${apiUrl}${url}`, { method, headers: { Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': restricted.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const before = await entriesOf(A);
+    const cross = await call('POST', `/admin/vale-pass/vouchers/${A}/redeem`, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: 'tentativa cruzada', operationId: `cross-${Date.now()}`, expectedBalanceCents: 40_000, confirmAmountCents: 100 });
+    assert.equal(cross.status, 403, 'resgate cruzado pela API direta é recusado');
+    assert.equal((await cross.json()).code, 'COMPANY_NOT_AUTHORIZED');
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${A}/redeem/prepare`, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: 'tentativa cruzada' })).status, 403);
+    const someEntry = before[0];
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${A}/ledger/${someEntry.id}/reverse/prepare`, {})).status, 403, 'reversão cruzada recusada');
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${A}/use`)).status, 403, 'endpoint legado "usado" não é atalho entre lojas');
+    assert.equal((await call('POST', `/admin/vale-pass/operators/${restricted.id}/companies/VALLE_SHOWROOM/grant`, {})).status, 403, 'operador não concede vínculo a si mesmo');
+    assert.equal((await call('GET', '/admin/vale-pass/operators')).status, 403, 'a visão de vínculos é só do proprietário');
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${B}/redeem/prepare`, { company: 'VS_BY_CLOSET', amountCents: 100, reference: 'conferência' })).status, 200, 'na loja autorizada a prévia funciona');
+    assert.equal((await entriesOf(A)).length, before.length, 'nenhum lançamento cruzado foi gravado');
+    assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: A } })).balanceCents, 40_000);
+    pass('6c) operador restrito: sem formulário/reversão e com mensagem na loja não autorizada; opera a sua; API direta (resgate, prévia, reversão, "usado", vínculo) cruzada = 403 e nada gravado');
+  }
+
+  // 6d) Proprietário gerencia vínculos pela tela: concede, vê o resultado, revoga; confirmação obrigatória; a API grava a auditoria crítica.
+  {
+    const target = await createUser(`Operador vinculável sintético ${prefix}`, 'ADMIN');
+    const owner = await createUser(`Proprietário sintético ${prefix}`, 'SUPER_ADMIN');
+    const ctx = await newContext(owner.token, { viewport: { width: 1280, height: 900 } });
+    const op = await newPage(ctx, errors);
+    await op.goto(vallePass);
+    await op.getByRole('button', { name: /Quem opera cada estabelecimento/ }).click();
+    const row = op.locator('[data-testid="operator-row"]', { hasText: `Operador vinculável sintético ${prefix}` });
+    await row.waitFor();
+    await row.getByText('Sem vínculo: acesso legado às duas lojas.').waitFor();
+    await row.getByRole('button', { name: /Valle Showroom: sem vínculo/ }).click();
+    await row.getByRole('alertdialog').waitFor();
+    assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id } }), 0, 'nada é gravado antes da confirmação');
+    await row.getByRole('button', { name: 'Confirmar' }).dblclick(); // duplo clique: um só vínculo
+    await row.getByRole('button', { name: /Valle Showroom: autorizado/ }).waitFor();
+    await row.getByText('Restrito às lojas marcadas.').waitFor();
+    assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id, company: 'VALLE_SHOWROOM', revokedAt: null } }), 1);
+    const audit = await db.adminAuditEvent.findFirst({ where: { action: 'VALE_PASS_OPERATOR_SCOPE_GRANTED', entityId: target.id } });
+    assert.ok(audit && audit.isCritical, 'auditoria crítica da concessão');
+    await row.getByRole('button', { name: /Valle Showroom: autorizado/ }).click();
+    await row.getByRole('button', { name: 'Cancelar' }).click(); // cancelar não revoga
+    assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id, revokedAt: null } }), 1);
+    await row.getByRole('button', { name: /Valle Showroom: autorizado/ }).click();
+    await row.getByRole('button', { name: 'Confirmar' }).click();
+    await row.getByRole('button', { name: /Valle Showroom: sem vínculo/ }).waitFor();
+    assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id, revokedAt: null } }), 0);
+    assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id } }), 1, 'o histórico da revogação é preservado');
+    await shot(op, '4-proprietario-vinculos');
+    await ctx.close();
+    // administrador e funcionário não veem o painel
+    const adminCtx = await newContext(admin.token, { viewport: { width: 1280, height: 900 } });
+    const ap = await newPage(adminCtx, errors);
+    await ap.goto(vallePass);
+    await ap.getByLabel('Código do voucher').waitFor();
+    assert.equal(await ap.getByRole('button', { name: /Quem opera cada estabelecimento/ }).count(), 0, 'só o proprietário vê a gestão de vínculos');
+    await adminCtx.close();
+    pass('6d) proprietário: concede e revoga vínculo pela tela (confirmação, duplo clique, histórico, auditoria crítica); administrador não vê o painel');
+  }
+
   // 6) Celular: sem rolagem horizontal; resgate e histórico legíveis.
   const mobile = await newContext(admin.token, { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
   const mp = await newPage(mobile, errors);

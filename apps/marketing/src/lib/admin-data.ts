@@ -1125,3 +1125,17 @@ export function confirmValePassReverse(
 export function updateEmployeePermissions(id: string, moduleAccess: AdminModuleName[], adminUserId: string): Promise<EmployeeListItem> {
   return adminPut(`/admin/employees/${pathSegment(id)}/permissions`, { moduleAccess, adminUserId });
 }
+
+// ── Vínculo operador↔estabelecimento (só o proprietário) ──────────────────────────────────
+export type ValePassOperatorCompany = 'VALLE_SHOWROOM' | 'VS_BY_CLOSET';
+export interface ValePassOperatorOverview {
+  readonly users: readonly { readonly id: string; readonly name: string; readonly role: 'ADMIN' | 'STAFF'; readonly companies: readonly ValePassOperatorCompany[] }[];
+  readonly policy: { readonly staffMayRedeem: boolean; readonly adminRequiresScope: boolean };
+  readonly summary: { readonly adminsWithoutScope: number; readonly legacyAdminOperationsLast30Days: number };
+}
+export function getValePassOperatorOverview(): Promise<ValePassOperatorOverview> {
+  return adminGetPlain('/admin/vale-pass/operators');
+}
+export function setValePassOperatorCompany(adminUserId: string, company: ValePassOperatorCompany, grant: boolean): Promise<{ changed: boolean }> {
+  return adminPost(`/admin/vale-pass/operators/${pathSegment(adminUserId)}/companies/${company}/${grant ? 'grant' : 'revoke'}`, {});
+}

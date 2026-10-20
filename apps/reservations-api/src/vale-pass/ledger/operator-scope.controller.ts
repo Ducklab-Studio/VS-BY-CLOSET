@@ -4,7 +4,7 @@ import type { AdminRole } from '@prisma/client';
 import { AdminAuthGuard } from '../../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../../admin/admin-role.guard';
 import { RequireRole } from '../../admin/require-role.decorator';
-import { ValePassOperatorScopeService, type OperatorScopeView } from './operator-scope.service';
+import { ValePassOperatorScopeService, type OperatorOverview, type OperatorScopeView } from './operator-scope.service';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string; role: AdminRole };
@@ -22,6 +22,13 @@ const LIMIT = { default: { limit: 30, ttl: 60_000 } };
 @RequireRole('SUPER_ADMIN')
 export class ValePassOperatorScopeController {
   constructor(private readonly scopes: ValePassOperatorScopeService) {}
+
+  /** Visão geral para o proprietário: quem opera o quê e quanto ainda depende do acesso administrativo legado. */
+  @Get()
+  @Throttle(LIMIT)
+  overview(@Req() req: RequestWithAdminUser): Promise<OperatorOverview> {
+    return this.scopes.overview(actorOf(req));
+  }
 
   @Get(':adminUserId/companies')
   @Throttle(LIMIT)

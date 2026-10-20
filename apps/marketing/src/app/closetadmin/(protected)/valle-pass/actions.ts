@@ -70,6 +70,7 @@ import {
   type ValePassVoucherFilters,
 } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
+import { getValePassOperatorOverview, setValePassOperatorCompany, type ValePassOperatorCompany, type ValePassOperatorOverview } from '@/lib/admin-data';
 
 /**
  * Valle Pass — produto totalmente separado do fluxo de aluguel. Só o
@@ -628,5 +629,27 @@ export async function resumeHeldPaymentsAction(note: string): Promise<{ error: s
     return { error: null, report };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível retomar as retenções.' };
+  }
+}
+
+// ── Vínculo operador↔estabelecimento: SOMENTE o proprietário (a API revalida) ─────────────────────────────
+export async function loadValePassOperatorsAction(): Promise<{ data: ValePassOperatorOverview; error: null } | { data: null; error: string }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+  try {
+    return { data: await getValePassOperatorOverview(), error: null };
+  } catch (err) {
+    return { data: null, error: err instanceof AdminApiError ? err.message : 'Não foi possível carregar os vínculos.' };
+  }
+}
+
+export async function setValePassOperatorCompanyAction(adminUserId: string, company: ValePassOperatorCompany, grant: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+  try {
+    await setValePassOperatorCompany(adminUserId, company, grant);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o vínculo.' };
   }
 }

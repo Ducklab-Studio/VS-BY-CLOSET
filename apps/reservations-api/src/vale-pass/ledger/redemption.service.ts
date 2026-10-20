@@ -247,8 +247,11 @@ export class ValePassRedemptionService {
    * A decisão de verdade, por empresa, é `authorizeVoucher` (dentro da transação).
    */
   private async requireAnyAuthorization(actor: Actor): Promise<void> {
-    if (actor.role === 'STAFF' && (await activeCompanies(this.prisma, actor.id)).length === 0) {
-      throw new ForbiddenException({ statusCode: 403, error: 'Forbidden', code: 'NO_COMPANY_AUTHORIZED', message: 'Seu usuário não está autorizado a resgatar vouchers de nenhum estabelecimento. Peça ao proprietário.' });
+    if (actor.role !== 'STAFF') return;
+    const denial = decideCompanyAccess('STAFF', await activeCompanies(this.prisma, actor.id), 'VALLE_SHOWROOM');
+    // STAFF nunca é "allowed" enquanto a política não o liberar; qualquer recusa aqui vale para as DUAS empresas (sem vínculo ou STAFF não liberado).
+    if (!denial.allowed && (denial.code === 'NO_COMPANY_AUTHORIZED' || denial.code === 'STAFF_NOT_ENABLED')) {
+      throw new ForbiddenException({ statusCode: 403, error: 'Forbidden', code: denial.code, message: denial.message });
     }
   }
 

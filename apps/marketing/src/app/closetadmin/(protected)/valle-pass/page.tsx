@@ -39,7 +39,7 @@ export default async function ClosetAdminValePassPage() {
         title="Valle Pass"
         description="Vale-presente/crédito de compra — vendido pelo checkout oficial da Shopify, separado do fluxo de aluguel. Nunca depende de disponibilidade, HOLD ou datas de retirada/devolução."
       />
-      <ValePassSection initialCampaigns={campaigns} initialVouchers={vouchers} initialOrders={orders} canManageCampaigns={hasAdminRole(session, 'ADMIN')} />
+      <ValePassSection initialCampaigns={campaigns} initialVouchers={vouchers} initialOrders={orders} canManageCampaigns={hasAdminRole(session, 'ADMIN')} isOwner={session.role === 'SUPER_ADMIN'} />
     </div>
   );
 }
