@@ -287,6 +287,26 @@ describe('ValePassWebhookService — via WebhooksService.handleIncoming (integra
     expect(event).not.toBeNull();
   }, 15_000);
 
+  test('9b) eventos persistidos (reservation_events) de criação e cancelamento NUNCA trazem o código completo, só o mascarado + valePassId', async () => {
+    const campaign = await createCampaign();
+    const order = orderPayload({ variantId: campaign.shopifyVariantId });
+    await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: order });
+    await service.handleIncoming({ topic: 'orders/cancelled', shopifyWebhookId: nextWebhookId(), payload: { ...order, cancel_reason: 'customer' } });
+
+    const voucher = await prisma.valePass.findFirstOrThrow({ where: { campaignId: campaign.id, shopifyOrderId: String(order.id) } });
+    const events = await prisma.$queryRaw<{ type: string; detail: unknown }[]>`
+      SELECT re.type::text AS type, re.detail FROM reservation_events re
+      JOIN webhook_events we ON we.id = re.webhook_event_id
+      WHERE we.order_id = ${String(order.id)} AND re.type::text LIKE 'VALE_PASS%'`;
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    for (const ev of events) {
+      const raw = JSON.stringify(ev.detail);
+      expect(raw).not.toContain(voucher.code);
+    }
+    expect(JSON.stringify(events.map((e) => e.detail))).toContain(`${voucher.code.slice(0, -4)}****`);
+    expect(JSON.stringify(events.map((e) => e.detail))).toContain(voucher.id);
+  }, 15_000);
+
   test('10) refunds/create cancela vale ACTIVE vinculado ao pedido', async () => {
     const campaign = await createCampaign();
     const order = orderPayload({ variantId: campaign.shopifyVariantId });

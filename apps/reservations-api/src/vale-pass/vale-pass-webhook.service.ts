@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
+import { maskCode } from './vale-pass-code-mask';
 import { ValePassPaymentFlowService } from './flow/payment-flow.service';
 import { resolveWebhookSignal, type ValePassWebhookMeta } from './flow/payment-instant';
 import { decidePaymentTime } from './flow/payment-time-policy';
@@ -323,7 +324,7 @@ export class ValePassWebhookService {
         await tx.valePassEvent.create({
           data: { valePassId: created.id, type: 'CREATED', detail: { orderId, campaignId: campaign.id } },
         });
-        events.push({ type: 'VALE_PASS_CREATED', detail: { valePassId: created.id, code: created.code, campaignId: campaign.id, orderId } });
+        events.push({ type: 'VALE_PASS_CREATED', detail: { valePassId: created.id, code: maskCode(created.code), campaignId: campaign.id, orderId } });
 
         if (priorCancellation) {
           const cancelled = await this.cancelByShopify(tx, created, orderId, priorCancellation.topic, 'pedido já confirmado como cancelado/reembolsado antes da emissão');
@@ -364,7 +365,7 @@ export class ValePassWebhookService {
         await tx.valePassEvent.create({
           data: { valePassId: pass.id, type: 'SHOPIFY_ORDER_CANCELLED', detail: { orderId, topic, source: 'shopify', statusAtConfirmation: pass.status } },
         });
-        events.push({ type: 'VALE_PASS_SHOPIFY_ORDER_CANCELLED', detail: { valePassId: pass.id, code: pass.code, orderId, topic, status: pass.status } });
+        events.push({ type: 'VALE_PASS_SHOPIFY_ORDER_CANCELLED', detail: { valePassId: pass.id, code: maskCode(pass.code), orderId, topic, status: pass.status } });
       }
     }
     return events;
@@ -377,7 +378,7 @@ export class ValePassWebhookService {
     });
     if (changed.count !== 1) return null;
     await tx.valePassEvent.create({ data: { valePassId: pass.id, type: 'CANCELLED', detail: { orderId, reason: topic, source: 'shopify', ...(note ? { note } : {}) } } });
-    return { type: 'VALE_PASS_CANCELLED', detail: { valePassId: pass.id, code: pass.code, orderId, reason: topic } };
+    return { type: 'VALE_PASS_CANCELLED', detail: { valePassId: pass.id, code: maskCode(pass.code), orderId, reason: topic } };
   }
 
   private async generateUniqueCode(tx: Prisma.TransactionClient): Promise<string> {

@@ -8,13 +8,8 @@ export function maskEmail(email: string | null | undefined): string {
   return `${email[0]}***${email.slice(at)}`;
 }
 
-/** `VALLE-AB12-CD34` → `VALLE-AB12-****`. */
-export function maskCode(code: string | null | undefined): string {
-  if (!code) return '****';
-  const parts = code.split('-');
-  if (parts.length < 2) return '****';
-  return [...parts.slice(0, -1), '****'].join('-');
-}
+import { maskCode } from '../vale-pass-code-mask';
+export { maskCode } from '../vale-pass-code-mask';
 
 /** Troca qualquer código de voucher (VALLE-XXXX-XXXX) e qualquer e-mail em um texto por versões mascaradas. Rede de proteção para mensagens de erro. */
 export function scrubSensitive(text: string): string {
