@@ -70,7 +70,7 @@ import {
   type ValePassVoucherFilters,
 } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { getValePassOperatorOverview, setValePassOperatorCompany, type ValePassOperatorCompany, type ValePassOperatorOverview } from '@/lib/admin-data';
+import { confirmValePassExtension, getValePassOperatorOverview, listValePassExtensions, prepareValePassExtension, setValePassOperatorCompany, type ValePassExtensionPreview, type ValePassExtensionView, type ValePassOperatorCompany, type ValePassOperatorOverview } from '@/lib/admin-data';
 
 /**
  * Valle Pass — produto totalmente separado do fluxo de aluguel. Só o
@@ -651,5 +651,41 @@ export async function setValePassOperatorCompanyAction(adminUserId: string, comp
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof AdminApiError ? err.message : 'Não foi possível alterar o vínculo.' };
+  }
+}
+
+// ── Prorrogação coletiva da validade: SOMENTE o proprietário (a API revalida) ──────────────────────────
+export async function prepareValePassExtensionAction(campaignId: string, newUntil: string): Promise<BalanceActionResult<ValePassExtensionPreview>> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+  try {
+    return { data: await prepareValePassExtension(campaignId, newUntil), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível gerar a prévia da prorrogação.') };
+  }
+}
+
+export async function confirmValePassExtensionAction(
+  campaignId: string,
+  input: { newUntil: string; reason: string; operationId: string; confirmDate: string; expectedEligibleCount: number },
+): Promise<BalanceActionResult<{ replayed: boolean; extension: ValePassExtensionView }>> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+  try {
+    const data = await confirmValePassExtension(campaignId, input);
+    revalidateValePassPath();
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível registrar a prorrogação. Nada foi alterado: gere uma nova prévia e tente de novo.') };
+  }
+}
+
+export async function listValePassExtensionsAction(campaignId: string): Promise<BalanceActionResult<ValePassExtensionView[]>> {
+  const session = await requireAdminSession();
+  requireAdminRole(session, 'SUPER_ADMIN');
+  try {
+    return { data: await listValePassExtensions(campaignId), error: null };
+  } catch (err) {
+    return { data: null, error: balanceError(err, 'Não foi possível carregar o histórico de prorrogações.') };
   }
 }

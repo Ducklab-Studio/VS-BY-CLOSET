@@ -89,6 +89,7 @@ async function clean() {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
       await tx.$executeRaw`DELETE FROM vale_pass_block_events WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
       await tx.$executeRaw`DELETE FROM vale_pass_ledger_entries WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
+      await tx.$executeRaw`DELETE FROM vale_pass_validity_extensions WHERE campaign_id = ${campaignId}::uuid`; // histórico imutável: só a limpeza do dado SINTÉTICO (gatilhos desligados nesta transação)
     });
     await db.adminAuditEvent.deleteMany({ where: { entityId: { in: passes.map((p) => p.id) } } });
     await db.valePassEvent.deleteMany({ where: { valePassId: { in: passes.map((p) => p.id) } } });
@@ -373,6 +374,106 @@ try {
     assert.equal(await ap.getByRole('button', { name: /Quem opera cada estabelecimento/ }).count(), 0, 'só o proprietário vê a gestão de vínculos');
     await adminCtx.close();
     pass('6d) proprietário: concede e revoga vínculo pela tela (confirmação, duplo clique, histórico, auditoria crítica); administrador não vê o painel');
+  }
+
+  // 6e) Prorrogação de validade (só o proprietário): data digitada manualmente (campo vazio, sem sugestão), prévia com contagens, justificativa + data redigitada,
+  // prévia desatualizada recusada, duplo clique = uma prorrogação, saldos/histórico intactos, ADMIN/STAFF sem acesso (tela e API).
+  {
+    const NEW_UNTIL = '2027-11-30';
+    const NEW_EXPIRY = '2027-12-01T03:00:00.000Z';
+    // vouchers de apoio: um cancelado e um expirado (ficam de fora); um terceiro entra DEPOIS da prévia para provar a recusa de prévia desatualizada
+    await db.valePass.create({ data: { ...common, groupId: randomUUID(), shopifyOrderId: `${prefix}-ext1`, code: `VALLE-X${Date.now().toString(36).toUpperCase().slice(-3)}-CCCC`, amountCents: 5_000, company: 'VS_BY_CLOSET', benefitId: b2.id, status: 'CANCELLED' } });
+    await db.valePass.create({ data: { ...common, groupId: randomUUID(), shopifyOrderId: `${prefix}-ext2`, code: `VALLE-X${Date.now().toString(36).toUpperCase().slice(-3)}-DDDD`, amountCents: 5_000, company: 'VS_BY_CLOSET', benefitId: b2.id, status: 'EXPIRED' } });
+    const balancesBefore = (await db.valePass.findMany({ where: { campaignId }, orderBy: { code: 'asc' }, select: { code: true, balanceCents: true, status: true } }));
+    const ledgerBefore = await db.valePassLedgerEntry.count({ where: { valePass: { campaignId } } });
+    const owner2 = await createUser(`Proprietário prorrogação sintético ${prefix}`, 'SUPER_ADMIN');
+    const ctx = await newContext(owner2.token, { viewport: { width: 1280, height: 900 } });
+    const xp = await newPage(ctx, errors);
+    await xp.goto(vallePass);
+    await xp.getByRole('button', { name: /Prorrogação de validade/ }).click();
+    const panel = xp.locator('section[aria-label="Prorrogação de validade"]');
+    await panel.getByLabel('Campanha').selectOption({ label: `${prefix} Valle Pass` });
+    await panel.getByTestId('current-validity').getByText('até 30/09/2027').waitFor();
+    const dateInput = panel.locator('input[type="date"]');
+    assert.equal(await dateInput.inputValue(), '', 'o campo de data nasce vazio: o sistema não sugere data');
+    const previewBtn = panel.getByRole('button', { name: 'Ver prévia' });
+    assert.equal(await previewBtn.isDisabled(), true, 'sem data não há prévia');
+    // data que não aumenta: problema, sem formulário de confirmação
+    await dateInput.fill('2027-09-30');
+    await previewBtn.click();
+    await panel.getByText(/precisa ser posterior à validade atual/).first().waitFor();
+    assert.equal(await panel.getByRole('button', { name: 'Confirmar prorrogação' }).count(), 0);
+    // prévia válida
+    await dateInput.fill(NEW_UNTIL);
+    await previewBtn.click();
+    await panel.getByTestId('extension-preview').waitFor();
+    assert.equal((await panel.getByTestId('eligible-count').innerText()).trim(), '2');
+    assert.equal((await panel.getByTestId('excluded-count').innerText()).trim(), '2');
+    await panel.getByText(/Expirados.*não.*são reativados/).waitFor();
+    await panel.getByText(/Cancelados e reembolsados.*continuam cancelados/).waitFor();
+    await panel.getByText(/saldos somados R\$ 430,00/).waitFor(); // 400 + 30 (não mudam)
+    const confirmBtn = panel.getByRole('button', { name: 'Confirmar prorrogação' });
+    assert.equal(await confirmBtn.isDisabled(), true, 'confirmar exige justificativa e a data redigitada');
+    await panel.getByLabel(/Justificativa/).fill('curta');
+    await panel.getByLabel(/Digite novamente a nova data/).fill(NEW_UNTIL);
+    assert.equal(await confirmBtn.isDisabled(), true, 'justificativa curta não habilita');
+    await panel.getByLabel(/Justificativa/).fill('Decisão comercial confirmada por escrito (teste sintético)');
+    await panel.getByLabel(/Digite novamente a nova data/).fill('2027-11-29');
+    assert.equal(await confirmBtn.isDisabled(), true, 'data diferente não habilita');
+    // mudar a data descarta a prévia (nunca se confirma uma prévia de outra data)
+    await dateInput.fill('2027-12-31');
+    assert.equal(await panel.getByTestId('extension-preview').count(), 0, 'a prévia some quando a data muda');
+    await dateInput.fill(NEW_UNTIL);
+    await previewBtn.click();
+    await panel.getByTestId('extension-preview').waitFor();
+    await panel.getByLabel(/Justificativa/).fill('Decisão comercial confirmada por escrito (teste sintético)');
+    await panel.getByLabel(/Digite novamente a nova data/).fill(NEW_UNTIL);
+    // prévia desatualizada no SERVIDOR: um voucher prorrogável entra depois da prévia
+    const late = await db.valePass.create({ data: { ...common, groupId: randomUUID(), shopifyOrderId: `${prefix}-ext3`, code: `VALLE-X${Date.now().toString(36).toUpperCase().slice(-3)}-EEEE`, amountCents: 5_000, company: 'VS_BY_CLOSET', benefitId: b2.id } });
+    await confirmBtn.click();
+    await panel.getByText(/quantidade de vouchers prorrogáveis mudou/).waitFor();
+    assert.equal(await panel.getByTestId('extension-preview').count(), 0, 'prévia desatualizada é descartada');
+    assert.equal(await db.valePassValidityExtension.count({ where: { campaignId } }), 0, 'nada foi gravado com prévia desatualizada');
+    assert.equal((await db.valePass.findUniqueOrThrow({ where: { id: late.id } })).expiresAt.toISOString(), '2027-10-01T03:00:00.000Z');
+    // nova prévia (agora 3) e confirmação com duplo clique
+    await previewBtn.click();
+    await panel.getByTestId('extension-preview').waitFor();
+    assert.equal((await panel.getByTestId('eligible-count').innerText()).trim(), '3');
+    await panel.getByLabel(/Justificativa/).fill('Decisão comercial confirmada por escrito (teste sintético)');
+    await panel.getByLabel(/Digite novamente a nova data/).fill(NEW_UNTIL);
+    await confirmBtn.dblclick();
+    await panel.getByText(/Prorrogação registrada: validade até 30\/11\/2027\. 3 voucher\(s\) prorrogado\(s\)/).waitFor();
+    await panel.getByTestId('current-validity').getByText('até 30/11/2027').waitFor();
+    await panel.getByTestId('extension-history-row').first().getByText(/#1 · 30\/09\/2027 → 30\/11\/2027/).waitFor();
+    assert.equal(await db.valePassValidityExtension.count({ where: { campaignId } }), 1, 'duplo clique gravou UMA prorrogação');
+    for (const code of [A, B]) assert.equal((await db.valePass.findUniqueOrThrow({ where: { code } })).expiresAt.toISOString(), NEW_EXPIRY);
+    const after = await db.valePass.findMany({ where: { campaignId }, orderBy: { code: 'asc' }, select: { code: true, balanceCents: true, status: true, expiresAt: true } });
+    for (const b of balancesBefore) {
+      const a = after.find((x) => x.code === b.code);
+      assert.equal(a.balanceCents, b.balanceCents, 'saldo intacto');
+      assert.equal(a.status, b.status, 'status intacto (cancelado/expirado não reativados)');
+      if (b.status !== 'ACTIVE') assert.equal(a.expiresAt.toISOString(), '2027-10-01T03:00:00.000Z', 'cancelado/expirado ficam de fora');
+    }
+    assert.equal(await db.valePassLedgerEntry.count({ where: { valePass: { campaignId } } }), ledgerBefore, 'histórico de resgates intacto');
+    assert.ok(await db.adminAuditEvent.findFirst({ where: { action: 'VALE_PASS_VALIDITY_EXTENDED', entityId: campaignId, isCritical: true } }), 'auditoria crítica');
+    await shot(xp, '5-prorrogacao');
+    await ctx.close();
+
+    // ADMIN e STAFF: a tela não oferece a seção e a API direta (guards reais) recusa prévia, confirmação e histórico
+    for (const who of [admin, staff]) {
+      const c2 = await newContext(who.token, { viewport: { width: 1280, height: 900 } });
+      const p2 = await newPage(c2, errors);
+      await p2.goto(vallePass);
+      await p2.getByLabel('Código do voucher').waitFor();
+      assert.equal(await p2.getByRole('button', { name: /Prorrogação de validade/ }).count(), 0, 'só o proprietário vê a seção');
+      await c2.close();
+      const call = (method, url, body) => fetch(`${apiUrl}${url}`, { method, headers: { Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': who.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      assert.equal((await call('POST', `/admin/vale-pass/campaigns/${campaignId}/validity-extension/prepare`, { newUntil: '2028-01-31' })).status, 403);
+      assert.equal((await call('POST', `/admin/vale-pass/campaigns/${campaignId}/validity-extension`, { newUntil: '2028-01-31', reason: 'tentativa sem permissão', operationId: `try-${Date.now()}`, confirmDate: '2028-01-31', expectedEligibleCount: 3 })).status, 403);
+      assert.equal((await call('GET', `/admin/vale-pass/campaigns/${campaignId}/validity-extension`)).status, 403);
+    }
+    assert.equal(await db.valePassValidityExtension.count({ where: { campaignId } }), 1, 'ADMIN/STAFF não executaram nada');
+    pass('6e) prorrogação: data manual (sem sugestão), prévia com contagens e avisos, justificativa + data redigitada, prévia desatualizada recusada, duplo clique = 1, saldos/histórico intactos, ADMIN/STAFF sem acesso (tela e API)');
   }
 
   // 6) Celular: sem rolagem horizontal; resgate e histórico legíveis.

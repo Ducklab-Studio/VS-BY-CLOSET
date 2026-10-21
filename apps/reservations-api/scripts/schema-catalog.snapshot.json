@@ -365,6 +365,20 @@
       "deferrable": false,
       "initiallyDeferred": false
     },
+    "vale_pass_validity_extensions.vale_pass_validity_extensions_campaign_id_fkey": {
+      "columns": [
+        "campaign_id"
+      ],
+      "references": "vale_pass_campaigns",
+      "referencedColumns": [
+        "id"
+      ],
+      "onDelete": "RESTRICT",
+      "onUpdate": "CASCADE",
+      "match": "SIMPLE",
+      "deferrable": false,
+      "initiallyDeferred": false
+    },
     "vale_passes.vale_passes_benefit_id_fkey": {
       "columns": [
         "benefit_id"
@@ -1677,6 +1691,60 @@
       ],
       "predicate": null
     },
+    "vale_pass_validity_extensions.vale_pass_validity_extensions_campaign_id_idempotency_key_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "campaign_id",
+        "idempotency_key"
+      ],
+      "predicate": null
+    },
+    "vale_pass_validity_extensions.vale_pass_validity_extensions_campaign_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "campaign_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_validity_extensions.vale_pass_validity_extensions_campaign_id_seq_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 2,
+      "totalColumns": 2,
+      "valid": true,
+      "options": "0 0",
+      "columns": [
+        "campaign_id",
+        "seq"
+      ],
+      "predicate": null
+    },
+    "vale_pass_validity_extensions.vale_pass_validity_extensions_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
     "vale_passes.vale_passes_benefit_id_idx": {
       "method": "btree",
       "unique": false,
@@ -2318,6 +2386,41 @@
     },
     "vale_pass_refund_applications.review_reasons": {
       "default": "'[]'::jsonb",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.already_longer_count": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.balance_total_cents": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.cancelled_not_included": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.expired_not_included": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.extended_count": {
+      "default": "0",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_validity_extensions.id": {
+      "default": "gen_random_uuid()",
       "generated": null,
       "identity": null
     },

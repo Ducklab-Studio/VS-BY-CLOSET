@@ -1139,3 +1139,53 @@ export function getValePassOperatorOverview(): Promise<ValePassOperatorOverview>
 export function setValePassOperatorCompany(adminUserId: string, company: ValePassOperatorCompany, grant: boolean): Promise<{ changed: boolean }> {
   return adminPost(`/admin/vale-pass/operators/${pathSegment(adminUserId)}/companies/${company}/${grant ? 'grant' : 'revoke'}`, {});
 }
+
+// ── Prorrogação coletiva da validade (só o proprietário) ───────────────────────────────────
+export interface ValePassExtensionCounts {
+  readonly eligible: number;
+  readonly eligibleByCompany: { readonly VALLE_SHOWROOM: number; readonly VS_BY_CLOSET: number; readonly LEGACY: number };
+  readonly eligibleBalanceCents: number;
+  readonly expiredNotIncluded: number;
+  readonly cancelledNotIncluded: number;
+  readonly alreadyLonger: number;
+}
+export interface ValePassExtensionPreview {
+  readonly canProceed: boolean;
+  readonly problems: readonly { readonly code: string; readonly message: string }[];
+  readonly campaignId: string;
+  readonly campaignName: string;
+  readonly currentUntil: string | null;
+  readonly newUntil: string;
+  readonly timezone: string;
+  readonly newExpiresAt: string | null;
+  readonly counts: ValePassExtensionCounts;
+  readonly operationId: string;
+}
+export interface ValePassExtensionView {
+  readonly id: string;
+  readonly seq: number;
+  readonly previousUntil: string;
+  readonly newUntil: string;
+  readonly timezone: string;
+  readonly newExpiresAt: string;
+  readonly reason: string;
+  readonly actorName: string | null;
+  readonly extendedCount: number;
+  readonly expiredNotIncluded: number;
+  readonly cancelledNotIncluded: number;
+  readonly alreadyLongerCount: number;
+  readonly balanceTotalCents: number;
+  readonly createdAt: string;
+}
+export function prepareValePassExtension(campaignId: string, newUntil: string): Promise<ValePassExtensionPreview> {
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/validity-extension/prepare`, { newUntil });
+}
+export function confirmValePassExtension(
+  campaignId: string,
+  input: { newUntil: string; reason: string; operationId: string; confirmDate: string; expectedEligibleCount: number },
+): Promise<{ replayed: boolean; extension: ValePassExtensionView }> {
+  return adminPost(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/validity-extension`, input);
+}
+export function listValePassExtensions(campaignId: string): Promise<ValePassExtensionView[]> {
+  return adminGetPlain(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/validity-extension`);
+}

@@ -33,6 +33,8 @@ import { ValePassRedemptionService } from './ledger/redemption.service';
 import { ValePassBlockService } from './ledger/block.service';
 import { ValePassOperatorScopeService } from './ledger/operator-scope.service';
 import { ValePassOperatorScopeController } from './ledger/operator-scope.controller';
+import { ValePassValidityExtensionService } from './validity-extension.service';
+import { ValePassValidityExtensionController } from './validity-extension.controller';
 import { ValePassAutoVerifyScheduler, ValePassAutoVerifyService } from './flow/auto-verify.service';
 import { ValePassAlertsScheduler, ValePassOperationalAlertsService } from './flow/operational-alerts.service';
 import { ValePassFlowController } from './flow/flow.controller';
@@ -42,7 +44,7 @@ import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController],
+  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -74,6 +76,7 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassRedemptionService,
     ValePassBlockService,
     ValePassOperatorScopeService,
+    ValePassValidityExtensionService,
     ValePassAutoVerifyService,
     ValePassAutoVerifyScheduler,
     ValePassOperationalAlertsService,
