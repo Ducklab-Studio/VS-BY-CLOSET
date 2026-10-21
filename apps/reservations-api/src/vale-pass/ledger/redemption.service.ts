@@ -348,17 +348,23 @@ export class ValePassRedemptionService {
     if (voucher.status === 'USED' || (voucher.company !== null && voucher.balanceCents <= 0 && voucher.status !== 'CANCELLED')) out.push('USED_UP');
     if (voucher.validFrom && voucher.validFrom.getTime() > now.getTime()) out.push('NOT_YET_VALID');
     if (voucher.blockedAt) out.push('BLOCKED');
-    if (voucher.shopifyOrderId) {
-      if (await db.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: voucher.shopifyOrderId }, select: { shopifyOrderId: true } })) out.push('ORDER_CANCELLED');
-      if (voucher.groupId) {
-        // Mesma regra do gatilho do banco: revisão NEEDS_REVIEW do pedido cuja lista de unidades contém esta OU está vazia.
-        const blocking = await db.$queryRaw<{ id: string }[]>`
-          SELECT id FROM vale_pass_refund_applications
-          WHERE shopify_order_id = ${voucher.shopifyOrderId} AND status = 'NEEDS_REVIEW'
-            AND (detail->'reviewGroupIds' @> to_jsonb(${voucher.groupId}::text) OR jsonb_array_length(coalesce(detail->'reviewGroupIds', '[]'::jsonb)) = 0)
-          LIMIT 1`;
-        if (blocking.length > 0) out.push('REFUND_UNDER_REVIEW');
-      }
+    out.push(...(await this.orderRestrictions(db, voucher)));
+    return out;
+  }
+
+  /** Pedido cancelado/reembolsado e reembolso aguardando decisão do ADMIN: valem para RESGATE e também para REVERSÃO (reverter não pode devolver saldo nem reativar voucher de pedido reembolsado). */
+  private async orderRestrictions(db: Db, voucher: ValePass): Promise<('ORDER_CANCELLED' | 'REFUND_UNDER_REVIEW')[]> {
+    const out: ('ORDER_CANCELLED' | 'REFUND_UNDER_REVIEW')[] = [];
+    if (!voucher.shopifyOrderId) return out;
+    if (await db.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: voucher.shopifyOrderId }, select: { shopifyOrderId: true } })) out.push('ORDER_CANCELLED');
+    if (voucher.groupId) {
+      // Mesma regra do gatilho do banco: revisão NEEDS_REVIEW do pedido cuja lista de unidades contém esta OU está vazia.
+      const blocking = await db.$queryRaw<{ id: string }[]>`
+        SELECT id FROM vale_pass_refund_applications
+        WHERE shopify_order_id = ${voucher.shopifyOrderId} AND status = 'NEEDS_REVIEW'
+          AND (detail->'reviewGroupIds' @> to_jsonb(${voucher.groupId}::text) OR jsonb_array_length(coalesce(detail->'reviewGroupIds', '[]'::jsonb)) = 0)
+        LIMIT 1`;
+      if (blocking.length > 0) out.push('REFUND_UNDER_REVIEW');
     }
     return out;
   }
@@ -383,6 +389,7 @@ export class ValePassRedemptionService {
       return { problems, entry: null };
     }
     if (voucher.blockedAt) problems.push({ code: 'BLOCKED', message: RESTRICTION_TEXT.BLOCKED });
+    for (const code of await this.orderRestrictions(db, voucher)) problems.push({ code, message: RESTRICTION_TEXT[code] });
     if (entry.kind !== 'REDEEM') problems.push({ code: 'NOT_A_REDEMPTION', message: 'Só um resgate pode ser revertido.' });
     if (await db.valePassLedgerEntry.findUnique({ where: { reversesEntryId: entry.id }, select: { id: true } })) problems.push({ code: 'ALREADY_REVERSED', message: 'Este resgate já foi revertido.' });
     if (entry.kind === 'REDEEM' && voucher.balanceCents - entry.deltaCents > voucher.amountCents) problems.push({ code: 'OVER_CREDIT', message: 'A reversão deixaria o saldo acima do crédito emitido.' });
