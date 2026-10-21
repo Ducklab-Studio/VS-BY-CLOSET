@@ -1215,6 +1215,58 @@
       ],
       "predicate": null
     },
+    "vale_pass_cancellation_alerts.vale_pass_cancellation_alerts_campaign_id_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "campaign_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_cancellation_alerts.vale_pass_cancellation_alerts_pkey": {
+      "method": "btree",
+      "unique": true,
+      "primary": true,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_cancellation_alerts.vale_pass_cancellation_alerts_shopify_order_id_key": {
+      "method": "btree",
+      "unique": true,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "shopify_order_id"
+      ],
+      "predicate": null
+    },
+    "vale_pass_cancellation_alerts.vale_pass_cancellation_alerts_status_idx": {
+      "method": "btree",
+      "unique": false,
+      "primary": false,
+      "keyColumns": 1,
+      "totalColumns": 1,
+      "valid": true,
+      "options": "0",
+      "columns": [
+        "status"
+      ],
+      "predicate": null
+    },
     "vale_pass_email_events.vale_pass_email_events_outbox_id_created_at_idx": {
       "method": "btree",
       "unique": false,
@@ -2221,6 +2273,21 @@
     },
     "vale_pass_campaigns.id": {
       "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_cancellation_alerts.created_at": {
+      "default": "now()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_cancellation_alerts.id": {
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null
+    },
+    "vale_pass_cancellation_alerts.status": {
+      "default": "'open'::vale_pass_cancellation_alert_status",
       "generated": null,
       "identity": null
     },

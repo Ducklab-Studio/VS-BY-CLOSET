@@ -569,8 +569,21 @@ export interface ValePassCapacity {
   readonly holds: readonly ValePassCapacityHold[];
   /** Reembolsos que o tratamento por unidade não resolveu sozinho: aguardam um ADMIN. */
   readonly refundReviews?: readonly ValePassCapacityRefundReview[];
+  /** Pedidos cancelados/reembolsados cujo crédito JÁ foi utilizado, ainda não conferidos por um ADMIN. */
+  readonly cancellationAlerts?: readonly ValePassCapacityCancellationAlert[];
   readonly benefits: readonly ValePassCapacityBenefit[];
   readonly alerts: readonly ValePassCapacityAlert[];
+}
+
+export interface ValePassCapacityCancellationAlert {
+  readonly id: string;
+  /** Referência interna do pedido (ex.: "#1001"). */
+  readonly orderName: string | null;
+  readonly shopifyOrderId: string;
+  readonly topic: string;
+  readonly usedCents: number;
+  readonly lines: readonly { readonly company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET' | 'LEGACY'; readonly vouchers: number; readonly amountCents: number; readonly usedCents: number; readonly balanceCents: number }[];
+  readonly createdAt: string;
 }
 
 export interface ValePassCapacityRefundReview {
@@ -1188,4 +1201,9 @@ export function confirmValePassExtension(
 }
 export function listValePassExtensions(campaignId: string): Promise<ValePassExtensionView[]> {
   return adminGetPlain(`/admin/vale-pass/campaigns/${pathSegment(campaignId)}/validity-extension`);
+}
+
+/** Conferência (só registra que um ADMIN viu o alerta; não altera saldo, voucher, reembolso nem cancelamento). */
+export function acknowledgeValePassCancellationAlert(id: string, note: string): Promise<{ id: string; status: 'ACKNOWLEDGED' | 'OPEN' }> {
+  return adminPost(`/admin/vale-pass/cancellation-alerts/${pathSegment(id)}/acknowledge`, { note });
 }

@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import type { ValePassCapacityRefundReview, ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
-import { resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import { formatCents } from '@/lib/valle-pass-balance';
+import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
 /**
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
@@ -312,6 +313,78 @@ const REFUND_REASON_LABELS: Record<string, string> = {
 };
 
 /** Reembolsos em revisão: a API já cancelou o que era seguro; aqui o ADMIN decide o resto. Voucher usado nunca é alterado. */
+const COMPANY_NAMES: Record<string, string> = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET', LEGACY: 'Voucher único (legado)' };
+
+/**
+ * Pedidos CANCELADOS/REEMBOLSADOS cujo crédito já tinha sido utilizado. Só informa: os vouchers não utilizados já foram cancelados pela regra de sempre e nada foi alterado em
+ * saldos nem no histórico. O ADMIN confere o reembolso/conciliação com o financeiro e marca como conferido (justificativa + auditoria). Sem código de voucher e sem dado pessoal.
+ */
+export function CancellationAlertsPanel({ alerts, canManage, onChanged }: { alerts: readonly ValePassCapacityCancellationAlert[]; canManage: boolean; onChanged: () => void }) {
+  return (
+    <section aria-label="Cancelamentos com crédito utilizado">
+      <h4 className="mb-2 text-xs font-semibold text-red-500">Pedidos cancelados/reembolsados com crédito já utilizado ({alerts.length})</h4>
+      <ul className="space-y-2">
+        {alerts.map((alert) => (
+          <CancellationAlertRow key={alert.id} alert={alert} canManage={canManage} onChanged={onChanged} />
+        ))}
+      </ul>
+      <p className={hintClass}>
+        Confira o reembolso feito na Shopify (ou, se foi feito fora dela, a conciliação com o financeiro) levando em conta o crédito já consumido. Marcar como conferido não altera saldos, vouchers nem o reembolso.
+      </p>
+    </section>
+  );
+}
+
+function CancellationAlertRow({ alert, canManage, onChanged }: { alert: ValePassCapacityCancellationAlert; canManage: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function acknowledge() {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    const result = await acknowledgeValePassCancellationAlertAction(alert.id, note);
+    setPending(false);
+    if (result.error) return setError(result.error);
+    setNote('');
+    setOpen(false);
+    onChanged();
+  }
+
+  return (
+    <li className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-xs text-ink dark:text-dark-text" data-testid="cancellation-alert-row">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          <strong>{alert.orderName ?? 'Pedido'}</strong> · <span title="Identificador interno do pedido na Shopify">ref. {alert.shopifyOrderId}</span> · {alert.topic} · {formatDateTime(alert.createdAt)} · <strong>{formatCents(alert.usedCents)} já utilizados</strong>
+        </span>
+        {canManage ? (
+          <button type="button" className={secondaryButton} onClick={() => setOpen((value) => !value)}>
+            {open ? 'Fechar' : 'Conferir'}
+          </button>
+        ) : null}
+      </div>
+      <ul className="mt-1.5 space-y-0.5 text-[0.72rem] text-ink/70 dark:text-dark-subtle">
+        {alert.lines.map((line) => (
+          <li key={line.company}>
+            {COMPANY_NAMES[line.company] ?? line.company}: emitido {formatCents(line.amountCents)} · utilizado {formatCents(line.usedCents)} · saldo {formatCents(line.balanceCents)}
+          </li>
+        ))}
+      </ul>
+      {open ? (
+        <div className="mt-2 space-y-2">
+          <textarea className={inputClass} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Justificativa da conferência (mínimo de 10 caracteres)" />
+          <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 10} onClick={() => void acknowledge()}>
+            {pending ? 'Registrando…' : 'Marcar como conferido'}
+          </button>
+          {error ? <p role="alert" className="text-red-500">{error}</p> : null}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 export function RefundReviewsPanel({ reviews, canManage, onChanged }: { reviews: readonly ValePassCapacityRefundReview[]; canManage: boolean; onChanged: () => void }) {
   return (
     <section aria-label="Reembolsos em revisão">

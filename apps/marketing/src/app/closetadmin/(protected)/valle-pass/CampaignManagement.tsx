@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp, Layers, Pencil, Plus, RefreshCw } from 'lucide-react';
 import type { ValePassCampaign, ValePassCapacity, ValePassCapacityAlert, ValePassLot, ValePassLotAction, ValePassLotStatus } from '@/lib/admin-data';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
-import { BenefitsPanel, HoldsPanel, RefundReviewsPanel } from './HoldsAndBenefits';
+import { BenefitsPanel, CancellationAlertsPanel, HoldsPanel, RefundReviewsPanel } from './HoldsAndBenefits';
 import {
   actOnValePassLotAction,
   createValePassLotAction,
@@ -107,6 +107,7 @@ export function CampaignManagement({
               {capacity.alerts.length > 0 ? <AlertList alerts={capacity.alerts} /> : null}
               {capacity.paidOrdersWithoutVoucher.length > 0 ? <ShortfallList capacity={capacity} /> : null}
               {capacity.holds.length > 0 ? <HoldsPanel holds={capacity.holds} canManage={canManage} onChanged={refresh} /> : null}
+              {(capacity.cancellationAlerts ?? []).length > 0 ? <CancellationAlertsPanel alerts={capacity.cancellationAlerts ?? []} canManage={canManage} onChanged={refresh} /> : null}
               {(capacity.refundReviews ?? []).length > 0 ? <RefundReviewsPanel reviews={capacity.refundReviews ?? []} canManage={canManage} onChanged={refresh} /> : null}
               <BenefitsPanel campaignId={campaign.id} benefits={capacity.benefits} canManage={canManage} onChanged={refresh} />
               <LotsPanel campaignId={campaign.id} capacity={capacity} canManage={canManage} onChanged={refresh} />

@@ -89,6 +89,7 @@ async function clean() {
       await tx.$executeRawUnsafe('SET LOCAL session_replication_role = replica');
       await tx.$executeRaw`DELETE FROM vale_pass_block_events WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
       await tx.$executeRaw`DELETE FROM vale_pass_ledger_entries WHERE vale_pass_id = ANY(${passes.map((p) => p.id)}::uuid[])`;
+      await tx.$executeRaw`DELETE FROM vale_pass_cancellation_alerts WHERE campaign_id = ${campaignId}::uuid`;
       await tx.$executeRaw`DELETE FROM vale_pass_validity_extensions WHERE campaign_id = ${campaignId}::uuid`; // histórico imutável: só a limpeza do dado SINTÉTICO (gatilhos desligados nesta transação)
     });
     await db.adminAuditEvent.deleteMany({ where: { entityId: { in: passes.map((p) => p.id) } } });
@@ -474,6 +475,56 @@ try {
     }
     assert.equal(await db.valePassValidityExtension.count({ where: { campaignId } }), 1, 'ADMIN/STAFF não executaram nada');
     pass('6e) prorrogação: data manual (sem sugestão), prévia com contagens e avisos, justificativa + data redigitada, prévia desatualizada recusada, duplo clique = 1, saldos/histórico intactos, ADMIN/STAFF sem acesso (tela e API)');
+  }
+
+  // 6f) Alerta de cancelamento/reembolso com crédito já utilizado: aparece na campanha com referência do pedido, empresa, valores utilizados e saldo, SEM código de voucher nem
+  // dado pessoal; STAFF só vê; ADMIN confere com justificativa (botão desabilitado sem ela, duplo clique = uma conferência) e o alerta sai da lista; nada de saldo muda.
+  {
+    const alertRow = await db.valePassCancellationAlert.create({
+      data: {
+        shopifyOrderId: `${prefix}-alerta`, shopifyOrderName: '#T-9001', campaignId, topic: 'refunds/create', usedCents: 25_000,
+        detail: { vouchersWithUse: 2, lines: [{ company: 'VALLE_SHOWROOM', vouchers: 1, amountCents: 50_000, usedCents: 20_000, balanceCents: 30_000 }, { company: 'VS_BY_CLOSET', vouchers: 1, amountCents: 5_000, usedCents: 5_000, balanceCents: 0 }] },
+      },
+    });
+    const balancesBefore = (await db.valePass.findMany({ where: { campaignId }, orderBy: { code: 'asc' }, select: { code: true, balanceCents: true, status: true } }));
+    // STAFF: vê o alerta, sem o botão de conferir
+    const sctx = await newContext(staff.token, { viewport: { width: 1280, height: 900 } });
+    const sp = await newPage(sctx, errors);
+    await sp.goto(vallePass);
+    await sp.getByRole('button', { name: /Capacidade, lotes e configuração/ }).first().click();
+    const sRow = sp.getByTestId('cancellation-alert-row');
+    await sRow.waitFor();
+    assert.equal(await sRow.getByRole('button', { name: 'Conferir' }).count(), 0, 'STAFF não confere');
+    await sctx.close();
+
+    const actx = await newContext(admin.token, { viewport: { width: 1280, height: 900 } });
+    const ap = await newPage(actx, errors);
+    await ap.goto(vallePass);
+    await ap.getByRole('button', { name: /Capacidade, lotes e configuração/ }).first().click();
+    const row = ap.getByTestId('cancellation-alert-row');
+    await row.waitFor();
+    await ap.getByText(/cancelados ou reembolsados DEPOIS de o crédito ser utilizado/).waitFor();
+    const text = await row.innerText();
+    assert.ok(text.includes('#T-9001') && text.includes(`${prefix}-alerta`) && text.includes('R$ 250,00 já utilizados'), 'referência do pedido e total utilizado');
+    assert.ok(/Valle Showroom: emitido R\$ 500,00 · utilizado R\$ 200,00 · saldo R\$ 300,00/.test(text) && /VS BY CLOSET: emitido R\$ 50,00 · utilizado R\$ 50,00 · saldo R\$ 0,00/.test(text), 'empresa, valores utilizados e saldo');
+    const section = await ap.locator('section[aria-label="Cancelamentos com crédito utilizado"]').innerText();
+    assert.ok(!section.includes(A) && !section.includes(B) && !/Maria|maria\.souza|91234/.test(section), 'sem código de voucher nem dado pessoal');
+    await row.getByRole('button', { name: 'Conferir' }).click();
+    const ackBtn = row.getByRole('button', { name: 'Marcar como conferido' });
+    assert.equal(await ackBtn.isDisabled(), true, 'conferir exige justificativa');
+    await row.getByPlaceholder(/Justificativa da conferência/).fill('curta');
+    assert.equal(await ackBtn.isDisabled(), true);
+    await row.getByPlaceholder(/Justificativa da conferência/).fill('Reembolso conferido com o financeiro (teste sintético)');
+    await ackBtn.dblclick(); // duplo clique: uma única conferência
+    await ap.getByTestId('cancellation-alert-row').waitFor({ state: 'detached' });
+    const done = await db.valePassCancellationAlert.findUniqueOrThrow({ where: { id: alertRow.id } });
+    assert.equal(done.status, 'ACKNOWLEDGED');
+    assert.equal(await db.adminAuditEvent.count({ where: { action: 'VALE_PASS_CANCELLATION_ALERT_ACKNOWLEDGED', entityId: `${prefix}-alerta` } }), 1, 'uma conferência auditada');
+    const after = await db.valePass.findMany({ where: { campaignId }, orderBy: { code: 'asc' }, select: { code: true, balanceCents: true, status: true } });
+    assert.deepEqual(after, balancesBefore, 'conferir o alerta não altera saldos nem status');
+    await shot(ap, '6-alerta-cancelamento');
+    await actx.close();
+    pass('6f) alerta de cancelamento com crédito utilizado: referência, empresa, valores e saldo; sem código/dado pessoal; STAFF só vê; ADMIN confere com justificativa (duplo clique = 1); saldos intactos');
   }
 
   // 6) Celular: sem rolagem horizontal; resgate e histórico legíveis.

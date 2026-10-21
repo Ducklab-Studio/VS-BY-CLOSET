@@ -34,6 +34,8 @@ import { ValePassBlockService } from './ledger/block.service';
 import { ValePassOperatorScopeService } from './ledger/operator-scope.service';
 import { ValePassOperatorScopeController } from './ledger/operator-scope.controller';
 import { ValePassValidityExtensionService } from './validity-extension.service';
+import { ValePassCancellationAlertsService } from './cancellation-alerts.service';
+import { ValePassCancellationAlertsController } from './cancellation-alerts.controller';
 import { ValePassValidityExtensionController } from './validity-extension.controller';
 import { ValePassAutoVerifyScheduler, ValePassAutoVerifyService } from './flow/auto-verify.service';
 import { ValePassAlertsScheduler, ValePassOperationalAlertsService } from './flow/operational-alerts.service';
@@ -44,7 +46,7 @@ import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController],
+  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController, ValePassCancellationAlertsController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -77,6 +79,7 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassBlockService,
     ValePassOperatorScopeService,
     ValePassValidityExtensionService,
+    ValePassCancellationAlertsService,
     ValePassAutoVerifyService,
     ValePassAutoVerifyScheduler,
     ValePassOperationalAlertsService,

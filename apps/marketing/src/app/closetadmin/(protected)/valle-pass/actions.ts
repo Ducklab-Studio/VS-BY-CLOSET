@@ -70,7 +70,7 @@ import {
   type ValePassVoucherFilters,
 } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
-import { confirmValePassExtension, getValePassOperatorOverview, listValePassExtensions, prepareValePassExtension, setValePassOperatorCompany, type ValePassExtensionPreview, type ValePassExtensionView, type ValePassOperatorCompany, type ValePassOperatorOverview } from '@/lib/admin-data';
+import { acknowledgeValePassCancellationAlert, confirmValePassExtension, getValePassOperatorOverview, listValePassExtensions, prepareValePassExtension, setValePassOperatorCompany, type ValePassExtensionPreview, type ValePassExtensionView, type ValePassOperatorCompany, type ValePassOperatorOverview } from '@/lib/admin-data';
 
 /**
  * Valle Pass — produto totalmente separado do fluxo de aluguel. Só o
@@ -687,5 +687,20 @@ export async function listValePassExtensionsAction(campaignId: string): Promise<
     return { data: await listValePassExtensions(campaignId), error: null };
   } catch (err) {
     return { data: null, error: balanceError(err, 'Não foi possível carregar o histórico de prorrogações.') };
+  }
+}
+
+// ── Alerta de cancelamento/reembolso com crédito já utilizado: conferência (ADMIN; a API revalida) ──────────
+export async function acknowledgeValePassCancellationAlertAction(id: string, note: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (note.trim().length < 10) return { error: 'Informe a justificativa (mínimo de 10 caracteres).' };
+  try {
+    await acknowledgeValePassCancellationAlert(id, note.trim());
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível registrar a conferência.' };
   }
 }
