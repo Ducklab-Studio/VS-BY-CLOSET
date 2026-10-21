@@ -1,6 +1,6 @@
 # Valle Pass 2027 — prorrogação coletiva da validade (preparação)
 
-> **Contém migration** `20261028100000_vale_pass_prorrogacao_validade` (aditiva: uma tabela vazia + funções/gatilhos + uma função substituída). **Nada é prorrogado por este PR**: nenhuma data é definida ou sugerida, nenhum voucher é alterado, não há botão na tela (só API do proprietário). Aplicar em produção só com autorização expressa. Prorrogar de verdade depende da **nova data final** e das decisões abaixo.
+> **Contém migration** `20261028100000_vale_pass_prorrogacao_validade` (aditiva: uma tabela vazia + funções/gatilhos + uma função substituída). **Nada é prorrogado por este PR**: nenhuma data é definida ou sugerida e nenhum voucher é alterado. A tela do ClosetAdmin (abaixo) só **executa** quando o proprietário digitar a data e confirmar. Aplicar em produção só com autorização expressa. Prorrogar de verdade depende da **nova data final** e das decisões abaixo.
 
 ## Auditoria (antes)
 - `vale_passes.expires_at` e `valid_from` eram **imutáveis** por gatilho (`vale_pass_immutable_fields`): nenhuma forma de prorrogar, nem por SQL.
@@ -22,6 +22,9 @@
 ## API (somente proprietário)
 `POST /admin/vale-pass/campaigns/:id/validity-extension/prepare` `{ newUntil: "AAAA-MM-DD" }` → contagens e `operationId` (nada gravado) · `POST …/validity-extension` `{ newUntil, reason, operationId, confirmDate, expectedEligibleCount }` · `GET …/validity-extension` (histórico).
 
+## Interface no ClosetAdmin (só SUPER_ADMIN)
+ClosetAdmin → Valle Pass → **"Prorrogação de validade"** (recolhida por padrão; ADMIN e STAFF **não veem a seção** e a API os recusa com 403). Escolher a campanha mostra a **validade atual**; o campo de nova data nasce **vazio** (nenhum valor sugerido). "Ver prévia" mostra: validade atual → nova (e o instante em que deixa de valer, no fuso), **quantos serão prorrogados** (por empresa, mais a soma dos saldos, que não muda), **quantos ficam de fora** (expirados, cancelados/reembolsados, já com validade igual ou maior) e os avisos: expirados não são reativados (decisão comercial pendente), cancelados/reembolsados continuam cancelados, saldos/histórico/bloqueios/benefícios intactos, a prorrogação não pode ser desfeita. Confirmar exige **justificativa (≥10 caracteres)** e a **nova data redigitada**; trava de duplo clique; estados de carregamento, erro e sucesso. A prévia é **descartada** ao mudar campanha ou data e o servidor recusa prévia desatualizada (contagem mudou/validade mudou). Abaixo, o **histórico de prorrogações** (#, datas, quem, quando, contagens, saldos somados, motivo).
+
 ## Procedimento operacional (quando a data for definida)
 1. Anderson/jurídico definem a **nova data final** por escrito e as decisões abaixo. 2. Proprietário gera a prévia e confere: validade atual, nova data, quantos vouchers por empresa, soma dos saldos, quantos ficam de fora. 3. Confirma com a justificativa (cite a decisão), redigitando a data. 4. Conferir o histórico, a auditoria e uma leitura de integridade (saldos/ledger iguais). 5. Avisar clientes só se for decidido (e-mail **não** é enviado por este fluxo). Erro/"nada foi alterado": repetir a prévia.
 **Rollback**: não há "desfazer" de uma prorrogação aplicada (só aumenta, por desenho); o `down.sql` remove a estrutura (só sem prorrogações reais) e **não** devolve datas. Antes de aplicar em produção, ensaiar em banco descartável.
@@ -34,7 +37,6 @@
 5. **Vouchers bloqueados**: prorrogados (bloqueio é independente) — confirmar.
 6. Fuso da validade (Brasil × Chile) — afeta o instante de vencimento (a diferença é de horas).
 7. Comunicação ao cliente (e-mail/WhatsApp) e quem autoriza (hoje só o proprietário).
-8. Tela no ClosetAdmin (não implementada nesta etapa).
 
 ## Testes
-`validity-extension.integration.test.ts` (15, banco descartável): prévia sem gravar, datas inválidas, prorrogação com saldos/ledger/benefícios preservados e eventos, exclusão de cancelados/expirados/mais longos, legado, sequência e prévia vencida, fuso, UPDATE direto recusado (inclusive com contexto forjado), histórico imutável, falha no meio, só SUPER_ADMIN, confirmação explícita, idempotência/concorrência, e prorrogação simultânea a resgates e cancelamentos (sem impasse). Suíte completa da API, typecheck, lint e builds verdes.
+`validity-extension.integration.test.ts` (15, banco descartável): prévia sem gravar, datas inválidas, prorrogação com saldos/ledger/benefícios preservados e eventos, exclusão de cancelados/expirados/mais longos, legado, sequência e prévia vencida, fuso, UPDATE direto recusado (inclusive com contexto forjado), histórico imutável, falha no meio, só SUPER_ADMIN, confirmação explícita, idempotência/concorrência, e prorrogação simultânea a resgates e cancelamentos (sem impasse). Navegador real (`test:valle-pass-balance`, passo 6e): data manual sem sugestão, prévia e avisos, justificativa + data redigitada, prévia desatualizada recusada, duplo clique = uma prorrogação, saldos/histórico intactos, ADMIN/STAFF sem acesso (tela e API direta). Suíte completa da API, typecheck, lint e builds verdes.
