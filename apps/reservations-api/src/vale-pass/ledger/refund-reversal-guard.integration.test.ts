@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { purgeLedgerForTest } from './ledger-test-utils';
 import { ValePassLedgerService } from './ledger.service';
 import { ValePassRedemptionService, type Actor } from './redemption.service';
+import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { ValePassWebhookService } from '../vale-pass-webhook.service';
 import { ValePassVouchersService } from '../vale-pass-vouchers.service';
 
@@ -175,6 +176,44 @@ localDescribe('cancelamento/reembolso do pedido pela Shopify com crédito parcia
     // idempotência: o mesmo aviso de novo não muda nada
     await prisma.$transaction((tx) => webhook.handleOrderCancelledOrRefunded(tx, u.orderId, 'refunds/create'));
     expect(await row(u.showroom.id)).toMatchObject({ status: 'CANCELLED', balanceCents: 30_000 });
+    expect(await ledger.reconcile()).toEqual([]);
+  });
+});
+
+localDescribe('reversão × reembolso: concorrência e idempotência', () => {
+  test('reversão e cancelamento/reembolso simultâneos (12 rodadas): nunca termina ATIVO com o pedido reembolsado; saldos e ledger consistentes', async () => {
+    for (let round = 0; round < 12; round++) {
+      const u = await newUnit();
+      const used = await redeem(u.closet, 5_000);
+      const prep = await redemption.prepareReverse(u.closet.code, used.entry.id, admin);
+      const doReverse = () =>
+        redemption.confirmReverse(u.closet.code, used.entry.id, { reason: 'reversão concorrente (teste)', operationId: prep.operationId, expectedBalanceCents: prep.expectedBalanceCents, confirmAmountCents: 5_000 }, admin).then((r) => r, (e: unknown) => e);
+      // o webhook real toma o lock do pedido antes de tratar o reembolso
+      const doRefund = () => prisma.$transaction(async (tx) => { await lockShopifyOrder(tx, u.orderId); return webhook.handleOrderCancelledOrRefunded(tx, u.orderId, 'refunds/create'); });
+      const [a, b] = await Promise.all(round % 2 === 0 ? [doReverse(), doRefund()] : [doRefund(), doReverse()]);
+      void a; void b;
+      const final = await row(u.closet.id);
+      // reversão antes do reembolso → o voucher ativo é cancelado pelo webhook; reembolso antes da reversão → reversão recusada e o USADO continua USADO
+      expect(['CANCELLED', 'USED']).toContain(final.status);
+      expect(final.status).not.toBe('ACTIVE');
+      expect(await prisma.valePassOrderCancellation.count({ where: { shopifyOrderId: u.orderId } })).toBe(1);
+      expect(await ledger.reconcile()).toEqual([]);
+    }
+  }, 120_000);
+
+  test('idempotência: repetir uma reversão JÁ feita (antes do reembolso) devolve o resultado original; uma reversão NOVA depois do reembolso é recusada', async () => {
+    const u = await newUnit();
+    const first = await redeem(u.closet, 5_000);
+    const second = await redeem(u.showroom, 10_000);
+    const prep = await redemption.prepareReverse(u.closet.code, first.entry.id, admin);
+    const input = { reason: 'reversão legítima (teste)', operationId: prep.operationId, expectedBalanceCents: prep.expectedBalanceCents, confirmAmountCents: 5_000 };
+    const done = await redemption.confirmReverse(u.closet.code, first.entry.id, input, admin);
+    expect(done).toMatchObject({ replayed: false, status: 'ACTIVE', balanceCents: 5_000 });
+    await markOrderRefunded(u.orderId);
+    const again = await redemption.confirmReverse(u.closet.code, first.entry.id, input, admin); // mesma operação: resultado original, nada novo
+    expect(again).toMatchObject({ replayed: true, balanceCents: 5_000 });
+    expect(await entries(u.closet.id)).toHaveLength(2);
+    expect((await rejection((await reverse(u.showroom, second.entry.id)).run()))?.response?.code).toBe('ORDER_CANCELLED');
     expect(await ledger.reconcile()).toEqual([]);
   });
 });
