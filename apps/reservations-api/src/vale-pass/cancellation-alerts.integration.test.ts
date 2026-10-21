@@ -268,6 +268,27 @@ localDescribe('apresentação no ClosetAdmin (API) e conferência', () => {
     expect(await auditOf(u.orderId, 'VALE_PASS_CANCELLATION_ALERT_ACKNOWLEDGED')).toHaveLength(1);
   });
 
+  test('o proprietário (SUPER_ADMIN) também confere; justificativa, quem e quando ficam no registro e na auditoria', async () => {
+    const owner = await prisma.adminUser.create({ data: { name: 'Proprietário Teste Alerta', phone: `${TAG}-owner`, pinHash: 'x', role: 'SUPER_ADMIN', active: true } });
+    try {
+      const u = await newUnit();
+      await redeem(u.closet, 1_000);
+      await cancelOrder(u.orderId);
+      const [alert] = await alertsOf(u.orderId);
+      const done = await alerts.acknowledge(alert.id, 'Conferido pelo proprietário (teste sintético)', { id: owner.id, name: owner.name, role: 'SUPER_ADMIN' });
+      expect(done).toMatchObject({ status: 'ACKNOWLEDGED', acknowledgedByName: owner.name, acknowledgeNote: 'Conferido pelo proprietário (teste sintético)' });
+      const stored = (await alertsOf(u.orderId))[0];
+      expect(stored).toMatchObject({ status: 'ACKNOWLEDGED', acknowledgedBy: owner.id });
+      expect(stored.acknowledgedAt).not.toBeNull();
+      const audit = await auditOf(u.orderId, 'VALE_PASS_CANCELLATION_ALERT_ACKNOWLEDGED');
+      expect(audit[0]).toMatchObject({ adminUserId: owner.id, isCritical: true });
+      expect(JSON.stringify(audit[0].detail)).toContain('Conferido pelo proprietário');
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: owner.id } });
+      await prisma.adminUser.delete({ where: { id: owner.id } });
+    }
+  });
+
   test('o banco protege o alerta: fatos imutáveis, conferência só uma vez e sem apagar', async () => {
     const u = await newUnit();
     await redeem(u.closet, 1_000);
