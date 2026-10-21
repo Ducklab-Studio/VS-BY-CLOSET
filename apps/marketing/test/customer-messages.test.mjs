@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 
@@ -104,4 +104,23 @@ test('Valle Pass: compra direta intacta (não usa estas mensagens nem o calendá
   assert.equal(/TEMPORARILY_UNAVAILABLE|rentalStockNotice|customerFacingCartError|RentalCalendar/.test(presentation), false);
   assert.match(read('src/app/pecas/[handle]/page.tsx'), /isValePass \?\s*\(\s*<ValePassPresentation/);
   assert.match(read('src/lib/cart.ts'), /O Valle Pass não entra numa reserva de aluguel\./);
+});
+
+test('Valle Pass: nenhum texto público fala em vale-presente/presente nem promete transferência (vouchers intransferíveis); a página só afirma fatos confirmados', () => {
+  const presentation = read('src/components/ValePassPresentation.tsx');
+  assert.equal(/vale[- ]presente|presente(ar)?\b|(?<!in)transfer[ií]ve/i.test(presentation), false, 'vale-presente/transferível na página do Valle Pass');
+  assert.match(presentation, /R\$ 500 para a Valle Showroom e um voucher de R\$ 50\s+para a VS BY CLOSET/);
+  assert.match(presentation, /intransferíveis/);
+  assert.equal(/qualquer peça/i.test(presentation), false, 'o uso não é "em qualquer peça do closet"');
+  // nenhum outro arquivo de código do site (fora dos testes) volta a chamar o Valle Pass de vale-presente
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+      const rel = `${dir}${entry.name}`;
+      if (entry.isDirectory()) walk(`${rel}/`);
+      else if (/\.(tsx?|mjs)$/.test(entry.name) && /vale[- ]presente/i.test(readFileSync(new URL(rel, root), 'utf8'))) offenders.push(rel);
+    }
+  };
+  walk('src/');
+  assert.deepEqual(offenders, []);
 });

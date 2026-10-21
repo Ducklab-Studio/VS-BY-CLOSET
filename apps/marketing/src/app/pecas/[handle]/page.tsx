@@ -135,7 +135,7 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
     product.descriptionHtml.replace(/<p(?:\s[^>]*)?>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, ''),
   );
 
-  // Valle Pass é vale-presente/crédito de compra — produto Shopify
+  // Valle Pass (dois vouchers: Valle Showroom e VS BY CLOSET) — produto Shopify
   // normal, mas NUNCA pode entrar no fluxo de aluguel (calendário,
   // disponibilidade, HOLD, reserva). Ver lib/vale-pass-product.ts.
   const isValePass =

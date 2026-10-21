@@ -458,7 +458,7 @@ export function purgeEmployee(id: string, adminUserId: string): Promise<{ id: st
   return adminPost(`/admin/employees/${pathSegment(id)}/purge`, { adminUserId });
 }
 
-/** Valle Pass — vale-presente/crédito de compra, produto TOTALMENTE
+/** Valle Pass — dois vouchers por unidade, produto TOTALMENTE
  *  separado do fluxo de aluguel (nunca depende de disponibilidade,
  *  HOLD ou datas de retirada/devolução). Vendido pelo checkout oficial
  *  da Shopify; este painel só configura campanha e opera os vales já

@@ -3,7 +3,7 @@ import { storeUrl } from './shopify';
 /**
  * Identificação do produto Valle Pass no catálogo da Shopify.
  *
- * Vale-presente/crédito de compra — produto Shopify normal, mas que
+ * Valle Pass (dois vouchers por unidade) — produto Shopify normal, mas que
  * NUNCA pode passar pelo fluxo de aluguel (calendário, disponibilidade,
  * HOLD, reserva). Ver apps/reservations-api/src/vale-pass para o
  * backend que processa a compra pelo webhook `orders/paid`.

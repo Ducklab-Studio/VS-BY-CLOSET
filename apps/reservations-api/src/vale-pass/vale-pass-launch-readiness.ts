@@ -14,6 +14,10 @@ export const OFFICIAL_SPEC = {
     { company: 'VS_BY_CLOSET', amountCents: 5_000 },
   ],
   discountPercent: 10,
+  /** Início das vendas previsto (30/10/2026). O sistema NÃO tem data de início de vendas: a venda é controlada pelo estoque da Shopify. */
+  salesStart: '2026-10-30',
+  /** Encerramento previsto: último dia de maio de 2027 (ou esgotamento do estoque — interpretação comercial ainda a confirmar). */
+  salesEndLastDay: '2027-05-31',
 } as const;
 
 export interface ReadinessCampaign {
@@ -24,6 +28,8 @@ export interface ReadinessCampaign {
   /** `YYYY-MM-DD` ou nulo. */
   readonly voucherValidFrom: string | null;
   readonly voucherValidUntil: string | null;
+  /** Encerramento das vendas (informativo; nenhum encerramento automático é feito). */
+  readonly salesEndDate?: string | null;
 }
 
 export interface ReadinessBenefit {
@@ -100,9 +106,16 @@ export function evaluateLaunchReadiness(input: ReadinessInput): ReadinessItem[] 
   out.push(
     campaign.voucherValidFrom
       ? item('valid-from', 'OK', `validade começa em ${campaign.voucherValidFrom}`)
-      : item('valid-from', 'PENDING', 'data de INÍCIO da validade não definida (sem ela a emissão fica retida, por segurança)'),
+      : item('valid-from', 'PENDING', 'data de INÍCIO da validade não definida: começa na abertura da temporada de neve de 2027, data ainda não informada (sem ela a emissão fica retida, por segurança)'),
   );
-  out.push(item('extension', 'PENDING', 'prorrogação da validade: regra não definida (não implementada)'));
+  out.push(item('extension', 'PENDING', 'prorrogação da validade: vale para todos os vouchers, mas a elegibilidade de expirados e cancelados e a data final ainda precisam de confirmação (a estrutura existe; nenhuma data foi definida)'));
+
+  // Janela de vendas: o início não é campo do sistema (a Shopify controla pelo estoque); o encerramento é só informativo.
+  out.push(item('sales-start', 'PENDING', `início das vendas previsto em 30/10/2026: o sistema não tem data de início; a venda abre quando o estoque da Shopify for ajustado ao saldo do lote 1 (hoje deve estar em 0)`));
+  const salesEnd = campaign.salesEndDate ?? null;
+  if (salesEnd === null) out.push(item('sales-end', 'PENDING', 'encerramento das vendas (último dia de maio de 2027 ou esgotamento do estoque) não registrado: interpretação comercial a confirmar; nenhum encerramento automático existe'));
+  else if (salesEnd === OFFICIAL_SPEC.salesEndLastDay) out.push(item('sales-end', 'OK', 'encerramento informativo registrado em 31/05/2027 (o esgotamento do estoque encerra antes; nada é encerrado automaticamente)'));
+  else out.push(item('sales-end', 'DIVERGENCE', `encerramento registrado em ${salesEnd}; previsto: ${OFFICIAL_SPEC.salesEndLastDay}`));
 
   if (!input.hasOpenLot) out.push(item('lot', 'PENDING', 'nenhum lote comercial aberto (quantidades e datas de lote dependem do Anderson); sem lote o estoque recomendado é 0'));
   if (input.shopifyStock === null) out.push(item('shopify-stock', 'PENDING', 'estoque da Shopify não consultado'));
