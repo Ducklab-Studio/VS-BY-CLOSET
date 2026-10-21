@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Ban,
   CheckCircle2,
-  Gift,
   Plus,
   Power,
   PowerOff,
@@ -341,7 +340,7 @@ export function ValePassSection({
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Gift size={18} className="text-marsala dark:text-gold" />
+          <Ticket size={18} className="text-marsala dark:text-gold" />
           <h2 className="font-heading text-lg font-semibold text-ink dark:text-dark-text">
             Campanhas
           </h2>

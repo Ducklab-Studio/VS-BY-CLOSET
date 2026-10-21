@@ -57,3 +57,34 @@ Ação **manual na Shopify, só com autorização expressa** (o app não escreve
 2. Complementar: tirar o produto da coleção/menu da vitrine, mantendo-o ativo — evita tráfego, mas não impede checkout por link direto; por isso não substitui o item 1.
 3. Despublicar o produto dos canais é a opção mais forte (some do Storefront), porém muda o vínculo público e exige republicar no lançamento; só se o item 1 não bastar.
 Depois de aplicar: conferir via consulta pública (somente leitura) que a variante deixou de estar à venda e que os demais produtos seguem normais. No lançamento, ajustar o estoque ao saldo do lote 1 aprovado.
+
+## Atualização — decisões de Anderson de 21/10/2026 e preparação local (sem produção)
+Fontes: mensagem de Anderson (preço, dois vouchers, intransferíveis, ADMIN opera as duas lojas, validade, janela de vendas, lotes, 10%, reaproveitar o produto existente). Nada abaixo altera Shopify, campanha de produção, flags ou dados.
+
+### Matriz
+| Decisão | Situação no sistema |
+|---|---|
+| R$ 350 = voucher R$ 500 Valle Showroom + voucher R$ 50 VS BY CLOSET, independentes | ✅ implementado e testado (dois vouchers por unidade, saldo e empresa próprios) |
+| Vouchers intransferíveis | ✅ nenhum procedimento de transferência existe; texto público agora afirma "intransferíveis" (página do produto) |
+| ADMIN opera as duas lojas; Anderson cadastra/autoriza funcionários | ✅ ADMIN sem vínculo opera as duas (política atual); STAFF segue sem resgatar (decisão pendente se STAFF vinculado resgata) |
+| Limite global de 1.000 e lotes | ✅ limite global por unidade, lote não cabe além do saldo global (nem é cadastrado), estoque recomendado = saldo do lote aberto (0 sem lote); **quantidades dos lotes: Anderson** |
+| Reaproveitar o produto Shopify existente | ✅ compatível: a campanha atual aponta para a variante do produto; só falta configurar a campanha (benefícios, limite global, validade) e ajustar o estoque quando autorizado |
+| Início das vendas 30/10/2026 | ⚠️ o sistema **não tem data de início de vendas**: a abertura é o ajuste de estoque na Shopify (hoje 0). A checagem de prontidão registra isso como pendência. Impedir compra antes da data = manter estoque 0 |
+| Encerramento: último dia de maio/2027 **ou esgotamento** | ⚠️ `salesEndDate` é só informativo (nenhum encerramento automático). Interpretação (31/05/2027 firme? esgotar antes?) a confirmar; a checagem aceita 31/05/2027 como registro informativo |
+| Validade começa na abertura da temporada de neve 2027 | ⏳ **data não informada**: `voucher_valid_from` fica sem valor (a emissão fica retida por segurança); nenhuma data foi presumida |
+| Prorrogação para todos os vouchers | ✅ estrutura pronta e em produção na API (SUPER_ADMIN, só aumenta); elegibilidade de expirados/cancelados e data final: **Anderson** |
+| Reembolso de R$ 350 (valor efetivamente pago) | ✅ a Shopify devolve; o sistema só cancela os vouchers. Restrição "sem reembolso após qualquer uso": **não automatizada** (validação jurídica, direito de arrependimento) — hoje o crédito parcialmente usado exige decisão do ADMIN |
+| 10% nos passeios: cliente informa a compra e a equipe confere na tabela de vendas | ✅ benefício **descritivo** (sem código/saldo); o procedimento é manual da equipe. Texto das condições (`terms`): **Anderson** |
+| Remover referências a vale-presente/transferência | ✅ página pública, comentários e telas do ClosetAdmin; teste impede a volta de "vale-presente" e de promessa de transferência |
+| Novos termos e condições | ⏳ **Anderson enviará**: a página usa só fatos confirmados e remete aos termos |
+
+### Textos públicos revisados (e o que continua incompatível)
+- **Corrigido:** página do produto Valle Pass ("Vale-presente… utilizável em qualquer peça do closet" → dois vouchers independentes e intransferíveis, uso/validade "conforme os termos"). Redação **provisória**, sujeita aos novos termos.
+- **Segue a revisar quando os termos chegarem:** termos de uso do site (hoje só tratam do aluguel de peças; o "não transferir a peça" é do aluguel, não do Valle Pass) e o e-mail dos vouchers (não declara intransferibilidade nem os 10% — redação aprovada pendente).
+
+### O que pode ser preparado agora (e o que não)
+- Pode, com autorização expressa em produção: configurar a campanha (limite global 1.000, limpar o limite legado, três benefícios, fim da validade 30/09/2027) — a checagem de prontidão mostra o que falta. **Não** pode ainda: início da validade, lotes (quantidades), condições dos 10%, texto dos termos.
+- Venda e emissão fora das condições: emissão **nunca** passa de 1.000 unidades (tudo ou nada, fila de retenção); sem validade/benefícios a emissão fica **retida**; campanha desativada **continua emitindo para quem já pagou** (a venda nova é fechada pelo estoque da Shopify, hoje 0); pedido fora da janela de vendas **não** é bloqueado pelo sistema (decisão pendente: o que fazer com pagamento fora da janela).
+
+### Validação jurídica necessária
+Direito de arrependimento (CDC art. 49) e a restrição "sem reembolso após uso"; texto dos termos (intransferibilidade, validade, prorrogação, reembolso); conferência do desconto de 10% por tabela de vendas (tratamento de dados do cliente); vencimento/prorrogação e vouchers expirados.

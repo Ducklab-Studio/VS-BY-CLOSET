@@ -24,6 +24,7 @@ const TAG = `VPO-${Date.now()}`;
 const SYNTHETIC_VALID_FROM = '2027-01-01'; // SINTÉTICO — a data real de início é pendência do Anderson
 let counter = 0;
 let storeId: string;
+let adminId: string;
 const createdCampaigns: string[] = [];
 const orderIds: string[] = [];
 
@@ -129,6 +130,7 @@ async function preSold(campaign: ValePassCampaign, units: number): Promise<void>
 
 beforeAll(async () => {
   if (!localDatabase) return;
+  adminId = (await prisma.adminUser.create({ data: { name: `Admin ${TAG}`, phone: `${TAG}-admin`, pinHash: 'x', role: 'ADMIN', active: true } })).id;
   storeId = `${TAG}-store`;
   await prisma.$executeRaw`INSERT INTO stores (id, shopify_domain, currency) VALUES (${storeId}, ${storeId + '.invalid'}, 'BRL')`;
 });
@@ -146,10 +148,12 @@ afterAll(async () => {
     await prisma.$transaction((tx) => purgeLedgerForTest(tx, { campaignIds: createdCampaigns }), { timeout: 120_000 });
     await prisma.valePass.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
     await prisma.valePassIssuanceHold.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
+    await prisma.adminAuditEvent.deleteMany({ where: { OR: [{ entityId: { in: createdCampaigns } }, { adminUserId: adminId }] } });
     await prisma.valePassLot.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
     await prisma.valePassCampaignBenefit.deleteMany({ where: { campaignId: { in: createdCampaigns } } });
     await prisma.valePassCampaign.deleteMany({ where: { id: { in: createdCampaigns } } });
     await prisma.$executeRaw`DELETE FROM stores WHERE id = ${storeId}`;
+    await prisma.adminUser.deleteMany({ where: { id: adminId } });
   }
   await prisma.$disconnect();
 });
@@ -159,12 +163,12 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     const c = await officialCampaign();
     const benefits = await prisma.valePassCampaignBenefit.findMany({ where: { campaignId: c.id } });
     const items = evaluateLaunchReadiness({
-      campaign: { amountCents: c.amountCents, active: c.active, quantityLimit: c.quantityLimit, globalLimit: c.globalLimit, voucherValidFrom: SYNTHETIC_VALID_FROM, voucherValidUntil: '2027-09-30' },
+      campaign: { amountCents: c.amountCents, active: c.active, quantityLimit: c.quantityLimit, globalLimit: c.globalLimit, voucherValidFrom: SYNTHETIC_VALID_FROM, voucherValidUntil: '2027-09-30', salesEndDate: '2027-05-31' },
       benefits: benefits.map((b) => ({ kind: b.kind, company: b.company, amountCents: b.amountCents, discountPercent: b.discountPercent, terms: 'x', active: b.active })),
       shopifyStock: 1_000,
       hasOpenLot: true,
     });
-    expect(items.filter((i) => i.kind !== 'OK').map((i) => i.id)).toEqual(['extension']);
+    expect(items.filter((i) => i.kind !== 'OK').map((i) => i.id)).toEqual(['extension', 'sales-start']);
   });
 
   test('cada unidade gera DOIS vouchers independentes, com a validade até 30/09/2027 (fim às 00:00 de 01/10 no fuso configurado)', async () => {
@@ -241,5 +245,39 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     expect(held).toMatchObject({ issuedUnits: 0, heldUnits: 1, vouchersCreated: 0 });
     expect(await prisma.valePass.count({ where: { campaignId: c.id } })).toBe(0);
     expect(await prisma.valePassIssuanceHold.count({ where: { campaignId: c.id, status: 'OPEN', reason: 'CAMPAIGN_NOT_READY' } })).toBe(1);
+  }, 60_000);
+
+  test('lotes dentro do limite global: um lote que NÃO cabe no saldo global nem chega a ser cadastrado (quantidades dos lotes são decisão do Anderson; o sistema nunca as inventa)', async () => {
+    const c = await officialCampaign();
+    await preSold(c, 998);
+    // o próprio cadastro do lote recusa quantidade que não cabe no saldo global
+    await expect(lots.create(c.id, { name: 'Lote grande (teste)', quantity: 5 }, adminId, 'Admin')).rejects.toThrow(/não cabe no saldo do limite global/);
+    expect((await lots.getCapacity(c.id)).lots).toHaveLength(0);
+    const fits = await lots.create(c.id, { name: 'Lote que cabe (teste)', quantity: 2 }, adminId, 'Admin');
+    const opened = await lots.open(c.id, fits.id, fits.updatedAt, adminId, 'Admin');
+    expect(opened).toMatchObject({ status: 'OPEN', quantity: 2 });
+    const capacity = await lots.getCapacity(c.id);
+    expect(capacity.globalRemaining).toBe(2);
+    expect(capacity.recommendedShopifyStock).toBe(2); // o estoque recomendado nunca passa do saldo global
+    // sem lote aberto o estoque recomendado é 0 (venda fechada)
+    await lots.close(c.id, fits.id, opened.updatedAt, adminId, 'Admin');
+    expect((await lots.getCapacity(c.id)).recommendedShopifyStock).toBe(0);
+  }, 120_000);
+
+  test('campanha desativada: pedido JÁ PAGO continua emitindo os dois vouchers (quem pagou não perde); fechar a venda nova é papel do estoque da Shopify, não da emissão', async () => {
+    const c = await officialCampaign();
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { active: false } });
+    const outcome = outcomeOf(await issue(c, paidOrder(c, 1)));
+    expect(outcome).toMatchObject({ issuedUnits: 1, heldUnits: 0, vouchersCreated: 2 });
+  }, 60_000);
+
+  test('sem benefícios o modelo novo não é usado: uma campanha só com o preço (sem os dois vouchers) NÃO emite pelo fluxo oficial', async () => {
+    const campaign = await prisma.valePassCampaign.create({
+      data: { name: `${TAG}-sem-beneficios`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, voucherValidFrom: new Date('2027-01-01'), voucherValidUntil: new Date('2027-09-30'), shopifyVariantId: `${TAG}-var-${counter++}` },
+    });
+    createdCampaigns.push(campaign.id);
+    const outcome = await issue(campaign, paidOrder(campaign, 1));
+    expect(outcome.mode).toBe('legacy'); // o serviço do modelo novo não emite nada para esta campanha
+    expect(await prisma.valePass.count({ where: { campaignId: campaign.id } })).toBe(0);
   }, 60_000);
 });

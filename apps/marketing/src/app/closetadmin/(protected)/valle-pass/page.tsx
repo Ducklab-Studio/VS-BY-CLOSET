@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: 'Valle Pass' };
 
 /**
  * Valle Pass — produto TOTALMENTE separado do fluxo de aluguel:
- * vale-presente/crédito de compra vendido pelo checkout oficial já
+ * produto de dois vouchers (Valle Showroom e VS BY CLOSET) vendido pelo checkout oficial já
  * configurado na loja Shopify. Nunca exige data de
  * retirada/devolução, disponibilidade ou HOLD — continua vendável
  * mesmo com agendamentos de aluguel bloqueados, porque esta tela (e o
@@ -37,7 +37,7 @@ export default async function ClosetAdminValePassPage() {
     <div>
       <PageHeader
         title="Valle Pass"
-        description="Vale-presente/crédito de compra — vendido pelo checkout oficial da Shopify, separado do fluxo de aluguel. Nunca depende de disponibilidade, HOLD ou datas de retirada/devolução."
+        description="Dois vouchers por unidade (Valle Showroom e VS BY CLOSET) — vendido pelo checkout oficial da Shopify, separado do fluxo de aluguel. Nunca depende de disponibilidade, HOLD ou datas de retirada/devolução."
       />
       <ValePassSection initialCampaigns={campaigns} initialVouchers={vouchers} initialOrders={orders} canManageCampaigns={hasAdminRole(session, 'ADMIN')} isOwner={session.role === 'SUPER_ADMIN'} />
     </div>
