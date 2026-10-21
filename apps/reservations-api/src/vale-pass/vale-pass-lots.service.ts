@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { ValePassLot } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
+import { formatBRL } from './ledger/money';
 import {
   awaitingProcessingCount,
   formatIsoDate,
@@ -32,6 +33,7 @@ export type CapacityAlertCode =
   | 'INTEGRATION_HOLDS_OPEN'
   | 'PAYMENT_TIME_UNKNOWN'
   | 'REFUND_REVIEW_OPEN'
+  | 'CANCELLED_ORDER_CREDIT_USED'
   | 'OPEN_LOT_SOLD_OUT';
 
 /** Retenção aberta há mais que isso pede ação imediata: o cliente já pagou e o prazo de 3 dias para os códigos corre desde o pagamento. */
@@ -79,6 +81,17 @@ export interface CapacityRefundReview {
   readonly createdAt: string;
 }
 
+/** Pedido cancelado/reembolsado cujo crédito já tinha sido utilizado e que ainda NÃO foi conferido por um ADMIN. Sem código de voucher e sem dado pessoal. */
+export interface CapacityCancellationAlert {
+  readonly id: string;
+  readonly orderName: string | null;
+  readonly shopifyOrderId: string;
+  readonly topic: string;
+  readonly usedCents: number;
+  readonly lines: readonly { readonly company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET' | 'LEGACY'; readonly vouchers: number; readonly amountCents: number; readonly usedCents: number; readonly balanceCents: number }[];
+  readonly createdAt: string;
+}
+
 export interface CapacityBenefit {
   readonly code: string;
   readonly kind: 'VOUCHER' | 'DISCOUNT';
@@ -114,6 +127,8 @@ export interface CampaignCapacity {
   readonly holds: readonly CapacityHold[];
   /** Reembolsos aguardando decisão de um ADMIN. */
   readonly refundReviews: readonly CapacityRefundReview[];
+  /** Cancelamentos/reembolsos de pedidos com crédito JÁ utilizado, ainda não conferidos por um ADMIN. */
+  readonly cancellationAlerts: readonly CapacityCancellationAlert[];
   readonly benefits: readonly CapacityBenefit[];
   readonly alerts: readonly CapacityAlert[];
 }
@@ -153,6 +168,7 @@ export class ValePassLotsService {
       ? await this.prisma.valePassOrder.findMany({ where: { shopifyOrderId: { in: refundRows.map((row) => row.shopifyOrderId) } }, select: { shopifyOrderId: true, shopifyOrderName: true } })
       : [];
     const refundOrderNames = new Map(refundOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
+    const cancellationRows = await this.prisma.valePassCancellationAlert.findMany({ where: { status: 'OPEN', campaignId }, orderBy: { createdAt: 'asc' }, take: 50 });
     const benefitRows = await this.prisma.valePassCampaignBenefit.findMany({ where: { campaignId }, orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] });
     const issuedByBenefit = await this.prisma.$queryRaw<{ benefitId: string; n: number }[]>`
       SELECT benefit_id::text AS "benefitId", count(*)::int AS n FROM vale_passes WHERE campaign_id = ${campaignId}::uuid AND benefit_id IS NOT NULL GROUP BY benefit_id`;
@@ -230,6 +246,13 @@ export class ValePassLotsService {
         message: `${integrationHolds.length} pagamento(s) confirmado(s) chegaram com a integração dos dois vouchers DESLIGADA e aguardam. Nenhum voucher foi emitido. Ligue a integração e use "Retomar retenções" (mais antigas primeiro), ou emita com a emissão excepcional de um ADMIN.`,
       });
     }
+    if (cancellationRows.length > 0) {
+      alerts.push({
+        code: 'CANCELLED_ORDER_CREDIT_USED',
+        severity: 'critical',
+        message: `${cancellationRows.length} pedido(s) foram cancelados ou reembolsados DEPOIS de o crédito ser utilizado (total de ${formatBRL(cancellationRows.reduce((sum, row) => sum + row.usedCents, 0))} já consumido). Os vouchers não utilizados foram cancelados e nada foi alterado em saldos; confira o reembolso e a conciliação com o financeiro e marque como conferido.`,
+      });
+    }
     if (refundRows.length > 0) {
       alerts.push({
         code: 'REFUND_REVIEW_OPEN',
@@ -299,6 +322,15 @@ export class ValePassLotsService {
         refundedUnits: row.refundedUnits,
         unitsNeedingReview: Number((row.detail as { unitsNeedingReview?: unknown } | null)?.unitsNeedingReview ?? 0),
         reasons: Array.isArray(row.reviewReasons) ? (row.reviewReasons as unknown[]).filter((reason): reason is string => typeof reason === 'string') : [],
+        createdAt: row.createdAt.toISOString(),
+      })),
+      cancellationAlerts: cancellationRows.map((row) => ({
+        id: row.id,
+        orderName: row.shopifyOrderName,
+        shopifyOrderId: row.shopifyOrderId,
+        topic: row.topic,
+        usedCents: row.usedCents,
+        lines: ((row.detail as { lines?: CapacityCancellationAlert['lines'] } | null)?.lines ?? []) as CapacityCancellationAlert['lines'],
         createdAt: row.createdAt.toISOString(),
       })),
       benefits: benefitRows.map((benefit) => ({

@@ -1415,3 +1415,33 @@ model ValePassValidityExtension {
   @@index([campaignId])
   @@map("vale_pass_validity_extensions")
 }
+
+enum ValePassCancellationAlertStatus {
+  OPEN
+  ACKNOWLEDGED
+
+  @@map("vale_pass_cancellation_alert_status")
+}
+
+/// Alerta persistente: pedido CANCELADO/REEMBOLSADO cujos vouchers já tiveram crédito utilizado. Uma linha por pedido (idempotente). Só informação para o ADMIN: nunca altera
+/// saldo, voucher, reembolso ou cancelamento. Sem código de voucher e sem dado pessoal; fatos imutáveis (gatilho), conferência única ABERTO → CONFERIDO.
+model ValePassCancellationAlert {
+  id                 String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyOrderId     String                              @unique @map("shopify_order_id")
+  shopifyOrderName   String?                             @map("shopify_order_name")
+  /// Sem FK de propósito: o alerta é um fato imutável e nunca bloqueia nem acompanha a exclusão da campanha.
+  campaignId         String?                             @map("campaign_id") @db.Uuid
+  topic              String
+  usedCents          Int                                 @map("used_cents")
+  detail             Json
+  status             ValePassCancellationAlertStatus     @default(OPEN)
+  acknowledgedAt     DateTime?                           @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy     String?                             @map("acknowledged_by") @db.Uuid
+  acknowledgedByName String?                             @map("acknowledged_by_name")
+  acknowledgeNote    String?                             @map("acknowledge_note")
+  createdAt          DateTime                            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status])
+  @@index([campaignId])
+  @@map("vale_pass_cancellation_alerts")
+}

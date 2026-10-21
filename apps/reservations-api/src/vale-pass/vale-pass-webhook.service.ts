@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { Prisma, ValePass, ValePassOrder } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
 import { maskCode } from './vale-pass-code-mask';
+import { recordCancellationAlert } from './cancellation-alerts.service';
 import { ValePassPaymentFlowService } from './flow/payment-flow.service';
 import { resolveWebhookSignal, type ValePassWebhookMeta } from './flow/payment-instant';
 import { decidePaymentTime } from './flow/payment-time-policy';
@@ -368,6 +369,9 @@ export class ValePassWebhookService {
         events.push({ type: 'VALE_PASS_SHOPIFY_ORDER_CANCELLED', detail: { valePassId: pass.id, code: maskCode(pass.code), orderId, topic, status: pass.status } });
       }
     }
+    // Alerta persistente (uma linha por pedido): cancelamento/reembolso de pedido cujo crédito JÁ foi utilizado. Só informa; não altera nada.
+    const alert = await recordCancellationAlert(tx, orderId, topic);
+    if (alert.created) events.push({ type: 'VALE_PASS_CANCELLED_WITH_USED_CREDIT', detail: { orderId, topic, usedCents: alert.usedCents } });
     return events;
   }
 
