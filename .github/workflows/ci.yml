@@ -112,10 +112,13 @@ jobs:
         run: pnpm --filter @valle/marketing run test:valle-pass-badge
 
       - name: Testar ações do Valle Pass no ClosetAdmin (perfil e módulo)
-        run: node scripts/no-real-network.mjs node --test apps/marketing/test/valle-pass-admin-actions.test.mjs apps/marketing/test/valle-pass-dates.test.mjs
+        run: node scripts/no-real-network.mjs node --test apps/marketing/test/valle-pass-admin-actions.test.mjs apps/marketing/test/valle-pass-dates.test.mjs apps/marketing/test/valle-pass-sale.test.mjs
 
       - name: Testar a escolha de tamanho/opções da peça (navegador isolado, Shopify simulada)
         run: pnpm --filter @valle/marketing run test:product-variants
+
+      - name: Testar o pré-lançamento do Valle Pass (botão "Em breve", venda fechada x aberta, termos; navegador isolado, Shopify simulada)
+        run: pnpm --filter @valle/marketing run test:valle-pass-prelaunch
 
       - name: Testar campanhas, lotes e capacidade do Valle Pass (navegador isolado)
         run: pnpm --filter @valle/marketing run test:valle-pass-lots
