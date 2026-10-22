@@ -42,6 +42,20 @@ const products = [
 ];
 module.exports = { products, STORE_HOST };
 
+// Disponibilidade do Valle Pass simulada, lida A CADA consulta de um arquivo de estado ("open" | "closed") indicado pelo teste. Sem a variável, o produto
+// continua à venda como sempre (os testes antigos não mudam). Serve só para provar as duas telas sem abrir venda real.
+const fs = require('node:fs');
+function valePassAvailable() {
+  const file = process.env.VALLE_PASS_FIXTURE_STATE_FILE;
+  if (!file) return true;
+  try { return fs.readFileSync(file, 'utf8').trim() === 'open'; } catch { return false; }
+}
+function withValePassAvailability(item) {
+  if (!item.handle.startsWith('valle-pass')) return item;
+  const available = valePassAvailable();
+  return { ...item, variants: { nodes: item.variants.nodes.map((v) => ({ ...v, availableForSale: available, quantityAvailable: available ? 3 : 0, currentlyNotInStock: !available })) } };
+}
+
 if (process.env.SIZE_VARIANTS_FIXTURE === '1') {
   if (process.env.NODE_ENV === 'production') throw new Error('Fixture de variantes restrita a testes locais.');
   const original = globalThis.fetch;
@@ -50,9 +64,10 @@ if (process.env.SIZE_VARIANTS_FIXTURE === '1') {
     if (url.host !== STORE_HOST) return original(input, init);
     const body = JSON.parse(init?.body || '{}');
     const handle = body.variables?.handle;
+    const current = products.map(withValePassAvailability);
     const data = handle
-      ? { product: products.find((item) => item.handle === handle) || null }
-      : { products: { nodes: products } };
+      ? { product: current.find((item) => item.handle === handle) || null }
+      : { products: { nodes: current } };
     return Response.json({ data });
   };
 }
