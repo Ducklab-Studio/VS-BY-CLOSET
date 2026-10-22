@@ -162,11 +162,18 @@ try {
   await card(page).getByText('Voucher Valle Showroom').waitFor();
   await card(page).getByText(/exclusivo VS BY CLOSET/).waitFor();
   await card(page).getByText(/10% \(direito comercial, sem código nem saldo\)/).waitFor();
+  await card(page).getByText('10% de desconto em passeios e transfers — benefício informativo, sujeito às condições oficiais').waitFor();
   const benefits = await db.valePassCampaignBenefit.findMany({ where: { campaignId }, orderBy: { sortOrder: 'asc' } });
   assert.deepEqual(benefits.map((b) => [b.code, b.kind, b.company, b.amountCents, b.discountPercent]), [
     ['valle_showroom_500', 'VOUCHER', 'VALLE_SHOWROOM', 50_000, null],
     ['vs_by_closet_50', 'VOUCHER', 'VS_BY_CLOSET', 5_000, null],
     ['desconto_passeios', 'DISCOUNT', null, null, 10],
+  ]);
+  // textos aprovados (rótulos); o desconto não leva texto de condições (pendente do Anderson)
+  assert.deepEqual(benefits.map((b) => [b.label, b.terms]), [
+    ['Voucher Valle Showroom', null],
+    ['Voucher VS BY CLOSET', null],
+    ['10% de desconto em passeios e transfers — benefício informativo, sujeito às condições oficiais', null],
   ]);
   assert.equal(await db.valePass.count({ where: { campaignId } }), 0); // cadastrar benefícios não emite nada
   assert.equal((await db.adminAuditEvent.findFirst({ where: { entityId: campaignId, action: 'VALE_PASS_BENEFITS_UPDATED' } })).adminUserId, admin.id);

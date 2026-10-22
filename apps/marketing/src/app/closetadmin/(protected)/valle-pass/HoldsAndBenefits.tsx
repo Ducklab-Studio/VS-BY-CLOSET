@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassBenefitInput, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
 import { formatCents } from '@/lib/valle-pass-balance';
+import { VALLE_PASS_2027_PRESET } from '@/lib/valle-pass-benefits-preset';
 import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
 /**
@@ -222,13 +223,6 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
   );
 }
 
-/** Modelo comercial do Valle Pass 2027. É só uma SUGESTÃO: nada é salvo até o ADMIN confirmar. As condições do desconto de 10% ainda estão pendentes. */
-const VALLE_PASS_2027_PRESET: readonly ValePassBenefitInput[] = [
-  { code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'Voucher Valle Showroom', amountCents: 50_000, sortOrder: 0 },
-  { code: 'vs_by_closet_50', kind: 'VOUCHER', company: 'VS_BY_CLOSET', label: 'Voucher VS BY CLOSET', amountCents: 5_000, sortOrder: 1 },
-  { code: 'desconto_passeios', kind: 'DISCOUNT', label: '10% de desconto em passeios elegíveis', discountPercent: 10, terms: 'Condições a definir. Direito comercial: não gera desconto automático.', sortOrder: 2 },
-];
-
 export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { campaignId: string; benefits: readonly ValePassCapacityBenefit[]; canManage: boolean; onChanged: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
@@ -272,7 +266,7 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
         confirming ? (
           <div className="mt-2 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs text-ink dark:text-dark-text">
             <p>
-              Cadastrar o modelo Valle Pass 2027 (voucher R$ 500 Valle Showroom + voucher R$ 50 VS BY CLOSET + 10% em passeios)? Isto só registra a
+              Cadastrar o modelo Valle Pass 2027 (voucher R$ 500 Valle Showroom + voucher R$ 50 VS BY CLOSET + 10% em passeios e transfers, apenas informativo)? Isto só registra a
               configuração; a emissão dos dois vouchers só passa a valer quando a ligação ao pagamento for autorizada.
             </p>
             {error ? (
