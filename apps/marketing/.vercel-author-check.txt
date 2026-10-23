@@ -1,0 +1,1 @@
+Teste de identidade de deploy (Vercel Hobby): arquivo inofensivo, sem uso no build. Pode ser removido.
