@@ -90,10 +90,16 @@ export class IssueHoldExpectedDto {
   @Min(0)
   globalLimit!: number | null;
 
+  @IsOptional()
   @ValidateIf((_o, value) => value !== null)
   @IsInt()
   @Min(0)
-  capacityLimit!: number | null;
+  capacityLimit?: number | null;
+
+  /** Explicit protocol marker returned by the server preview. Optional for older clients; never grants capacity. */
+  @IsOptional()
+  @IsIn(['valle-pass-capacity-v1'])
+  capacityContractVersion?: string;
 
   @IsString()
   @MaxLength(40)

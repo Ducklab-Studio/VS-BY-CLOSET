@@ -679,8 +679,27 @@ localDescribe('Valle Pass 2027 — resolução administrativa sujeita ao teto: c
     expect(audit.detail).toMatchObject({ note: 'Capacidade revisada e atualizada', override: true, exceedsLimit: false, confirmedTotal: 6 });
   });
 
+  test('API nova preserva cliente antigo dentro do limite e não confia no payload para excedê-lo', async () => {
+    const allowed = await heldScenario();
+    await prisma.valePassCampaign.update({ where: { id: allowed.c.id }, data: { globalLimit: 6 } });
+    const oldClientInput = await confirm(allowed.holdId, 'Emissão enviada por cliente antigo');
+    const legacyExpected = (({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }) => ({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }))(oldClientInput.expected);
+    await holds.issue(allowed.holdId, { ...oldClientInput, expected: legacyExpected }, adminId, ADMIN_NAME);
+    expect(await vouchersOf(allowed.order.id)).toHaveLength(4);
+
+    const blocked = await heldScenario();
+    const overLimitInput = await confirm(blocked.holdId, 'Pedido antigo preservado em retenção');
+    const legacyOverLimit = { ...overLimitInput, expected: (({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }) => ({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }))(overLimitInput.expected) };
+    await expect(holds.issue(blocked.holdId, legacyOverLimit, adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+    await nothingIssued(blocked.order.id, blocked.holdId);
+  });
+
   test('pedido retido não pode ser emitido acima do teto e continua visível; novas vendas também ficam retidas', async () => {
     const { c, holdId } = await heldScenario();
+    const forgedCapacity = await confirm(holdId, 'Tentativa de forjar capacidade no cliente');
+    // A capacidade enviada sem o contrato reconhecido pelo servidor nunca autoriza emissão acima do teto.
+    await expect(holds.issue(holdId, { ...forgedCapacity, expected: { ...forgedCapacity.expected, capacityLimit: 1000 } }, adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+    await nothingIssued((await prisma.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId } })).shopifyOrderId, holdId);
     await expect(holds.issue(holdId, await confirm(holdId, 'Justificativa suficientemente longa'), adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
     const after = await capacityOf(c.id);
     expect(after.totals).toMatchObject({ sold: 4, pending: 2, consumed: 6 });

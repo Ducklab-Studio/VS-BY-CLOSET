@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 // a leitura da capacidade exige só o módulo. Guarda de fonte: reprova se uma ação nova de escrita esquecer o perfil.
 const root = new URL('../', import.meta.url);
 const actions = readFileSync(new URL('src/app/closetadmin/(protected)/valle-pass/actions.ts', root), 'utf8');
+const holdsComponent = readFileSync(new URL('src/app/closetadmin/(protected)/valle-pass/HoldsAndBenefits.tsx', root), 'utf8');
+const capacityContract = readFileSync(new URL('src/lib/valle-pass-capacity-contract.ts', root), 'utf8');
 
 function body(name) {
   const start = actions.indexOf(`export async function ${name}(`);
@@ -62,4 +64,12 @@ test('o painel não fala com a Shopify nem altera estoque (só mostra o número 
   assert.doesNotMatch(component, /myshopify|shopify\.com|storefront|inventory|fetch\(/i);
   assert.match(component, /só mostra o número/);
   assert.match(component, /LEGADO/);
+});
+
+test('a tela nova bloqueia emissão administrativa contra preview de API antiga sem marcador de capacidade', () => {
+  assert.match(capacityContract, /projection\?\.capacityContractVersion === VALE_PASS_CAPACITY_CONTRACT_VERSION/);
+  assert.match(holdsComponent, /if \(!supportsValePassCapacityContract\(projection\)\)[\s\S]*Nenhuma solicitação de emissão foi enviada/);
+  assert.match(holdsComponent, /!supportsValePassCapacityContract\(projection\)/);
+  assert.match(holdsComponent, /!supportsValePassCapacityContract\(projection\) \|\| !typedOk/);
+  assert.match(holdsComponent, /capacityContractVersion: VALE_PASS_CAPACITY_CONTRACT_VERSION/);
 });

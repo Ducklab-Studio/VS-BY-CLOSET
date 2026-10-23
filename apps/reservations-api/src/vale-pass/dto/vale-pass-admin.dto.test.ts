@@ -1,7 +1,10 @@
+import 'reflect-metadata';
 import { describe, expect, test } from 'vitest';
 import { validate } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
+import { plainToInstance, Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { UpdateValePassCampaignDto } from './update-vale-pass-campaign.dto';
+import { IssueHoldDto } from './vale-pass-benefits.dto';
 import { CreateValePassLotDto, UpdateValePassLotDto, ValePassLotActionDto } from './vale-pass-lot.dto';
 
 // Mesmas opções do ValidationPipe global (main.ts): campo não declarado derruba a requisição inteira.
@@ -45,5 +48,38 @@ describe('DTOs de lote', () => {
     expect(await check(ValePassLotActionDto, { expectedUpdatedAt: STAMP })).toHaveLength(0);
     expect(await check(ValePassLotActionDto, {})).not.toHaveLength(0);
     expect(await check(ValePassLotActionDto, { expectedUpdatedAt: STAMP, status: 'OPEN' })).not.toHaveLength(0); // o estado nunca vem do cliente
+  });
+});
+
+describe('protocolo compatível de emissão administrativa', () => {
+  const legacyExpected = { projectedTotal: 4, consumedTotal: 3, globalLimit: 10, holdUpdatedAt: STAMP };
+  const base = { note: 'Justificativa administrativa', confirmTotal: 4 };
+
+  test('API atual aceita payload antigo sem capacityLimit nem marcador de versão', async () => {
+    expect(await check(IssueHoldDto, { ...base, expected: legacyExpected })).toHaveLength(0);
+  });
+
+  test('API atual aceita payload versionado e rejeita versões que não conhece', async () => {
+    expect(await check(IssueHoldDto, { ...base, expected: { ...legacyExpected, capacityLimit: 10, capacityContractVersion: 'valle-pass-capacity-v1' } })).toHaveLength(0);
+    expect(await check(IssueHoldDto, { ...base, expected: { ...legacyExpected, capacityContractVersion: 'valle-pass-capacity-v2' } })).not.toHaveLength(0);
+  });
+
+  test('DTO legado estrito rejeita o protocolo novo em vez de aceitá-lo silenciosamente', async () => {
+    class LegacyExpectedDto {
+      @IsInt() projectedTotal!: number;
+      @IsInt() consumedTotal!: number;
+      @IsOptional() @IsInt() globalLimit?: number | null;
+      @IsString() holdUpdatedAt!: string;
+    }
+    class LegacyIssueDto {
+      @IsString() note!: string;
+      @IsInt() confirmTotal!: number;
+      @ValidateNested() @Type(() => LegacyExpectedDto) expected!: LegacyExpectedDto;
+    }
+    // Frontend/API antigos: o request legado continua tendo o formato esperado pela API antiga.
+    expect(await check(LegacyIssueDto, { ...base, expected: legacyExpected })).toHaveLength(0);
+    const legacyPayload = { ...base, expected: { ...legacyExpected, capacityLimit: 10, capacityContractVersion: 'valle-pass-capacity-v1' } };
+    // Frontend novo/API antiga: o guard do frontend não envia esse request; se alguém tentar, o DTO antigo o recusa.
+    expect(await check(LegacyIssueDto, legacyPayload)).not.toHaveLength(0);
   });
 });

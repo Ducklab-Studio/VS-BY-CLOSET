@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import { supportsValePassCapacityContract, VALE_PASS_CAPACITY_CONTRACT_VERSION } from '@/lib/valle-pass-capacity-contract';
 import { formatCents } from '@/lib/valle-pass-balance';
 import { VALLE_PASS_2027_PRESET } from '@/lib/valle-pass-benefits-preset';
 import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
@@ -118,12 +119,16 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
 
   async function issue() {
     if (!projection) return;
+    if (!supportsValePassCapacityContract(projection)) {
+      setError('A API ainda não confirma a proteção de capacidade necessária. Nenhuma solicitação de emissão foi enviada.');
+      return;
+    }
     setPending(true);
     setError(null);
     const result = await issueValePassHoldAction(hold.id, {
       note,
       confirmTotal: Number(typed),
-      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, capacityLimit: projection.capacityLimit, holdUpdatedAt: projection.holdUpdatedAt },
+      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, capacityLimit: projection.capacityLimit, capacityContractVersion: VALE_PASS_CAPACITY_CONTRACT_VERSION, holdUpdatedAt: projection.holdUpdatedAt },
     });
     if (result.error) {
       const message = result.error;
@@ -186,6 +191,9 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
               ) : (
                 <p className={hintClass}>O total projetado não ultrapassa o limite atual.</p>
               )}
+              {!supportsValePassCapacityContract(projection) ? (
+                <p role="alert" className="text-red-500">A API ainda não confirma a proteção de capacidade necessária. Atualize a página após a atualização do servidor; nenhum voucher pode ser emitido por esta versão.</p>
+              ) : null}
               {!projection.canIssue ? (
                 <p role="alert" className="text-red-500">
                   {projection.blockedReason}
@@ -207,7 +215,7 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
             </p>
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !typedOk || !noteOk} onClick={() => void issue()}>
+            <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !supportsValePassCapacityContract(projection) || !typedOk || !noteOk} onClick={() => void issue()}>
               Emitir dentro da capacidade
             </button>
             <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void dismiss()}>

@@ -33,7 +33,10 @@ export interface IssueHoldExpected {
   readonly projectedTotal: number;
   readonly consumedTotal: number;
   readonly globalLimit: number | null;
-  readonly capacityLimit: number | null;
+  /** Absent only for clients predating the versioned capacity protocol. Never used to authorize issuance. */
+  readonly capacityLimit?: number | null;
+  /** Explicitly negotiates the capacity-aware request contract. */
+  readonly capacityContractVersion?: string;
   readonly holdUpdatedAt: string;
 }
 
@@ -47,6 +50,7 @@ export interface IssueHoldInput {
 
 /** Retrato da emissão excepcional: o que é hoje e o que passa a ser depois. */
 export interface HoldProjection {
+  readonly capacityContractVersion: typeof VALE_PASS_CAPACITY_CONTRACT_VERSION;
   readonly holdId: string;
   readonly campaignId: string;
   readonly campaignName: string;
@@ -73,6 +77,7 @@ export interface HoldProjection {
 }
 
 export const MIN_ISSUE_NOTE = 10;
+export const VALE_PASS_CAPACITY_CONTRACT_VERSION = 'valle-pass-capacity-v1' as const;
 
 const TX = { timeout: 20_000, maxWait: 5_000 } as const;
 
@@ -161,6 +166,7 @@ export class ValePassHoldsService {
     const missingCapacity = hold.campaign.benefits.length > 0 && capacityLimit === null;
     const paid = Boolean(order && order.status === 'CONFIRMED' && !order.deletedInShopifyAt && !cancelled);
     return {
+      capacityContractVersion: VALE_PASS_CAPACITY_CONTRACT_VERSION,
       holdId: hold.id,
       campaignId: hold.campaignId,
       campaignName: hold.campaign.name,
@@ -233,7 +239,8 @@ export class ValePassHoldsService {
           expected.projectedTotal !== projection.projectedTotal ||
           expected.consumedTotal !== projection.consumedBefore ||
           expected.globalLimit !== projection.globalLimit ||
-          expected.capacityLimit !== projection.capacityLimit ||
+          (expected.capacityContractVersion === VALE_PASS_CAPACITY_CONTRACT_VERSION && expected.capacityLimit !== projection.capacityLimit) ||
+          (expected.capacityContractVersion !== undefined && expected.capacityContractVersion !== VALE_PASS_CAPACITY_CONTRACT_VERSION) ||
           expected.holdUpdatedAt !== projection.holdUpdatedAt
         ) {
           throw new ConflictException('A capacidade ou a retenção mudou desde que a confirmação foi aberta. Nada foi emitido: reabra a confirmação, confira os números atuais e confirme de novo.');
