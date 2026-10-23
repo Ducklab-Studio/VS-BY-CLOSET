@@ -73,7 +73,7 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
         ))}
       </ul>
       <p className={hintClass}>
-        A unidade retida continua contando como vendida. &quot;Emitir&quot; cria os vouchers acima do limite (decisão consciente);
+        A unidade retida continua contando como vendida. Pedidos acima da capacidade permanecem na fila para decisão humana;
         &quot;Descartar&quot; só é aceito depois que o pedido for reembolsado ou cancelado na Shopify. Nenhuma das duas ações mexe no pagamento.
       </p>
     </section>
@@ -123,7 +123,7 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
     const result = await issueValePassHoldAction(hold.id, {
       note,
       confirmTotal: Number(typed),
-      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, holdUpdatedAt: projection.holdUpdatedAt },
+      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, capacityLimit: projection.capacityLimit, holdUpdatedAt: projection.holdUpdatedAt },
     });
     if (result.error) {
       const message = result.error;
@@ -167,8 +167,8 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
             <div className="space-y-1.5 rounded-lg border border-ink/10 bg-ink/[0.03] p-3 dark:border-white/10 dark:bg-white/[0.03]" aria-label="Confirmação da emissão excepcional">
               <p className="font-semibold">Confirmação da emissão excepcional</p>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-                <dt>Limite global</dt>
-                <dd>{projection.globalLimit === null ? 'sem limite' : projection.globalLimit}</dd>
+                <dt>Teto configurado da campanha</dt>
+                <dd>{projection.capacityLimit === null ? 'sem limite configurado' : projection.capacityLimit}</dd>
                 <dt>Consumido hoje</dt>
                 <dd>
                   {projection.consumedBefore} ({projection.soldBefore} vendidos + {projection.pendingBefore} pagos aguardando)
@@ -180,8 +180,8 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
               </dl>
               {projection.exceedsLimit ? (
                 <p role="alert" className="rounded border border-red-500/30 bg-red-500/[0.08] px-2 py-1.5 font-medium text-red-500">
-                  Atenção: esta emissão ultrapassa o limite autorizado em {projection.exceededBy} unidade(s) ({projection.projectedTotal} de {projection.globalLimit}). A venda continua
-                  bloqueada para novos clientes, mas este excedente fica registrado e auditado.
+                  Atenção: a emissão ultrapassaria o teto configurado em {projection.exceededBy} unidade(s) ({projection.projectedTotal} de {projection.capacityLimit}).
+                  Nenhum voucher será emitido e o pedido pago continuará retido para decisão humana.
                 </p>
               ) : (
                 <p className={hintClass}>O total projetado não ultrapassa o limite atual.</p>
@@ -208,7 +208,7 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
           ) : null}
           <div className="flex flex-wrap gap-2">
             <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !typedOk || !noteOk} onClick={() => void issue()}>
-              Emitir (excedente aprovado)
+              Emitir dentro da capacidade
             </button>
             <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void dismiss()}>
               Descartar (pedido não está mais pago)

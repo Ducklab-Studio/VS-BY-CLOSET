@@ -244,7 +244,7 @@ localDescribe('divergência financeira → fila de resolução administrativa (n
     expect(preview).toMatchObject({ reason: 'FINANCIAL_MISMATCH', canIssue: true, units: 1 });
     const resolved = await holds.issue(
       holdId as string,
-      { note: 'Cupom autorizado pelo Anderson para este cliente', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } },
+      { note: 'Cupom autorizado pelo Anderson para este cliente', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, capacityLimit: preview.capacityLimit, holdUpdatedAt: preview.holdUpdatedAt } },
       adminId,
       ADMIN_NAME,
     );

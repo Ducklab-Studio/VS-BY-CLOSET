@@ -69,13 +69,13 @@ describe('DTO da emissão excepcional acima do limite', () => {
   const valid = {
     note: 'Excedente aprovado em reunião',
     confirmTotal: 6,
-    expected: { projectedTotal: 6, consumedTotal: 6, globalLimit: 5, holdUpdatedAt: '2027-01-01T00:00:00.000Z' },
+    expected: { projectedTotal: 6, consumedTotal: 6, globalLimit: 5, capacityLimit: 5, holdUpdatedAt: '2027-01-01T00:00:00.000Z' },
   };
   const errorsOf = async (body: unknown) => validate(plainToInstance(IssueHoldDto, body));
 
   test('aceita o corpo completo, inclusive sem limite global (null)', async () => {
     expect(await errorsOf(valid)).toEqual([]);
-    expect(await errorsOf({ ...valid, expected: { ...valid.expected, globalLimit: null } })).toEqual([]);
+    expect(await errorsOf({ ...valid, expected: { ...valid.expected, globalLimit: null, capacityLimit: null } })).toEqual([]);
   });
 
   test('recusa justificativa curta, total ausente/negativo/fracionado e números vistos ausentes ou incompletos', async () => {
@@ -88,6 +88,7 @@ describe('DTO da emissão excepcional acima do limite', () => {
       { ...valid, confirmTotal: '6' },
       { ...valid, expected: undefined },
       { ...valid, expected: { ...valid.expected, projectedTotal: undefined } },
+      { ...valid, expected: { ...valid.expected, capacityLimit: undefined } },
       { ...valid, expected: { ...valid.expected, holdUpdatedAt: undefined } },
     ]) {
       expect((await errorsOf(body)).length, JSON.stringify(body)).toBeGreaterThan(0);

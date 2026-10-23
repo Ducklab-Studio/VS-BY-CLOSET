@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma, ValePassCampaign, ValePassCampaignBenefit, ValePassIssuanceHold } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
-import { loadCapacity } from './vale-pass-capacity';
+import { configuredCapacityLimit, loadCapacity } from './vale-pass-capacity';
 import { formatIsoDate } from './vale-pass-capacity';
 import { resolveValidityTimezone, voucherWindow } from './vale-pass-validity';
 
@@ -45,7 +45,7 @@ export interface IssueInput {
   readonly order: IssuanceOrder;
   /** Unidades comerciais compradas neste pedido para esta campanha. */
   readonly units: number;
-  /** `enforce`: respeita o limite global (webhook). `override`: excedente aprovado por um ADMIN (resolução da fila). */
+  /** `enforce`: emissão automática. `override`: resolução administrativa; nenhum modo ultrapassa o teto configurado da campanha. */
   readonly mode: IssuanceMode;
   readonly actor?: { readonly id: string; readonly name: string };
   /** Justificativa gravada na retenção quando esta emissão a resolve (resolução administrativa). */
@@ -130,28 +130,31 @@ export class ValePassIssuanceService {
     const priorCancellation = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: order.orderId } });
 
     // Reembolso deste pedido aguardando decisão de um ADMIN: não dá para saber quais unidades foram devolvidas, então NÃO se emite o que falta
-    // (retenção administrativa, sem presumir cancelamento integral). A emissão excepcional por um ADMIN (modo override) segue possível.
+    // (retenção administrativa, sem presumir cancelamento integral). A resolução ADMIN segue sujeita ao mesmo teto de capacidade.
     if (toCreate > 0 && input.mode === 'enforce' && (await tx.valePassRefundApplication.count({ where: { shopifyOrderId: order.orderId, status: 'NEEDS_REVIEW' } })) > 0) {
       const hold = await this.upsertHold(tx, order.orderId, campaign, toCreate, 'FINANCIAL_MISMATCH', { issues: [{ code: 'REFUND_PENDING_REVIEW' }] as unknown as Prisma.InputJsonValue });
       events.push({ type: 'VALE_PASS_ISSUANCE_HELD', detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'FINANCIAL_MISMATCH', note: 'reembolso aguardando decisão administrativa' } });
       return { mode: 'benefits', issuedUnits: 0, completedUnits: 0, heldUnits: toCreate, holdId: hold.id, vouchersCreated: 0, events };
     }
 
-    // Capacidade: só unidades NOVAS consomem; completar uma unidade que já existe não consome nada. Pedido já cancelado/reembolsado emite e
-    // cancela na hora (mesmo comportamento do legado): não consome capacidade, então não passa pela checagem nem abre retenção.
-    if (toCreate > 0 && input.mode === 'enforce' && campaign.globalLimit !== null && !priorCancellation) {
+    // Capacidade: todos os modos respeitam o teto configurado (globalLimit, ou quantityLimit legado quando globalLimit é nulo).
+    // Só unidades NOVAS consomem; completar uma unidade existente não consome capacidade. Pedido já cancelado/reembolsado é criado e
+    // cancelado na mesma transação, portanto não permanece consumindo capacidade.
+    const capacityLimit = configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit);
+    if (toCreate > 0 && capacityLimit !== null && !priorCancellation) {
       const { totals } = await loadCapacity(tx, campaignId, order.orderId);
-      const allowed = Math.max(0, campaign.globalLimit - totals.consumed - consumingExisting);
+      const allowed = Math.max(0, capacityLimit - totals.consumed - consumingExisting);
       if (toCreate > allowed) {
         const hold = await this.upsertHold(tx, order.orderId, campaign, toCreate, 'CAPACITY_EXCEEDED', {
           globalLimit: campaign.globalLimit,
+          capacityLimit,
           consumedWithoutThisOrder: totals.consumed,
           alreadyConsumingInThisOrder: consumingExisting,
           allowedUnits: allowed,
         });
         events.push({
           type: 'VALE_PASS_ISSUANCE_HELD',
-          detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'CAPACITY_EXCEEDED', globalLimit: campaign.globalLimit, allowedUnits: allowed },
+          detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'CAPACITY_EXCEEDED', globalLimit: campaign.globalLimit, capacityLimit, allowedUnits: allowed },
         });
         // Completar o que já existe não depende de capacidade: faz mesmo assim.
         const completed = await this.completeGroups(tx, incomplete, benefits, campaign, order, now, events);

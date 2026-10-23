@@ -758,6 +758,7 @@ export interface ValePassHoldProjection {
   readonly units: number;
   readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH';
   readonly globalLimit: number | null;
+  readonly capacityLimit: number | null;
   readonly soldBefore: number;
   readonly pendingBefore: number;
   readonly consumedBefore: number;
@@ -778,7 +779,7 @@ export function getValePassHoldPreview(holdId: string, adminUserId: string): Pro
 export interface IssueValePassHoldInput {
   readonly note: string;
   readonly confirmTotal: number;
-  readonly expected: { readonly projectedTotal: number; readonly consumedTotal: number; readonly globalLimit: number | null; readonly holdUpdatedAt: string };
+  readonly expected: { readonly projectedTotal: number; readonly consumedTotal: number; readonly globalLimit: number | null; readonly capacityLimit: number | null; readonly holdUpdatedAt: string };
 }
 
 export function issueValePassHold(holdId: string, input: IssueValePassHoldInput, adminUserId: string): Promise<ValePassHold> {

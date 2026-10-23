@@ -6,6 +6,7 @@ import { ledgerRefusal } from './ledger/ledger-errors';
 import { maskCode } from './vale-pass-code-mask';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { authorizeCompany } from './ledger/operator-scope.service';
+import { configuredCapacityLimit, loadCapacity } from './vale-pass-capacity';
 
 export interface ValePassVoucherItem {
   readonly id: string;
@@ -243,6 +244,32 @@ export class ValePassVouchersService {
         return { blocked: new ConflictException(block.message) };
       }
       if (block) throw block.error;
+
+      // Reativar uma unidade cancelada volta a ocupar capacidade. Compartilha o lock da campanha
+      // com pagamentos e emissões para que duas operações concorrentes não excedam o teto.
+      await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${target.campaignId}::uuid FOR UPDATE`;
+      const campaign = await tx.valePassCampaign.findUniqueOrThrow({ where: { id: target.campaignId }, select: { globalLimit: true, quantityLimit: true } });
+      const capacityLimit = configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit);
+      const siblings = target.groupId
+        ? await tx.valePass.count({ where: { campaignId: target.campaignId, groupId: target.groupId, id: { not: target.id }, status: { not: 'CANCELLED' } } })
+        : 0;
+      if (siblings === 0 && capacityLimit !== null) {
+        const { totals } = await loadCapacity(tx, target.campaignId);
+        if (totals.consumed >= capacityLimit) {
+          const message = `A restauração ultrapassaria o teto configurado da campanha (${capacityLimit}). O voucher continua cancelado.`;
+          await tx.valePassEvent.create({ data: { valePassId: target.id, type: 'RESTORE_BLOCKED', detail: { actorId, reason, blockedBy: 'capacity_limit', capacityLimit, consumed: totals.consumed } } });
+          await writeAdminAuditEvent(tx, {
+            adminUserId: actorId,
+            adminUserName: actorName,
+            action: 'VALE_PASS_RESTORE_BLOCKED',
+            entityType: 'ValePass',
+            entityId: target.id,
+            before: { status: target.status },
+            detail: { code: maskCode(target.code), reason, blockedBy: 'capacity_limit', capacityLimit, consumed: totals.consumed },
+          });
+          return { blocked: new ConflictException(message) };
+        }
+      }
 
       // Status no WHERE: duplo clique ou duas abas → só uma grava.
       const changed = await tx.valePass.updateMany({

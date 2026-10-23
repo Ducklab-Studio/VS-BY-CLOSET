@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   awaitingProcessingCount,
+  configuredCapacityLimit,
   formatIsoDate,
   globalRemaining,
   parseIsoDate,
@@ -15,6 +16,12 @@ import {
 } from './vale-pass-capacity';
 
 describe('totais e saldo global', () => {
+  test('usa somente limites configurados da campanha, sem atribuir 1.000 às campanhas antigas', () => {
+    expect(configuredCapacityLimit(1000, null)).toBe(1000);
+    expect(configuredCapacityLimit(null, 37)).toBe(37);
+    expect(configuredCapacityLimit(1000, 37)).toBe(1000);
+    expect(configuredCapacityLimit(null, null)).toBeNull();
+  });
   test('consumido = vendido + pendente; cancelado = emitido − vendido', () => {
     expect(totalsFrom({ issued: 19, sold: 15, active: 10, used: 3, expired: 2 }, 0)).toEqual({ issued: 19, cancelled: 4, sold: 15, pending: 0, consumed: 15, active: 10, used: 3, expired: 2 });
     expect(totalsFrom({ issued: 1, sold: 1, active: 1, used: 0, expired: 0 }, 4)).toMatchObject({ sold: 1, pending: 4, consumed: 5 }); // o exemplo da auditoria: 5 pagas, 1 emitida

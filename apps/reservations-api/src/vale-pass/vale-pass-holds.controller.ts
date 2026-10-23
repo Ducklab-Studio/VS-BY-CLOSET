@@ -12,7 +12,7 @@ interface RequestWithAdminUser {
 
 /**
  * Fila de resolução de pagamentos sem emissão. Ver a fila: qualquer perfil com o módulo VALLE_PASS (é um alerta operacional); resolver
- * (emitir excedente aprovado ou descartar): só ADMIN, com justificativa e auditoria. Nada aqui reembolsa ou cancela pedido.
+ * (emitir dentro da capacidade ou descartar): só ADMIN, com justificativa e auditoria. Nada aqui reembolsa ou cancela pedido.
  */
 @Controller('admin/vale-pass/holds')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)

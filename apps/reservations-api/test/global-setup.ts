@@ -8,23 +8,24 @@ import { PrismaClient } from '@prisma/client';
  * regra — com a data gravada, falhariam pelo motivo errado. Os testes da
  * regra definem a própria data e restauram `null` ao terminar.
  *
- * Só mexe em banco LOCAL de teste (mesma checagem das suítes de integração);
- * em qualquer outro banco não faz nada.
+ * Só conecta a banco LOCAL de teste (mesma checagem das suítes de integração).
+ * Uma URL remota é recusada antes da execução dos testes para impedir que a
+ * suíte, inclusive arquivos antigos que ainda usam Prisma diretamente, acesse
+ * Neon ou qualquer banco compartilhado.
  */
 const LOCAL_TEST_DATABASE = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i;
 
 function isApprovedTestDatabase(raw: string): boolean {
   if (LOCAL_TEST_DATABASE.test(raw)) return true;
-  try {
-    const databaseName = decodeURIComponent(new URL(raw).pathname.replace(/^\//, ''));
-    return databaseName.toUpperCase() === 'TESTE';
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export default async function setup(): Promise<void> {
-  if (!isApprovedTestDatabase(process.env.DATABASE_URL ?? '')) return;
+  const databaseUrl = process.env.DATABASE_URL ?? '';
+  if (!databaseUrl) return;
+  if (!isApprovedTestDatabase(databaseUrl)) {
+    throw new Error('Vitest bloqueado: DATABASE_URL deve apontar para PostgreSQL local em loopback com nome de banco de teste.');
+  }
   const prisma = new PrismaClient();
   try {
     await prisma.$executeRaw`

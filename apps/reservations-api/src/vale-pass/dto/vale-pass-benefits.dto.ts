@@ -90,6 +90,11 @@ export class IssueHoldExpectedDto {
   @Min(0)
   globalLimit!: number | null;
 
+  @ValidateIf((_o, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  capacityLimit!: number | null;
+
   @IsString()
   @MaxLength(40)
   holdUpdatedAt!: string;

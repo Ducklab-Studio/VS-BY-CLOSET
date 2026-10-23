@@ -28,6 +28,16 @@ export const VALE_PASS_LOT_UNITS = 100;
 /** O teto global confirmado para a campanha oficial. */
 export const VALE_PASS_GLOBAL_LIMIT = 1_000;
 
+/**
+ * Resolve o teto configurado sem inventar um limite para campanhas antigas:
+ * `globalLimit` é a configuração explícita do modelo atual; `quantityLimit`
+ * continua sendo o teto próprio das campanhas legadas. `null` em ambos
+ * preserva o comportamento existente (sem teto configurado).
+ */
+export function configuredCapacityLimit(globalLimit: number | null, quantityLimit: number | null): number | null {
+  return globalLimit ?? quantityLimit;
+}
+
 /** Chave que identifica UMA unidade vendida em `vale_passes` (alias `v`): o grupo (2 vouchers = 1 unidade) ou, no legado, o próprio voucher. */
 export const PASS_UNIT_KEY = Prisma.sql`coalesce(v.group_id, v.id)`;
 

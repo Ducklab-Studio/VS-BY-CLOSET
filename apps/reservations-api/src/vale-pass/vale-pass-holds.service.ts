@@ -5,7 +5,7 @@ import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { ValePassIssuanceService } from './vale-pass-issuance.service';
 import { ValePassEmailOutboxService } from './email/email-outbox.service';
-import { PASS_UNIT_KEY, loadCapacity } from './vale-pass-capacity';
+import { configuredCapacityLimit, PASS_UNIT_KEY, loadCapacity } from './vale-pass-capacity';
 import { absorbedUnissuedUnits } from './refunds/refund.service';
 import { financialIssueCodes } from './vale-pass-lots.service';
 
@@ -33,6 +33,7 @@ export interface IssueHoldExpected {
   readonly projectedTotal: number;
   readonly consumedTotal: number;
   readonly globalLimit: number | null;
+  readonly capacityLimit: number | null;
   readonly holdUpdatedAt: string;
 }
 
@@ -55,6 +56,7 @@ export interface HoldProjection {
   readonly units: number;
   readonly reason: ValePassHoldReason;
   readonly globalLimit: number | null;
+  readonly capacityLimit: number | null;
   readonly soldBefore: number;
   readonly pendingBefore: number;
   /** O que o limite global compara hoje (vendidos + pagos aguardando, incluindo esta retenção). */
@@ -77,7 +79,7 @@ const TX = { timeout: 20_000, maxWait: 5_000 } as const;
 /**
  * Fila de resolução: pagamentos CONFIRMADOS que não puderam ser emitidos sozinhos (limite global esgotado ou campanha sem validade).
  * Só um ADMIN resolve, sempre com justificativa e auditoria:
- *  - EMITIR (excedente aprovado): cria os vouchers mesmo acima do limite global; exige o pedido ainda pago e ativo;
+ *  - EMITIR: só cria vouchers quando a emissão cabe no teto configurado da campanha; retenções acima dele permanecem abertas;
  *  - DESCARTAR: só depois que o pedido deixou de estar pago (cancelado/reembolsado/excluído na Shopify). Descartar NUNCA reembolsa nem
  *    cancela nada: o reembolso é feito na Shopify (e chega aqui pelo webhook).
  * Nenhuma ação é automática.
@@ -132,7 +134,7 @@ export class ValePassHoldsService {
    * mostra; a emissão de verdade recalcula tudo no servidor, com as travas, e recusa se algum número tiver mudado.
    */
   async preview(holdId: string): Promise<HoldProjection> {
-    const hold = await this.prisma.valePassIssuanceHold.findUnique({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true } } } });
+    const hold = await this.prisma.valePassIssuanceHold.findUnique({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true } } } });
     if (!hold) throw new NotFoundException('Retenção não encontrada.');
     if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
     return this.project(this.prisma, hold);
@@ -140,7 +142,7 @@ export class ValePassHoldsService {
 
   private async project(
     client: Pick<Prisma.TransactionClient, '$queryRaw' | 'valePassOrder' | 'valePassOrderCancellation'>,
-    hold: ValePassIssuanceHold & { campaign: { name: string; globalLimit: number | null } },
+    hold: ValePassIssuanceHold & { campaign: { name: string; globalLimit: number | null; quantityLimit: number | null } },
   ): Promise<HoldProjection> {
     const order = await client.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
     const cancelled = await client.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
@@ -154,7 +156,8 @@ export class ValePassHoldsService {
     const ownOccupied = Math.max(0, full.totals.consumed - others.totals.consumed - (own?.n ?? 0));
     const projectedTotal = others.totals.consumed + (own?.n ?? 0) + Math.max(hold.units, ownOccupied);
     const globalLimit = hold.campaign.globalLimit;
-    const exceededBy = globalLimit === null ? 0 : Math.max(0, projectedTotal - globalLimit);
+    const capacityLimit = configuredCapacityLimit(globalLimit, hold.campaign.quantityLimit);
+    const exceededBy = capacityLimit === null ? 0 : Math.max(0, projectedTotal - capacityLimit);
     const paid = Boolean(order && order.status === 'CONFIRMED' && !order.deletedInShopifyAt && !cancelled);
     return {
       holdId: hold.id,
@@ -166,6 +169,7 @@ export class ValePassHoldsService {
       units: hold.units,
       reason: hold.reason,
       globalLimit,
+      capacityLimit,
       soldBefore: full.totals.sold,
       pendingBefore: full.totals.pending,
       consumedBefore: full.totals.consumed,
@@ -175,13 +179,17 @@ export class ValePassHoldsService {
       exceedsLimit: exceededBy > 0,
       exceededBy,
       holdUpdatedAt: hold.updatedAt.toISOString(),
-      canIssue: paid,
-      blockedReason: paid ? null : 'O pedido não está mais pago/ativo na Shopify: não há o que emitir. Use "Descartar" para encerrar a retenção.',
+      canIssue: paid && !exceededBy,
+      blockedReason: !paid
+        ? 'O pedido não está mais pago/ativo na Shopify: não há o que emitir. Use "Descartar" para encerrar a retenção.'
+        : exceededBy > 0
+          ? `O pedido permanece retido: a emissão ultrapassaria o teto configurado da campanha (${capacityLimit}).`
+          : null,
     };
   }
 
   /**
-   * Emite as unidades retidas acima do limite (excedente aprovado por um ADMIN). Confirmação reforçada, sempre revalidada aqui:
+   * Emite unidades retidas somente dentro do teto configurado. Confirmação reforçada, sempre revalidada aqui:
    * perfil ADMIN ativo, retenção aberta, pedido ainda pago, justificativa, números que a pessoa viu (iguais aos de agora) e o total
    * projetado digitado. Qualquer divergência rejeita sem emitir; se a capacidade mudou, é preciso abrir a confirmação de novo.
    */
@@ -199,7 +207,7 @@ export class ValePassHoldsService {
         const actor = await tx.adminUser.findUnique({ where: { id: actorId }, select: { role: true, active: true } });
         if (!actor || !actor.active || actor.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode emitir acima do limite.');
 
-        const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true } } } });
+        const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true } } } });
         if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
         // A retenção nunca pode emitir MAIS do que o pedido ainda deve (ex.: a quantidade diminuiu e ninguém sincronizou a retenção).
         const registryOrder = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId }, select: { quantity: true } });
@@ -212,7 +220,9 @@ export class ValePassHoldsService {
         // Pedido de TESTE da Shopify nunca recebe voucher comercial, nem por emissão excepcional (descarte a retenção). Pagamento MANUAL pode ser aprovado aqui, com justificativa.
         if (financialIssueCodes(hold.detail).includes('TEST_ORDER')) throw new ConflictException('Este pedido é um pedido de TESTE da Shopify (test: true): não recebe vouchers comerciais. Descarte a retenção.');
         const projection = await this.project(tx, hold);
-        if (!projection.canIssue) throw new ConflictException(projection.blockedReason ?? 'O pedido não está mais pago.');
+        if (projection.orderStatus !== 'CONFIRMED' || (!projection.canIssue && !projection.exceedsLimit)) {
+          throw new ConflictException(projection.blockedReason ?? 'O pedido não está mais pago.');
+        }
 
         const expected = input.expected;
         if (
@@ -220,12 +230,16 @@ export class ValePassHoldsService {
           expected.projectedTotal !== projection.projectedTotal ||
           expected.consumedTotal !== projection.consumedBefore ||
           expected.globalLimit !== projection.globalLimit ||
+          expected.capacityLimit !== projection.capacityLimit ||
           expected.holdUpdatedAt !== projection.holdUpdatedAt
         ) {
           throw new ConflictException('A capacidade ou a retenção mudou desde que a confirmação foi aberta. Nada foi emitido: reabra a confirmação, confira os números atuais e confirme de novo.');
         }
         if (!Number.isInteger(input.confirmTotal) || input.confirmTotal !== projection.projectedTotal) {
           throw new UnprocessableEntityException(`Confirmação incorreta: digite o total projetado (${projection.projectedTotal}) para emitir.`);
+        }
+        if (projection.exceedsLimit) {
+          throw new ConflictException(`A emissão excederia o teto configurado da campanha (${projection.capacityLimit}). A retenção permanece aberta para decisão humana; nenhum voucher foi emitido.`);
         }
 
         const [existing] = await tx.$queryRaw<{ n: number }[]>`
