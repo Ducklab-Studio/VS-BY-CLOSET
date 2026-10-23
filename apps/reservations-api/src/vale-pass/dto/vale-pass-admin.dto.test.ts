@@ -23,7 +23,7 @@ describe('UpdateValePassCampaignDto', () => {
   });
 
   test('formato dos números e das datas', async () => {
-    for (const bad of [{ amountCents: 0 }, { amountCents: 1.5 }, { validityDays: 3651 }, { quantityLimit: 0 }, { globalLimit: -1 }, { globalLimit: 1_000_001 }, { voucherValidFrom: '01/01/2027' }, { salesEndDate: '2027-5-30' }, { name: '' }]) {
+    for (const bad of [{ amountCents: 0 }, { amountCents: 1.5 }, { validityDays: 3651 }, { quantityLimit: 0 }, { globalLimit: -1 }, { globalLimit: 1_001 }, { voucherValidFrom: '01/01/2027' }, { salesEndDate: '2027-5-30' }, { name: '' }]) {
       expect(await check(UpdateValePassCampaignDto, { expectedUpdatedAt: STAMP, ...bad }), JSON.stringify(bad)).not.toHaveLength(0);
     }
   });
@@ -32,13 +32,15 @@ describe('UpdateValePassCampaignDto', () => {
 describe('DTOs de lote', () => {
   test('criar: nome e quantidade', async () => {
     expect(await check(CreateValePassLotDto, { name: 'Lote 1', quantity: 100 })).toHaveLength(0);
+    expect(await check(CreateValePassLotDto, { name: 'Lote 1', quantity: 99 })).not.toHaveLength(0);
     for (const bad of [{ name: '', quantity: 100 }, { name: 'a'.repeat(81), quantity: 100 }, { name: 'Lote', quantity: 0 }, { name: 'Lote', quantity: 100_001 }, { name: 'Lote', quantity: 1.5 }, { name: 'Lote' }]) {
       expect(await check(CreateValePassLotDto, bad), JSON.stringify(bad)).not.toHaveLength(0);
     }
   });
 
   test('editar e agir (abrir/encerrar/cancelar) exigem o carimbo de versão', async () => {
-    expect(await check(UpdateValePassLotDto, { expectedUpdatedAt: STAMP, quantity: 200 })).toHaveLength(0);
+    expect(await check(UpdateValePassLotDto, { expectedUpdatedAt: STAMP, quantity: 100 })).toHaveLength(0);
+    expect(await check(UpdateValePassLotDto, { expectedUpdatedAt: STAMP, quantity: 200 })).not.toHaveLength(0);
     expect(await check(UpdateValePassLotDto, { quantity: 200 })).not.toHaveLength(0);
     expect(await check(ValePassLotActionDto, { expectedUpdatedAt: STAMP })).toHaveLength(0);
     expect(await check(ValePassLotActionDto, {})).not.toHaveLength(0);
