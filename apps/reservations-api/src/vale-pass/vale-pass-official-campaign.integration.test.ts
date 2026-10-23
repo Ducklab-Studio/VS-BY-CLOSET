@@ -199,6 +199,23 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     expect(await prisma.valePass.count({ where: { campaignId: c.id } })).toBe(4);
   }, 60_000);
 
+  test('campanha com benefícios e sem nenhum teto falha fechada; reprocessamentos e pedidos concorrentes mantêm uma retenção por pedido e nenhum voucher', async () => {
+    const c = await officialCampaign();
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: null, quantityLimit: null } });
+    const replayedOrder = paidOrder(c, 1);
+    const replayed = await Promise.all([issue(c, replayedOrder), issue(c, replayedOrder), issue(c, replayedOrder)]);
+    for (const result of replayed) expect(outcomeOf(result)).toMatchObject({ issuedUnits: 0, heldUnits: 1, vouchersCreated: 0 });
+
+    const simultaneous = Array.from({ length: 8 }, () => paidOrder(c, 1));
+    const results = await Promise.all(simultaneous.map((order) => issue(c, order)));
+    for (const result of results) expect(outcomeOf(result)).toMatchObject({ issuedUnits: 0, heldUnits: 1, vouchersCreated: 0 });
+
+    expect(await prisma.valePass.count({ where: { campaignId: c.id } })).toBe(0);
+    const holds = await prisma.valePassIssuanceHold.findMany({ where: { campaignId: c.id, status: 'OPEN' } });
+    expect(holds).toHaveLength(9);
+    expect(new Set(holds.map((hold) => hold.shopifyOrderId)).size).toBe(9);
+  }, 120_000);
+
   test('limite de 1.000: com 998 unidades vendidas, pedido de 3 é retido INTEIRO, um de 2 emite, e o seguinte (1) é retido; vendido = 1.000, nunca mais', async () => {
     const c = await officialCampaign();
     await preSold(c, 998);
@@ -273,7 +290,7 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
 
   test('sem benefícios o modelo novo não é usado: uma campanha só com o preço (sem os dois vouchers) NÃO emite pelo fluxo oficial', async () => {
     const campaign = await prisma.valePassCampaign.create({
-      data: { name: `${TAG}-sem-beneficios`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, voucherValidFrom: new Date('2027-01-01'), voucherValidUntil: new Date('2027-09-30'), shopifyVariantId: `${TAG}-var-${counter++}` },
+      data: { name: `${TAG}-sem-beneficios`, amountCents: 35_000, validityDays: 30, voucherValidFrom: new Date('2027-01-01'), voucherValidUntil: new Date('2027-09-30'), shopifyVariantId: `${TAG}-var-${counter++}` },
     });
     createdCampaigns.push(campaign.id);
     const outcome = await issue(campaign, paidOrder(campaign, 1));

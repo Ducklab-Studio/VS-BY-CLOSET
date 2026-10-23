@@ -45,7 +45,7 @@ async function newCampaign(): Promise<ValePassCampaign & { numericVariant: strin
   const numericVariant = String(800_000_000_000 + counter++);
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, shopifyVariantId: `gid://shopify/ProductVariant/${numericVariant}`,
+      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: `gid://shopify/ProductVariant/${numericVariant}`,
       voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z'),
     },
   });

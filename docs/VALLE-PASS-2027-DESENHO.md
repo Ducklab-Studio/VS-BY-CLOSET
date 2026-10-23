@@ -51,10 +51,10 @@ Anderson detalhar as condições. A emissão (webhook) passa a criar 2 linhas po
 ### PR B — emissão sem perder pagamento (proposta)
 
 1. **Nunca pular a emissão.** O limite legado (`quantity_limit`) deixa de bloquear. Limite de lote nunca bloqueia emissão.
-2. **Limite global como teto de ESTOQUE VENDÁVEL, não de emissão:** o controle real da venda é o estoque da Shopify; se, por corrida,
-   um pedido pago chegar com o global esgotado, ele **entra numa fila de resolução** (registro `HELD` com motivo, alerta crítico no painel,
-   nenhum passe emitido automaticamente) e o administrador escolhe: **emitir mesmo assim** (excedente aprovado, auditado) ou
-   **marcar para reembolso** (decisão e execução do reembolso são humanas, na Shopify).
+2. **Limite global como teto de emissão:** o estoque da Shopify controla as vendas; se, por corrida, um pedido pago chegar sem capacidade,
+   ele **entra numa fila de resolução** (registro `HELD` com motivo e alerta crítico) e nenhum voucher é emitido. A resolução administrativa
+   também respeita a capacidade. O pedido permanece registrado para decisão humana; reembolso, se decidido, é manual na Shopify. A adoção
+   comercial de um teto absoluto ainda depende de aprovação do Anderson.
 3. **Concorrência/duplicidade:** a emissão toma a **mesma trava `FOR UPDATE` da campanha** usada pelo PR A (ordem de locks fixa:
    operacional → webhook → pedido → campanha), `shopify_order_id` + `vouchers_processed_at` seguem como idempotência, e a
    capacidade é recontada **dentro** da trava.
@@ -233,7 +233,7 @@ Opt-in **por campanha**: sem benefícios cadastrados ⇒ `{ mode: 'legacy' }` (n
 5. Pedido já cancelado/reembolsado antes da emissão: emite e cancela na mesma transação (mesmo estado final do legado), sem consumir capacidade nem criar retenção.
 6. Eventos não carregam o código do voucher.
 
-**Fila de resolução (somente ADMIN, justificativa ≥ 3 caracteres, auditada):** *Emitir* = excedente consciente acima do limite (exige pedido ainda pago); *Descartar* só depois de o pedido deixar de estar pago (reembolso/cancelamento ocorre **na Shopify**). Nenhuma das duas ações reembolsa, cancela ou transfere crédito. Reprocessar o webhook com mais capacidade emite sozinho e fecha a retenção.
+**Fila de resolução (somente ADMIN, justificativa ≥ 10 caracteres, auditada):** *Emitir* só é permitido dentro da capacidade configurada e exige pedido ainda pago; acima do limite o pedido permanece retido para decisão humana. *Descartar* só depois de o pedido deixar de estar pago (reembolso/cancelamento ocorre **na Shopify**). Nenhuma ação administrativa reembolsa, cancela ou transfere crédito. Reprocessar com capacidade disponível emite e fecha a retenção.
 
 ### 9.4 Resgate e painel (Etapa 4)
 
@@ -263,12 +263,9 @@ Fuso da validade (provisório `America/Sao_Paulo`); uso parcial do voucher (sald
 ### 9.8 Correções da auditoria pré-merge (B1 e B2)
 
 * **B1 — datas de validade no painel.** "Válido de/até" (e "Comprado em") do cartão do voucher passam a ser calculados explicitamente em `America/Sao_Paulo` (`apps/marketing/src/lib/valle-pass-dates.ts`), nunca no fuso do navegador/servidor: o último dia aparece como 31/12/2027 em UTC, São Paulo, Santiago, Auckland e Kolkata. Nenhum instante gravado, regra de expiração ou validação de resgate mudou. O fuso continua **provisório**; a definição comercial definitiva segue pendente. Resíduo conhecido e fora de escopo: outras datas já existentes do painel (lista de pedidos, lotes) ainda usam o fuso do aparelho.
-* **B2 — emissão excepcional acima do limite global.** Passa a exigir confirmação reforçada, sempre revalidada no servidor:
-  * a tela mostra limite global, consumo de hoje, total projetado depois e aviso explícito de que a emissão ultrapassa o limite autorizado;
-  * justificativa de no mínimo 10 caracteres e digitação do total projetado;
-  * o servidor refaz tudo dentro da transação (locks do pedido e da campanha): perfil ADMIN ativo (além do guard da rota), retenção aberta, pedido ainda pago, números que a pessoa viu **iguais** aos de agora (limite, consumo, total projetado, versão da retenção) e total digitado correto. Qualquer divergência rejeita sem emitir (409 se algo mudou entre a visualização e a confirmação — exige nova confirmação; 422 se o total digitado estiver errado; 403 se não for ADMIN);
-  * invariante: a emissão só **troca** "pago aguardando" por "vendido". O consumo total não pode mudar; se mudasse, a transação é desfeita. Assim o painel nunca enxerga capacidade falsa (saldo continua 0, estoque recomendado 0, novas vendas continuam retidas, alerta crítico permanece);
-  * auditoria crítica com limite, vendidos/aguardando/consumido antes e depois, quanto excede, justificativa, total confirmado e administrador.
+* **B2 — emissão administrativa limitada à capacidade.** A prévia é revalidada pelo servidor dentro da transação e a API recusa se o teto não estiver configurado para campanha com benefícios ou se a emissão exceder a capacidade. O perfil ADMIN ativo, a retenção aberta, pedido ainda pago, total digitado e números vistos continuam validados. Uma alteração de capacidade entre prévia e confirmação exige nova confirmação. A auditoria registra os totais, justificativa e administrador. Não há override acima do teto.
+
+* **B3 — capacidade sem configuração em campanhas com benefícios.** Com `globalLimit` e `quantityLimit` nulos, emissão e restauração falham fechadas. Pedidos pagos continuam retidos; campanhas legadas sem benefícios seguem no fluxo compatível existente. O teto absoluto de 1.000 é regra comercial pendente de aprovação do Anderson.
 
 ## 10. PR C — e-mail dos vouchers pela Resend (19/10/2026)
 

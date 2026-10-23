@@ -10,8 +10,8 @@ import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, r
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
  *
  * Retenção = pagamento CONFIRMADO que a emissão automática não atendeu (limite global esgotado ou campanha sem validade). A
- * unidade continua contando como consumida. Só ADMIN resolve, com justificativa (auditada): "Emitir" aprova um excedente
- * consciente; "Descartar" só vale depois de o pedido ter sido reembolsado/cancelado na Shopify. Nada aqui reembolsa ou cancela.
+ * unidade continua contando como consumida. Só ADMIN resolve dentro da capacidade configurada, com justificativa auditada;
+ * acima dela a retenção aguarda decisão humana. "Descartar" só vale depois de o pedido ter sido reembolsado/cancelado na Shopify.
  */
 
 const inputClass =

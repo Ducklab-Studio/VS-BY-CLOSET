@@ -17,9 +17,9 @@ import { resolveValidityTimezone, voucherWindow } from './vale-pass-validity';
  * Contrato (o chamador já está DENTRO de uma transação e já tomou o lock do pedido — `lockShopifyOrder`; aqui só se trava a campanha):
  *  - só emite para pedido com pagamento confirmado: quem chama garante isso (o webhook, ou a resolução, que relê o pedido);
  *  - campanha SEM nenhum benefício cadastrado → devolve `{ mode: 'legacy' }` e não faz nada: o chamador segue o caminho legado;
- *  - campanha COM benefícios mas sem voucher ativo ou sem janela de validade → NÃO cai no legado: retém o pedido (fila de resolução);
+ *  - campanha COM benefícios sem capacidade configurada, sem voucher ativo ou sem janela de validade → NÃO cai no legado: retém o pedido;
  *  - idempotente e recuperável: reentrega ou reprocessamento nunca duplica; unidade com voucher faltando é completada sem consumir capacidade;
- *  - sem capacidade no limite global → retém o pedido INTEIRO (tudo ou nada), com alerta e fila; o pagamento nunca fica sem tratamento;
+ *  - sem limite de capacidade configurado para uma campanha com benefícios, ou sem saldo → retém o pedido INTEIRO (tudo ou nada), com alerta e fila;
  *  - limite de LOTE nunca bloqueia emissão; o limite LEGADO (`quantity_limit`) não vale neste modelo;
  *  - nunca cancela, reembolsa nem emite dinheiro: só cria vouchers e registra a retenção.
  */
@@ -118,7 +118,7 @@ export class ValePassIssuanceService {
       return { mode: 'benefits', issuedUnits: 0, completedUnits: 0, heldUnits: 0, holdId: null, vouchersCreated: 0, events };
     }
 
-    // Prontidão: sem voucher ativo ou sem validade configurada NÃO se improvisa nem se cai no legado — retém.
+    // Prontidão: campanha com benefícios sem limite configurado, sem voucher ativo ou sem validade NÃO emite nem cai no legado — retém.
     const notReady = this.notReadyReason(campaign, benefits);
     if (notReady) {
       const heldUnits = Math.max(toCreate, incomplete.length);
@@ -184,8 +184,8 @@ export class ValePassIssuanceService {
 
   /**
    * Retém um pedido PAGO cuja validação financeira (valor, moeda, quantidade, desconto) deu problema. Não emite, não cancela e não reembolsa: abre
-   * (ou atualiza) UMA retenção aberta por pedido e campanha para um ADMIN resolver (emitir mesmo assim, com justificativa e confirmação reforçada,
-   * ou descartar depois de reembolsar na Shopify). A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
+   * (ou atualiza) UMA retenção aberta por pedido e campanha para um ADMIN resolver dentro da capacidade configurada, ou descartar depois de
+   * reembolsar na Shopify. A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
    * pedido já tem vouchers da campanha, não abre retenção (já foi tratado). ISOLADO: nenhum fluxo ativo chama este método.
    */
   /** Soma, na trilha de reembolsos, das unidades pagas e não emitidas já descontadas. Pedido sem reembolso registrado: 0. */
@@ -212,6 +212,7 @@ export class ValePassIssuanceService {
 
   private notReadyReason(campaign: ValePassCampaign, benefits: readonly ValePassCampaignBenefit[]): string | null {
     if (benefits.length === 0) return 'a campanha tem benefícios cadastrados, mas nenhum voucher ativo';
+    if (configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit) === null) return 'a campanha com benefícios não tem limite de capacidade configurado';
     if (!campaign.voucherValidFrom || !campaign.voucherValidUntil) return 'a campanha não tem a validade dos vouchers configurada (início e fim)';
     return null;
   }

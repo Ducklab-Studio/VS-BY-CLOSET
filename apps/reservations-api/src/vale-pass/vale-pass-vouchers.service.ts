@@ -245,14 +245,27 @@ export class ValePassVouchersService {
       }
       if (block) throw block.error;
 
-      // Reativar uma unidade cancelada volta a ocupar capacidade. Compartilha o lock da campanha
-      // com pagamentos e emissões para que duas operações concorrentes não excedam o teto.
-      await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${target.campaignId}::uuid FOR UPDATE`;
-      const campaign = await tx.valePassCampaign.findUniqueOrThrow({ where: { id: target.campaignId }, select: { globalLimit: true, quantityLimit: true } });
+      // inVoucherTransaction já trava campanha antes dos vouchers, como a prorrogação coletiva.
+      // Reativar uma unidade cancelada volta a ocupar capacidade.
+      const campaign = await tx.valePassCampaign.findUniqueOrThrow({ where: { id: target.campaignId }, select: { globalLimit: true, quantityLimit: true, benefits: { select: { id: true }, take: 1 } } });
       const capacityLimit = configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit);
       const siblings = target.groupId
         ? await tx.valePass.count({ where: { campaignId: target.campaignId, groupId: target.groupId, id: { not: target.id }, status: { not: 'CANCELLED' } } })
         : 0;
+      if (campaign.benefits.length > 0 && capacityLimit === null) {
+        const message = 'A restauração está bloqueada: a campanha com benefícios não tem limite de capacidade configurado.';
+        await tx.valePassEvent.create({ data: { valePassId: target.id, type: 'RESTORE_BLOCKED', detail: { actorId, reason, blockedBy: 'capacity_limit_unconfigured' } } });
+        await writeAdminAuditEvent(tx, {
+          adminUserId: actorId,
+          adminUserName: actorName,
+          action: 'VALE_PASS_RESTORE_BLOCKED',
+          entityType: 'ValePass',
+          entityId: target.id,
+          before: { status: target.status },
+          detail: { code: maskCode(target.code), reason, blockedBy: 'capacity_limit_unconfigured' },
+        });
+        return { blocked: new ConflictException(message) };
+      }
       if (siblings === 0 && capacityLimit !== null) {
         const { totals } = await loadCapacity(tx, target.campaignId);
         if (totals.consumed >= capacityLimit) {
@@ -316,9 +329,10 @@ export class ValePassVouchersService {
     const located = await this.requireByCode(code);
     try {
       return await this.prisma.$transaction(async (tx) => {
-        // `shopifyOrderId` nunca muda depois da emissão, então a leitura
-        // fora da transação é suficiente para escolher o lock.
+        // Ordem comum: pedido Shopify → campanha → voucher. A prorrogação coletiva usa campanha → vouchers;
+        // travar a campanha antes da linha evita ciclo entre restauração e prorrogação.
         if (located.shopifyOrderId) await lockShopifyOrder(tx, located.shopifyOrderId);
+        await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${located.campaignId}::uuid FOR UPDATE`;
         await tx.$executeRaw`SELECT 1 FROM vale_passes WHERE id = ${located.id}::uuid FOR UPDATE`;
         const target = await tx.valePass.findUniqueOrThrow({ where: { id: located.id } });
         return work(tx, target);

@@ -65,11 +65,11 @@ const flowService = () => new ValePassPaymentFlowService(new ValePassFinancialGu
 const money = (amount: string) => ({ shop_money: { amount, currency_code: 'BRL' }, presentment_money: { amount, currency_code: 'BRL' } });
 
 interface Campaign extends ValePassCampaign { numericVariant: string }
-async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number }> = {}): Promise<Campaign> {
+async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number | null }> = {}): Promise<Campaign> {
   const numericVariant = String(900_000_000_000 + counter++);
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, shopifyVariantId: numericVariant,
+      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: over.globalLimit === undefined ? 1_000 : over.globalLimit, shopifyVariantId: numericVariant,
       voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z'), ...over,
     },
   });
@@ -756,7 +756,7 @@ localDescribe('MÉDIO-1/2 — pagamento sem tratamento: variante sem campanha e 
   const prodLine = (variant: number, quantity: number) => ({ variant_id: variant, product_id: Number(KNOWN_VALE_PASS_PRODUCT_ID), quantity, current_quantity: quantity, price: '350.00', price_set: money('350.00'), discount_allocations: [] });
   async function campaignFor(variant: string): Promise<Campaign> {
     const campaign = await prisma.valePassCampaign.create({
-      data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, shopifyVariantId: variant, voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') },
+      data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: variant, voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') },
     });
     campaignIds.push(campaign.id);
     await prisma.valePassCampaignBenefit.createMany({
@@ -1470,7 +1470,7 @@ localDescribe('HORÁRIO DO PAGAMENTO — política estrita por padrão; fonte au
     shopify(orderId, [txn({ processedAt: paidAt, amount: '700.00' })], '700.00');
     expect(await paymentTimeService().verifyFromShopify(actor(), { orderId, note })).toMatchObject({ status: 'CONFIRMED', confirmedAt: paidAt });
     expect((await paymentTimeService().candidates()).map((c) => c.orderId)).not.toContain(orderId);
-    const campaign = await prisma.valePassCampaign.create({ data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, shopifyVariantId: String(variant), voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') } });
+    const campaign = await prisma.valePassCampaign.create({ data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: String(variant), voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') } });
     campaignIds.push(campaign.id);
     await prisma.valePassCampaignBenefit.createMany({ data: [
       { campaignId: campaign.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'A', amountCents: 50_000, sortOrder: 0 },

@@ -54,7 +54,7 @@ async function newCampaign(setup: Setup = {}): Promise<ValePassCampaign> {
       name: `${TAG}-camp-${counter++}`,
       amountCents: 35_000,
       validityDays: 30,
-      globalLimit: setup.globalLimit === undefined ? null : setup.globalLimit,
+      globalLimit: setup.globalLimit === undefined ? 1_000 : setup.globalLimit,
       quantityLimit: setup.quantityLimit,
       voucherValidFrom: window ? new Date(`${window[0]}T00:00:00.000Z`) : null,
       voucherValidUntil: window ? new Date(`${window[1]}T00:00:00.000Z`) : null,
@@ -771,6 +771,20 @@ localDescribe('Valle Pass 2027 — resgate, saldos por empresa, cancelamento e r
     await expect(vouchers.restore(first.code, 'restauração acima do teto', adminId, ADMIN_NAME)).rejects.toThrow(/ultrapassaria o teto configurado/);
     expect((await prisma.valePass.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('CANCELLED');
     expect((await capacityOf(c.id)).totals).toMatchObject({ sold: 1, consumed: 1 });
+    expect(await prisma.valePassEvent.count({ where: { valePassId: first.id, type: 'RESTORE_BLOCKED' } })).toBe(1);
+  });
+
+  test('restauração falha fechada quando uma campanha com benefícios perde ambos os limites', async () => {
+    const c = await newCampaign({ globalLimit: 10 });
+    const order = await paidOrder(c, 1);
+    await issue(c, order);
+    const [first, second] = await vouchersOf(order.id);
+    await vouchers.cancel(first.code, 'cancelamento para teste de teto nulo', adminId, ADMIN_NAME);
+    await vouchers.cancel(second.code, 'cancelamento para teste de teto nulo', adminId, ADMIN_NAME);
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: null, quantityLimit: null } });
+
+    await expect(vouchers.restore(first.code, 'restauração com teto nulo', adminId, ADMIN_NAME)).rejects.toThrow(/não tem limite de capacidade configurado/);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('CANCELLED');
     expect(await prisma.valePassEvent.count({ where: { valePassId: first.id, type: 'RESTORE_BLOCKED' } })).toBe(1);
   });
 

@@ -134,7 +134,7 @@ export class ValePassHoldsService {
    * mostra; a emissão de verdade recalcula tudo no servidor, com as travas, e recusa se algum número tiver mudado.
    */
   async preview(holdId: string): Promise<HoldProjection> {
-    const hold = await this.prisma.valePassIssuanceHold.findUnique({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true } } } });
+    const hold = await this.prisma.valePassIssuanceHold.findUnique({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true, benefits: { select: { id: true }, take: 1 } } } } });
     if (!hold) throw new NotFoundException('Retenção não encontrada.');
     if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
     return this.project(this.prisma, hold);
@@ -142,7 +142,7 @@ export class ValePassHoldsService {
 
   private async project(
     client: Pick<Prisma.TransactionClient, '$queryRaw' | 'valePassOrder' | 'valePassOrderCancellation'>,
-    hold: ValePassIssuanceHold & { campaign: { name: string; globalLimit: number | null; quantityLimit: number | null } },
+    hold: ValePassIssuanceHold & { campaign: { name: string; globalLimit: number | null; quantityLimit: number | null; benefits: { id: string }[] } },
   ): Promise<HoldProjection> {
     const order = await client.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
     const cancelled = await client.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId } });
@@ -158,6 +158,7 @@ export class ValePassHoldsService {
     const globalLimit = hold.campaign.globalLimit;
     const capacityLimit = configuredCapacityLimit(globalLimit, hold.campaign.quantityLimit);
     const exceededBy = capacityLimit === null ? 0 : Math.max(0, projectedTotal - capacityLimit);
+    const missingCapacity = hold.campaign.benefits.length > 0 && capacityLimit === null;
     const paid = Boolean(order && order.status === 'CONFIRMED' && !order.deletedInShopifyAt && !cancelled);
     return {
       holdId: hold.id,
@@ -179,9 +180,11 @@ export class ValePassHoldsService {
       exceedsLimit: exceededBy > 0,
       exceededBy,
       holdUpdatedAt: hold.updatedAt.toISOString(),
-      canIssue: paid && !exceededBy,
+      canIssue: paid && !exceededBy && !missingCapacity,
       blockedReason: !paid
         ? 'O pedido não está mais pago/ativo na Shopify: não há o que emitir. Use "Descartar" para encerrar a retenção.'
+        : missingCapacity
+          ? 'A campanha com benefícios não tem limite de capacidade configurado. O pedido permanece retido; configure um limite antes de emitir.'
         : exceededBy > 0
           ? `O pedido permanece retido: a emissão ultrapassaria o teto configurado da campanha (${capacityLimit}).`
           : null,
@@ -205,9 +208,9 @@ export class ValePassHoldsService {
 
         // Perfil revalidado AQUI (o guard da rota não basta): ADMIN e ativo.
         const actor = await tx.adminUser.findUnique({ where: { id: actorId }, select: { role: true, active: true } });
-        if (!actor || !actor.active || actor.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode emitir acima do limite.');
+        if (!actor || !actor.active || actor.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode resolver esta retenção.');
 
-        const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true } } } });
+        const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true, benefits: { select: { id: true }, take: 1 } } } } });
         if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
         // A retenção nunca pode emitir MAIS do que o pedido ainda deve (ex.: a quantidade diminuiu e ninguém sincronizou a retenção).
         const registryOrder = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: hold.shopifyOrderId }, select: { quantity: true } });

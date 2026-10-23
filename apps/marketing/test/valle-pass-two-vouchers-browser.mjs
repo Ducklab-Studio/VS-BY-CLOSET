@@ -192,7 +192,7 @@ try {
     },
   });
   await db.valePass.create({ data: { code: `${prefix}-LEGADO`, campaignId, amountCents: 35_000, status: 'ACTIVE', purchasedAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() + 86_400_000) } });
-  await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: 1 } });
+  await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: null } });
   const hold = await db.valePassIssuanceHold.create({
     data: { shopifyOrderId: orderId, campaignId, units: 1, reason: 'CAPACITY_EXCEEDED', status: 'OPEN', openFlag: true, detail: { globalLimit: 1 } },
   });
@@ -201,54 +201,55 @@ try {
   await card(page).waitFor();
   await expand(page);
   await card(page).getByText(/Pagamentos confirmados aguardando resolução \(1\)/).waitFor();
-  await card(page).getByText(/Limite global esgotado/).waitFor();
   await card(page).getByText(/aguardam resolução de um administrador/).first().waitFor();
   await card(page).getByRole('button', { name: 'Resolver' }).click();
   const confirmation = card(page).getByLabel('Confirmação da emissão excepcional');
   await confirmation.waitFor();
-  assert.match(await confirmation.innerText(), /Limite global\s*1\b/);
+  assert.match(await confirmation.innerText(), /Teto configurado da campanha\s*sem limite configurado/);
   assert.match(await confirmation.innerText(), /Consumido hoje\s*2 \(1 vendidos \+ 1 pagos aguardando\)/);
   assert.match(await confirmation.innerText(), /Total projetado depois\s*2 \(2 vendidos \+ 0 aguardando\)/);
-  await confirmation.getByText(/ultrapassa o limite autorizado em 1 unidade\(s\) \(2 de 1\)/).waitFor();
-  const emitir = card(page).getByRole('button', { name: /Emitir \(excedente aprovado\)/ });
+  await confirmation.getByText(/sem limite configurado/).waitFor();
+  const emitir = card(page).getByRole('button', { name: 'Emitir dentro da capacidade' });
   const noteInput = card(page).getByLabel(/Justificativa/);
   const totalInput = card(page).getByLabel(/digite o total projetado \(2\)/);
-  assert.equal(await emitir.isDisabled(), true); // sem justificativa nem total
+  assert.equal(await emitir.isDisabled(), true); // fail-closed: campanha com benefícios sem limite
   await noteInput.fill('curta'); // < 10 caracteres
   await totalInput.fill('2');
   assert.equal(await emitir.isDisabled(), true);
-  await noteInput.fill('Excedente aprovado no teste');
-  await totalInput.fill('3'); // total errado
-  assert.equal(await emitir.isDisabled(), true);
+  await noteInput.fill('Emissão segura no teste');
   await totalInput.fill('2');
-  assert.equal(await emitir.isDisabled(), false); // só aqui habilita
-  await totalInput.fill('');
-  await card(page).getByRole('button', { name: /Descartar/ }).click();
-  await card(page).getByText(/continua pago/).waitFor();
-  assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: hold.id } })).status, 'OPEN');
-  assert.equal((await newVouchers()).length, 0);
+  assert.equal(await emitir.isDisabled(), true);
 
-  // A API recusa por conta própria (a tela não é a barreira): sem confirmação → 400; números vistos errados → 409; total digitado errado → 422.
+  // A API recusa por conta própria (a tela não é a barreira): sem confirmação/justificativa → 400; capacidade ausente ou excedida → 409.
   const http = (path, init = {}) => fetch(`${apiUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': admin.token } });
   const seen = await (await http(`/admin/vale-pass/holds/${hold.id}/preview`)).json();
   assert.equal(seen.projectedTotal, 2);
-  assert.equal(seen.exceededBy, 1);
-  const expected = { projectedTotal: seen.projectedTotal, consumedTotal: seen.consumedBefore, globalLimit: seen.globalLimit, holdUpdatedAt: seen.holdUpdatedAt };
+  assert.equal(seen.capacityLimit, null);
+  const expected = { projectedTotal: seen.projectedTotal, consumedTotal: seen.consumedBefore, globalLimit: seen.globalLimit, capacityLimit: seen.capacityLimit, holdUpdatedAt: seen.holdUpdatedAt };
   const post = (body) => http(`/admin/vale-pass/holds/${hold.id}/issue`, { method: 'POST', body: JSON.stringify({ adminUserId: admin.id, ...body }) });
   assert.equal((await post({ note: 'Justificativa suficiente', expected })).status, 400); // sem confirmTotal
   assert.equal((await post({ note: 'curta', confirmTotal: 2, expected })).status, 400); // justificativa curta
-  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 2, expected: { ...expected, consumedTotal: 1 } })).status, 409);
-  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 3, expected })).status, 422);
+  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 2, expected })).status, 409); // sem teto configurado
   assert.equal((await newVouchers()).length, 0);
   assert.equal((await db.valePassIssuanceHold.findUnique({ where: { id: hold.id } })).status, 'OPEN');
-  pass('2) confirmação reforçada: limite/consumo/total projetado e aviso de excesso; botão só habilita com justificativa ≥ 10 e total digitado certo; descartar recusado com pedido pago; a API recusa sem confirmação (400), com números vistos errados (409) e total errado (422)');
+  await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: 1 } });
+  await card(page).getByRole('button', { name: 'Atualizar números' }).click();
+  await confirmation.getByText(/ultrapassaria o teto configurado em 1 unidade/).waitFor();
+  assert.equal(await emitir.isDisabled(), true);
+  const overLimitPreview = await (await http(`/admin/vale-pass/holds/${hold.id}/preview`)).json();
+  assert.equal(overLimitPreview.capacityLimit, 1);
+  assert.equal(overLimitPreview.exceededBy, 1);
+  const overLimitExpected = { projectedTotal: overLimitPreview.projectedTotal, consumedTotal: overLimitPreview.consumedBefore, globalLimit: overLimitPreview.globalLimit, capacityLimit: overLimitPreview.capacityLimit, holdUpdatedAt: overLimitPreview.holdUpdatedAt };
+  assert.equal((await post({ note: 'Justificativa suficiente', confirmTotal: 2, expected: overLimitExpected })).status, 409); // admin API também bloqueia acima do teto
+  assert.equal((await newVouchers()).length, 0);
+  pass('2) fail-closed: UI e API retêm campanhas sem teto e impedem emissão administrativa acima da capacidade');
 
   // 2b) Capacidade muda entre a visualização e a confirmação: rejeita, recarrega os números e exige digitar de novo.
-  await noteInput.fill('Excedente aprovado no teste');
+  await noteInput.fill('Capacidade revisada no teste');
   await totalInput.fill('2');
   await db.valePassCampaign.update({ where: { id: campaignId }, data: { globalLimit: 2 } }); // outra pessoa mexe no limite depois de a tela abrir
-  await emitir.click();
-  await card(page).getByText(/mudou desde que a confirmação foi aberta/).waitFor();
+  assert.equal((await post({ note: 'Capacidade revisada no teste', confirmTotal: 2, expected: overLimitExpected })).status, 409);
+  await card(page).getByRole('button', { name: 'Atualizar números' }).click();
   assert.equal((await newVouchers()).length, 0);
   await confirmation.getByText(/não ultrapassa o limite atual/).waitFor(); // números novos na tela
   assert.equal(await totalInput.inputValue(), ''); // exige digitar de novo
@@ -270,7 +271,7 @@ try {
   assert.equal(audit.isCritical, true);
   assert.deepEqual([audit.before.globalLimit, audit.before.sold, audit.before.pending, audit.before.consumed], [2, 1, 1, 2]);
   assert.deepEqual([audit.after.sold, audit.after.pending, audit.after.consumed], [2, 0, 2]);
-  assert.equal(audit.detail.note, 'Excedente aprovado no teste');
+  assert.equal(audit.detail.note, 'Capacidade revisada no teste');
   assert.equal(audit.detail.confirmedTotal, 2);
   pass('2c) emissão confirmada cria exatamente 2 vouchers (R$ 500 Valle Showroom + R$ 50 VS BY CLOSET), mesmo grupo; consumo igual antes e depois; auditoria crítica com totais, justificativa e administrador');
 

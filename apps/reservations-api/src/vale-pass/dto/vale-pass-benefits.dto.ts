@@ -100,7 +100,7 @@ export class IssueHoldExpectedDto {
   holdUpdatedAt!: string;
 }
 
-/** Emissão excepcional acima do limite: justificativa forte + total projetado digitado + os números que a pessoa viu. */
+/** Emissão administrativa dentro da capacidade: justificativa + total projetado digitado + os números que a pessoa viu. */
 export class IssueHoldDto {
   @IsOptional()
   @IsUUID()
