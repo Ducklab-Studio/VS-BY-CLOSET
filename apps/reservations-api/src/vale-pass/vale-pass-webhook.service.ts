@@ -11,6 +11,7 @@ import { ValePassRefundService } from './refunds/refund.service';
 import { factsFromRefundWebhook } from './refunds/refund-facts';
 import { KNOWN_VALE_PASS_VARIANT_ID, valePassUnits } from './vale-pass-order-status';
 import { ValePassOrderRegistry, type ValePassOrderSnapshot } from './vale-pass-order-registry';
+import { configuredCapacityLimit, loadCapacity } from './vale-pass-capacity';
 import {
   extractCustomerEmail,
   extractCustomerName,
@@ -287,19 +288,32 @@ export class ValePassWebhookService {
     const customerEmail = extractCustomerEmail(order);
 
     const events: EventInput[] = [...flowEvents];
+    // Campanhas legadas continuam usando seus próprios limites; não recebem o teto 1.000 por padrão.
+    // Trava em ordem determinística para serializar pedidos diferentes e evitar deadlocks entre campanhas.
+    const legacyCapacity = new Map<string, number>();
+    const legacyLimits = new Map<string, number | null>();
+    const blockedLegacyCampaigns = new Set<string>();
+    for (const campaign of [...legacyCampaigns].sort((a, b) => a.id.localeCompare(b.id))) {
+      await tx.$queryRaw`SELECT id FROM vale_pass_campaigns WHERE id = ${campaign.id}::uuid FOR UPDATE`;
+      const { totals } = await loadCapacity(tx, campaign.id, orderId);
+      const limit = configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit);
+      const occupied = campaign.globalLimit !== null ? totals.consumed : totals.issued + totals.pending;
+      const requested = lines.filter((line) => line.variantId === campaign.shopifyVariantId).reduce((sum, line) => sum + line.quantity, 0);
+      legacyCapacity.set(campaign.id, occupied);
+      legacyLimits.set(campaign.id, limit);
+      if (limit !== null && occupied + requested > limit) {
+        blockedLegacyCampaigns.add(campaign.id);
+        this.logger.warn(`Pedido ${orderId} permanece sem emissão na campanha ${campaign.id}: ${requested} unidade(s) pagas não cabem no teto configurado ${limit}.`);
+        events.push({ type: 'VALE_PASS_QUANTITY_LIMIT_REACHED', detail: { campaignId: campaign.id, orderId, limit, occupied, requested, retained: true } });
+      }
+    }
     for (const line of lines) {
       const campaign = legacyCampaigns.find((c) => c.shopifyVariantId === line.variantId);
-      if (!campaign) continue;
+      if (!campaign || blockedLegacyCampaigns.has(campaign.id)) continue;
 
       for (let i = 0; i < line.quantity; i++) {
-        if (campaign.quantityLimit != null) {
-          const issuedSoFar = await tx.valePass.count({ where: { campaignId: campaign.id } });
-          if (issuedSoFar >= campaign.quantityLimit) {
-            this.logger.error(`Campanha ${campaign.id} atingiu o limite de quantidade — pedido ${orderId} recebeu menos vales do que comprou`);
-            events.push({ type: 'VALE_PASS_QUANTITY_LIMIT_REACHED', detail: { campaignId: campaign.id, orderId } });
-            continue;
-          }
-        }
+        const limit = legacyLimits.get(campaign.id) ?? null;
+        const occupied = legacyCapacity.get(campaign.id) ?? 0;
 
         const code = await this.generateUniqueCode(tx);
         const purchasedAt = new Date();
@@ -326,6 +340,7 @@ export class ValePassWebhookService {
           data: { valePassId: created.id, type: 'CREATED', detail: { orderId, campaignId: campaign.id } },
         });
         events.push({ type: 'VALE_PASS_CREATED', detail: { valePassId: created.id, code: maskCode(created.code), campaignId: campaign.id, orderId } });
+        if (limit !== null && (campaign.globalLimit === null || !priorCancellation)) legacyCapacity.set(campaign.id, occupied + 1);
 
         if (priorCancellation) {
           const cancelled = await this.cancelByShopify(tx, created, orderId, priorCancellation.topic, 'pedido já confirmado como cancelado/reembolsado antes da emissão');

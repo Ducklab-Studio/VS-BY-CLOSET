@@ -7,6 +7,9 @@ import { ValePassVouchersController } from './vale-pass-vouchers.controller';
 import { REQUIRE_ROLE_KEY } from '../admin/require-role.decorator';
 import { REQUIRE_MODULE_KEY } from '../admin/require-module.decorator';
 
+const localDatabase = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i.test(process.env.DATABASE_URL ?? '');
+const localDescribe = localDatabase ? describe : describe.skip;
+
 /**
  * Restaurar Valle Pass cancelado — item novo do pedido: a tela mostrava
  * "Nenhuma ação disponível" pra todo CANCELLED; agora um subconjunto pode
@@ -90,13 +93,13 @@ async function cleanup() {
   }
 }
 
-beforeAll(cleanup);
+beforeAll(async () => { if (localDatabase) await cleanup(); });
 afterAll(async () => {
-  await cleanup();
+  if (localDatabase) await cleanup();
   await prisma.$disconnect();
 });
 
-describe('ValePassVouchersService.restore — restaurar Valle Pass cancelado (integração real, Neon)', () => {
+localDescribe('ValePassVouchersService.restore — restaurar Valle Pass cancelado (PostgreSQL local descartável)', () => {
   test('1) cancelado por ADMIN, nunca utilizado, não expirado → restaura pra ACTIVE', async () => {
     const owner = await createOwner();
     const campaign = await createCampaign();

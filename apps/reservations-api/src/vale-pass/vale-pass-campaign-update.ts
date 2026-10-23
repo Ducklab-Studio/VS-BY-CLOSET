@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { formatIsoDate, parseIsoDate } from './vale-pass-capacity';
+import { formatIsoDate, parseIsoDate, VALE_PASS_GLOBAL_LIMIT } from './vale-pass-capacity';
 
 /**
  * Plano de edição de uma campanha de Valle Pass: valida o PATCH contra o estado atual e contra o que já foi vendido, e
@@ -90,7 +90,9 @@ export function planCampaignUpdate(current: CampaignCurrent, input: CampaignUpda
   if (has(input, 'globalLimit')) {
     const value = input.globalLimit as number | null;
     const needed = context.sold + (context.openLot ? Math.max(0, context.openLot.quantity - context.openLot.sold) : 0);
-    if (value !== null && value < context.sold) {
+    if (value !== null && value > VALE_PASS_GLOBAL_LIMIT) {
+      errors.push(`O limite global do Valle Pass 2027 não pode passar de ${VALE_PASS_GLOBAL_LIMIT} unidades.`);
+    } else if (value !== null && value < context.sold) {
       errors.push(`O limite global (${value}) é menor que os ${context.sold} passes já vendidos (incluindo pagos aguardando emissão).`);
     } else if (value !== null && value < needed) {
       errors.push(`O limite global (${value}) não comporta o saldo do lote aberto (vendidos ${context.sold} + restante do lote ${needed - context.sold} = ${needed}). Encerre ou reduza o lote antes.`);

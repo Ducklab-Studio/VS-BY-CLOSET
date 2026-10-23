@@ -65,11 +65,11 @@ const flowService = () => new ValePassPaymentFlowService(new ValePassFinancialGu
 const money = (amount: string) => ({ shop_money: { amount, currency_code: 'BRL' }, presentment_money: { amount, currency_code: 'BRL' } });
 
 interface Campaign extends ValePassCampaign { numericVariant: string }
-async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number }> = {}): Promise<Campaign> {
+async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number | null }> = {}): Promise<Campaign> {
   const numericVariant = String(900_000_000_000 + counter++);
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, shopifyVariantId: numericVariant,
+      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: over.globalLimit === undefined ? 1_000 : over.globalLimit, shopifyVariantId: numericVariant,
       voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z'), ...over,
     },
   });
@@ -756,7 +756,7 @@ localDescribe('MÉDIO-1/2 — pagamento sem tratamento: variante sem campanha e 
   const prodLine = (variant: number, quantity: number) => ({ variant_id: variant, product_id: Number(KNOWN_VALE_PASS_PRODUCT_ID), quantity, current_quantity: quantity, price: '350.00', price_set: money('350.00'), discount_allocations: [] });
   async function campaignFor(variant: string): Promise<Campaign> {
     const campaign = await prisma.valePassCampaign.create({
-      data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, shopifyVariantId: variant, voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') },
+      data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: variant, voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') },
     });
     campaignIds.push(campaign.id);
     await prisma.valePassCampaignBenefit.createMany({
@@ -916,8 +916,9 @@ localDescribe('MÉDIO-3 — a emissão excepcional do ADMIN registra a mensagem 
     const [hold] = await holdsOf(orderId);
     expect(hold.reason).toBe('CAPACITY_EXCEEDED');
     expect(await outboxOf(orderId)).toHaveLength(0);
+    await prisma.valePassCampaign.update({ where: { id: campaign.id }, data: { globalLimit: 2 } });
     const preview = await holdsService.preview(hold.id);
-    const input: IssueHoldInput = { note: 'Excedente aprovado pela diretoria (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } };
+    const input: IssueHoldInput = { note: 'Capacidade revisada pela diretoria (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, capacityLimit: preview.capacityLimit, holdUpdatedAt: preview.holdUpdatedAt } };
     await holdsService.issue(hold.id, input, adminId, ADMIN_NAME);
     expect(await vouchersOf(orderId)).toHaveLength(4);
     const rows = await outboxOf(orderId);
@@ -943,7 +944,7 @@ localDescribe('MÉDIO-3 — a emissão excepcional do ADMIN registra a mensagem 
     const [hold] = await holdsOf(orderId);
     expect(issueCodes(hold)).toEqual(['PAYMENT_TIME_UNKNOWN']);
     const preview = await holdsService.preview(hold.id);
-    await holdsService.issue(hold.id, { note: 'Pagamento conferido na Shopify (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } }, adminId, ADMIN_NAME);
+    await holdsService.issue(hold.id, { note: 'Pagamento conferido na Shopify (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, capacityLimit: preview.capacityLimit, holdUpdatedAt: preview.holdUpdatedAt } }, adminId, ADMIN_NAME);
     const [mail] = await outboxOf(orderId);
     expect(mail.deadlineAt.getTime()).toBe(hold.createdAt.getTime() + 3 * DAY);
     const event = await prisma.valePassEmailEvent.findFirstOrThrow({ where: { outboxId: mail.id, type: 'ENQUEUED' } });
@@ -1182,7 +1183,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
   });
   const confirmIssue = async (holdId: string, note = 'Excedente aprovado pela diretoria (teste)'): Promise<IssueHoldInput> => {
     const p = await holdsService.preview(holdId);
-    return { note, confirmTotal: p.projectedTotal, expected: { projectedTotal: p.projectedTotal, consumedTotal: p.consumedBefore, globalLimit: p.globalLimit, holdUpdatedAt: p.holdUpdatedAt } };
+    return { note, confirmTotal: p.projectedTotal, expected: { projectedTotal: p.projectedTotal, consumedTotal: p.consumedBefore, globalLimit: p.globalLimit, capacityLimit: p.capacityLimit, holdUpdatedAt: p.holdUpdatedAt } };
   };
   async function capacityHeld(quantity: number, limit = 1) {
     flags.twoVoucher = true;
@@ -1195,7 +1196,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
     return { campaign, payload, orderId, hold };
   }
 
-  test('2 → 3 unidades COM pagamento comprovado: a retenção passa a 3 (auditado), o ADMIN emite as 3 de uma vez e a fila de e-mail tem 3 mensagens', async () => {
+  test('2 → 3 unidades COM pagamento comprovado: retenção acompanha o pedido e só emite após o teto configurado comportar 3', async () => {
     const { campaign, payload, orderId, hold } = await capacityHeld(2);
     const edit = editQty(payload, campaign.numericVariant, 3, '1050.00', 5_000);
     const events = await run(service(), 'orders/updated', edit);
@@ -1206,6 +1207,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
     expect(detail.unitHistory).toEqual([expect.objectContaining({ from: 2, to: 3, proven: true })]);
     expect(await vouchersOf(orderId)).toHaveLength(0); // atualizar a retenção nunca emite
     expect((await allOrderEvents(orderId)).filter((type) => type === 'HOLD_UNITS_UPDATED')).toHaveLength(1);
+    await prisma.valePassCampaign.update({ where: { id: campaign.id }, data: { globalLimit: 3 } });
     await holdsService.issue(hold.id, await confirmIssue(hold.id), adminId, ADMIN_NAME);
     expect(await vouchersOf(orderId)).toHaveLength(6);
     expect(await outboxOf(orderId)).toHaveLength(3);
@@ -1213,7 +1215,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
     expect((await lots.getCapacity(campaign.id)).totals.consumed).toBe(3);
   });
 
-  test('2 → 3 unidades SEM comprovação (total pago não cobre): a retenção NÃO cresce, o motivo aparece, o ADMIN emite só as 2 comprovadas e a 3ª fica visível para regularização', async () => {
+  test('2 → 3 unidades SEM comprovação (total pago não cobre): a retenção não cresce; só as 2 comprovadas emitem dentro do teto', async () => {
     const { campaign, payload, orderId, hold } = await capacityHeld(2);
     const edit = editQty(payload, campaign.numericVariant, 3, '700.00', 5_000); // acréscimo não pago
     await run(service(), 'orders/updated', edit);
@@ -1223,6 +1225,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
     expect(issueCodes(after)).toContain('QUANTITY_INCREASED_UNPROVEN');
     const projection = await holdsService.preview(hold.id);
     expect(projection.units).toBe(2);
+    await prisma.valePassCampaign.update({ where: { id: campaign.id }, data: { globalLimit: 3 } });
     await holdsService.issue(hold.id, await confirmIssue(hold.id), adminId, ADMIN_NAME); // caminho real de resolução (antes: Conflito eterno)
     expect(await vouchersOf(orderId)).toHaveLength(4);
     expect(new Set((await vouchersOf(orderId)).map((v) => v.groupId)).size).toBe(2);
@@ -1257,6 +1260,7 @@ localDescribe('D2 — retenção aberta acompanha a quantidade do pedido; o ADMI
     const { campaign, payload, orderId, hold } = await capacityHeld(3);
     await run(service(), 'orders/updated', editQty(payload, campaign.numericVariant, 2, '700.00', 5_000));
     expect((await holdsOf(orderId))[0].units).toBe(2);
+    await prisma.valePassCampaign.update({ where: { id: campaign.id }, data: { globalLimit: 2 } });
     await holdsService.issue(hold.id, await confirmIssue(hold.id), adminId, ADMIN_NAME);
     expect(await vouchersOf(orderId)).toHaveLength(4);
   });
@@ -1466,7 +1470,7 @@ localDescribe('HORÁRIO DO PAGAMENTO — política estrita por padrão; fonte au
     shopify(orderId, [txn({ processedAt: paidAt, amount: '700.00' })], '700.00');
     expect(await paymentTimeService().verifyFromShopify(actor(), { orderId, note })).toMatchObject({ status: 'CONFIRMED', confirmedAt: paidAt });
     expect((await paymentTimeService().candidates()).map((c) => c.orderId)).not.toContain(orderId);
-    const campaign = await prisma.valePassCampaign.create({ data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, shopifyVariantId: String(variant), voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') } });
+    const campaign = await prisma.valePassCampaign.create({ data: { name: TAG + '-camp-' + counter++, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: String(variant), voucherValidFrom: new Date('2026-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z') } });
     campaignIds.push(campaign.id);
     await prisma.valePassCampaignBenefit.createMany({ data: [
       { campaignId: campaign.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'A', amountCents: 50_000, sortOrder: 0 },

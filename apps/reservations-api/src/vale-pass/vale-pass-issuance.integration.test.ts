@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,7 +44,7 @@ const ADMIN_NAME = 'Admin Teste Emissão';
 const createdCampaigns: string[] = [];
 const orderIds: string[] = [];
 
-interface Setup { globalLimit?: number | null; window?: [string, string] | null; withBenefits?: boolean }
+interface Setup { globalLimit?: number | null; quantityLimit?: number | null; window?: [string, string] | null; withBenefits?: boolean }
 
 /** Campanha no modelo Valle Pass 2027: voucher R$ 500 Valle Showroom + voucher R$ 50 VS BY CLOSET + 10% em passeios (sem voucher). */
 async function newCampaign(setup: Setup = {}): Promise<ValePassCampaign> {
@@ -53,7 +54,8 @@ async function newCampaign(setup: Setup = {}): Promise<ValePassCampaign> {
       name: `${TAG}-camp-${counter++}`,
       amountCents: 35_000,
       validityDays: 30,
-      globalLimit: setup.globalLimit === undefined ? null : setup.globalLimit,
+      globalLimit: setup.globalLimit === undefined ? 1_000 : setup.globalLimit,
+      quantityLimit: setup.quantityLimit,
       voucherValidFrom: window ? new Date(`${window[0]}T00:00:00.000Z`) : null,
       voucherValidUntil: window ? new Date(`${window[1]}T00:00:00.000Z`) : null,
       shopifyVariantId: `${TAG}-var-${counter++}`,
@@ -132,13 +134,37 @@ const benefitsOutcome = (outcome: IssuanceOutcome) => {
 };
 const vouchersOf = (orderId: string) => prisma.valePass.findMany({ where: { shopifyOrderId: orderId }, orderBy: [{ groupId: 'asc' }, { company: 'asc' }] });
 const capacityOf = (campaignId: string) => lots.getCapacity(campaignId);
+async function seedCapacityUnits(campaign: ValePassCampaign, units: number): Promise<void> {
+  const benefits = await prisma.valePassCampaignBenefit.findMany({ where: { campaignId: campaign.id, kind: 'VOUCHER' }, orderBy: { sortOrder: 'asc' } });
+  const benefit = benefits[0];
+  if (!benefit?.company || benefit.amountCents === null) throw new Error('benefício de voucher da campanha ausente');
+  const orderId = `${TAG}-seed-${counter++}`;
+  orderIds.push(orderId);
+  const now = new Date();
+  await prisma.valePass.createMany({
+    data: Array.from({ length: units }, (_, i) => ({
+      code: `${TAG}-seed-${counter}-${i}`,
+      campaignId: campaign.id,
+      amountCents: benefit.amountCents!,
+      status: 'ACTIVE' as const,
+      purchasedAt: now,
+      expiresAt: new Date('2028-01-01T00:00:00.000Z'),
+      customerName: 'Semente sintética de capacidade',
+      shopifyOrderId: orderId,
+      company: benefit.company!,
+      groupId: randomUUID(),
+      benefitId: benefit.id,
+      validFrom: new Date('2027-01-01T00:00:00.000Z'),
+    })),
+  });
+}
 /** Faz o que a tela faz: abre a confirmação reforçada (preview) e monta o pedido de emissão com os números que viu e o total digitado. */
 const confirm = async (holdId: string, note: string, patch: { confirmTotal?: number; expected?: Partial<IssueHoldExpected> } = {}): Promise<IssueHoldInput> => {
   const p = await holds.preview(holdId);
   return {
     note,
     confirmTotal: patch.confirmTotal ?? p.projectedTotal,
-    expected: { projectedTotal: p.projectedTotal, consumedTotal: p.consumedBefore, globalLimit: p.globalLimit, holdUpdatedAt: p.holdUpdatedAt, ...patch.expected },
+    expected: { projectedTotal: p.projectedTotal, consumedTotal: p.consumedBefore, globalLimit: p.globalLimit, capacityLimit: p.capacityLimit, holdUpdatedAt: p.holdUpdatedAt, ...patch.expected },
   };
 };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,6 +245,34 @@ localDescribe('Valle Pass 2027 — uma unidade paga gera exatamente dois voucher
     expect(capacity.globalRemaining).toBe(999);
     expect((await campaigns.list()).find((item) => item.id === c.id)?.soldCount).toBe(1); // unidades, não linhas
     expect(await prisma.valePass.count({ where: { campaignId: c.id } })).toBe(2);
+  });
+
+  test('fronteiras 999/1000/1001: emite só a unidade que cabe; override e reentrega mantêm uma retenção sem vouchers excedentes', async () => {
+    for (const startingUnits of [999, 1000, 1001]) {
+      const c = await newCampaign({ globalLimit: 1000 });
+      await seedCapacityUnits(c, startingUnits);
+      const order = await paidOrder(c, 1);
+      const first = benefitsOutcome(await issue(c, order));
+      if (startingUnits === 999) {
+        expect(first).toMatchObject({ issuedUnits: 1, heldUnits: 0 });
+        expect(await vouchersOf(order.id)).toHaveLength(2);
+        expect((await capacityOf(c.id)).totals.consumed).toBe(1000);
+        continue;
+      }
+
+      expect(first).toMatchObject({ issuedUnits: 0, heldUnits: 1 });
+      expect(await vouchersOf(order.id)).toHaveLength(0);
+      const repeated = benefitsOutcome(await issue(c, order));
+      expect(repeated.holdId).toBe(first.holdId);
+      expect(await prisma.valePassIssuanceHold.count({ where: { shopifyOrderId: order.id, status: 'OPEN' } })).toBe(1);
+
+      const override = benefitsOutcome(await issue(c, order, { mode: 'override', actor: { id: adminId, name: ADMIN_NAME } }));
+      expect(override).toMatchObject({ issuedUnits: 0, heldUnits: 1, holdId: first.holdId });
+      await expect(holds.issue(first.holdId as string, await confirm(first.holdId as string, 'Tentativa administrativa revisada'), adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+      expect(await vouchersOf(order.id)).toHaveLength(0);
+      expect((await prisma.valePassIssuanceHold.findUniqueOrThrow({ where: { id: first.holdId as string } })).status).toBe('OPEN');
+      expect((await capacityOf(c.id)).totals.consumed).toBe(startingUnits + 1); // o excedente é apenas pendência paga, nunca voucher
+    }
   });
 
   test('pedido com várias unidades: 3 unidades → 6 vouchers em 3 grupos completos', async () => {
@@ -403,7 +457,7 @@ localDescribe('Valle Pass 2027 — lote esgotado, limite global de 1.000 e pagam
 });
 
 localDescribe('Valle Pass 2027 — resolução administrativa da fila', () => {
-  test('emitir (excedente aprovado): cria os vouchers acima do limite, fecha a retenção, audita; não resolve duas vezes', async () => {
+  test('pedido acima do limite permanece retido até a capacidade ser ampliada; então emite sem ultrapassar o novo teto', async () => {
     const c = await newCampaign({ globalLimit: 1 });
     await issue(c, await paidOrder(c, 1));
     const order = await paidOrder(c, 2);
@@ -411,13 +465,17 @@ localDescribe('Valle Pass 2027 — resolução administrativa da fila', () => {
     expect(held.heldUnits).toBe(2);
 
     await expect(holds.issue(held.holdId as string, await confirm(held.holdId as string, '  '), adminId, ADMIN_NAME)).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(holds.issue(held.holdId as string, await confirm(held.holdId as string, 'Excedente aprovado pelo Anderson (teste)'), adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+    await expect(vouchersOf(order.id)).resolves.toHaveLength(0);
+    await expect(prisma.valePassIssuanceHold.findUniqueOrThrow({ where: { id: held.holdId as string } })).resolves.toMatchObject({ status: 'OPEN' });
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 3 } });
     const good = await confirm(held.holdId as string, 'Excedente aprovado pelo Anderson (teste)');
     const resolved = await holds.issue(held.holdId as string, good, adminId, ADMIN_NAME);
     expect(resolved).toMatchObject({ status: 'ISSUED', issuedUnits: 2, resolutionNote: 'Excedente aprovado pelo Anderson (teste)' });
     expect(await vouchersOf(order.id)).toHaveLength(4);
     const capacity = await capacityOf(c.id);
     expect(capacity.totals).toMatchObject({ sold: 3, pending: 0, consumed: 3 });
-    expect(capacity.alerts.map((a) => a.code)).toContain('GLOBAL_LIMIT_EXCEEDED'); // 3 de 1: o excedente aprovado continua visível como alerta
+    expect(capacity.alerts.map((a) => a.code)).not.toContain('GLOBAL_LIMIT_EXCEEDED');
     expect(capacity.holds).toHaveLength(0);
 
     const audit = await prisma.adminAuditEvent.findMany({ where: { entityId: held.holdId as string } });
@@ -483,7 +541,7 @@ localDescribe('Valle Pass 2027 — resolução administrativa da fila', () => {
   });
 });
 
-localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirmação reforçada', () => {
+localDescribe('Valle Pass 2027 — resolução administrativa sujeita ao teto: confirmação reforçada', () => {
   /** Campanha com limite 5: 4 unidades emitidas e um pedido de 2 retido (consumo 6 de 5 — excede em 1). */
   async function heldScenario() {
     const c = await newCampaign({ globalLimit: 5 });
@@ -502,8 +560,8 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     const { c, holdId } = await heldScenario();
     const p = await holds.preview(holdId);
     expect(p).toMatchObject({
-      globalLimit: 5, units: 2, soldBefore: 4, pendingBefore: 2, consumedBefore: 6,
-      soldAfter: 6, pendingAfter: 0, projectedTotal: 6, exceedsLimit: true, exceededBy: 1, canIssue: true, blockedReason: null, reason: 'CAPACITY_EXCEEDED',
+      globalLimit: 5, capacityLimit: 5, units: 2, soldBefore: 4, pendingBefore: 2, consumedBefore: 6,
+      soldAfter: 6, pendingAfter: 0, projectedTotal: 6, exceedsLimit: true, exceededBy: 1, canIssue: false, blockedReason: expect.stringContaining('permanece retido'), reason: 'CAPACITY_EXCEEDED',
     });
     // somente leitura: nada mudou
     expect((await capacityOf(c.id)).totals).toMatchObject({ sold: 4, pending: 2, consumed: 6 });
@@ -524,7 +582,7 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
   test('a confirmação digitada NÃO substitui o servidor: números vistos desatualizados são rejeitados mesmo com o total certo', async () => {
     const { order, holdId } = await heldScenario();
     const good = await confirm(holdId, 'Justificativa suficientemente longa');
-    for (const expected of [{ projectedTotal: 5 }, { consumedTotal: 5 }, { globalLimit: 1000 }, { globalLimit: null }, { holdUpdatedAt: '2020-01-01T00:00:00.000Z' }]) {
+    for (const expected of [{ projectedTotal: 5 }, { consumedTotal: 5 }, { globalLimit: 1000 }, { globalLimit: null }, { capacityLimit: 1000 }, { capacityLimit: null }, { holdUpdatedAt: '2020-01-01T00:00:00.000Z' }]) {
       await expect(holds.issue(holdId, { ...good, expected: { ...good.expected, ...expected } }, adminId, ADMIN_NAME), JSON.stringify(expected)).rejects.toBeInstanceOf(ConflictException);
     }
     await nothingIssued(order.id, holdId);
@@ -553,9 +611,10 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     await nothingIssued(order.id, holdId);
 
     // nova abertura da confirmação com os números atuais: agora emite
-    const fresh = await confirm(holdId, 'Justificativa suficientemente longa');
-    expect(fresh.confirmTotal).toBe((await holds.preview(holdId)).projectedTotal);
-    await holds.issue(holdId, fresh, adminId, ADMIN_NAME);
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 7 } });
+    const refreshed = await confirm(holdId, 'Justificativa suficientemente longa');
+    expect(refreshed.confirmTotal).toBe((await holds.preview(holdId)).projectedTotal);
+    await holds.issue(holdId, refreshed, adminId, ADMIN_NAME);
     expect(await vouchersOf(order.id)).toHaveLength(4);
   });
 
@@ -578,8 +637,9 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     }
   });
 
-  test('duplo clique/duas abas: exatamente uma emissão vale; a outra é rejeitada; sem vouchers em dobro', async () => {
+  test('duplo clique/duas abas: dentro do teto, exatamente uma emissão vale; sem vouchers em dobro', async () => {
     const { order, holdId } = await heldScenario();
+    await prisma.valePassCampaign.update({ where: { id: (await prisma.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId } })).campaignId }, data: { globalLimit: 6 } });
     const input = await confirm(holdId, 'Justificativa suficientemente longa');
     const results = await Promise.allSettled(Array.from({ length: 5 }, () => holds.issue(holdId, input, adminId, ADMIN_NAME)));
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -588,8 +648,9 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     expect(await prisma.adminAuditEvent.count({ where: { entityId: holdId, action: 'VALE_PASS_HOLD_ISSUED' } })).toBe(1);
   });
 
-  test('concorrência com um pedido novo: a emissão excepcional e a emissão automática nunca estouram o consumo registrado', async () => {
+  test('concorrência com um pedido novo: a resolução e a emissão automática nunca ultrapassam o teto', async () => {
     const { c, order, holdId } = await heldScenario();
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 6 } });
     const input = await confirm(holdId, 'Justificativa suficientemente longa');
     const newcomer = await paidOrder(c, 1, { deferred: true });
     const [a, b] = await Promise.allSettled([holds.issue(holdId, input, adminId, ADMIN_NAME), issue(c, newcomer)]);
@@ -607,26 +668,44 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     expect(benefitsOutcome((b as PromiseFulfilledResult<IssuanceOutcome>).value).issuedUnits).toBe(0); // sem folga, o novo pedido nunca foi emitido sozinho
   });
 
-  test('a auditoria crítica guarda limite, totais antes/depois, justificativa, quem confirmou e o total digitado', async () => {
-    const { holdId } = await heldScenario();
-    await holds.issue(holdId, await confirm(holdId, 'Excedente aprovado pela diretoria em reunião'), adminId, ADMIN_NAME);
+  test('a emissão dentro do novo teto registra limite e totais sem auditoria de excedente', async () => {
+    const { c, holdId } = await heldScenario();
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 6 } });
+    await holds.issue(holdId, await confirm(holdId, 'Capacidade revisada e atualizada'), adminId, ADMIN_NAME);
     const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { entityId: holdId, action: 'VALE_PASS_HOLD_ISSUED' } });
     expect(audit).toMatchObject({ adminUserId: adminId, isCritical: true });
-    expect(audit.before).toMatchObject({ status: 'OPEN', units: 2, globalLimit: 5, sold: 4, pending: 2, consumed: 6 });
-    expect(audit.after).toMatchObject({ status: 'ISSUED', issuedUnits: 2, vouchers: 4, sold: 6, pending: 0, consumed: 6, exceededBy: 1 });
-    expect(audit.detail).toMatchObject({ note: 'Excedente aprovado pela diretoria em reunião', override: true, exceedsLimit: true, confirmedTotal: 6 });
+    expect(audit.before).toMatchObject({ status: 'OPEN', units: 2, globalLimit: 6, sold: 4, pending: 2, consumed: 6 });
+    expect(audit.after).toMatchObject({ status: 'ISSUED', issuedUnits: 2, vouchers: 4, sold: 6, pending: 0, consumed: 6, exceededBy: 0 });
+    expect(audit.detail).toMatchObject({ note: 'Capacidade revisada e atualizada', override: true, exceedsLimit: false, confirmedTotal: 6 });
   });
 
-  test('depois da emissão excepcional o sistema NÃO enxerga capacidade falsa: consumo igual, saldo 0, estoque recomendado 0, novas vendas continuam retidas, alerta crítico', async () => {
+  test('API nova preserva cliente antigo dentro do limite e não confia no payload para excedê-lo', async () => {
+    const allowed = await heldScenario();
+    await prisma.valePassCampaign.update({ where: { id: allowed.c.id }, data: { globalLimit: 6 } });
+    const oldClientInput = await confirm(allowed.holdId, 'Emissão enviada por cliente antigo');
+    const legacyExpected = (({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }) => ({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }))(oldClientInput.expected);
+    await holds.issue(allowed.holdId, { ...oldClientInput, expected: legacyExpected }, adminId, ADMIN_NAME);
+    expect(await vouchersOf(allowed.order.id)).toHaveLength(4);
+
+    const blocked = await heldScenario();
+    const overLimitInput = await confirm(blocked.holdId, 'Pedido antigo preservado em retenção');
+    const legacyOverLimit = { ...overLimitInput, expected: (({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }) => ({ projectedTotal, consumedTotal, globalLimit, holdUpdatedAt }))(overLimitInput.expected) };
+    await expect(holds.issue(blocked.holdId, legacyOverLimit, adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+    await nothingIssued(blocked.order.id, blocked.holdId);
+  });
+
+  test('pedido retido não pode ser emitido acima do teto e continua visível; novas vendas também ficam retidas', async () => {
     const { c, holdId } = await heldScenario();
-    const before = await capacityOf(c.id);
-    await holds.issue(holdId, await confirm(holdId, 'Justificativa suficientemente longa'), adminId, ADMIN_NAME);
+    const forgedCapacity = await confirm(holdId, 'Tentativa de forjar capacidade no cliente');
+    // A capacidade enviada sem o contrato reconhecido pelo servidor nunca autoriza emissão acima do teto.
+    await expect(holds.issue(holdId, { ...forgedCapacity, expected: { ...forgedCapacity.expected, capacityLimit: 1000 } }, adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
+    await nothingIssued((await prisma.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId } })).shopifyOrderId, holdId);
+    await expect(holds.issue(holdId, await confirm(holdId, 'Justificativa suficientemente longa'), adminId, ADMIN_NAME)).rejects.toThrow(/excederia o teto configurado/);
     const after = await capacityOf(c.id);
-    expect(after.totals.consumed).toBe(before.totals.consumed); // só troca "pago aguardando" por "vendido"
-    expect(after.totals).toMatchObject({ sold: 6, pending: 0, consumed: 6 });
+    expect(after.totals).toMatchObject({ sold: 4, pending: 2, consumed: 6 });
     expect(after.globalRemaining).toBe(0);
     expect(after.recommendedShopifyStock).toBe(0);
-    expect(after.alerts.find((a) => a.code === 'GLOBAL_LIMIT_EXCEEDED')?.severity).toBe('critical');
+    expect(after.holds.map((hold) => hold.id)).toContain(holdId);
     await expect(lots.create(c.id, { name: 'fictício', quantity: 1 }, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(UnprocessableEntityException);
     // uma nova venda não encontra lugar: fica retida, não emitida
     const next = benefitsOutcome(await issue(c, await paidOrder(c, 1)));
@@ -637,7 +716,7 @@ localDescribe('Valle Pass 2027 — emissão excepcional acima do limite: confirm
     const { c, holdId } = await heldScenario();
     await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 10 } });
     const p = await holds.preview(holdId);
-    expect(p).toMatchObject({ exceedsLimit: false, exceededBy: 0, globalLimit: 10 });
+    expect(p).toMatchObject({ exceedsLimit: false, exceededBy: 0, globalLimit: 10, capacityLimit: 10 });
     await expect(holds.issue(holdId, { ...(await confirm(holdId, 'Justificativa suficientemente longa')), confirmTotal: 1 }, adminId, ADMIN_NAME)).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });
@@ -695,6 +774,37 @@ localDescribe('Valle Pass 2027 — resgate, saldos por empresa, cancelamento e r
     const restored = await vouchers.restore(a.code, 'cancelado por engano', adminId, ADMIN_NAME);
     expect(restored).toMatchObject({ status: 'ACTIVE', company: a.company });
     expect((await capacityOf(c.id)).totals).toMatchObject({ sold: 1, consumed: 1 });
+  });
+
+  test('restauração da última linha cancelada de uma unidade respeita o teto e deixa o voucher cancelado', async () => {
+    const c = await newCampaign({ globalLimit: 1 });
+    const oldOrder = await paidOrder(c, 1);
+    await issue(c, oldOrder);
+    const [first, second] = await vouchersOf(oldOrder.id);
+    await vouchers.cancel(first.code, 'cancelamento manual para teste', adminId, ADMIN_NAME);
+    await vouchers.cancel(second.code, 'cancelamento manual para teste', adminId, ADMIN_NAME);
+    expect((await capacityOf(c.id)).totals.consumed).toBe(0);
+
+    const currentOrder = await paidOrder(c, 1);
+    await issue(c, currentOrder);
+    await expect(vouchers.restore(first.code, 'restauração acima do teto', adminId, ADMIN_NAME)).rejects.toThrow(/ultrapassaria o teto configurado/);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('CANCELLED');
+    expect((await capacityOf(c.id)).totals).toMatchObject({ sold: 1, consumed: 1 });
+    expect(await prisma.valePassEvent.count({ where: { valePassId: first.id, type: 'RESTORE_BLOCKED' } })).toBe(1);
+  });
+
+  test('restauração falha fechada quando uma campanha com benefícios perde ambos os limites', async () => {
+    const c = await newCampaign({ globalLimit: 10 });
+    const order = await paidOrder(c, 1);
+    await issue(c, order);
+    const [first, second] = await vouchersOf(order.id);
+    await vouchers.cancel(first.code, 'cancelamento para teste de teto nulo', adminId, ADMIN_NAME);
+    await vouchers.cancel(second.code, 'cancelamento para teste de teto nulo', adminId, ADMIN_NAME);
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: null, quantityLimit: null } });
+
+    await expect(vouchers.restore(first.code, 'restauração com teto nulo', adminId, ADMIN_NAME)).rejects.toThrow(/não tem limite de capacidade configurado/);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: first.id } })).status).toBe('CANCELLED');
+    expect(await prisma.valePassEvent.count({ where: { valePassId: first.id, type: 'RESTORE_BLOCKED' } })).toBe(1);
   });
 
   test('vouchers LEGADOS continuam intactos e contam como 1 unidade cada, junto com os novos', async () => {

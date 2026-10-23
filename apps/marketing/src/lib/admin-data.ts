@@ -752,12 +752,15 @@ export function dismissValePassHold(holdId: string, note: string, adminUserId: s
 /** Retrato da emissão excepcional: o que a tela de confirmação mostra. O servidor recalcula tudo na hora de emitir. */
 export interface ValePassHoldProjection {
   readonly holdId: string;
+  /** Missing on older API deployments; administrative issuance must stay disabled in that case. */
+  readonly capacityContractVersion?: string;
   readonly campaignName: string;
   readonly orderName: string | null;
   readonly orderStatus: string | null;
   readonly units: number;
   readonly reason: 'CAPACITY_EXCEEDED' | 'CAMPAIGN_NOT_READY' | 'FINANCIAL_MISMATCH';
   readonly globalLimit: number | null;
+  readonly capacityLimit: number | null;
   readonly soldBefore: number;
   readonly pendingBefore: number;
   readonly consumedBefore: number;
@@ -778,7 +781,7 @@ export function getValePassHoldPreview(holdId: string, adminUserId: string): Pro
 export interface IssueValePassHoldInput {
   readonly note: string;
   readonly confirmTotal: number;
-  readonly expected: { readonly projectedTotal: number; readonly consumedTotal: number; readonly globalLimit: number | null; readonly holdUpdatedAt: string };
+  readonly expected: { readonly projectedTotal: number; readonly consumedTotal: number; readonly globalLimit: number | null; readonly capacityLimit: number | null; readonly capacityContractVersion: string; readonly holdUpdatedAt: string };
 }
 
 export function issueValePassHold(holdId: string, input: IssueValePassHoldInput, adminUserId: string): Promise<ValePassHold> {

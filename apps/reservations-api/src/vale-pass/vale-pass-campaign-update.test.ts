@@ -59,6 +59,11 @@ describe('limite legado × limite global (nunca confundidos)', () => {
     expect(ok({ globalLimit: 6 }, { issued: 8, sold: 6, openLot: null }).changed).toEqual(['globalLimit']);
   });
 
+  test('o limite global do Valle Pass 2027 não passa de 1.000 unidades', () => {
+    expect(errors({ globalLimit: 1001 })).toEqual(['O limite global do Valle Pass 2027 não pode passar de 1000 unidades.']);
+    expect(ok({ globalLimit: 1000 }).data.globalLimit).toBe(1000);
+  });
+
   test('o limite global precisa comportar o saldo do lote aberto', () => {
     const context: CampaignUpdateContext = { issued: 40, sold: 40, openLot: { quantity: 100, sold: 30 } };
     // vendido 40 + restante do lote 70 = 110

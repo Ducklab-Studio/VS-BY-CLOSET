@@ -662,11 +662,14 @@ localDescribe('Valle Pass — permissões e isolamento da emissão', () => {
     for (const handler of ['list', 'capacity']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto[handler] as object), handler).toBeUndefined();
   });
 
-  test('a emissão de vales (webhook) NÃO lê lotes nem limite global nesta etapa', () => {
+  test('a emissão do webhook usa o limite próprio da campanha, sem consultar lotes nem validade', () => {
     const source = readFileSync(join(__dirname, 'vale-pass-webhook.service.ts'), 'utf8');
-    for (const name of ['valePassLot', 'globalLimit', 'voucherValidFrom', 'voucherValidUntil', 'salesEndDate', 'vale-pass-capacity', 'vale-pass-lots']) {
+    for (const name of ['valePassLot', 'voucherValidFrom', 'voucherValidUntil', 'salesEndDate', 'vale-pass-lots']) {
       expect(source, name).not.toContain(name);
     }
+    expect(source).toContain('configuredCapacityLimit');
+    expect(source).toContain('loadCapacity');
+    expect(source).toContain('FOR UPDATE');
   });
 
   test('migrações aditivas: as colunas originais dos passes continuam as mesmas (só 4 novas, nulas, no fim; depois, as do saldo)', async () => {

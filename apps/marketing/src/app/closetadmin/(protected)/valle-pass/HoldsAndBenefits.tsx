@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
+import { supportsValePassCapacityContract, VALE_PASS_CAPACITY_CONTRACT_VERSION } from '@/lib/valle-pass-capacity-contract';
 import { formatCents } from '@/lib/valle-pass-balance';
 import { VALLE_PASS_2027_PRESET } from '@/lib/valle-pass-benefits-preset';
 import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
@@ -10,8 +11,8 @@ import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, r
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
  *
  * Retenção = pagamento CONFIRMADO que a emissão automática não atendeu (limite global esgotado ou campanha sem validade). A
- * unidade continua contando como consumida. Só ADMIN resolve, com justificativa (auditada): "Emitir" aprova um excedente
- * consciente; "Descartar" só vale depois de o pedido ter sido reembolsado/cancelado na Shopify. Nada aqui reembolsa ou cancela.
+ * unidade continua contando como consumida. Só ADMIN resolve dentro da capacidade configurada, com justificativa auditada;
+ * acima dela a retenção aguarda decisão humana. "Descartar" só vale depois de o pedido ter sido reembolsado/cancelado na Shopify.
  */
 
 const inputClass =
@@ -73,7 +74,7 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
         ))}
       </ul>
       <p className={hintClass}>
-        A unidade retida continua contando como vendida. &quot;Emitir&quot; cria os vouchers acima do limite (decisão consciente);
+        A unidade retida continua contando como vendida. Pedidos acima da capacidade permanecem na fila para decisão humana;
         &quot;Descartar&quot; só é aceito depois que o pedido for reembolsado ou cancelado na Shopify. Nenhuma das duas ações mexe no pagamento.
       </p>
     </section>
@@ -118,12 +119,16 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
 
   async function issue() {
     if (!projection) return;
+    if (!supportsValePassCapacityContract(projection)) {
+      setError('A API ainda não confirma a proteção de capacidade necessária. Nenhuma solicitação de emissão foi enviada.');
+      return;
+    }
     setPending(true);
     setError(null);
     const result = await issueValePassHoldAction(hold.id, {
       note,
       confirmTotal: Number(typed),
-      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, holdUpdatedAt: projection.holdUpdatedAt },
+      expected: { projectedTotal: projection.projectedTotal, consumedTotal: projection.consumedBefore, globalLimit: projection.globalLimit, capacityLimit: projection.capacityLimit, capacityContractVersion: VALE_PASS_CAPACITY_CONTRACT_VERSION, holdUpdatedAt: projection.holdUpdatedAt },
     });
     if (result.error) {
       const message = result.error;
@@ -167,8 +172,8 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
             <div className="space-y-1.5 rounded-lg border border-ink/10 bg-ink/[0.03] p-3 dark:border-white/10 dark:bg-white/[0.03]" aria-label="Confirmação da emissão excepcional">
               <p className="font-semibold">Confirmação da emissão excepcional</p>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-                <dt>Limite global</dt>
-                <dd>{projection.globalLimit === null ? 'sem limite' : projection.globalLimit}</dd>
+                <dt>Teto configurado da campanha</dt>
+                <dd>{projection.capacityLimit === null ? 'sem limite configurado' : projection.capacityLimit}</dd>
                 <dt>Consumido hoje</dt>
                 <dd>
                   {projection.consumedBefore} ({projection.soldBefore} vendidos + {projection.pendingBefore} pagos aguardando)
@@ -180,12 +185,15 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
               </dl>
               {projection.exceedsLimit ? (
                 <p role="alert" className="rounded border border-red-500/30 bg-red-500/[0.08] px-2 py-1.5 font-medium text-red-500">
-                  Atenção: esta emissão ultrapassa o limite autorizado em {projection.exceededBy} unidade(s) ({projection.projectedTotal} de {projection.globalLimit}). A venda continua
-                  bloqueada para novos clientes, mas este excedente fica registrado e auditado.
+                  Atenção: a emissão ultrapassaria o teto configurado em {projection.exceededBy} unidade(s) ({projection.projectedTotal} de {projection.capacityLimit}).
+                  Nenhum voucher será emitido e o pedido pago continuará retido para decisão humana.
                 </p>
               ) : (
                 <p className={hintClass}>O total projetado não ultrapassa o limite atual.</p>
               )}
+              {!supportsValePassCapacityContract(projection) ? (
+                <p role="alert" className="text-red-500">A API ainda não confirma a proteção de capacidade necessária. Atualize a página após a atualização do servidor; nenhum voucher pode ser emitido por esta versão.</p>
+              ) : null}
               {!projection.canIssue ? (
                 <p role="alert" className="text-red-500">
                   {projection.blockedReason}
@@ -207,8 +215,8 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
             </p>
           ) : null}
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !typedOk || !noteOk} onClick={() => void issue()}>
-              Emitir (excedente aprovado)
+            <button type="button" className={secondaryButton} disabled={pending || !projection?.canIssue || !supportsValePassCapacityContract(projection) || !typedOk || !noteOk} onClick={() => void issue()}>
+              Emitir dentro da capacidade
             </button>
             <button type="button" className={secondaryButton} disabled={pending || note.trim().length < 3} onClick={() => void dismiss()}>
               Descartar (pedido não está mais pago)

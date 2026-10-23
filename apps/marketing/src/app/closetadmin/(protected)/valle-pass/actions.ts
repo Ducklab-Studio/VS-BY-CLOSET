@@ -398,7 +398,7 @@ export async function resolveValePassHoldAction(holdId: string, action: 'dismiss
   }
 }
 
-/** Números da confirmação reforçada da emissão acima do limite (somente leitura; só ADMIN). */
+/** Prévia da capacidade e dos números da retenção (somente leitura; só ADMIN). */
 export async function previewValePassHoldAction(holdId: string): Promise<{ projection: ValePassHoldProjection | null; error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
@@ -410,7 +410,7 @@ export async function previewValePassHoldAction(holdId: string): Promise<{ proje
   }
 }
 
-/** Emissão excepcional acima do limite: justificativa ≥ 10 caracteres, total projetado digitado e os números vistos. A API revalida tudo. */
+/** Emissão administrativa dentro da capacidade: justificativa, total projetado e os números vistos. A API revalida tudo. */
 export async function issueValePassHoldAction(holdId: string, input: IssueValePassHoldInput): Promise<{ error: string | null }> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');

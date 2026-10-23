@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma, ValePassCampaign, ValePassCampaignBenefit, ValePassIssuanceHold } from '@prisma/client';
 import { generateValePassCode } from './vale-pass-code';
-import { loadCapacity } from './vale-pass-capacity';
+import { configuredCapacityLimit, loadCapacity } from './vale-pass-capacity';
 import { formatIsoDate } from './vale-pass-capacity';
 import { resolveValidityTimezone, voucherWindow } from './vale-pass-validity';
 
@@ -17,9 +17,9 @@ import { resolveValidityTimezone, voucherWindow } from './vale-pass-validity';
  * Contrato (o chamador já está DENTRO de uma transação e já tomou o lock do pedido — `lockShopifyOrder`; aqui só se trava a campanha):
  *  - só emite para pedido com pagamento confirmado: quem chama garante isso (o webhook, ou a resolução, que relê o pedido);
  *  - campanha SEM nenhum benefício cadastrado → devolve `{ mode: 'legacy' }` e não faz nada: o chamador segue o caminho legado;
- *  - campanha COM benefícios mas sem voucher ativo ou sem janela de validade → NÃO cai no legado: retém o pedido (fila de resolução);
+ *  - campanha COM benefícios sem capacidade configurada, sem voucher ativo ou sem janela de validade → NÃO cai no legado: retém o pedido;
  *  - idempotente e recuperável: reentrega ou reprocessamento nunca duplica; unidade com voucher faltando é completada sem consumir capacidade;
- *  - sem capacidade no limite global → retém o pedido INTEIRO (tudo ou nada), com alerta e fila; o pagamento nunca fica sem tratamento;
+ *  - sem limite de capacidade configurado para uma campanha com benefícios, ou sem saldo → retém o pedido INTEIRO (tudo ou nada), com alerta e fila;
  *  - limite de LOTE nunca bloqueia emissão; o limite LEGADO (`quantity_limit`) não vale neste modelo;
  *  - nunca cancela, reembolsa nem emite dinheiro: só cria vouchers e registra a retenção.
  */
@@ -45,7 +45,7 @@ export interface IssueInput {
   readonly order: IssuanceOrder;
   /** Unidades comerciais compradas neste pedido para esta campanha. */
   readonly units: number;
-  /** `enforce`: respeita o limite global (webhook). `override`: excedente aprovado por um ADMIN (resolução da fila). */
+  /** `enforce`: emissão automática. `override`: resolução administrativa; nenhum modo ultrapassa o teto configurado da campanha. */
   readonly mode: IssuanceMode;
   readonly actor?: { readonly id: string; readonly name: string };
   /** Justificativa gravada na retenção quando esta emissão a resolve (resolução administrativa). */
@@ -118,7 +118,7 @@ export class ValePassIssuanceService {
       return { mode: 'benefits', issuedUnits: 0, completedUnits: 0, heldUnits: 0, holdId: null, vouchersCreated: 0, events };
     }
 
-    // Prontidão: sem voucher ativo ou sem validade configurada NÃO se improvisa nem se cai no legado — retém.
+    // Prontidão: campanha com benefícios sem limite configurado, sem voucher ativo ou sem validade NÃO emite nem cai no legado — retém.
     const notReady = this.notReadyReason(campaign, benefits);
     if (notReady) {
       const heldUnits = Math.max(toCreate, incomplete.length);
@@ -130,28 +130,31 @@ export class ValePassIssuanceService {
     const priorCancellation = await tx.valePassOrderCancellation.findUnique({ where: { shopifyOrderId: order.orderId } });
 
     // Reembolso deste pedido aguardando decisão de um ADMIN: não dá para saber quais unidades foram devolvidas, então NÃO se emite o que falta
-    // (retenção administrativa, sem presumir cancelamento integral). A emissão excepcional por um ADMIN (modo override) segue possível.
+    // (retenção administrativa, sem presumir cancelamento integral). A resolução ADMIN segue sujeita ao mesmo teto de capacidade.
     if (toCreate > 0 && input.mode === 'enforce' && (await tx.valePassRefundApplication.count({ where: { shopifyOrderId: order.orderId, status: 'NEEDS_REVIEW' } })) > 0) {
       const hold = await this.upsertHold(tx, order.orderId, campaign, toCreate, 'FINANCIAL_MISMATCH', { issues: [{ code: 'REFUND_PENDING_REVIEW' }] as unknown as Prisma.InputJsonValue });
       events.push({ type: 'VALE_PASS_ISSUANCE_HELD', detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'FINANCIAL_MISMATCH', note: 'reembolso aguardando decisão administrativa' } });
       return { mode: 'benefits', issuedUnits: 0, completedUnits: 0, heldUnits: toCreate, holdId: hold.id, vouchersCreated: 0, events };
     }
 
-    // Capacidade: só unidades NOVAS consomem; completar uma unidade que já existe não consome nada. Pedido já cancelado/reembolsado emite e
-    // cancela na hora (mesmo comportamento do legado): não consome capacidade, então não passa pela checagem nem abre retenção.
-    if (toCreate > 0 && input.mode === 'enforce' && campaign.globalLimit !== null && !priorCancellation) {
+    // Capacidade: todos os modos respeitam o teto configurado (globalLimit, ou quantityLimit legado quando globalLimit é nulo).
+    // Só unidades NOVAS consomem; completar uma unidade existente não consome capacidade. Pedido já cancelado/reembolsado é criado e
+    // cancelado na mesma transação, portanto não permanece consumindo capacidade.
+    const capacityLimit = configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit);
+    if (toCreate > 0 && capacityLimit !== null && !priorCancellation) {
       const { totals } = await loadCapacity(tx, campaignId, order.orderId);
-      const allowed = Math.max(0, campaign.globalLimit - totals.consumed - consumingExisting);
+      const allowed = Math.max(0, capacityLimit - totals.consumed - consumingExisting);
       if (toCreate > allowed) {
         const hold = await this.upsertHold(tx, order.orderId, campaign, toCreate, 'CAPACITY_EXCEEDED', {
           globalLimit: campaign.globalLimit,
+          capacityLimit,
           consumedWithoutThisOrder: totals.consumed,
           alreadyConsumingInThisOrder: consumingExisting,
           allowedUnits: allowed,
         });
         events.push({
           type: 'VALE_PASS_ISSUANCE_HELD',
-          detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'CAPACITY_EXCEEDED', globalLimit: campaign.globalLimit, allowedUnits: allowed },
+          detail: { orderId: order.orderId, campaignId, units: toCreate, reason: 'CAPACITY_EXCEEDED', globalLimit: campaign.globalLimit, capacityLimit, allowedUnits: allowed },
         });
         // Completar o que já existe não depende de capacidade: faz mesmo assim.
         const completed = await this.completeGroups(tx, incomplete, benefits, campaign, order, now, events);
@@ -181,8 +184,8 @@ export class ValePassIssuanceService {
 
   /**
    * Retém um pedido PAGO cuja validação financeira (valor, moeda, quantidade, desconto) deu problema. Não emite, não cancela e não reembolsa: abre
-   * (ou atualiza) UMA retenção aberta por pedido e campanha para um ADMIN resolver (emitir mesmo assim, com justificativa e confirmação reforçada,
-   * ou descartar depois de reembolsar na Shopify). A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
+   * (ou atualiza) UMA retenção aberta por pedido e campanha para um ADMIN resolver dentro da capacidade configurada, ou descartar depois de
+   * reembolsar na Shopify. A unidade retida continua contando como consumida. Idempotente: reentrega não duplica; se o
    * pedido já tem vouchers da campanha, não abre retenção (já foi tratado). ISOLADO: nenhum fluxo ativo chama este método.
    */
   /** Soma, na trilha de reembolsos, das unidades pagas e não emitidas já descontadas. Pedido sem reembolso registrado: 0. */
@@ -209,6 +212,7 @@ export class ValePassIssuanceService {
 
   private notReadyReason(campaign: ValePassCampaign, benefits: readonly ValePassCampaignBenefit[]): string | null {
     if (benefits.length === 0) return 'a campanha tem benefícios cadastrados, mas nenhum voucher ativo';
+    if (configuredCapacityLimit(campaign.globalLimit, campaign.quantityLimit) === null) return 'a campanha com benefícios não tem limite de capacidade configurado';
     if (!campaign.voucherValidFrom || !campaign.voucherValidUntil) return 'a campanha não tem a validade dos vouchers configurada (início e fim)';
     return null;
   }

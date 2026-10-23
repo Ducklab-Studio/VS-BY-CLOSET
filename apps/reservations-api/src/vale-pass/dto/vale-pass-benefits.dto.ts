@@ -90,12 +90,23 @@ export class IssueHoldExpectedDto {
   @Min(0)
   globalLimit!: number | null;
 
+  @IsOptional()
+  @ValidateIf((_o, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  capacityLimit?: number | null;
+
+  /** Explicit protocol marker returned by the server preview. Optional for older clients; never grants capacity. */
+  @IsOptional()
+  @IsIn(['valle-pass-capacity-v1'])
+  capacityContractVersion?: string;
+
   @IsString()
   @MaxLength(40)
   holdUpdatedAt!: string;
 }
 
-/** Emissão excepcional acima do limite: justificativa forte + total projetado digitado + os números que a pessoa viu. */
+/** Emissão administrativa dentro da capacidade: justificativa + total projetado digitado + os números que a pessoa viu. */
 export class IssueHoldDto {
   @IsOptional()
   @IsUUID()
