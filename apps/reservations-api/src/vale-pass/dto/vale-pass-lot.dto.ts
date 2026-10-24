@@ -1,5 +1,5 @@
-import { IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { MAX_LOT_QUANTITY } from '../vale-pass-capacity';
+import { IsIn, IsISO8601, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { VALE_PASS_LOT_UNITS } from '../vale-pass-capacity';
 
 export class CreateValePassLotDto {
   // O guard de sessão lê `adminUserId` do body.
@@ -12,9 +12,7 @@ export class CreateValePassLotDto {
   @MaxLength(80)
   name!: string;
 
-  @IsInt()
-  @Min(1)
-  @Max(MAX_LOT_QUANTITY)
+  @IsIn([VALE_PASS_LOT_UNITS], { message: `Cada lote deve conter exatamente ${VALE_PASS_LOT_UNITS} unidades.` })
   quantity!: number;
 }
 
@@ -33,9 +31,7 @@ export class UpdateValePassLotDto {
   name?: string;
 
   @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(MAX_LOT_QUANTITY)
+  @IsIn([VALE_PASS_LOT_UNITS], { message: `Cada lote deve conter exatamente ${VALE_PASS_LOT_UNITS} unidades.` })
   quantity?: number;
 }
 

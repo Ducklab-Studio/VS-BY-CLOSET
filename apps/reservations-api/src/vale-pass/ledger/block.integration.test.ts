@@ -34,7 +34,7 @@ const REASON = 'Suspeita de fraude: conferir com a Valle Showroom';
 
 interface Unit { campaignId: string; orderId: string; groupId: string; showroom: ValePass; closet: ValePass }
 async function newUnit(over: { expiresAt?: Date } = {}): Promise<Unit> {
-  const campaign = await prisma.valePassCampaign.create({ data: { name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, shopifyVariantId: `${TAG}-var-${counter++}`, voucherValidFrom: new Date('2026-01-01'), voucherValidUntil: new Date('2027-09-30') } });
+  const campaign = await prisma.valePassCampaign.create({ data: { name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: `${TAG}-var-${counter++}`, voucherValidFrom: new Date('2026-01-01'), voucherValidUntil: new Date('2027-09-30') } });
   campaignIds.push(campaign.id);
   const [b1, b2] = await Promise.all([
     prisma.valePassCampaignBenefit.create({ data: { campaignId: campaign.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'Voucher Valle Showroom', amountCents: 50_000, sortOrder: 0 } }),

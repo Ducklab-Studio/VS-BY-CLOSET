@@ -213,21 +213,21 @@ function ShortfallList({ capacity }: { capacity: ValePassCapacity }) {
 function LotsPanel({ campaignId, capacity, canManage, onChanged }: { campaignId: string; capacity: ValePassCapacity; canManage: boolean; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const [quantity, setQuantity] = useState('100');
   const [pending, setPending] = useState(false);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
     const parsed = Number(quantity);
     if (!name.trim()) return setError('Dê um nome ao lote (ex.: Lote 1).');
-    if (!Number.isInteger(parsed) || parsed < 1) return setError('Informe a quantidade de passes do lote.');
+    if (parsed !== 100) return setError('Cada lote deve conter exatamente 100 unidades.');
     setPending(true);
     setError(null);
     const result = await createValePassLotAction(campaignId, { name: name.trim(), quantity: parsed });
     setPending(false);
     if (result.error) return setError(result.error);
     setName('');
-    setQuantity('');
+    setQuantity('100');
     onChanged();
   }
 
@@ -252,7 +252,8 @@ function LotsPanel({ campaignId, capacity, canManage, onChanged }: { campaignId:
           </label>
           <label>
             <span className={labelClass}>Quantidade</span>
-            <input value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="100" className={`${inputClass} mt-1`} />
+            <input type="number" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/\D/g, ''))} inputMode="numeric" min={100} max={100} className={`${inputClass} mt-1`} />
+            <p className={hintClass}>Cada lote tem 100 unidades. A campanha comporta até 1.000 no total.</p>
           </label>
           <button type="submit" disabled={pending} className={primaryButton}>
             <Plus size={14} /> {pending ? 'Criando…' : 'Criar lote'}
@@ -287,7 +288,7 @@ function LotRow({ campaignId, lot, canManage, onChanged, onError }: { campaignId
   async function save(event: React.FormEvent) {
     event.preventDefault();
     const parsed = Number(quantity);
-    if (!Number.isInteger(parsed) || parsed < 1) return onError('Informe uma quantidade válida.');
+    if (parsed !== 100) return onError('Cada lote deve conter exatamente 100 unidades.');
     setPending(true);
     onError(null);
     const result = await updateValePassLotAction(campaignId, lot.id, {
@@ -367,7 +368,7 @@ function LotRow({ campaignId, lot, canManage, onChanged, onError }: { campaignId
           </label>
           <label>
             <span className={labelClass}>Quantidade</span>
-            <input value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className={`${inputClass} mt-1`} />
+            <input type="number" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/\D/g, ''))} inputMode="numeric" min={100} max={100} className={`${inputClass} mt-1`} />
           </label>
           <button type="submit" disabled={pending} className={primaryButton}>
             {pending ? 'Salvando…' : 'Salvar'}
@@ -394,9 +395,11 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
     event.preventDefault();
     const amountCents = Math.round(Number(amount.replace(/\./g, '').replace(',', '.')) * 100);
     const days = Number(validityDays);
+    const parsedGlobalLimit = globalLimit.trim() ? Number(globalLimit) : null;
     if (!name.trim()) return setError('Preencha o nome da campanha.');
     if (!Number.isFinite(amountCents) || amountCents <= 0) return setError('Informe um valor válido.');
     if (!Number.isInteger(days) || days < 1) return setError('Informe uma validade em dias válida.');
+    if (parsedGlobalLimit !== null && (!Number.isInteger(parsedGlobalLimit) || parsedGlobalLimit < 1 || parsedGlobalLimit > 1000)) return setError('O limite global deve ser de 1 a 1.000 unidades.');
     if (Boolean(validFrom) !== Boolean(validUntil)) return setError('Informe as duas datas da validade dos vouchers (início e fim), ou nenhuma.');
 
     setPending(true);
@@ -406,7 +409,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
       name: name.trim(),
       amountCents,
       validityDays: days,
-      globalLimit: globalLimit.trim() ? Number(globalLimit) : null,
+      globalLimit: parsedGlobalLimit,
       quantityLimit: quantityLimit.trim() ? Number(quantityLimit) : null,
       voucherValidFrom: validFrom || null,
       voucherValidUntil: validUntil || null,
@@ -438,7 +441,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
         </label>
         <label>
           <span className={labelClass}>Limite GLOBAL de passes (todos os lotes)</span>
-          <input value={globalLimit} onChange={(event) => setGlobalLimit(event.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="1000" className={`${inputClass} mt-1`} />
+          <input type="number" value={globalLimit} onChange={(event) => setGlobalLimit(event.target.value.replace(/\D/g, ''))} inputMode="numeric" min={1} max={1000} placeholder="1000" className={`${inputClass} mt-1`} />
           <p className={hintClass}>Teto de passes vendidos em todos os lotes. Passes cancelados deixam de contar.</p>
         </label>
         <label>

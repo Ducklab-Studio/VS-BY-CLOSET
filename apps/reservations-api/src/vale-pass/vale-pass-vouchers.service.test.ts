@@ -4,7 +4,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../admin/admin-pin';
 import { ValePassVouchersService } from './vale-pass-vouchers.service';
 
-/** Integração real (Neon) — mesmo padrão do resto da suíte admin. */
+const localDatabase = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i.test(process.env.DATABASE_URL ?? '');
+const localDescribe = localDatabase ? describe : describe.skip;
+
+/** Integração PostgreSQL, executada apenas contra banco local descartável. */
 const prisma = new PrismaService();
 const vouchers = new ValePassVouchersService(prisma);
 const PREFIX = `VP-VOU-${Date.now()}`;
@@ -55,13 +58,13 @@ async function cleanup() {
   }
 }
 
-beforeAll(cleanup);
+beforeAll(async () => { if (localDatabase) await cleanup(); });
 afterAll(async () => {
-  await cleanup();
+  if (localDatabase) await cleanup();
   await prisma.$disconnect();
 });
 
-describe('ValePassVouchersService — listar/buscar/validar/usar/cancelar (integração real, Neon)', () => {
+localDescribe('ValePassVouchersService — listar/buscar/validar/usar/cancelar (PostgreSQL local descartável)', () => {
   test('1) findByCode devolve o vale com nome da campanha', async () => {
     const campaign = await createCampaign('Campanha Busca');
     const voucher = await createVoucher(campaign.id);

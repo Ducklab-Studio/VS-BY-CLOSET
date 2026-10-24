@@ -149,7 +149,7 @@ try {
 
   // 2) Sem limite global não abre lote (mensagem clara da API); edita a configuração pela tela e define 1.000.
   await card(page).getByPlaceholder('Lote 1').fill('Lote 1');
-  await card(page).getByPlaceholder('100', { exact: true }).fill('100');
+  await card(page).getByLabel('Quantidade').fill('100');
   await card(page).getByRole('button', { name: 'Criar lote' }).click();
   await card(page).getByText('Lote 1', { exact: true }).waitFor();
   await card(page).getByRole('button', { name: 'Abrir lote' }).click();
@@ -224,7 +224,7 @@ try {
 
   // 4) Versão antiga: outra aba abre/encerra por cima; esta aba (desatualizada) recebe a mensagem e nada é aplicado.
   await card(page).getByPlaceholder('Lote 1').fill('Lote 2');
-  await card(page).getByPlaceholder('100', { exact: true }).fill('50');
+  await card(page).getByLabel('Quantidade').fill('100');
   await card(page).getByRole('button', { name: 'Criar lote' }).click();
   await card(page).getByText('Lote 2', { exact: true }).waitFor();
   const lot2 = await db.valePassLot.findFirst({ where: { campaignId, name: 'Lote 2' } });

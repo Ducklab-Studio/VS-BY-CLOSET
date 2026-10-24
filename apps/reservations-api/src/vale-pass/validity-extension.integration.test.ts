@@ -42,7 +42,7 @@ async function newCampaign(over: { until?: string | null; benefits?: boolean } =
   const until = over.until === undefined ? '2027-09-30' : over.until;
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, shopifyVariantId: `${TAG}-var-${counter++}`,
+      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: `${TAG}-var-${counter++}`,
       voucherValidFrom: until ? new Date('2026-01-01') : null, voucherValidUntil: until ? new Date(`${until}T00:00:00.000Z`) : null,
     },
   });
@@ -360,6 +360,30 @@ localDescribe('autorização, confirmação e idempotência', () => {
 });
 
 localDescribe('concorrência com resgates e cancelamentos', () => {
+  test('restauração concorrente com prorrogação coletiva segue campanha → voucher e termina sem deadlock', async () => {
+    const owner = await newUser('SUPER_ADMIN');
+    const admin = await newUser('ADMIN');
+    const c = await newCampaign();
+    await prisma.valePassCampaign.update({ where: { id: c.id }, data: { globalLimit: 100 } });
+    const unit = await newUnit(c);
+    await vouchersService.cancel(unit.showroom.code, 'cancelado para corrida de teste', admin.id, admin.name);
+
+    const [restoreResult, extensionResult] = await Promise.all([
+      vouchersService.restore(unit.showroom.code, 'restaurado em corrida de teste', admin.id, admin.name).then((r) => ({ ok: true as const, value: r }), (error: unknown) => ({ ok: false as const, error })),
+      extend(owner, c).then((r) => ({ ok: true as const, value: r }), (error: unknown) => ({ ok: false as const, error })),
+    ]);
+    if (!restoreResult.ok) throw restoreResult.error;
+    if (!extensionResult.ok) {
+      expect((extensionResult.error as Error).message).toMatch(/quantidade de vouchers prorrogáveis mudou desde a prévia/i);
+      const retried = await extend(owner, c);
+      expect(retried.extension.extendedCount).toBeGreaterThan(0);
+    }
+    const restored = await row(unit.showroom.id);
+    expect(restored.status).toBe('ACTIVE');
+    expect([OLD_EXPIRY.toISOString(), NEW_EXPIRY]).toContain(restored.expiresAt.toISOString());
+    expect(await ledger.reconcile()).toEqual([]);
+  }, 60_000);
+
   test('prorrogação simultânea a resgates e a cancelamentos: sem impasse, saldos e ledger consistentes, cancelados continuam cancelados, nenhum voucher fica pela metade', async () => {
     const owner = await newUser('SUPER_ADMIN');
     const admin = await newUser('ADMIN');

@@ -1093,7 +1093,7 @@ enum ValePassHoldReason {
 
 /// Fila de resolução: pagamento CONFIRMADO que não pôde ser emitido automaticamente (sem capacidade no limite global, ou campanha sem
 /// validade configurada). O pedido continua consumindo capacidade (unidade paga aguardando emissão) e aparece como alerta crítico até
-/// um ADMIN resolver: emitir mesmo assim (excedente aprovado) ou descartar depois de o pedido ser cancelado/reembolsado na Shopify.
+/// um ADMIN resolver dentro da capacidade configurada ou descartar depois de o pedido ser cancelado/reembolsado na Shopify.
 /// Nunca emite, cancela nem reembolsa sozinho. Um registro ABERTO por pedido e campanha (`open_flag`).
 model ValePassIssuanceHold {
   id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

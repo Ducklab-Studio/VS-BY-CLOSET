@@ -45,7 +45,7 @@ async function newCampaign(amountCents = 35_000): Promise<ValePassCampaign & { n
   const numericVariant = String(900_000_000_000 + counter++);
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents, validityDays: 30, shopifyVariantId: `gid://shopify/ProductVariant/${numericVariant}`,
+      name: `${TAG}-camp-${counter++}`, amountCents, validityDays: 30, globalLimit: 1_000, shopifyVariantId: `gid://shopify/ProductVariant/${numericVariant}`,
       voucherValidFrom: new Date('2027-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z'),
     },
   });
@@ -244,7 +244,7 @@ localDescribe('divergência financeira → fila de resolução administrativa (n
     expect(preview).toMatchObject({ reason: 'FINANCIAL_MISMATCH', canIssue: true, units: 1 });
     const resolved = await holds.issue(
       holdId as string,
-      { note: 'Cupom autorizado pelo Anderson para este cliente', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, holdUpdatedAt: preview.holdUpdatedAt } },
+      { note: 'Cupom autorizado pelo Anderson para este cliente', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, capacityLimit: preview.capacityLimit, holdUpdatedAt: preview.holdUpdatedAt } },
       adminId,
       ADMIN_NAME,
     );

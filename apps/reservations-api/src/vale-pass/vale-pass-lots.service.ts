@@ -198,7 +198,7 @@ export class ValePassLotsService {
       alerts.push({
         code: 'ISSUANCE_HOLDS_OPEN',
         severity: 'critical',
-        message: `${openHolds.length} pedido(s) pago(s) aguardam resolução de um administrador (${heldUnits} unidade(s) sem voucher). Emita (excedente aprovado) ou resolva o reembolso na Shopify.`,
+        message: `${openHolds.length} pedido(s) pago(s) aguardam resolução de um administrador (${heldUnits} unidade(s) sem voucher). Emita somente se houver capacidade; resolva o reembolso na Shopify quando aplicável.`,
       });
     }
     const staleSince = Date.now() - STALE_HOLD_HOURS * 3_600_000;

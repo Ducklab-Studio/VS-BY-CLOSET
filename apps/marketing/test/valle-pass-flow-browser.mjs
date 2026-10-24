@@ -124,7 +124,7 @@ try {
 
   const variant = String(910_000_000_000 + (Date.now() % 1_000_000));
   const campaign = await db.valePassCampaign.create({
-    data: { name: `${prefix} Valle Pass`, amountCents: 35_000, validityDays: 30, shopifyVariantId: variant, voucherValidFrom: new Date('2027-01-01T00:00:00Z'), voucherValidUntil: new Date('2027-12-31T00:00:00Z') },
+    data: { name: `${prefix} Valle Pass`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: variant, voucherValidFrom: new Date('2027-01-01T00:00:00Z'), voucherValidUntil: new Date('2027-12-31T00:00:00Z') },
   });
   campaignId = campaign.id;
   const [showroom, closet] = await Promise.all([

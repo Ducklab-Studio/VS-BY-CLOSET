@@ -1,5 +1,5 @@
 import { IsInt, IsISO8601, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { MAX_CONFIGURABLE_QUANTITY } from '../vale-pass-capacity';
+import { MAX_CONFIGURABLE_QUANTITY, VALE_PASS_GLOBAL_LIMIT } from '../vale-pass-capacity';
 
 /**
  * Edição de uma campanha de Valle Pass (ADMIN). Semântica de PATCH: campo AUSENTE = não muda; `null` = limpa (só nos campos
@@ -47,7 +47,7 @@ export class UpdateValePassCampaignDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(MAX_CONFIGURABLE_QUANTITY)
+  @Max(VALE_PASS_GLOBAL_LIMIT)
   globalLimit?: number | null;
 
   /** Validade fixa dos vouchers, "YYYY-MM-DD". As duas datas juntas, ou as duas `null`. */

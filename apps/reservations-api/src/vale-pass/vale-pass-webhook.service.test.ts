@@ -5,8 +5,11 @@ import { WebhooksService } from '../webhooks/webhooks.service';
 import { ValePassWebhookService } from './vale-pass-webhook.service';
 import type { ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
 
+const localDatabase = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i.test(process.env.DATABASE_URL ?? '');
+const localDescribe = localDatabase ? describe : describe.skip;
+
 /**
- * Integração real (Neon) — mesmo padrão de webhooks.service.test.ts:
+ * Integração real do pipeline de webhook, executada em PostgreSQL local descartável:
  * chama `WebhooksService.handleIncoming` de verdade (não o método
  * isolado do ValePassWebhookService), pra provar a integração real
  * dentro do MESMO pipeline de webhook, sem mock nenhum.
@@ -100,13 +103,13 @@ async function cleanup() {
   await prisma.$executeRaw`DELETE FROM webhook_events WHERE shopify_webhook_id LIKE ${`VP-WH-${SUFFIX}-webhook-%`}`;
 }
 
-beforeAll(cleanup);
+beforeAll(async () => { if (localDatabase) await cleanup(); });
 afterAll(async () => {
-  await cleanup();
+  if (localDatabase) await cleanup();
   await prisma.$disconnect();
 });
 
-describe('ValePassWebhookService — via WebhooksService.handleIncoming (integração real, Neon)', () => {
+localDescribe('ValePassWebhookService — via WebhooksService.handleIncoming (PostgreSQL local descartável)', () => {
   test('1) orders/paid com variante de campanha ativa → cria 1 vale ACTIVE, snapshot correto, sem tocar nenhuma RentalUnit/Reservation', async () => {
     const campaign = await createCampaign();
     const order = orderPayload({ variantId: campaign.shopifyVariantId, quantity: 1 });
@@ -248,14 +251,19 @@ describe('ValePassWebhookService — via WebhooksService.handleIncoming (integra
     expect(vouchers).toHaveLength(1);
   }, 15_000);
 
-  test('7) campanha atingiu quantityLimit → emite só até o limite, registra evento de limite atingido', async () => {
+  test('7) campanha atingiu quantityLimit → retém o pedido pago inteiro sem emissão parcial acima do limite', async () => {
     const campaign = await createCampaign({ quantityLimit: 2 });
     const order = orderPayload({ variantId: campaign.shopifyVariantId, quantity: 5 });
+    const webhookId = nextWebhookId();
+    await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: webhookId, payload: order });
 
-    await service.handleIncoming({ topic: 'orders/paid', shopifyWebhookId: nextWebhookId(), payload: order });
-
-    const vouchers = await prisma.valePass.findMany({ where: { campaignId: campaign.id } });
-    expect(vouchers).toHaveLength(2);
+    const vouchers = await prisma.valePass.findMany({ where: { campaignId: campaign.id, shopifyOrderId: String(order.id) } });
+    expect(vouchers).toHaveLength(0);
+    const webhook = await prisma.webhookEvent.findUniqueOrThrow({ where: { shopifyWebhookId: webhookId } });
+    const events = await prisma.reservationEvent.findMany({ where: { webhookEventId: webhook.id } });
+    expect(events.map((event) => event.type)).toContain('VALE_PASS_QUANTITY_LIMIT_REACHED');
+    expect(events.find((event) => event.type === 'VALE_PASS_QUANTITY_LIMIT_REACHED')?.detail).toMatchObject({ retained: true, requested: 5, limit: 2 });
+    expect(await prisma.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: String(order.id) } })).toMatchObject({ status: 'CONFIRMED', quantity: 5 });
   }, 15_000);
 
   test('8) campanha DESATIVADA continua emitindo vale pra pedido já pago (desativar só impede venda NOVA na Shopify, não invalida pedido em curso)', async () => {
