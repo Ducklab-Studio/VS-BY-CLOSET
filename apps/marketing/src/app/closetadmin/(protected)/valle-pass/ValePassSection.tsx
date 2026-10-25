@@ -21,6 +21,7 @@ import type {
   ValePassStatus,
   ValePassVoucher,
 } from '@/lib/admin-data';
+import { soldIndicator, validityIndicator } from '@/lib/valle-pass-campaign-indicators';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { CampaignManagement } from './CampaignManagement';
 import { BalanceDesk } from './BalanceDesk';
@@ -671,6 +672,9 @@ function CampaignCard({
     onToggled(updated);
   }
 
+  const validity = validityIndicator(campaign);
+  const sold = soldIndicator(campaign);
+
   return (
     <article className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-dark-card">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -696,16 +700,15 @@ function CampaignCard({
             {formatCurrency(campaign.amountCents)}
           </p>
         </div>
-        <div>
+        <div data-testid="campaign-validity" data-validity-kind={validity.kind}>
           <p className="text-ink/40 dark:text-dark-subtle">Validade</p>
-          <p className="font-semibold text-ink dark:text-dark-text">{campaign.validityDays} dias</p>
+          <p className="font-semibold text-ink dark:text-dark-text">{validity.text}</p>
+          {validity.note ? <p className="mt-0.5 text-[0.65rem] font-normal leading-snug text-amber-700 dark:text-amber-300">{validity.note}</p> : null}
         </div>
-        <div>
+        <div data-testid="campaign-sold">
           <p className="text-ink/40 dark:text-dark-subtle">Vendidos</p>
-          <p className="font-semibold text-ink dark:text-dark-text">
-            {campaign.soldCount}
-            {campaign.quantityLimit ? ` / ${campaign.quantityLimit}` : ''}
-          </p>
+          <p className="font-semibold text-ink dark:text-dark-text">{sold.value}</p>
+          {sold.note ? <p className="mt-0.5 text-[0.65rem] font-normal leading-snug text-ink/50 dark:text-dark-subtle">{sold.note}</p> : null}
         </div>
       </div>
 

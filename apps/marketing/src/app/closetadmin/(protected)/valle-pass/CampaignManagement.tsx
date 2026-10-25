@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { ChevronDown, ChevronUp, Layers, Pencil, Plus, RefreshCw } from 'lucide-react';
 import type { ValePassCampaign, ValePassCapacity, ValePassCapacityAlert, ValePassLot, ValePassLotAction, ValePassLotStatus } from '@/lib/admin-data';
+import { editFormValidityCopy, syncCampaignWithCapacity } from '@/lib/valle-pass-campaign-indicators';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { BenefitsPanel, CancellationAlertsPanel, HoldsPanel, RefundReviewsPanel } from './HoldsAndBenefits';
 import {
@@ -61,6 +62,10 @@ export function CampaignManagement({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const onCampaignChangedRef = useRef(onCampaignChanged);
+  useEffect(() => {
+    onCampaignChangedRef.current = onCampaignChanged;
+  });
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -72,7 +77,10 @@ export function CampaignManagement({
     }
     setError(null);
     setCapacity(result.capacity);
-  }, [campaign.id]);
+    // O cartão usa a MESMA fonte do painel de capacidade: sem divergência entre os dois, mesmo depois de cadastrar benefícios ou mexer em lotes.
+    const synced = syncCampaignWithCapacity(campaign, result.capacity);
+    if (synced !== campaign) onCampaignChangedRef.current(synced);
+  }, [campaign]);
 
   useEffect(() => {
     if (expanded && !capacity && !loading) void refresh();
@@ -390,6 +398,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
   const [salesEnd, setSalesEnd] = useState(campaign.salesEndDate ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const validityCopy = editFormValidityCopy(campaign);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -436,7 +445,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
           <input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" className={`${inputClass} mt-1`} />
         </label>
         <label>
-          <span className={labelClass}>Validade em dias — usada na emissão atual</span>
+          <span className={labelClass}>{validityCopy.daysLabel}</span>
           <input value={validityDays} onChange={(event) => setValidityDays(event.target.value.replace(/\D/g, ''))} inputMode="numeric" className={`${inputClass} mt-1`} />
         </label>
         <label>
@@ -457,7 +466,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
           <span className={labelClass}>até</span>
           <input type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} className={`${inputClass} mt-1`} />
         </label>
-        <p className={`${hintClass} sm:col-span-2`}>A validade fixa fica registrada para a próxima etapa; nesta versão a emissão ainda usa a &quot;validade em dias&quot;.</p>
+        <p className={`${hintClass} sm:col-span-2`} data-testid="edit-validity-hint">{validityCopy.windowHint}</p>
         <label className="sm:col-span-2">
           <span className={labelClass}>Fim das vendas (informativo)</span>
           <input type="date" value={salesEnd} onChange={(event) => setSalesEnd(event.target.value)} className={`${inputClass} mt-1 sm:max-w-xs`} />
@@ -481,7 +490,7 @@ function CampaignEditForm({ campaign, onSaved, onCancel }: { campaign: ValePassC
         {pending ? 'Salvando' : ''}
       </p>
       <p className="mt-2 text-[0.65rem] text-ink/35 dark:text-dark-subtle">
-        Hoje: {formatCurrency(campaign.amountCents)}, {campaign.validityDays} dias
+        Hoje: {formatCurrency(campaign.amountCents)}, {validityCopy.today}
         {campaign.salesEndDate ? `, vendas até ${formatDay(campaign.salesEndDate)}` : ''}.
       </p>
     </form>

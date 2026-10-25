@@ -21,6 +21,8 @@ const campaign = (over: Partial<ValePassCampaignItem> = {}): ValePassCampaignIte
   shopifyVariantId: '1',
   active: true,
   soldCount: 0,
+  issuedCount: 0,
+  benefitsCount: 0,
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
   ...over,

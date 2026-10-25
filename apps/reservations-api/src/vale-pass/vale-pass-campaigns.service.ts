@@ -2,7 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException, ServiceUnavai
 import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
-import { PASS_UNIT_KEY, formatIsoDate, loadCapacity, loadLotSold } from './vale-pass-capacity';
+import { PASS_UNIT_KEY, formatIsoDate, loadCapacity, loadLotSold, unitAggregates } from './vale-pass-capacity';
 import { planCampaignUpdate, type CampaignUpdateInput } from './vale-pass-campaign-update';
 
 export interface ValePassCampaignItem {
@@ -21,7 +21,15 @@ export interface ValePassCampaignItem {
   readonly salesEndDate: string | null;
   readonly shopifyVariantId: string;
   readonly active: boolean;
+  /**
+   * Unidades VENDIDAS = emitidas e NÃO totalmente canceladas (um Valle Pass com dois vouchers conta 1). É a MESMA definição de `totals.sold` do motor de
+   * capacidade: cartão, painel de capacidade e limite global nunca divergem.
+   */
   readonly soldCount: number;
+  /** Unidades já emitidas, INCLUINDO as canceladas (histórico preservado: cancelado nunca é apagado). */
+  readonly issuedCount: number;
+  /** Benefícios cadastrados (ativos ou não). Maior que 0 = modelo novo (validade fixa por datas); 0 = modelo legado ("N dias após a compra"). Mesmo critério do webhook. */
+  readonly benefitsCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -41,11 +49,14 @@ export class ValePassCampaignsService {
 
   async list(): Promise<ValePassCampaignItem[]> {
     const rows = await this.prisma.valePassCampaign.findMany({ orderBy: { createdAt: 'desc' } });
-    const units = await this.prisma.$queryRaw<{ campaignId: string; n: number }[]>`
-      SELECT v.campaign_id::text AS "campaignId", count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v GROUP BY v.campaign_id`;
-    const byCampaign = new Map(units.map((row) => [row.campaignId, row.n]));
-    // "Vendidos" = UNIDADES comerciais emitidas (um Valle Pass com dois vouchers conta 1), nunca linhas de voucher.
-    return rows.map((row) => toItem(row, byCampaign.get(row.id) ?? 0));
+    const units = await this.prisma.$queryRaw<{ campaignId: string; sold: number; issued: number }[]>`
+      SELECT v.campaign_id::text AS "campaignId", ${unitAggregates(PASS_UNIT_KEY)} FROM vale_passes v GROUP BY v.campaign_id`;
+    const benefits = await this.prisma.$queryRaw<{ campaignId: string; n: number }[]>`
+      SELECT campaign_id::text AS "campaignId", count(*)::int AS n FROM vale_pass_campaign_benefits GROUP BY campaign_id`;
+    const byCampaign = new Map(units.map((row) => [row.campaignId, row]));
+    const benefitsByCampaign = new Map(benefits.map((row) => [row.campaignId, row.n]));
+    // "Vendidos" = UNIDADES comerciais (um Valle Pass com dois vouchers conta 1) que NÃO estão totalmente canceladas: igual à capacidade. "Emitidos" guarda o histórico.
+    return rows.map((row) => toItem(row, { sold: byCampaign.get(row.id)?.sold ?? 0, issued: byCampaign.get(row.id)?.issued ?? 0, benefits: benefitsByCampaign.get(row.id) ?? 0 }));
   }
 
   async create(
@@ -81,7 +92,7 @@ export class ValePassCampaignsService {
       after: { name: created.name, amountCents: created.amountCents, validityDays: created.validityDays, quantityLimit: created.quantityLimit, shopifyVariantId: created.shopifyVariantId },
     });
 
-    return toItem(created, 0);
+    return toItem(created, { sold: 0, issued: 0, benefits: 0 });
   }
 
   async setActive(id: string, active: boolean, actorId: string, actorName: string): Promise<ValePassCampaignItem> {
@@ -105,8 +116,8 @@ export class ValePassCampaignsService {
       after: { active: updated.active },
     });
 
-    const soldCount = await this.soldUnits(id);
-    return toItem(updated, soldCount);
+    const counts = await this.unitCounts(id);
+    return toItem(updated, counts);
   }
 
   /**
@@ -156,14 +167,16 @@ export class ValePassCampaignsService {
         throw new ServiceUnavailableException('Não foi possível editar a campanha no momento.');
       });
 
-    const soldCount = await this.soldUnits(id);
-    return toItem(outcome.row, soldCount);
+    const counts = await this.unitCounts(id);
+    return toItem(outcome.row, counts);
   }
 
-  /** Unidades comerciais emitidas da campanha (um Valle Pass com dois vouchers conta 1). */
-  private async soldUnits(campaignId: string): Promise<number> {
-    const rows = await this.prisma.$queryRaw<{ n: number }[]>`SELECT count(DISTINCT ${PASS_UNIT_KEY})::int AS n FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid`;
-    return rows[0]?.n ?? 0;
+  /** Contagens de UMA campanha com as mesmas definições de `list()` (vendidas = não canceladas; emitidas = histórico; benefícios = modelo). */
+  private async unitCounts(campaignId: string): Promise<CampaignCounts> {
+    const rows = await this.prisma.$queryRaw<{ sold: number; issued: number }[]>`
+      SELECT ${unitAggregates(PASS_UNIT_KEY)} FROM vale_passes v WHERE v.campaign_id = ${campaignId}::uuid`;
+    const benefits = await this.prisma.valePassCampaignBenefit.count({ where: { campaignId } });
+    return { sold: rows[0]?.sold ?? 0, issued: rows[0]?.issued ?? 0, benefits };
   }
 
   private async requireCampaign(id: string): Promise<ValePassCampaign> {
@@ -173,7 +186,13 @@ export class ValePassCampaignsService {
   }
 }
 
-function toItem(row: ValePassCampaign, soldCount: number): ValePassCampaignItem {
+interface CampaignCounts {
+  readonly sold: number;
+  readonly issued: number;
+  readonly benefits: number;
+}
+
+function toItem(row: ValePassCampaign, counts: CampaignCounts): ValePassCampaignItem {
   return {
     id: row.id,
     name: row.name,
@@ -186,7 +205,9 @@ function toItem(row: ValePassCampaign, soldCount: number): ValePassCampaignItem 
     salesEndDate: formatIsoDate(row.salesEndDate),
     shopifyVariantId: row.shopifyVariantId,
     active: row.active,
-    soldCount,
+    soldCount: counts.sold,
+    issuedCount: counts.issued,
+    benefitsCount: counts.benefits,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

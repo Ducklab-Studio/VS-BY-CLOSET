@@ -479,7 +479,12 @@ export interface ValePassCampaign {
   readonly salesEndDate: string | null;
   readonly shopifyVariantId: string;
   readonly active: boolean;
+  /** Unidades vendidas = emitidas e não totalmente canceladas (mesma definição da capacidade). */
   readonly soldCount: number;
+  /** Unidades emitidas incluindo as canceladas (histórico). Ausente em APIs antigas. */
+  readonly issuedCount?: number;
+  /** Benefícios cadastrados: > 0 = validade fixa por datas; 0 = legado (dias após a compra). Ausente em APIs antigas. */
+  readonly benefitsCount?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

@@ -145,6 +145,11 @@ try {
   await card(page).getByText(/limite LEGADO/).waitFor();
   await card(page).getByText(/Nenhum limite global configurado/).waitFor();
   await card(page).getByText(/o estoque da Shopify é ajustado à mão/).waitFor();
+  // Indicadores do cartão (campanha LEGADA, sem benefícios): vendidos = capacidade (2 não cancelados) com o limite legado, histórico de 1 cancelado e "N dias após a compra".
+  assert.equal((await card(page).getByTestId('campaign-sold').locator('p').nth(1).innerText()).trim(), '2 / 10');
+  await card(page).getByText('1 unidade cancelada no histórico (3 emitidas no total)').waitFor();
+  assert.equal(await card(page).getByTestId('campaign-validity').getAttribute('data-validity-kind'), 'LEGACY_DAYS');
+  await card(page).getByTestId('campaign-validity').getByText('30 dias após a compra').waitFor();
   pass('1) capacidade: vendidos (3 emitidos − 1 cancelado), alerta do limite legado e aviso de que a Shopify não é alterada');
 
   // 2) Sem limite global não abre lote (mensagem clara da API); edita a configuração pela tela e define 1.000.
@@ -160,6 +165,8 @@ try {
   pass('2) lote criado; abrir sem limite global é recusado com explicação e nada muda no banco');
 
   await card(page).getByRole('button', { name: 'Editar configuração' }).click();
+  await card(page).getByText('Validade em dias — usada na emissão').waitFor(); // modelo legado: o formulário mantém o texto dos dias
+  assert.match(await card(page).getByTestId('edit-validity-hint').innerText(), /modelo antigo/);
   await card(page).getByLabel(/Limite GLOBAL/).fill('1000');
   await card(page).getByLabel(/Limite de emissão \(LEGADO\)/).fill('');
   await card(page).getByLabel(/Vouchers válidos de/).fill('2027-01-01');
