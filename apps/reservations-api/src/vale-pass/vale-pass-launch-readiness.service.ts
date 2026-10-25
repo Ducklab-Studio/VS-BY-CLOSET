@@ -50,6 +50,7 @@ export class ValePassLaunchReadinessService {
         benefits: benefits.map((b) => ({ kind: b.kind, company: b.company, amountCents: b.amountCents, discountPercent: b.discountPercent, terms: b.terms, active: b.active })),
         hasOpenLot: capacity.openLot !== null,
         shopifyStock: null, // a API não lê a Shopify
+        expectedShopifyStock: capacity.recommendedShopifyStock,
         capacity: {
           openHolds: capacity.holds.length,
           refundReviews: capacity.refundReviews.length,

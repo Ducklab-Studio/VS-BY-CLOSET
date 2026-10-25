@@ -28,7 +28,7 @@ function load(relPath, aliases = {}) {
 
 const helpers = load('src/lib/valle-pass-launch-readiness.ts');
 const { LaunchReadinessPanel } = load('src/app/closetadmin/(protected)/valle-pass/LaunchReadinessPanel.tsx', { '@/lib/valle-pass-launch-readiness': helpers });
-const { applyWebEvidence, formatGeneratedAt, groupItems, headline } = helpers;
+const { applyWebEvidence, formatGeneratedAt, groupItems, headline, shopifyStockItem } = helpers;
 
 const LEGAL = new Set(['terms-approved', 'refund-policy', 'legal-review']);
 const item = (id, group, owner, status, label, message = `${label}: mensagem`) => ({
@@ -174,6 +174,78 @@ test('o que dá para concluir sem o Anderson: só itens técnicos ainda abertos,
   assert.match(html, /sem esperar o Anderson<\/strong>: 3 item\(ns\) abertos/);
   assert.match(html, /Dependem dele ou do jurídico:(<!-- -->)? ?(<!-- -->)?4/);
   assert.match(html, /não dispensa a autorização expressa/);
+});
+
+const stockEntry = () => item('shopify-stock', 'LOTES_ESTOQUE', 'TECNICO', 'PENDING', 'Estoque da Shopify');
+const withStock = (expected, evidence) => applyWebEvidence({ ...sample(), expectedShopifyStock: expected, items: [stockEntry()] }, { termsHref: null, shopifyStock: evidence }).items[0];
+
+test('estoque da Shopify: só aprova com leitura real igual ao esperado; sem resposta continua pendente (nunca vira zero por falta de dado)', () => {
+  const closed = withStock(0, { status: 'sold_out' });
+  assert.equal(closed.status, 'APPROVED');
+  assert.equal(closed.nextStep, null);
+  assert.match(closed.message, /NÃO está à venda \(estoque 0\)/);
+  assert.equal(withStock(100, { status: 'available', quantity: 100 }).status, 'APPROVED');
+  assert.equal(withStock(0, { status: 'unknown' }).status, 'PENDING');
+  assert.equal(withStock(0, undefined).status, 'PENDING');
+  assert.equal(withStock(undefined, { status: 'sold_out' }).status, 'PENDING'); // API antiga: sem estoque esperado, não aprova
+  assert.equal(withStock(null, { status: 'sold_out' }).status, 'PENDING');
+});
+
+test('estoque da Shopify: acima do esperado ou à venda sem quantidade conhecida BLOQUEIA; abaixo ou fechado com lote esperado fica pendente', () => {
+  const above = withStock(0, { status: 'available', quantity: 5 });
+  assert.equal(above.status, 'BLOCKED');
+  assert.match(above.message, /acima do esperado \(0\)/);
+  assert.match(above.nextStep, /Fechar a venda/); // sem lote aberto: fechar a venda
+  assert.match(withStock(100, { status: 'available', quantity: 150 }).nextStep, /Reduzir o estoque da variante para 100/);
+  assert.equal(withStock(100, { status: 'available', quantity: 150 }).status, 'BLOCKED');
+  const untracked = withStock(0, { status: 'available', quantity: null });
+  assert.equal(untracked.status, 'BLOCKED');
+  assert.match(untracked.message, /sem quantidade conhecida/);
+  assert.equal(withStock(0, { status: 'available', quantity: 0 }).status, 'BLOCKED'); // à venda sem lote aberto nunca é aprovado, mesmo com quantidade 0
+  assert.equal(withStock(100, { status: 'available', quantity: 40 }).status, 'PENDING');
+  assert.equal(withStock(100, { status: 'sold_out' }).status, 'PENDING');
+});
+
+test('estoque da Shopify: com lote aberto, quantidade não confirmada fica PENDENTE (nunca aprovada nem bloqueada por falta de dado)', () => {
+  const unknownQty = withStock(100, { status: 'available', quantity: null });
+  assert.equal(unknownQty.status, 'PENDING');
+  assert.match(unknownQty.message, /sem quantidade confirmada/);
+});
+
+test('estoque da Shopify: desconhecido NUNCA aprova, em nenhuma combinação (leitura ausente, falha, estoque esperado ausente, inválido ou negativo)', () => {
+  const original = stockEntry();
+  for (const evidence of [undefined, { status: 'unknown' }]) {
+    for (const expected of [0, 100, undefined, null, -1, 1.5, Number.NaN]) {
+      const out = shopifyStockItem(original, expected, evidence);
+      assert.equal(out.status, 'PENDING', `evidência ${JSON.stringify(evidence)} esperado ${expected}`);
+      assert.deepEqual(out, original, 'o item volta exatamente como a API enviou');
+    }
+  }
+  for (const expected of [undefined, null, -1, 1.5, Number.NaN]) {
+    for (const evidence of [{ status: 'sold_out' }, { status: 'available', quantity: 0 }, { status: 'available', quantity: 10 }, { status: 'available', quantity: null }]) {
+      assert.equal(shopifyStockItem(original, expected, evidence).status, 'PENDING', `esperado ${expected} ${JSON.stringify(evidence)}`);
+    }
+  }
+});
+
+test('estoque da Shopify: só o item do estoque muda; os outros itens, o horário e o veredito continuam iguais', () => {
+  const data = { ...sample(), expectedShopifyStock: 0, items: [stockEntry(), ...sample().items] };
+  const out = applyWebEvidence(data, { termsHref: null, shopifyStock: { status: 'sold_out' } });
+  assert.equal(out.items.find((i) => i.id === 'shopify-stock').status, 'APPROVED');
+  assert.deepEqual(out.items.filter((i) => i.id !== 'shopify-stock' && i.id !== 'terms-url'), data.items.filter((i) => i.id !== 'shopify-stock' && i.id !== 'terms-url'));
+  assert.equal(out.generatedAt, data.generatedAt);
+  assert.equal(out.readyToSell, false);
+  assert.equal(out.summary.total, data.items.length);
+  assert.equal(out.summary.approved, applyWebEvidence(data, { termsHref: null }).summary.approved + 1);
+  assert.match(render({ readiness: out, error: null }), /data-item="shopify-stock"[^>]*data-status="APPROVED"/);
+});
+
+test('a página lê o estoque só com leitura, em paralelo e com limite de 3 s (erro/timeout = desconhecido)', () => {
+  const page = readFileSync(new URL('src/app/closetadmin/(protected)/valle-pass/page.tsx', root), 'utf8');
+  assert.match(page, /fetchVariantStock\(\[gid\]\)/);
+  assert.match(page, /readStockEvidence\(/);
+  assert.match(page, /Promise\.all\(\[getValePassLaunchReadiness\(session\.id\), readValePassStock\(\)\]\)/);
+  assert.doesNotMatch(page, /inventory|inventorySet|mutation|Admin API|SHOPIFY_CLIENT_SECRET/i); // nada de escrita nem credencial privada
 });
 
 test('só vira "pronta" se todos os itens estiverem aprovados; lista vazia nunca é pronta', () => {

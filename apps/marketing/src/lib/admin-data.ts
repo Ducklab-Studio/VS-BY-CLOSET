@@ -763,6 +763,8 @@ export interface LaunchChecklistCounts {
 export interface LaunchReadiness {
   /** Instante da leitura na API (ISO). Os dados valem para esse momento; a tela não atualiza sozinha. */
   readonly generatedAt: string;
+  /** Estoque que a Shopify deveria ter agora (saldo do lote aberto; 0 sem lote). Ausente em APIs antigas. */
+  readonly expectedShopifyStock?: number | null;
   readonly campaign: { readonly id: string; readonly name: string; readonly active: boolean } | null;
   readonly items: readonly LaunchChecklistItem[];
   readonly summary: { readonly total: number; readonly approved: number; readonly pending: number; readonly blocked: number; readonly technical: LaunchChecklistCounts; readonly anderson: LaunchChecklistCounts };

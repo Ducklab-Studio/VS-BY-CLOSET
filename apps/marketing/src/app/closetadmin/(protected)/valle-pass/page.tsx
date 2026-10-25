@@ -5,10 +5,20 @@ import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader } from '@/components/closetadmin/ui';
 import { applyWebEvidence } from '@/lib/valle-pass-launch-readiness';
 import { VALE_PASS_TERMS_HREF } from '@/lib/vale-pass-terms';
+import { fetchVariantStock } from '@/lib/cart';
+import { VALE_PASS_VARIANT_ID } from '@/lib/vale-pass-product';
+import type { WebStockEvidence } from '@/lib/valle-pass-launch-readiness';
+import { readStockEvidence } from '@/lib/valle-pass-stock-read';
 import { LaunchReadinessPanel } from './LaunchReadinessPanel';
 import { ValePassSection } from './ValePassSection';
 
 export const metadata: Metadata = { title: 'Valle Pass' };
+
+/** Estoque da variante do Valle Pass lido do Storefront (SOMENTE LEITURA, no máximo 3 s). Qualquer falha, timeout ou Shopify bloqueada (testes) = `unknown`: o item fica pendente. */
+function readValePassStock(): Promise<WebStockEvidence> {
+  const gid = `gid://shopify/ProductVariant/${VALE_PASS_VARIANT_ID}`;
+  return readStockEvidence(async () => (await fetchVariantStock([gid])).get(gid));
+}
 
 /**
  * Valle Pass — produto TOTALMENTE separado do fluxo de aluguel:
@@ -40,7 +50,8 @@ export default async function ClosetAdminValePassPage() {
   let readiness: LaunchReadiness | null = null;
   let readinessError: string | null = null;
   try {
-    readiness = applyWebEvidence(await getValePassLaunchReadiness(session.id), { termsHref: VALE_PASS_TERMS_HREF });
+    const [raw, shopifyStock] = await Promise.all([getValePassLaunchReadiness(session.id), readValePassStock()]);
+    readiness = applyWebEvidence(raw, { termsHref: VALE_PASS_TERMS_HREF, shopifyStock });
   } catch (err) {
     readinessError = err instanceof AdminApiError ? err.message : 'Erro inesperado.';
   }

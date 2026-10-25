@@ -51,6 +51,8 @@ export interface ChecklistInput {
   readonly hasOpenLot: boolean;
   /** Estoque da Shopify. A API não consulta a Shopify, então chega `null`: o item fica PENDENTE com a orientação de conferir lá. */
   readonly shopifyStock: number | null;
+  /** Estoque que a Shopify DEVERIA ter agora (saldo do lote aberto; 0 sem lote aberto). Só informativo: quem compara com a Shopify é o site. */
+  readonly expectedShopifyStock?: number | null;
   readonly capacity: ChecklistCapacity;
   readonly flags: ChecklistFlags;
 }
@@ -67,6 +69,8 @@ export interface ChecklistSummary {
 export interface LaunchChecklist {
   /** Quando a leitura foi feita (ISO, relógio do servidor da API). Os dados são de AQUELE instante: nada aqui atualiza sozinho. */
   readonly generatedAt: string;
+  /** Estoque esperado na Shopify (saldo do lote aberto; 0 sem lote). `null` = sem campanha. A API não lê a Shopify: o site compara. */
+  readonly expectedShopifyStock: number | null;
   readonly campaign: { readonly id: string; readonly name: string; readonly active: boolean } | null;
   readonly items: readonly ChecklistItem[];
   readonly summary: ChecklistSummary;
@@ -135,7 +139,7 @@ function flagItems(f: ChecklistFlags): RawItem[] {
   out.push(
     f.twoVoucher
       ? item('flag-two-voucher', 'INTEGRACOES', 'TECNICO', 'APPROVED', 'Chave dos dois vouchers (VALE_PASS_TWO_VOUCHER_FLOW)', 'LIGADA no servidor.')
-      : item('flag-two-voucher', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Chave dos dois vouchers (VALE_PASS_TWO_VOUCHER_FLOW)', 'DESLIGADA: todo pagamento confirmado fica retido e nenhum voucher é emitido. Ligar só com autorização, na ordem de ativação.'),
+      : item('flag-two-voucher', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Chave dos dois vouchers (VALE_PASS_TWO_VOUCHER_FLOW)', 'DESLIGADA de propósito até a ativação autorizada: enquanto isso, todo pagamento confirmado fica retido e nenhum voucher é emitido. Não é erro técnico.'),
   );
   out.push(
     f.twoVoucher && f.autoVerify
@@ -148,7 +152,7 @@ function flagItems(f: ChecklistFlags): RawItem[] {
           'Verificação automática do pagamento (VALE_PASS_AUTO_VERIFY)',
           f.autoVerify
             ? 'Ligada, mas sem efeito enquanto a chave dos dois vouchers estiver desligada.'
-            : 'DESLIGADA: com a política estrita, o pagamento fica retido até a verificação (manual ou automática).',
+            : 'DESLIGADA de propósito até a ativação autorizada: com a política estrita, o pagamento fica retido até a verificação (manual ou automática). Não é erro técnico.',
         ),
   );
   if (f.emailMode === 'live') {
@@ -165,13 +169,13 @@ function flagItems(f: ChecklistFlags): RawItem[] {
         'TECNICO',
         'PENDING',
         'Envio de e-mails (VALE_PASS_EMAIL_MODE)',
-        f.emailMode === 'dry-run' ? 'Simulação (dry-run): nada é enviado de verdade.' : 'DESLIGADO: os e-mails ficam na fila e nada é enviado.',
+        f.emailMode === 'dry-run' ? 'Simulação (dry-run): nada é enviado de verdade.' : 'DESLIGADO de propósito até a ativação autorizada: os e-mails ficam na fila e nada é enviado. Não é erro técnico.',
       ),
     );
   }
   out.push(
     f.alertsMode === 'off'
-      ? item('alerts-mode', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Aviso ativo de pagamentos retidos (VALE_PASS_ALERTS_MODE)', 'DESLIGADO: pagamentos retidos só aparecem no painel, sem aviso ativo.')
+      ? item('alerts-mode', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Aviso ativo de pagamentos retidos (VALE_PASS_ALERTS_MODE)', 'DESLIGADO (opcional): pagamentos retidos só aparecem no painel, sem aviso ativo.')
       : item('alerts-mode', 'INTEGRACOES', 'TECNICO', 'APPROVED', 'Aviso ativo de pagamentos retidos (VALE_PASS_ALERTS_MODE)', `Canal "${f.alertsMode}" ligado.`),
   );
   return out;
@@ -252,7 +256,7 @@ export function summarize(items: readonly ChecklistItem[]): ChecklistSummary {
 /** Sem campanha cadastrada: nada a avaliar, e isso bloqueia. */
 export function emptyChecklist(now: Date = new Date()): LaunchChecklist {
   const items = [item('campaign', 'CAMPANHA', 'TECNICO', 'BLOCKED', 'Campanha cadastrada', 'Nenhuma campanha do Valle Pass encontrada.'), ...unprovableItems()].map(enrich);
-  return { generatedAt: now.toISOString(), campaign: null, items, summary: summarize(items), readyToSell: false };
+  return { generatedAt: now.toISOString(), expectedShopifyStock: null, campaign: null, items, summary: summarize(items), readyToSell: false };
 }
 
 export function buildLaunchChecklist(campaignRef: { id: string; name: string }, input: ChecklistInput, now: Date = new Date()): LaunchChecklist {
@@ -266,6 +270,7 @@ export function buildLaunchChecklist(campaignRef: { id: string; name: string }, 
   const summary = summarize(items);
   return {
     generatedAt: now.toISOString(),
+    expectedShopifyStock: input.expectedShopifyStock ?? null,
     campaign: { id: campaignRef.id, name: campaignRef.name, active: input.campaign.active },
     items,
     summary,
