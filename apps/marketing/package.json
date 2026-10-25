@@ -13,6 +13,7 @@
     "test:operational-browser": "node ../../scripts/no-real-network.mjs node test/operational-browser.mjs",
     "test:pecas-sku-inactive": "node ../../scripts/no-real-network.mjs node test/pecas-sku-inactive.mjs",
     "test:valle-pass-badge": "node ../../scripts/no-real-network.mjs node test/valle-pass-badge.mjs",
+    "test:valle-pass-readiness": "node ../../scripts/no-real-network.mjs node test/valle-pass-launch-readiness-browser.mjs",
     "test:product-variants": "node ../../scripts/no-real-network.mjs node test/product-variants-browser.mjs",
     "test:valle-pass-prelaunch": "node ../../scripts/no-real-network.mjs node test/valle-pass-prelaunch-browser.mjs",
     "test:valle-pass-lots": "node ../../scripts/no-real-network.mjs node test/valle-pass-lots-browser.mjs",

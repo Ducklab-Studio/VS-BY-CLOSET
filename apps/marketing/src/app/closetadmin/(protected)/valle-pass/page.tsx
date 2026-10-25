@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
 import { hasAdminRole, requireAdminModule, requireAdminSession } from '@/lib/admin-session';
-import { listValePassCampaigns, listValePassOrders, listValePassVouchers } from '@/lib/admin-data';
+import { getValePassLaunchReadiness, listValePassCampaigns, listValePassOrders, listValePassVouchers, type LaunchReadiness } from '@/lib/admin-data';
 import { AdminApiError } from '@/lib/admin-api';
 import { ErrorState, PageHeader } from '@/components/closetadmin/ui';
+import { applyWebEvidence } from '@/lib/valle-pass-launch-readiness';
+import { VALE_PASS_TERMS_HREF } from '@/lib/vale-pass-terms';
+import { LaunchReadinessPanel } from './LaunchReadinessPanel';
 import { ValePassSection } from './ValePassSection';
 
 export const metadata: Metadata = { title: 'Valle Pass' };
@@ -33,12 +36,22 @@ export default async function ClosetAdminValePassPage() {
     return <ErrorState message={errorMessage ?? 'Erro inesperado.'} />;
   }
 
+  // Painel "Pronta para vender?" (somente leitura). Falha aqui NÃO derruba o restante da tela: o painel mostra o próprio estado de erro.
+  let readiness: LaunchReadiness | null = null;
+  let readinessError: string | null = null;
+  try {
+    readiness = applyWebEvidence(await getValePassLaunchReadiness(session.id), { termsHref: VALE_PASS_TERMS_HREF });
+  } catch (err) {
+    readinessError = err instanceof AdminApiError ? err.message : 'Erro inesperado.';
+  }
+
   return (
     <div>
       <PageHeader
         title="Valle Pass"
         description="Dois vouchers por unidade (Valle Showroom e VS BY CLOSET) — vendido pelo checkout oficial da Shopify, separado do fluxo de aluguel. Nunca depende de disponibilidade, HOLD ou datas de retirada/devolução."
       />
+      <LaunchReadinessPanel readiness={readiness} error={readinessError} />
       <ValePassSection initialCampaigns={campaigns} initialVouchers={vouchers} initialOrders={orders} canManageCampaigns={hasAdminRole(session, 'ADMIN')} isOwner={session.role === 'SUPER_ADMIN'} />
     </div>
   );

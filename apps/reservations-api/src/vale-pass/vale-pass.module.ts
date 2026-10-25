@@ -40,13 +40,15 @@ import { ValePassValidityExtensionController } from './validity-extension.contro
 import { ValePassAutoVerifyScheduler, ValePassAutoVerifyService } from './flow/auto-verify.service';
 import { ValePassAlertsScheduler, ValePassOperationalAlertsService } from './flow/operational-alerts.service';
 import { ValePassFlowController } from './flow/flow.controller';
+import { ValePassLaunchReadinessController } from './vale-pass-launch-readiness.controller';
+import { ValePassLaunchReadinessService } from './vale-pass-launch-readiness.service';
 import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
 
 /** Sem chave configurada o provedor nunca é chamado (o worker bloqueia antes); se for, devolve resultado desconhecido em vez de fingir sucesso. */
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController, ValePassCancellationAlertsController],
+  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController, ValePassCancellationAlertsController, ValePassLaunchReadinessController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -73,6 +75,7 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassRegularizationService,
     { provide: FLOW_FLAGS_TOKEN, useFactory: () => envFlowFlags() },
     ValePassPaymentFlowService,
+    ValePassLaunchReadinessService,
     ValePassPaymentTimeService,
     ValePassLedgerService,
     ValePassRedemptionService,
