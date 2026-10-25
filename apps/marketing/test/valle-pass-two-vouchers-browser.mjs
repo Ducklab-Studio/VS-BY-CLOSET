@@ -78,11 +78,17 @@ async function newPage(context, errors) {
 }
 
 let campaignId = null;
+let extraCampaignId = null;
 const orderIds = [];
 let storeId = null;
 async function clean() {
   for (const child of childProcesses) child.kill();
   await browser?.close();
+  if (extraCampaignId) {
+    await db.valePass.deleteMany({ where: { campaignId: extraCampaignId } });
+    await db.valePassCampaignBenefit.deleteMany({ where: { campaignId: extraCampaignId } });
+    await db.valePassCampaign.deleteMany({ where: { id: extraCampaignId } });
+  }
   if (campaignId) {
     const holds = await db.valePassIssuanceHold.findMany({ where: { campaignId }, select: { id: true } });
     const passes = await db.valePass.findMany({ where: { campaignId }, select: { id: true } });
@@ -177,6 +183,10 @@ try {
   ]);
   assert.equal(await db.valePass.count({ where: { campaignId } }), 0); // cadastrar benefícios não emite nada
   assert.equal((await db.adminAuditEvent.findFirst({ where: { entityId: campaignId, action: 'VALE_PASS_BENEFITS_UPDATED' } })).adminUserId, admin.id);
+  // Indicadores do cartão: depois de cadastrar os benefícios o cartão passa ao modelo novo e mostra as datas oficiais (mesma fonte do painel de capacidade, sem recarregar).
+  await card(page).getByTestId('campaign-validity').getByText('01/01/2027 a 31/12/2027').waitFor();
+  assert.equal(await card(page).getByTestId('campaign-validity').getAttribute('data-validity-kind'), 'FIXED_WINDOW');
+  assert.equal(await card(page).getByText(/dias após a compra/).count(), 0);
   pass('1) modelo Valle Pass 2027 cadastrado pela tela (sugestão só grava após confirmar); nenhum voucher emitido; auditado');
 
   // 2) Pagamento retido (fila): confirmação reforçada. Limite 1 com 1 voucher legado vendido + 1 pedido pago aguardando = consumo 2 (excede em 1).
@@ -323,6 +333,33 @@ try {
   await card(mobilePage).getByText(/Pagamentos confirmados aguardando resolução/).waitFor();
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0);
   pass('5) celular (390px): sem rolagem lateral');
+
+  // Campanha como a OFICIAL hoje: benefícios cadastrados, SEM validade e só um voucher legado CANCELADO (teste antigo).
+  const extra = await db.valePassCampaign.create({ data: { name: `${prefix} Sem Validade`, amountCents: 35_000, validityDays: 30, globalLimit: 1000, shopifyVariantId: `${prefix}-sem-validade` } });
+  extraCampaignId = extra.id;
+  await db.valePassCampaignBenefit.create({ data: { campaignId: extra.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'Voucher Valle Showroom', amountCents: 50_000, sortOrder: 0 } });
+  await db.valePassCampaignBenefit.create({ data: { campaignId: extra.id, code: 'vs_by_closet_50', kind: 'VOUCHER', company: 'VS_BY_CLOSET', label: 'Voucher VS BY CLOSET', amountCents: 5_000, sortOrder: 1 } });
+  await db.valePass.create({ data: { code: `${prefix}-LEG`, campaignId: extra.id, amountCents: 35_000, status: 'CANCELLED', purchasedAt: new Date(Date.now() - 86_400_000), expiresAt: new Date(Date.now() + 86_400_000), cancelledAt: new Date(), cancelReason: 'teste antigo' } });
+  await page.reload();
+  const semValidade = page.locator('article', { hasText: `${prefix} Sem Validade` }).filter({ hasText: 'Variante Shopify' });
+  await semValidade.waitFor();
+  assert.equal(await semValidade.getByTestId('campaign-validity').getAttribute('data-validity-kind'), 'PENDING');
+  await semValidade.getByTestId('campaign-validity').getByText('A definir').waitFor();
+  await semValidade.getByTestId('campaign-validity').getByText(/Pagamentos ficam retidos até a validade/).waitFor();
+  assert.equal(await semValidade.getByText(/30 dias/).count(), 0, 'nunca mostra "30 dias" para a campanha com benefícios');
+  assert.equal((await semValidade.getByTestId('campaign-sold').locator('p').nth(1).innerText()).trim(), '0');
+  await semValidade.getByText('1 unidade cancelada no histórico (1 emitida no total)').waitFor();
+  assert.equal(await db.valePass.count({ where: { campaignId: extra.id } }), 1, 'o histórico continua no banco');
+  // O cartão e o painel de capacidade dizem o mesmo (vendidos 0, 1 emitido, 1 cancelado).
+  await semValidade.getByRole('button', { name: /Capacidade, lotes e configuração/ }).click();
+  await semValidade.getByText('1 emitidos, 1 cancelados').waitFor();
+  // Formulário de edição: explica o modelo novo e não promete "validade em dias".
+  await semValidade.getByRole('button', { name: 'Editar configuração' }).click();
+  await semValidade.getByText('Validade em dias — legado (não vale para esta campanha)').waitFor();
+  assert.match(await semValidade.getByTestId('edit-validity-hint').innerText(), /usa a validade fixa/);
+  await semValidade.getByText(/Hoje: R\$\s*350,00, validade a definir \(pagamentos retidos\)/).waitFor();
+  assert.equal(await semValidade.getByText(/usada na emissão atual|próxima etapa/).count(), 0);
+  pass('5b) campanha com benefícios e sem validade: "A definir" com aviso de retenção (nunca "30 dias"); vendidos 0 com histórico de 1 cancelado igual à capacidade; formulário de edição coerente');
 
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, [], 'o navegador tentou acessar a internet (Shopify real?)');
