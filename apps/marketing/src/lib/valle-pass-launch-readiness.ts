@@ -1,4 +1,4 @@
-import type { LaunchChecklistGroup, LaunchChecklistItem, LaunchChecklistOwner, LaunchChecklistStatus, LaunchReadiness } from './admin-data';
+import type { LaunchChecklistGroup, LaunchChecklistItem, LaunchChecklistNature, LaunchChecklistOwner, LaunchChecklistStatus, LaunchReadiness } from './admin-data';
 
 /**
  * Apoio puro (sem rede, sem React) do painel "Pronta para vender?". Só organiza e rotula o que a API devolveu; nunca aprova nada por conta própria.
@@ -17,6 +17,8 @@ export const GROUP_LABELS: Readonly<Record<LaunchChecklistGroup, string>> = {
 };
 
 export const STATUS_LABELS: Readonly<Record<LaunchChecklistStatus, string>> = { APPROVED: 'Aprovado', PENDING: 'Pendente', BLOCKED: 'Bloqueado' };
+
+export const NATURE_LABELS: Readonly<Record<LaunchChecklistNature, string>> = { TECNICO: 'Técnico', COMERCIAL: 'Comercial', JURIDICO: 'Jurídico' };
 
 export const OWNER_LABELS: Readonly<Record<LaunchChecklistOwner, string>> = { TECNICO: 'Requisitos técnicos', ANDERSON: 'Dependem do Anderson' };
 
@@ -39,11 +41,24 @@ export function applyWebEvidence(readiness: LaunchReadiness, evidence: { termsHr
   const items = readiness.items.map((entry): LaunchChecklistItem => {
     if (entry.id !== 'terms-url') return entry;
     return evidence.termsHref
-      ? { ...entry, status: 'APPROVED', message: `Endereço configurado no site publicado: ${evidence.termsHref}. A aprovação do texto é outro item.` }
+      ? { ...entry, status: 'APPROVED', nextStep: null, message: `Endereço configurado no site publicado: ${evidence.termsHref}. A aprovação do texto é outro item.` }
       : { ...entry, status: 'PENDING', message: 'Endereço dos termos NÃO configurado no site (NEXT_PUBLIC_VALE_PASS_TERMS_URL ausente): a vitrine só informa que os termos serão publicados.' };
   });
   const summary = counts(items);
   return { ...readiness, items, summary, readyToSell: items.length > 0 && summary.approved === summary.total };
+}
+
+/**
+ * Itens ainda abertos (pendentes ou bloqueados) que a equipe pode concluir SEM esperar o Anderson. Atenção: "sem o Anderson" não é "sem autorização" — ligar chaves, publicar
+ * termos e a compra de teste continuam exigindo a autorização expressa do responsável pela produção.
+ */
+export function openWithoutAnderson(items: readonly LaunchChecklistItem[]): LaunchChecklistItem[] {
+  return items.filter((i) => i.owner === 'TECNICO' && i.status !== 'APPROVED');
+}
+
+/** Itens abertos que dependem do Anderson ou do jurídico (decisão que não pode ser presumida). */
+export function openWithAnderson(items: readonly LaunchChecklistItem[]): LaunchChecklistItem[] {
+  return items.filter((i) => i.owner === 'ANDERSON' && i.status !== 'APPROVED');
 }
 
 /** Itens de um responsável, agrupados na ordem fixa da tela (grupos vazios somem). */

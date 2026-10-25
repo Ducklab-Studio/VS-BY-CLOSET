@@ -741,14 +741,19 @@ export function getValePassFlowStatus(adminUserId: string): Promise<ValePassFlow
 
 export type LaunchChecklistStatus = 'APPROVED' | 'PENDING' | 'BLOCKED';
 export type LaunchChecklistOwner = 'TECNICO' | 'ANDERSON';
+export type LaunchChecklistNature = 'TECNICO' | 'COMERCIAL' | 'JURIDICO';
 export type LaunchChecklistGroup = 'CAMPANHA' | 'VALIDADE' | 'LOTES_ESTOQUE' | 'TERMOS' | 'INTEGRACOES' | 'OPERACAO';
 export interface LaunchChecklistItem {
   readonly id: string;
   readonly group: LaunchChecklistGroup;
   readonly owner: LaunchChecklistOwner;
+  /** Natureza do que falta (técnica, comercial ou jurídica). Não altera o status. */
+  readonly nature: LaunchChecklistNature;
   readonly status: LaunchChecklistStatus;
   readonly label: string;
   readonly message: string;
+  /** Orientação para destravar o item (`null` quando aprovado). Só texto: a tela não executa nada. */
+  readonly nextStep: string | null;
 }
 export interface LaunchChecklistCounts {
   readonly approved: number;
@@ -1154,7 +1159,7 @@ export function prepareValePassRedeem(code: string, input: ValePassRedeemInput):
 }
 export function confirmValePassRedeem(
   code: string,
-  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number; identityChecked?: boolean },
 ): Promise<ValePassOperationResult> {
   return adminPost(`/admin/vale-pass/vouchers/${pathSegment(code)}/redeem`, input);
 }

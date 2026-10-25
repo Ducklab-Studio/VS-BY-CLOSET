@@ -192,10 +192,17 @@ try {
   await shot(page, '1-apos-resgate-200');
   pass('2) R$ 500 − R$ 200 = R$ 300 (confirmação exige redigitar o valor; duplo clique gravou UM lançamento)');
 
+  // "Usar saldo total": preenche o valor com o saldo atual (R$ 300,00) sem registrar nada; depois o operador digita o valor real.
+  await page.getByTestId('redeem-use-full').click();
+  assert.equal(await page.getByLabel('Valor a utilizar (R$)').inputValue(), '300,00');
+  assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: A } })).balanceCents, 30_000, 'o botão só preenche o campo: nada é gravado');
   await page.getByLabel('Valor a utilizar (R$)').fill('100');
   await page.getByLabel('Referência da utilização').fill('Nota 124');
   await page.getByRole('button', { name: 'Conferir' }).click();
   await page.getByLabel(/Digite novamente o valor/).fill('100,00');
+  // Conferência de identidade: OPCIONAL (aqui marcada; no resgate anterior ficou desmarcada e o resgate foi aceito do mesmo jeito).
+  assert.equal(await page.getByTestId('redeem-identity').isChecked(), false, 'a conferência nunca vem marcada');
+  await page.getByTestId('redeem-identity').check();
   await page.getByRole('button', { name: 'Confirmar resgate' }).click();
   await page.getByText('Saldo disponível: R$ 200,00.').waitFor();
   assert.equal((await metric(page, 'Saldo disponível').innerText()).trim(), 'R$ 200,00');
@@ -203,7 +210,15 @@ try {
   assert.equal(await page.locator('li:has-text("Resgate")').count() >= 2, true);
   const ledger = await entriesOf(A);
   assert.deepEqual(ledger.map((e) => [e.seq, e.deltaCents, e.balanceAfterCents]), [[1, -20_000, 30_000], [2, -10_000, 20_000]]);
-  pass('3) novo resgate de R$ 100 → saldo R$ 200; histórico com valor, saldo resultante, referência e operador');
+  const redeemedEvents = await db.valePassEvent.findMany({ where: { valePass: { code: A }, type: 'REDEEMED' }, orderBy: { createdAt: 'asc' } });
+  assert.equal(redeemedEvents.length, 2);
+  assert.equal(redeemedEvents[0].detail.identityChecked, null, 'sem marcar: registrado como "não informado", sem recusar o resgate');
+  assert.equal(redeemedEvents[1].detail.identityChecked, true, 'marcada: fica no histórico do voucher');
+  const redeemAudit = await db.adminAuditEvent.findMany({ where: { action: 'VALE_PASS_REDEEMED', entityId: redeemedEvents[1].valePassId }, orderBy: { createdAt: 'asc' } });
+  assert.equal(redeemAudit.length, 2);
+  assert.equal(redeemAudit[1].detail.identityChecked, true, 'e na auditoria administrativa');
+  assert.deepEqual(redeemAudit[0].detail.identityChecked, null);
+  pass('3) novo resgate de R$ 100 → saldo R$ 200; histórico com valor, saldo resultante, referência e operador; "Usar saldo total" só preenche o campo; identidade conferida é opcional e fica no histórico e na auditoria');
 
   // 3) Outra empresa: R$ 50 − R$ 20 = R$ 30, sem tocar no saldo da Valle Showroom.
   await consult(page, B);

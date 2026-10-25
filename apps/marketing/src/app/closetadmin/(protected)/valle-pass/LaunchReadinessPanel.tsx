@@ -1,5 +1,5 @@
-import type { LaunchChecklistItem, LaunchChecklistOwner, LaunchChecklistStatus, LaunchReadiness } from '@/lib/admin-data';
-import { formatGeneratedAt, groupItems, headline, OWNER_HINTS, OWNER_LABELS, STATUS_LABELS } from '@/lib/valle-pass-launch-readiness';
+import type { LaunchChecklistItem, LaunchChecklistNature, LaunchChecklistOwner, LaunchChecklistStatus, LaunchReadiness } from '@/lib/admin-data';
+import { formatGeneratedAt, groupItems, headline, NATURE_LABELS, openWithAnderson, openWithoutAnderson, OWNER_HINTS, OWNER_LABELS, STATUS_LABELS } from '@/lib/valle-pass-launch-readiness';
 
 /**
  * "Pronta para vender?" — painel SOMENTE LEITURA do ClosetAdmin. Sem botões, formulários nem ações: não abre vendas, não altera estoque e não liga chaves
@@ -13,6 +13,12 @@ const BADGE: Record<LaunchChecklistStatus, string> = {
   BLOCKED: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
 };
 
+const NATURE_BADGE: Record<LaunchChecklistNature, string> = {
+  TECNICO: 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300',
+  COMERCIAL: 'bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300',
+  JURIDICO: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300',
+};
+
 const OWNERS: readonly LaunchChecklistOwner[] = ['TECNICO', 'ANDERSON'];
 
 function Row({ entry }: { entry: LaunchChecklistItem }) {
@@ -20,8 +26,18 @@ function Row({ entry }: { entry: LaunchChecklistItem }) {
     <li className="flex items-start gap-3 py-2" data-item={entry.id} data-status={entry.status}>
       <span className={`mt-0.5 inline-block shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${BADGE[entry.status]}`}>{STATUS_LABELS[entry.status]}</span>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-ink dark:text-dark-text">{entry.label}</p>
+        <p className="text-sm font-medium text-ink dark:text-dark-text">
+          {entry.label}{' '}
+          <span className={`ml-1 inline-block rounded-full px-2 py-px align-middle text-[0.62rem] font-semibold uppercase tracking-wide ${NATURE_BADGE[entry.nature]}`} data-nature={entry.nature}>
+            {NATURE_LABELS[entry.nature]}
+          </span>
+        </p>
         <p className="mt-0.5 text-[0.75rem] leading-snug text-ink/60 dark:text-dark-muted">{entry.message}</p>
+        {entry.nextStep ? (
+          <p className="mt-0.5 text-[0.72rem] leading-snug text-ink/75 dark:text-dark-text" data-next-step={entry.id}>
+            <span className="font-semibold">Próximo passo:</span> {entry.nextStep}
+          </p>
+        ) : null}
       </div>
     </li>
   );
@@ -91,6 +107,10 @@ export function LaunchReadinessPanel({ readiness, error }: { readiness: LaunchRe
           </p>
           <p className="mt-1 text-xs text-ink/60 dark:text-dark-muted" data-testid="launch-readiness-campaign">
             {readiness.campaign ? `Campanha: ${readiness.campaign.name}${readiness.campaign.active ? '' : ' (inativa)'}` : 'Nenhuma campanha cadastrada.'}
+          </p>
+          <p className="mt-2 rounded-lg border border-sky-300/50 bg-sky-50 p-2.5 text-[0.75rem] leading-snug text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200" data-testid="launch-readiness-split">
+            Podem ser concluídos <strong>sem esperar o Anderson</strong>: {openWithoutAnderson(readiness.items).length} item(ns) abertos. Dependem dele ou do jurídico:{' '}
+            {openWithAnderson(readiness.items).length}. Concluir sem o Anderson não dispensa a autorização expressa para mexer na produção (chaves, termos publicados, compra de teste).
           </p>
           <div className="mt-3 grid gap-4 lg:grid-cols-2">
             {OWNERS.map((owner) => (

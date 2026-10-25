@@ -166,7 +166,7 @@ export class ValePassRedemptionService {
 
   async confirmRedeem(
     code: string,
-    input: { company: string; amountCents: number; reference: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+    input: { company: string; amountCents: number; reference: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number; identityChecked?: boolean },
     actor: Actor,
   ): Promise<OperationResult> {
     await this.requireAnyAuthorization(actor);
@@ -189,7 +189,7 @@ export class ValePassRedemptionService {
       const problems = await this.redeemProblems(tx, voucher, input.company, amount);
       if (problems.length > 0) throw conflict(problems[0].code, problems[0].message, { balanceCents: voucher.balanceCents, problems });
       const entry = await this.post(tx, voucher, { kind: 'REDEEM', deltaCents: -amount, operationId: input.operationId, requestHash, reference, reason: null, actor });
-      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference, accessBasis: basis });
+      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference, accessBasis: basis, identityChecked: input.identityChecked ?? null });
       return this.result(tx, voucher.id, entry, false);
     });
   }

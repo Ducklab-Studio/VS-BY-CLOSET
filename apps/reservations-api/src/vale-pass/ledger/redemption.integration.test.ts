@@ -56,7 +56,7 @@ async function newUnit(over: { validFrom?: Date | null; expiresAt?: Date; custom
 const voucher = (id: string) => prisma.valePass.findUniqueOrThrow({ where: { id } });
 const entries = (id: string) => prisma.valePassLedgerEntry.findMany({ where: { valePassId: id }, orderBy: { seq: 'asc' } });
 const op = () => `op-${randomUUID()}`;
-type Redeem = { company?: string; amountCents: number; reference?: string; operationId?: string; expectedBalanceCents?: number; confirmAmountCents?: number };
+type Redeem = { company?: string; amountCents: number; reference?: string; operationId?: string; expectedBalanceCents?: number; confirmAmountCents?: number; identityChecked?: boolean };
 /** Resgate completo pelo caminho de produção: prévia + confirmação (saldo esperado = o lido agora). */
 async function redeem(v: ValePass, amountCents: number, over: Partial<Redeem> = {}, actor: Actor = admin) {
   const current = await voucher(v.id);
@@ -316,10 +316,40 @@ localDescribe('autorização, privacidade e enumeração', () => {
     expect(guards.map((g) => (g as { name: string }).name)).toEqual(['AdminAuthGuard', 'AdminRoleGuard']);
   });
 
+  test('conferência de identidade é OPCIONAL e auditável: sem informar fica "não informado"; marcada vai para o histórico e a auditoria; nunca recusa nem muda o saldo; não entra na idempotência', async () => {
+    const u = await newUnit();
+    const first = await redeem(u.showroom, 10_000); // não informada
+    expect(first.balanceCents).toBe(40_000);
+    const second = await redeem(u.showroom, 5_000, { identityChecked: true });
+    expect(second.balanceCents).toBe(35_000);
+    const third = await redeem(u.showroom, 5_000, { identityChecked: false });
+    expect(third.balanceCents).toBe(30_000);
+    const events = await prisma.valePassEvent.findMany({ where: { valePassId: u.showroom.id, type: 'REDEEMED' }, orderBy: { createdAt: 'asc' } });
+    expect(events.map((e) => (e.detail as { identityChecked: boolean | null }).identityChecked)).toEqual([null, true, false]);
+    const audits = await prisma.adminAuditEvent.findMany({ where: { entityId: u.showroom.id, action: 'VALE_PASS_REDEEMED' }, orderBy: { createdAt: 'asc' } });
+    expect(audits.map((a) => (a.detail as { identityChecked: boolean | null }).identityChecked)).toEqual([null, true, false]);
+    // Repetição da MESMA operação com outro valor da conferência: devolve o original, não desconta nem regrava o registro.
+    const op1 = op();
+    const original = await redeem(u.showroom, 1_000, { operationId: op1, identityChecked: true });
+    const replay = await redeem(u.showroom, 1_000, { operationId: op1, identityChecked: false, expectedBalanceCents: 29_000 });
+    expect(replay.replayed).toBe(true);
+    expect(replay.entry.id).toBe(original.entry.id);
+    expect(await prisma.valePassEvent.count({ where: { valePassId: u.showroom.id, type: 'REDEEMED' } })).toBe(4);
+    expect((await voucher(u.showroom.id)).balanceCents).toBe(29_000);
+    // O registro não guarda nada pessoal: só o booleano.
+    expect(JSON.stringify([events, audits])).not.toMatch(/cpf|documento|passaporte|maria\.souza|91234|Silva/i);
+  });
+
   test('validação de entrada (ValidationPipe do app): decimal, texto, campos extras, operationId inseguro e motivo curto são recusados', async () => {
     const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
     const ok = { company: 'VALLE_SHOWROOM', amountCents: 20_000, reference: REF, operationId: 'op-12345678', expectedBalanceCents: 50_000, confirmAmountCents: 20_000 };
     await expect(pipe.transform(ok, { type: 'body', metatype: ConfirmRedeemDto })).resolves.toMatchObject({ amountCents: 20_000 });
+    // Conferência de identidade: opcional e só booleana (nunca texto, número nem outro campo livre).
+    await expect(pipe.transform({ ...ok, identityChecked: true }, { type: 'body', metatype: ConfirmRedeemDto })).resolves.toMatchObject({ identityChecked: true });
+    await expect(pipe.transform({ ...ok, identityChecked: false }, { type: 'body', metatype: ConfirmRedeemDto })).resolves.toMatchObject({ identityChecked: false });
+    for (const bad of [{ identityChecked: 'sim' }, { identityChecked: 1 }, { identityChecked: { cpf: '000' } }]) {
+      await expect(pipe.transform({ ...ok, ...bad }, { type: 'body', metatype: ConfirmRedeemDto }), JSON.stringify(bad)).rejects.toBeInstanceOf(BadRequestException);
+    }
     for (const bad of [{ amountCents: 200.5 }, { amountCents: '20000' }, { amountCents: 0 }, { amountCents: -5 }, { company: 'OUTRA' }, { reference: 'ab' }, { operationId: "x'; DROP" }, { operationId: 'curto' }, { expectedBalanceCents: -1 }, { confirmAmountCents: 1.5 }, { saldo: 99 }]) {
       await expect(pipe.transform({ ...ok, ...bad }, { type: 'body', metatype: ConfirmRedeemDto }), JSON.stringify(bad)).rejects.toBeInstanceOf(BadRequestException);
     }

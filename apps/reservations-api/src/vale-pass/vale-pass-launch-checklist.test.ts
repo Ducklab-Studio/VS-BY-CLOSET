@@ -42,7 +42,7 @@ describe('checklist "Pronta para vender?"', () => {
   test('NUNCA aprova o que o sistema não comprova, nem com tudo configurado: decisões do Anderson, parecer jurídico, termos e compra de teste real', () => {
     const list = buildLaunchChecklist(ref, configured);
     const k = byId(list.items);
-    for (const id of [...UNPROVABLE, 'extension', 'sales-start', 'shopify-stock']) expect(k[id].status, id).toBe('PENDING');
+    for (const id of [...UNPROVABLE, 'extension', 'sales-start', 'shopify-stock', 'sales-end']) expect(k[id].status, id).toBe('PENDING');
     expect(list.readyToSell).toBe(false);
   });
 
@@ -111,6 +111,35 @@ describe('checklist "Pronta para vender?"', () => {
     const list = buildLaunchChecklist(ref, configured);
     expect(JSON.stringify(list)).not.toMatch(/postgres(ql)?:\/\/|re_[A-Za-z0-9]{10,}|shpat_|whsec_|Bearer /i);
     expect(Object.keys(list).sort()).toEqual(['campaign', 'generatedAt', 'items', 'readyToSell', 'summary']);
+  });
+
+  test('natureza: técnico, comercial (Anderson) e jurídico; aprovado não tem próximo passo e todo item aberto tem orientação', () => {
+    const list = buildLaunchChecklist(ref, { ...configured, hasOpenLot: false, flags: { ...configured.flags, twoVoucher: false } });
+    const k = byId(list.items);
+    for (const id of ['terms-approved', 'refund-policy', 'legal-review']) expect(k[id].nature, id).toBe('JURIDICO');
+    for (const id of ['valid-from', 'lot', 'retention-owner', 'staff-policy', 'validity-confirmed', 'sales-end']) expect(k[id]?.nature, id).toBe('COMERCIAL');
+    for (const id of ['flag-two-voucher', 'real-purchase-test', 'terms-url', 'shopify-stock', 'global-limit']) expect(k[id].nature, id).toBe('TECNICO');
+    for (const entry of list.items) {
+      if (entry.status === 'APPROVED') expect(entry.nextStep, entry.id).toBeNull();
+      else expect(entry.nextStep && entry.nextStep.length > 10, `${entry.id} sem próximo passo`).toBe(true);
+    }
+    // Item aberto e técnico nunca é "comercial": quem lê sabe o que dá para fazer sem o Anderson.
+    expect(list.items.filter((i) => i.owner === 'TECNICO').every((i) => i.nature === 'TECNICO')).toBe(true);
+  });
+
+  test('classificação: o fim da validade depende da data confirmada pelo Anderson (não é pendência técnica) e o encerramento das vendas registrado não aprova sozinho', () => {
+    const missing = byId(buildLaunchChecklist(ref, { ...configured, campaign: { ...configured.campaign, voucherValidFrom: null, voucherValidUntil: null } }).items);
+    expect(missing['valid-until']).toMatchObject({ status: 'BLOCKED', owner: 'ANDERSON', nature: 'COMERCIAL' });
+    const registered = byId(buildLaunchChecklist(ref, configured).items); // salesEndDate = 31/05/2027 (sugestão)
+    expect(registered['sales-end']).toMatchObject({ status: 'PENDING', owner: 'ANDERSON' });
+    expect(registered['sales-end'].message).toContain('não a confirmou');
+  });
+
+  test('não há falso positivo: com a configuração completa só itens com evidência medida ficam aprovados', () => {
+    const approved = buildLaunchChecklist(ref, configured).items.filter((i) => i.status === 'APPROVED').map((i) => i.id).sort();
+    expect(approved).toEqual(
+      ['alerts-mode', 'cancellation-alerts', 'discount', 'email-mode', 'flag-auto-verify', 'flag-two-voucher', 'global-limit', 'legacy-limit', 'open-holds', 'paid-without-voucher', 'price', 'refund-reviews', 'valid-from', 'valid-until', 'vouchers'].sort(),
+    );
   });
 
   test('registra o instante da leitura (o dado vale para aquele momento), também sem campanha', () => {
