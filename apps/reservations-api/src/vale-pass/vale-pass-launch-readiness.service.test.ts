@@ -25,7 +25,7 @@ const campaign = (over: Partial<ValePassCampaignItem> = {}): ValePassCampaignIte
   updatedAt: '2026-10-01T00:00:00.000Z',
   ...over,
 });
-const emptyCapacity = { openLot: null, holds: [], refundReviews: [], cancellationAlerts: [], paidOrdersWithoutVoucher: [] };
+const emptyCapacity = { openLot: null, holds: [], refundReviews: [], cancellationAlerts: [], paidOrdersWithoutVoucher: [], recommendedShopifyStock: 0 };
 
 function build(opts: { campaigns?: ValePassCampaignItem[]; benefits?: unknown[]; capacity?: Record<string, unknown>; twoVoucher?: boolean } = {}) {
   const campaigns = { list: vi.fn(async () => opts.campaigns ?? [campaign()]) };
@@ -72,6 +72,14 @@ describe('serviço do painel de prontidão', () => {
     expect(k.lot).toBeUndefined(); // lote aberto: o item de pendência "lot" não aparece
     expect(k['flag-two-voucher'].status).toBe('APPROVED');
     expect(k['shopify-stock'].status).toBe('PENDING');
+  });
+
+  test('devolve o estoque esperado na Shopify (do painel de capacidade) e continua sem consultar a Shopify', async () => {
+    const closed = await build().service.snapshot();
+    expect(closed.expectedShopifyStock).toBe(0);
+    const open = await build({ capacity: { openLot: { id: 'l' }, recommendedShopifyStock: 100 } }).service.snapshot();
+    expect(open.expectedShopifyStock).toBe(100);
+    expect(open.items.find((i) => i.id === 'shopify-stock')?.status).toBe('PENDING');
   });
 
   test('cada chamada lê de novo e carimba a própria hora (nada é guardado em cache entre leituras)', async () => {

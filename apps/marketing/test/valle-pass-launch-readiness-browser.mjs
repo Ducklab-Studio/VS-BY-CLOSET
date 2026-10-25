@@ -152,7 +152,9 @@ try {
   assert.equal(byId['valid-until'].owner, 'ANDERSON');
   for (const id of ['terms-approved', 'refund-policy', 'legal-review']) assert.equal(byId[id].nature, 'JURIDICO', id);
   assert.equal(byId['sales-end'].status, 'PENDING');
-  assert.deepEqual(Object.keys(body).sort(), ['campaign', 'generatedAt', 'items', 'readyToSell', 'summary']);
+  assert.deepEqual(Object.keys(body).sort(), ['campaign', 'expectedShopifyStock', 'generatedAt', 'items', 'readyToSell', 'summary']);
+  assert.equal(body.expectedShopifyStock, 0, 'sem lote aberto a Shopify deve ter estoque 0 (a API só informa; quem compara com a Shopify é o site)');
+  assert.equal(byId['shopify-stock'].status, 'PENDING', 'a API nunca aprova o estoque sozinha');
   assert.ok(Math.abs(Date.now() - Date.parse(body.generatedAt)) < 60_000, 'generatedAt é o instante da leitura');
   assert.doesNotMatch(JSON.stringify(body), /postgres(ql)?:\/\/|re_[A-Za-z0-9]{10,}|shpat_|whsec_|Bearer /i);
   ok('endpoint: campanha sintética com as chaves de produção desligadas — itens reais aprovados, decisões do Anderson pendentes, sem segredos na resposta');

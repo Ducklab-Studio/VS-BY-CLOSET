@@ -33,12 +33,42 @@ function counts(items: readonly LaunchChecklistItem[]) {
   return { total: items.length, ...pack(), technical: pack('TECNICO'), anderson: pack('ANDERSON') };
 }
 
+/** Estoque da variante lido do Storefront da Shopify (somente leitura), no formato de `shopify-stock.ts`. */
+export type WebStockEvidence =
+  | { readonly status: 'sold_out' }
+  | { readonly status: 'available'; readonly quantity: number | null }
+  | { readonly status: 'unknown' };
+
+/**
+ * Item "Estoque da Shopify" a partir da leitura REAL do Storefront. Só aprova com evidência: estoque igual ao esperado (0 sem lote aberto = a Shopify confirma que
+ * a variante NÃO está à venda). Mais estoque do que o saldo do lote, ou à venda sem quantidade conhecida, é risco de vender sem capacidade (bloqueado). Sem resposta
+ * da Shopify, o item continua pendente: nunca vira "esgotada" nem zero por falta de dado.
+ */
+export function shopifyStockItem(entry: LaunchChecklistItem, expected: number | null | undefined, evidence: WebStockEvidence | undefined): LaunchChecklistItem {
+  if (!evidence || evidence.status === 'unknown' || typeof expected !== 'number') return entry;
+  const approved = (message: string): LaunchChecklistItem => ({ ...entry, status: 'APPROVED', nextStep: null, message });
+  if (evidence.status === 'sold_out') {
+    return expected === 0
+      ? approved('Lido agora no Storefront da Shopify: a variante NÃO está à venda (estoque 0), igual ao esperado sem lote aberto. Vendas fechadas de forma consistente.')
+      : { ...entry, status: 'PENDING', message: `A Shopify informa que a variante não está à venda, mas o lote aberto espera ${expected} unidade(s). Ajustar o estoque manualmente (com autorização).` };
+  }
+  if (evidence.quantity === null) {
+    return { ...entry, status: 'BLOCKED', message: 'A Shopify mostra a variante à venda sem quantidade conhecida (estoque não rastreado ou venda sem estoque permitida): risco de vender sem capacidade.', nextStep: 'Rastrear o estoque da variante e desmarcar "continuar vendendo sem estoque" na Shopify (com autorização).' };
+  }
+  if (evidence.quantity === expected) return approved(`Lido agora no Storefront da Shopify: estoque ${evidence.quantity}, igual ao saldo esperado do lote aberto.`);
+  if (evidence.quantity > expected) {
+    return { ...entry, status: 'BLOCKED', message: `Estoque na Shopify (${evidence.quantity}) acima do esperado (${expected}): risco de vender sem capacidade.`, nextStep: `Reduzir o estoque da variante para ${expected} na Shopify (com autorização).` };
+  }
+  return { ...entry, status: 'PENDING', message: `Estoque na Shopify (${evidence.quantity}) abaixo do esperado (${expected}): ajuste manual do lote.` };
+}
+
 /**
  * Evidência que só o site tem: o endereço dos termos (`NEXT_PUBLIC_VALE_PASS_TERMS_URL`, já embutido no build publicado). Configurado = aprovado SÓ nesse
  * item; a aprovação do texto continua pendente (item próprio). Recalcula os totais. Não muda mais nada.
  */
-export function applyWebEvidence(readiness: LaunchReadiness, evidence: { termsHref: string | null }): LaunchReadiness {
+export function applyWebEvidence(readiness: LaunchReadiness, evidence: { termsHref: string | null; shopifyStock?: WebStockEvidence }): LaunchReadiness {
   const items = readiness.items.map((entry): LaunchChecklistItem => {
+    if (entry.id === 'shopify-stock') return shopifyStockItem(entry, readiness.expectedShopifyStock, evidence.shopifyStock);
     if (entry.id !== 'terms-url') return entry;
     return evidence.termsHref
       ? { ...entry, status: 'APPROVED', nextStep: null, message: `Endereço configurado no site publicado: ${evidence.termsHref}. A aprovação do texto é outro item.` }

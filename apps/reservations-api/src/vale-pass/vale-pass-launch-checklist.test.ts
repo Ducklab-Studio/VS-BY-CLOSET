@@ -110,7 +110,7 @@ describe('checklist "Pronta para vender?"', () => {
   test('a resposta não carrega segredos: só ids, rótulos, mensagens e contagens', () => {
     const list = buildLaunchChecklist(ref, configured);
     expect(JSON.stringify(list)).not.toMatch(/postgres(ql)?:\/\/|re_[A-Za-z0-9]{10,}|shpat_|whsec_|Bearer /i);
-    expect(Object.keys(list).sort()).toEqual(['campaign', 'generatedAt', 'items', 'readyToSell', 'summary']);
+    expect(Object.keys(list).sort()).toEqual(['campaign', 'expectedShopifyStock', 'generatedAt', 'items', 'readyToSell', 'summary']);
   });
 
   test('natureza: técnico, comercial (Anderson) e jurídico; aprovado não tem próximo passo e todo item aberto tem orientação', () => {
@@ -140,6 +140,25 @@ describe('checklist "Pronta para vender?"', () => {
     expect(approved).toEqual(
       ['alerts-mode', 'cancellation-alerts', 'discount', 'email-mode', 'flag-auto-verify', 'flag-two-voucher', 'global-limit', 'legacy-limit', 'open-holds', 'paid-without-voucher', 'price', 'refund-reviews', 'valid-from', 'valid-until', 'vouchers'].sort(),
     );
+  });
+
+  test('informa o estoque esperado na Shopify (saldo do lote aberto; 0 sem lote) sem consultar a Shopify; sem campanha é nulo', () => {
+    expect(buildLaunchChecklist(ref, { ...configured, expectedShopifyStock: 0 }).expectedShopifyStock).toBe(0);
+    expect(buildLaunchChecklist(ref, { ...configured, expectedShopifyStock: 100 }).expectedShopifyStock).toBe(100);
+    expect(buildLaunchChecklist(ref, configured).expectedShopifyStock).toBeNull(); // quem chama não informou
+    expect(emptyChecklist().expectedShopifyStock).toBeNull();
+    // A API continua sem aprovar o estoque por conta própria: quem compara com a Shopify é o site.
+    expect(byId(buildLaunchChecklist(ref, { ...configured, expectedShopifyStock: 0 }).items)['shopify-stock'].status).toBe('PENDING');
+  });
+
+  test('chaves desligadas são "de propósito" (não erro técnico) e continuam pendentes, nunca bloqueadas', () => {
+    const off = byId(buildLaunchChecklist(ref, { ...configured, flags: { twoVoucher: false, autoVerify: false, emailMode: 'off', emailDomainVerified: true, alertsMode: 'off' } }).items);
+    for (const id of ['flag-two-voucher', 'flag-auto-verify', 'email-mode']) {
+      expect(off[id].status, id).toBe('PENDING');
+      expect(off[id].message, id).toContain('de propósito até a ativação autorizada');
+      expect(off[id].message, id).toContain('Não é erro técnico');
+    }
+    expect(off['alerts-mode'].message).toContain('opcional');
   });
 
   test('registra o instante da leitura (o dado vale para aquele momento), também sem campanha', () => {
