@@ -11,16 +11,24 @@ import { evaluateLaunchReadiness, type ReadinessBenefit, type ReadinessCampaign,
 export type ChecklistStatus = 'APPROVED' | 'PENDING' | 'BLOCKED';
 /** TECNICO = o time resolve com configuração/código; ANDERSON = depende de decisão comercial ou jurídica dele (ou de quem ele indicar). */
 export type ChecklistOwner = 'TECNICO' | 'ANDERSON';
+/** TECNICO = configuração/código/medição; COMERCIAL = decisão do Anderson; JURIDICO = precisa de parecer ou aprovação jurídica. */
+export type ChecklistNature = 'TECNICO' | 'COMERCIAL' | 'JURIDICO';
 export type ChecklistGroup = 'CAMPANHA' | 'VALIDADE' | 'LOTES_ESTOQUE' | 'TERMOS' | 'INTEGRACOES' | 'OPERACAO';
 
 export interface ChecklistItem {
   readonly id: string;
   readonly group: ChecklistGroup;
   readonly owner: ChecklistOwner;
+  /** Natureza do que falta: técnica, comercial ou jurídica (derivada do dono e do item; nunca vira aprovação). */
+  readonly nature: ChecklistNature;
   readonly status: ChecklistStatus;
   readonly label: string;
   readonly message: string;
+  /** O que fazer para destravar o item (sempre `null` quando aprovado). Só orienta: nenhuma ação é executada pela tela. */
+  readonly nextStep: string | null;
 }
+
+type RawItem = Omit<ChecklistItem, 'nature' | 'nextStep'>;
 
 export interface ChecklistFlags {
   readonly twoVoucher: boolean;
@@ -76,7 +84,7 @@ const BASE_META: Readonly<Record<string, { group: ChecklistGroup; owner: Checkli
   vouchers: { group: 'CAMPANHA', owner: 'TECNICO', label: 'Dois vouchers independentes' },
   discount: { group: 'CAMPANHA', owner: 'TECNICO', label: 'Desconto informativo de 10%' },
   'discount-terms': { group: 'TERMOS', owner: 'ANDERSON', label: 'Condições do desconto de 10%' },
-  'valid-until': { group: 'VALIDADE', owner: 'TECNICO', label: 'Fim da validade configurado' },
+  'valid-until': { group: 'VALIDADE', owner: 'ANDERSON', label: 'Fim da validade configurado' },
   'valid-from': { group: 'VALIDADE', owner: 'ANDERSON', label: 'Início da validade' },
   extension: { group: 'VALIDADE', owner: 'ANDERSON', label: 'Prorrogação da validade' },
   'sales-start': { group: 'LOTES_ESTOQUE', owner: 'ANDERSON', label: 'Início das vendas' },
@@ -88,7 +96,7 @@ const BASE_META: Readonly<Record<string, { group: ChecklistGroup; owner: Checkli
 
 const FALLBACK_META = { group: 'CAMPANHA', owner: 'TECNICO', label: 'Configuração da campanha' } as const;
 
-const item = (id: string, group: ChecklistGroup, owner: ChecklistOwner, status: ChecklistStatus, label: string, message: string): ChecklistItem => ({
+const item = (id: string, group: ChecklistGroup, owner: ChecklistOwner, status: ChecklistStatus, label: string, message: string): RawItem => ({
   id,
   group,
   owner,
@@ -97,17 +105,21 @@ const item = (id: string, group: ChecklistGroup, owner: ChecklistOwner, status: 
   message,
 });
 
-function fromBase(entry: ReadinessItem, shopifyStock: number | null): ChecklistItem {
+function fromBase(entry: ReadinessItem, shopifyStock: number | null): RawItem {
   const meta = BASE_META[entry.id] ?? FALLBACK_META;
   // A API não lê a Shopify: nunca mostra "não consultado" como se o sistema tivesse tentado e falhado.
   const message =
     entry.id === 'shopify-stock' && shopifyStock === null
       ? 'O sistema não consulta o estoque da Shopify. Conferir no Admin da Shopify: deve estar em 0 até a abertura autorizada e depois igual ao saldo do lote aberto (o painel não altera a Shopify).'
       : entry.message;
+  // O encerramento das vendas é só informativo e a data é SUGESTÃO do Anderson: registrada ≠ confirmada, então nunca aprova sozinha.
+  if (entry.id === 'sales-end' && entry.kind === 'OK') {
+    return item(entry.id, meta.group, meta.owner, 'PENDING', meta.label, 'Data registrada na campanha conforme a sugestão (31/05/2027), mas o Anderson ainda não a confirmou nem definiu se o esgotamento encerra antes. Nada é encerrado automaticamente.');
+  }
   return item(entry.id, meta.group, meta.owner, STATUS_OF[entry.kind], meta.label, message);
 }
 
-function capacityItems(c: ChecklistCapacity): ChecklistItem[] {
+function capacityItems(c: ChecklistCapacity): RawItem[] {
   const count = (id: string, label: string, n: number, zero: string, some: string) =>
     item(id, 'OPERACAO', 'TECNICO', n === 0 ? 'APPROVED' : 'PENDING', label, n === 0 ? zero : some);
   return [
@@ -118,8 +130,8 @@ function capacityItems(c: ChecklistCapacity): ChecklistItem[] {
   ];
 }
 
-function flagItems(f: ChecklistFlags): ChecklistItem[] {
-  const out: ChecklistItem[] = [];
+function flagItems(f: ChecklistFlags): RawItem[] {
+  const out: RawItem[] = [];
   out.push(
     f.twoVoucher
       ? item('flag-two-voucher', 'INTEGRACOES', 'TECNICO', 'APPROVED', 'Chave dos dois vouchers (VALE_PASS_TWO_VOUCHER_FLOW)', 'LIGADA no servidor.')
@@ -166,7 +178,7 @@ function flagItems(f: ChecklistFlags): ChecklistItem[] {
 }
 
 /** Itens que o sistema NÃO consegue comprovar: sempre pendentes (nunca presumidos). */
-function unprovableItems(): ChecklistItem[] {
+function unprovableItems(): RawItem[] {
   return [
     item('terms-url', 'TERMOS', 'TECNICO', 'PENDING', 'Endereço dos termos configurado', 'Variável da Vercel (NEXT_PUBLIC_VALE_PASS_TERMS_URL): a API não enxerga; a tela confere no site publicado.'),
     item('terms-approved', 'TERMOS', 'ANDERSON', 'PENDING', 'Termos e condições aprovados', 'Texto oficial do Anderson ainda não recebido/publicado. O sistema não guarda aprovação.'),
@@ -177,6 +189,49 @@ function unprovableItems(): ChecklistItem[] {
     item('staff-policy', 'OPERACAO', 'ANDERSON', 'PENDING', 'Quem pode resgatar (ADMIN e/ou STAFF)', 'Hoje só ADMIN e SUPER_ADMIN resgatam; STAFF apenas consulta. Decisão do Anderson pendente.'),
     item('real-purchase-test', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Compra de teste real (Shopify + e-mail)', 'Nenhuma compra de teste real registrada. Os testes locais não substituem a Shopify e a Resend reais.'),
   ];
+}
+
+const LEGAL_IDS: ReadonlySet<string> = new Set(['terms-approved', 'refund-policy', 'legal-review']);
+
+/** Orientação por item (só texto; a tela não executa nada). Itens aprovados não têm próximo passo. */
+const NEXT_STEPS: Readonly<Record<string, string>> = {
+  campaign: 'Cadastrar a campanha Valle Pass 2027 no ClosetAdmin (ADMIN).',
+  price: 'Corrigir o valor da campanha para R$ 350,00 no painel de campanhas (ADMIN).',
+  'global-limit': 'Definir o limite global de 1.000 unidades na campanha (ADMIN).',
+  'legacy-limit': 'Limpar o limite legado da campanha (ADMIN); o limite que vale é o global.',
+  vouchers: 'Cadastrar os benefícios: voucher de R$ 500 (Valle Showroom) e de R$ 50 (VS BY CLOSET), um por empresa.',
+  discount: 'Cadastrar o benefício descritivo de 10% em passeios e transfers (sem código nem saldo).',
+  'discount-terms': 'Receber do Anderson o texto das condições do desconto de 10% e cadastrá-lo no benefício.',
+  'valid-until': 'Aguardar a confirmação do Anderson e configurar início e fim juntos (o banco exige as duas datas).',
+  'valid-from': 'Pedir ao Anderson a data de abertura da temporada de neve de 2027; configurar início e fim da validade juntos.',
+  extension: 'O Anderson decide quem é elegível à prorrogação e a data final; a estrutura já existe (SUPER_ADMIN, só aumenta).',
+  'sales-start': 'O Anderson confirma a data; a abertura real é o ajuste do estoque na Shopify, feito pela equipe com autorização.',
+  'sales-end': 'O Anderson confirma a data final e se o esgotamento encerra antes; depois registrar na campanha.',
+  lot: 'O Anderson informa as datas de abertura; só então criar o lote de 100 unidades e abri-lo.',
+  'shopify-stock': 'Conferir no Admin da Shopify: 0 até a abertura autorizada; depois igual ao saldo do lote aberto.',
+  active: 'Ativar a campanha no painel de campanhas (ADMIN) quando a abertura for autorizada.',
+  'open-holds': 'Abrir "Pagamentos retidos" no painel do Valle Pass e resolver cada pedido (ADMIN), conforme o runbook.',
+  'refund-reviews': 'Abrir "Reembolsos aguardando decisão" e decidir cada revisão (ADMIN), conforme o runbook.',
+  'cancellation-alerts': 'Conferir os cancelamentos com crédito já usado e marcar como conferidos (ADMIN).',
+  'paid-without-voucher': 'Abrir a lista de pedidos pagos sem voucher e regularizar cada um (ADMIN).',
+  'flag-two-voucher': 'Ligar VALE_PASS_TWO_VOUCHER_FLOW=on na Railway só com autorização expressa, junto da compra de teste (ordem: dois vouchers, verificação automática, e-mail).',
+  'flag-auto-verify': 'Ligar VALE_PASS_AUTO_VERIFY=on na Railway só com autorização expressa e depois da chave dos dois vouchers.',
+  'email-mode': 'Validar em dry-run; só então VALE_PASS_EMAIL_MODE=live, com o domínio verificado na Resend e autorização expressa.',
+  'alerts-mode': 'Opcional: VALE_PASS_ALERTS_MODE=log registra os alertas nos logs da Railway (com autorização).',
+  'terms-url': 'Publicar a página de termos aprovada e definir NEXT_PUBLIC_VALE_PASS_TERMS_URL na Vercel (com autorização).',
+  'terms-approved': 'Receber o texto oficial do Anderson e a aprovação jurídica antes de publicar qualquer cláusula.',
+  'refund-policy': 'O Anderson decide a política e o jurídico valida (direito de arrependimento, reembolso após uso, falta de peça).',
+  'legal-review': 'Encaminhar as condições (reembolso, arrependimento, informação ao consumidor) para parecer jurídico.',
+  'validity-confirmed': 'O Anderson confirma por escrito as datas de início e fim da validade.',
+  'retention-owner': 'O Anderson indica o titular e o substituto para resolver pagamentos retidos e o canal de aviso.',
+  'staff-policy': 'O Anderson decide se STAFF pode resgatar vouchers (hoje só ADMIN e SUPER_ADMIN).',
+  'real-purchase-test': 'Planejar a compra de teste real controlada (Shopify + e-mail) com autorização expressa e as chaves na ordem prevista.',
+};
+
+/** Acrescenta natureza e próximo passo. A natureza nunca altera o status: aprovação continua exigindo evidência. */
+function enrich(entry: RawItem): ChecklistItem {
+  const nature: ChecklistNature = entry.owner === 'TECNICO' ? 'TECNICO' : LEGAL_IDS.has(entry.id) ? 'JURIDICO' : 'COMERCIAL';
+  return { ...entry, nature, nextStep: entry.status === 'APPROVED' ? null : (NEXT_STEPS[entry.id] ?? null) };
 }
 
 export function summarize(items: readonly ChecklistItem[]): ChecklistSummary {
@@ -196,7 +251,7 @@ export function summarize(items: readonly ChecklistItem[]): ChecklistSummary {
 
 /** Sem campanha cadastrada: nada a avaliar, e isso bloqueia. */
 export function emptyChecklist(now: Date = new Date()): LaunchChecklist {
-  const items = [item('campaign', 'CAMPANHA', 'TECNICO', 'BLOCKED', 'Campanha cadastrada', 'Nenhuma campanha do Valle Pass encontrada.'), ...unprovableItems()];
+  const items = [item('campaign', 'CAMPANHA', 'TECNICO', 'BLOCKED', 'Campanha cadastrada', 'Nenhuma campanha do Valle Pass encontrada.'), ...unprovableItems()].map(enrich);
   return { generatedAt: now.toISOString(), campaign: null, items, summary: summarize(items), readyToSell: false };
 }
 
@@ -207,7 +262,7 @@ export function buildLaunchChecklist(campaignRef: { id: string; name: string }, 
     ...capacityItems(input.capacity),
     ...flagItems(input.flags),
     ...unprovableItems(),
-  ];
+  ].map(enrich);
   const summary = summarize(items);
   return {
     generatedAt: now.toISOString(),

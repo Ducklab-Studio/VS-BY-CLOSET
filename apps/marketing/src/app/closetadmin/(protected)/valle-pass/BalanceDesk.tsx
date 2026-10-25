@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowDownCircle, CheckCircle2, Loader2, Lock, LockOpen, RotateCcw, Search, Wallet } from 'lucide-react';
 import type { ValePassBalanceView, ValePassBlockPreview, ValePassLedgerEntry, ValePassRedeemPreview, ValePassReversePreview } from '@/lib/admin-data';
-import { COMPANY_LABELS, describeBalanceError, formatCents, parseReaisToCents, usedPercent } from '@/lib/valle-pass-balance';
+import { centsToInput, COMPANY_LABELS, describeBalanceError, formatCents, parseReaisToCents, usedPercent } from '@/lib/valle-pass-balance';
 import {
   confirmValePassBlockAction,
   prepareValePassBlockAction,
@@ -64,6 +64,8 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
   const [reference, setReference] = useState('');
   const [preview, setPreview] = useState<ValePassRedeemPreview | null>(null);
   const [confirmText, setConfirmText] = useState('');
+  // Conferência presencial da identidade: OPCIONAL (não é regra de acesso). Só registra no histórico e na auditoria.
+  const [identityChecked, setIdentityChecked] = useState(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemBusy, setRedeemBusy] = useState(false);
   const redeemLock = useRef(false);
@@ -96,6 +98,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
     setReference('');
     setPreview(null);
     setConfirmText('');
+    setIdentityChecked(false);
     setRedeemError(null);
     setReversing(null);
     setReversePreview(null);
@@ -160,6 +163,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
     const { data, error } = await confirmValePassRedeemAction(view.code, {
       company: view.company, amountCents: preview.amountCents, reference: reference.trim(),
       operationId: preview.operationId, expectedBalanceCents: preview.expectedBalanceCents, confirmAmountCents: typed,
+      ...(identityChecked ? { identityChecked: true } : {}),
     });
     redeemLock.current = false;
     setRedeemBusy(false);
@@ -190,6 +194,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
     setReference('');
     setPreview(null);
     setConfirmText('');
+    setIdentityChecked(false);
     void consult(view.code, { keepFlash: true, keepForms: true }); // atualiza restrições e histórico completo
   }
 
@@ -374,6 +379,11 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
                     <div>
                       <label htmlFor="redeem-amount" className={labelClass}>Valor a utilizar (R$)</label>
                       <input id="redeem-amount" inputMode="decimal" autoComplete="off" value={amountText} onChange={(e) => setAmountText(e.target.value)} placeholder="200,00" className={inputClass} disabled={redeemBusy} />
+                      {view.balanceCents > 0 ? (
+                        <button type="button" data-testid="redeem-use-full" className="mt-1 text-[0.7rem] font-medium text-marsala underline underline-offset-2 hover:opacity-80 disabled:opacity-50 dark:text-gold" onClick={() => setAmountText(centsToInput(view.balanceCents))} disabled={redeemBusy}>
+                          Usar saldo total ({formatCents(view.balanceCents)})
+                        </button>
+                      ) : null}
                     </div>
                     <div>
                       <label htmlFor="redeem-ref" className={labelClass}>Referência da utilização</label>
@@ -393,6 +403,12 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
                     <Metric label="Saldo depois" value={formatCents(preview.balanceAfterCents ?? 0)} strong />
                   </div>
                   <p className="text-xs text-ink/60 dark:text-dark-subtle">Referência: {reference.trim()}</p>
+                  <label className="flex items-start gap-2 text-xs text-ink/70 dark:text-dark-muted">
+                    <input type="checkbox" data-testid="redeem-identity" className="mt-0.5" checked={identityChecked} onChange={(e) => setIdentityChecked(e.target.checked)} disabled={redeemBusy} />
+                    <span>
+                      Identidade do titular conferida pela equipe (opcional). Fica registrada no histórico e na auditoria; não é exigida para o resgate nem altera o saldo.
+                    </span>
+                  </label>
                   <div>
                     <label htmlFor="redeem-confirm" className={labelClass}>Digite novamente o valor ({formatCents(preview.amountCents)}) para confirmar</label>
                     <input id="redeem-confirm" inputMode="decimal" autoComplete="off" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} className={inputClass} disabled={redeemBusy} />

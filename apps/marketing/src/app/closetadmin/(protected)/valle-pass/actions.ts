@@ -226,7 +226,7 @@ export async function prepareValePassRedeemAction(code: string, input: ValePassR
 
 export async function confirmValePassRedeemAction(
   code: string,
-  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
+  input: ValePassRedeemInput & { operationId: string; expectedBalanceCents: number; confirmAmountCents: number; identityChecked?: boolean },
 ): Promise<BalanceActionResult<ValePassOperationResult>> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');

@@ -22,6 +22,13 @@ export function parseReaisToCents(input: string): number | null {
   return Number.isSafeInteger(cents) && cents > 0 && cents <= MAX_OPERATION_CENTS ? cents : null;
 }
 
+/** 20050 → "200,50" (campo de valor, sem R$ nem milhar): o que `parseReaisToCents` aceita de volta sem perda. */
+export function centsToInput(cents: number): string {
+  const whole = Math.trunc(cents / 100);
+  const decimals = String(Math.abs(cents % 100)).padStart(2, '0');
+  return `${whole},${decimals}`;
+}
+
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 /** Exibição apenas (R$ 1.234,56). */
 export function formatCents(cents: number): string {

@@ -145,6 +145,13 @@ try {
   assert.equal(byId['shopify-stock'].status, 'PENDING');
   for (const id of ['terms-approved', 'refund-policy', 'legal-review', 'real-purchase-test', 'retention-owner', 'staff-policy', 'validity-confirmed']) assert.equal(byId[id].status, 'PENDING', id);
   assert.equal(byId['open-holds'].status, 'APPROVED'); // contagem real: banco de teste sem retenções
+  // Classificação: natureza em todos os itens, próximo passo em todo item aberto, fim da validade depende do Anderson e termos são jurídicos.
+  assert.ok(body.items.every((i) => ['TECNICO', 'COMERCIAL', 'JURIDICO'].includes(i.nature)));
+  assert.ok(body.items.filter((i) => i.status !== 'APPROVED').every((i) => typeof i.nextStep === 'string' && i.nextStep.length > 10));
+  assert.ok(body.items.filter((i) => i.status === 'APPROVED').every((i) => i.nextStep === null));
+  assert.equal(byId['valid-until'].owner, 'ANDERSON');
+  for (const id of ['terms-approved', 'refund-policy', 'legal-review']) assert.equal(byId[id].nature, 'JURIDICO', id);
+  assert.equal(byId['sales-end'].status, 'PENDING');
   assert.deepEqual(Object.keys(body).sort(), ['campaign', 'generatedAt', 'items', 'readyToSell', 'summary']);
   assert.ok(Math.abs(Date.now() - Date.parse(body.generatedAt)) < 60_000, 'generatedAt é o instante da leitura');
   assert.doesNotMatch(JSON.stringify(body), /postgres(ql)?:\/\/|re_[A-Za-z0-9]{10,}|shpat_|whsec_|Bearer /i);
@@ -185,7 +192,14 @@ try {
   assert.match((await panel.locator('[data-testid="launch-readiness-notice"]').textContent()) ?? '', /não abre vendas, não altera o estoque da Shopify e não liga chaves/);
   assert.match((await panel.locator('[data-testid="launch-readiness-freshness"]').textContent()) ?? '', /Leitura feita em \d{2}\/\d{2}\/\d{4} \d{2}:\d{2} \(horário de São Paulo\).*recarregue/);
   assert.equal(await panel.locator('button, form, input, select, textarea, a').count(), 0, 'o painel é somente leitura: sem controles');
+  assert.ok(await panel.locator('[data-testid="launch-readiness-split"]').isVisible(), 'resumo do que dá para concluir sem o Anderson');
+  assert.ok((await panel.locator('[data-nature="JURIDICO"]').count()) > 0 && (await panel.locator('[data-nature="COMERCIAL"]').count()) > 0 && (await panel.locator('[data-nature="TECNICO"]').count()) > 0);
+  assert.ok((await panel.locator('[data-next-step]').count()) > 0, 'itens abertos mostram o próximo passo');
   ok('tela: painel "Pronta para vender?" com técnico x Anderson, aprovados/pendentes/bloqueados, aviso de somente leitura e nenhum controle');
+
+  // A página de termos (estrutura) fica NÃO publicada por padrão: 404 sem VALE_PASS_TERMS_PAGE=on.
+  assert.equal((await fetch(`${webUrl}/termos-valle-pass`, { signal: AbortSignal.timeout(15_000) })).status, 404);
+  ok('termos: a página-estrutura do Valle Pass responde 404 enquanto VALE_PASS_TERMS_PAGE não estiver ligada');
 
   // Sem o módulo: nem a tela nem os dados.
   const noModuleContext = await newContext(noModuleToken);

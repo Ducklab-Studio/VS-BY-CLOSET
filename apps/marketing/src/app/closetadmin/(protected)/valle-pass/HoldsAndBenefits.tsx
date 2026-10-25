@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
 import { supportsValePassCapacityContract, VALE_PASS_CAPACITY_CONTRACT_VERSION } from '@/lib/valle-pass-capacity-contract';
 import { formatCents } from '@/lib/valle-pass-balance';
+import { holdElapsed, holdGuidance } from '@/lib/valle-pass-holds';
 import { VALLE_PASS_2027_PRESET } from '@/lib/valle-pass-benefits-preset';
 import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
 
@@ -84,6 +85,14 @@ export function HoldsPanel({ holds, canManage, onChanged }: { holds: readonly Va
 const MIN_ISSUE_NOTE = 10;
 
 function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; canManage: boolean; onChanged: () => void }) {
+  // Relógio só no navegador (evita divergência de hidratação) e atualizado a cada minuto.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const elapsed = now === null ? null : holdElapsed(hold, now);
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
   const [typed, setTyped] = useState('');
@@ -159,6 +168,18 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
           {hold.reason === 'FINANCIAL_MISMATCH' && hold.issues.length > 0 ? (
             <span className="mt-0.5 block text-ink/60 dark:text-dark-muted">Divergências: {hold.issues.map((code) => ISSUE_LABELS[code] ?? code).join('; ')}.</span>
           ) : null}
+          {elapsed ? (
+            <span
+              data-testid="hold-elapsed"
+              data-urgency={elapsed.urgency}
+              className={`mt-0.5 block font-medium ${elapsed.urgency === 'OVERDUE' || elapsed.urgency === 'CRITICAL' ? 'text-red-600 dark:text-red-400' : elapsed.urgency === 'ATTENTION' ? 'text-amber-700 dark:text-amber-300' : 'text-ink/70 dark:text-dark-muted'}`}
+            >
+              {elapsed.text}.
+            </span>
+          ) : null}
+          <span data-testid="hold-guidance" className="mt-0.5 block text-ink/60 dark:text-dark-muted">
+            {holdGuidance(hold.reason, hold.issues)}
+          </span>
         </span>
         {canManage ? (
           <button type="button" className={secondaryButton} onClick={() => void openPanel()} aria-expanded={open}>

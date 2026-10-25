@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MAX_OPERATION_CENTS } from '../ledger/money';
 
 export const REDEEM_COMPANIES = ['VALLE_SHOWROOM', 'VS_BY_CLOSET'] as const;
@@ -41,6 +41,14 @@ export class ConfirmRedeemDto extends PrepareRedeemDto {
   @Min(1)
   @Max(MAX_OPERATION_CENTS)
   confirmAmountCents!: number;
+
+  /**
+   * Conferência presencial da identidade do titular, OPCIONAL (nenhuma regra nova de acesso: ausente = não informado). Só vai para o histórico e a
+   * auditoria; não entra na chave de idempotência, não muda o saldo e nunca recusa o resgate.
+   */
+  @IsOptional()
+  @IsBoolean()
+  identityChecked?: boolean;
 }
 
 /** POST /admin/vale-pass/vouchers/:code/ledger/:entryId/reverse — o motivo é obrigatório e vai para o histórico e a auditoria. */

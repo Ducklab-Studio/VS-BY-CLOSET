@@ -30,11 +30,16 @@ const helpers = load('src/lib/valle-pass-launch-readiness.ts');
 const { LaunchReadinessPanel } = load('src/app/closetadmin/(protected)/valle-pass/LaunchReadinessPanel.tsx', { '@/lib/valle-pass-launch-readiness': helpers });
 const { applyWebEvidence, formatGeneratedAt, groupItems, headline } = helpers;
 
-const item = (id, group, owner, status, label, message = `${label}: mensagem`) => ({ id, group, owner, status, label, message });
+const LEGAL = new Set(['terms-approved', 'refund-policy', 'legal-review']);
+const item = (id, group, owner, status, label, message = `${label}: mensagem`) => ({
+  id, group, owner, status, label, message,
+  nature: owner === 'TECNICO' ? 'TECNICO' : LEGAL.has(id) ? 'JURIDICO' : 'COMERCIAL',
+  nextStep: status === 'APPROVED' ? null : `Próximo passo de ${id}`,
+});
 const sample = () => {
   const items = [
     item('global-limit', 'CAMPANHA', 'TECNICO', 'APPROVED', 'Capacidade global (1.000 unidades)'),
-    item('valid-until', 'VALIDADE', 'TECNICO', 'BLOCKED', 'Fim da validade configurado'),
+    item('valid-until', 'VALIDADE', 'ANDERSON', 'BLOCKED', 'Fim da validade configurado'),
     item('flag-two-voucher', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Chave dos dois vouchers'),
     item('terms-url', 'TERMOS', 'TECNICO', 'PENDING', 'Endereço dos termos configurado'),
     item('real-purchase-test', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Compra de teste real'),
@@ -52,7 +57,7 @@ test('separa os requisitos técnicos dos que dependem do Anderson, agrupados na 
   const data = sample();
   const tech = groupItems(data.items, 'TECNICO').map((g) => g.group);
   const and = groupItems(data.items, 'ANDERSON').map((g) => g.group);
-  assert.deepEqual(tech, ['CAMPANHA', 'VALIDADE', 'TERMOS', 'INTEGRACOES']);
+  assert.deepEqual(tech, ['CAMPANHA', 'TERMOS', 'INTEGRACOES']);
   assert.deepEqual(and, ['VALIDADE', 'TERMOS']);
   const html = render({ readiness: data, error: null });
   assert.match(html, /data-owner="TECNICO"/);
@@ -144,6 +149,31 @@ test('frescor: horário ausente ou inválido nunca é inventado e o painel avisa
     assert.doesNotMatch(html, /Leitura feita em/);
   }
   assert.equal(applyWebEvidence(sample(), { termsHref: null }).generatedAt, '2026-10-25T02:41:00.000Z'); // a evidência do site não altera o horário
+});
+
+test('natureza e próximo passo: cada item aberto mostra se é técnico, comercial ou jurídico e o que fazer; aprovado não mostra próximo passo', () => {
+  const html = render({ readiness: sample(), error: null });
+  assert.match(html, /data-nature="TECNICO"/);
+  assert.match(html, /data-nature="COMERCIAL"/);
+  assert.match(html, /data-nature="JURIDICO"/);
+  assert.match(html, /Jurídico/);
+  assert.match(html, /data-next-step="flag-two-voucher"/);
+  assert.match(html, /Próximo passo:<\/span> Próximo passo de legal-review/);
+  assert.doesNotMatch(html, /data-next-step="global-limit"/); // aprovado
+});
+
+test('o que dá para concluir sem o Anderson: só itens técnicos ainda abertos, e o aviso lembra que isso não dispensa autorização', () => {
+  const data = sample();
+  const without = helpers.openWithoutAnderson(data.items).map((i) => i.id).sort();
+  assert.deepEqual(without, ['flag-two-voucher', 'real-purchase-test', 'terms-url']);
+  assert.ok(without.every((id) => data.items.find((i) => i.id === id).owner === 'TECNICO'));
+  const withAnderson = helpers.openWithAnderson(data.items).map((i) => i.id).sort();
+  assert.deepEqual(withAnderson, ['legal-review', 'terms-approved', 'valid-from', 'valid-until']);
+  const html = render({ readiness: data, error: null });
+  assert.match(html, /data-testid="launch-readiness-split"/);
+  assert.match(html, /sem esperar o Anderson<\/strong>: 3 item\(ns\) abertos/);
+  assert.match(html, /Dependem dele ou do jurídico:(<!-- -->)? ?(<!-- -->)?4/);
+  assert.match(html, /não dispensa a autorização expressa/);
 });
 
 test('só vira "pronta" se todos os itens estiverem aprovados; lista vazia nunca é pronta', () => {
