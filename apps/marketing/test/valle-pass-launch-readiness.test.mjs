@@ -16,14 +16,14 @@ function load(relPath, aliases = {}) {
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021, jsx: ts.JsxEmit.ReactJSX },
   });
-  const module = { exports: {} };
+  const loaded = { exports: {} };
   const customRequire = (id) => {
     if (id === 'react/jsx-runtime') return jsxRuntime;
     if (id in aliases) return aliases[id];
     throw new Error(`import inesperado no painel: ${id}`);
   };
-  new Function('require', 'module', 'exports', outputText)(customRequire, module, module.exports);
-  return module.exports;
+  new Function('require', 'module', 'exports', outputText)(customRequire, loaded, loaded.exports);
+  return loaded.exports;
 }
 
 const helpers = load('src/lib/valle-pass-launch-readiness.ts');
