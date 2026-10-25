@@ -739,6 +739,37 @@ export function getValePassFlowStatus(adminUserId: string): Promise<ValePassFlow
   return adminGet('/admin/vale-pass/flow', adminUserId);
 }
 
+export type LaunchChecklistStatus = 'APPROVED' | 'PENDING' | 'BLOCKED';
+export type LaunchChecklistOwner = 'TECNICO' | 'ANDERSON';
+export type LaunchChecklistGroup = 'CAMPANHA' | 'VALIDADE' | 'LOTES_ESTOQUE' | 'TERMOS' | 'INTEGRACOES' | 'OPERACAO';
+export interface LaunchChecklistItem {
+  readonly id: string;
+  readonly group: LaunchChecklistGroup;
+  readonly owner: LaunchChecklistOwner;
+  readonly status: LaunchChecklistStatus;
+  readonly label: string;
+  readonly message: string;
+}
+export interface LaunchChecklistCounts {
+  readonly approved: number;
+  readonly pending: number;
+  readonly blocked: number;
+}
+export interface LaunchReadiness {
+  /** Instante da leitura na API (ISO). Os dados valem para esse momento; a tela não atualiza sozinha. */
+  readonly generatedAt: string;
+  readonly campaign: { readonly id: string; readonly name: string; readonly active: boolean } | null;
+  readonly items: readonly LaunchChecklistItem[];
+  readonly summary: { readonly total: number; readonly approved: number; readonly pending: number; readonly blocked: number; readonly technical: LaunchChecklistCounts; readonly anderson: LaunchChecklistCounts };
+  /** Só `true` quando TODOS os itens estão aprovados. Aviso de leitura: nenhuma tela abre a venda. */
+  readonly readyToSell: boolean;
+}
+
+/** Painel "Pronta para vender?" (somente leitura). */
+export function getValePassLaunchReadiness(adminUserId: string): Promise<LaunchReadiness> {
+  return adminGet('/admin/vale-pass/launch-readiness', adminUserId);
+}
+
 /** Regulariza UM pedido pago com unidades sem voucher (revalida os fatos financeiros na API). Só ADMIN. */
 export function regularizeValePassOrder(input: { orderId: string; note: string }, adminUserId: string): Promise<ValePassRegularizeResult> {
   return adminPost('/admin/vale-pass/flow/regularize', { ...input, adminUserId });
