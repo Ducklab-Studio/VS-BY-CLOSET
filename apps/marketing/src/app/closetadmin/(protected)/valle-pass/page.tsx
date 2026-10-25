@@ -8,17 +8,16 @@ import { VALE_PASS_TERMS_HREF } from '@/lib/vale-pass-terms';
 import { fetchVariantStock } from '@/lib/cart';
 import { VALE_PASS_VARIANT_ID } from '@/lib/vale-pass-product';
 import type { WebStockEvidence } from '@/lib/valle-pass-launch-readiness';
+import { readStockEvidence } from '@/lib/valle-pass-stock-read';
 import { LaunchReadinessPanel } from './LaunchReadinessPanel';
 import { ValePassSection } from './ValePassSection';
 
 export const metadata: Metadata = { title: 'Valle Pass' };
 
-/** Estoque da variante do Valle Pass lido do Storefront (SOMENTE LEITURA, no máximo 3 s). Erro, timeout ou Shopify bloqueada (testes) = `unknown`: o item fica pendente. */
-async function readValePassStock(): Promise<WebStockEvidence> {
+/** Estoque da variante do Valle Pass lido do Storefront (SOMENTE LEITURA, no máximo 3 s). Qualquer falha, timeout ou Shopify bloqueada (testes) = `unknown`: o item fica pendente. */
+function readValePassStock(): Promise<WebStockEvidence> {
   const gid = `gid://shopify/ProductVariant/${VALE_PASS_VARIANT_ID}`;
-  const timeout = new Promise<WebStockEvidence>((resolve) => setTimeout(() => resolve({ status: 'unknown' }), 3_000));
-  const read = fetchVariantStock([gid]).then((map): WebStockEvidence => map.get(gid) ?? { status: 'unknown' }, (): WebStockEvidence => ({ status: 'unknown' }));
-  return Promise.race([read, timeout]);
+  return readStockEvidence(async () => (await fetchVariantStock([gid])).get(gid));
 }
 
 /**

@@ -195,13 +195,37 @@ test('estoque da Shopify: acima do esperado ou à venda sem quantidade conhecida
   const above = withStock(0, { status: 'available', quantity: 5 });
   assert.equal(above.status, 'BLOCKED');
   assert.match(above.message, /acima do esperado \(0\)/);
-  assert.match(above.nextStep, /Reduzir o estoque/);
+  assert.match(above.nextStep, /Fechar a venda/); // sem lote aberto: fechar a venda
+  assert.match(withStock(100, { status: 'available', quantity: 150 }).nextStep, /Reduzir o estoque da variante para 100/);
   assert.equal(withStock(100, { status: 'available', quantity: 150 }).status, 'BLOCKED');
   const untracked = withStock(0, { status: 'available', quantity: null });
   assert.equal(untracked.status, 'BLOCKED');
   assert.match(untracked.message, /sem quantidade conhecida/);
+  assert.equal(withStock(0, { status: 'available', quantity: 0 }).status, 'BLOCKED'); // à venda sem lote aberto nunca é aprovado, mesmo com quantidade 0
   assert.equal(withStock(100, { status: 'available', quantity: 40 }).status, 'PENDING');
   assert.equal(withStock(100, { status: 'sold_out' }).status, 'PENDING');
+});
+
+test('estoque da Shopify: com lote aberto, quantidade não confirmada fica PENDENTE (nunca aprovada nem bloqueada por falta de dado)', () => {
+  const unknownQty = withStock(100, { status: 'available', quantity: null });
+  assert.equal(unknownQty.status, 'PENDING');
+  assert.match(unknownQty.message, /sem quantidade confirmada/);
+});
+
+test('estoque da Shopify: desconhecido NUNCA aprova, em nenhuma combinação (leitura ausente, falha, estoque esperado ausente, inválido ou negativo)', () => {
+  const original = stockEntry();
+  for (const evidence of [undefined, { status: 'unknown' }]) {
+    for (const expected of [0, 100, undefined, null, -1, 1.5, Number.NaN]) {
+      const out = shopifyStockItem(original, expected, evidence);
+      assert.equal(out.status, 'PENDING', `evidência ${JSON.stringify(evidence)} esperado ${expected}`);
+      assert.deepEqual(out, original, 'o item volta exatamente como a API enviou');
+    }
+  }
+  for (const expected of [undefined, null, -1, 1.5, Number.NaN]) {
+    for (const evidence of [{ status: 'sold_out' }, { status: 'available', quantity: 0 }, { status: 'available', quantity: 10 }, { status: 'available', quantity: null }]) {
+      assert.equal(shopifyStockItem(original, expected, evidence).status, 'PENDING', `esperado ${expected} ${JSON.stringify(evidence)}`);
+    }
+  }
 });
 
 test('estoque da Shopify: só o item do estoque muda; os outros itens, o horário e o veredito continuam iguais', () => {
@@ -219,7 +243,7 @@ test('estoque da Shopify: só o item do estoque muda; os outros itens, o horári
 test('a página lê o estoque só com leitura, em paralelo e com limite de 3 s (erro/timeout = desconhecido)', () => {
   const page = readFileSync(new URL('src/app/closetadmin/(protected)/valle-pass/page.tsx', root), 'utf8');
   assert.match(page, /fetchVariantStock\(\[gid\]\)/);
-  assert.match(page, /3_000/);
+  assert.match(page, /readStockEvidence\(/);
   assert.match(page, /Promise\.all\(\[getValePassLaunchReadiness\(session\.id\), readValePassStock\(\)\]\)/);
   assert.doesNotMatch(page, /inventory|inventorySet|mutation|Admin API|SHOPIFY_CLIENT_SECRET/i); // nada de escrita nem credencial privada
 });
