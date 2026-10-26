@@ -603,6 +603,9 @@ try {
     assert.equal((await cross.json()).code, 'COMPANY_NOT_AUTHORIZED');
     assert.equal((await call('GET', '/admin/vale-pass/operators')).status, 403);
     assert.equal((await call('GET', '/admin/vale-pass/ledger/reconcile')).status, 403);
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${D}/use`)).status, 403, 'endpoint "usado" cruzado recusado');
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${C}/use`)).status, 403, 'funcionário não consome o voucher por inteiro pelo endpoint antigo (nem na própria loja)');
+    assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: C } })).balanceCents, 4_500, 'saldo da própria loja intacto');
     assert.equal((await entriesOf(D)).length, 0, 'nada gravado na outra loja');
     assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: D } })).balanceCents, 50_000);
     pass('6g) STAFF vinculado: resgata na loja autorizada (prévia + valor redigitado, auditoria SCOPE), sem reversão/bloqueio; outra loja bloqueada; API direta (reverter, bloquear, cruzado, vínculos, conciliação) = 403');

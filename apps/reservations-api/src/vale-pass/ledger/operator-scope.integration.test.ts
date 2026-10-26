@@ -300,6 +300,19 @@ localDescribe('STAFF: pode RESGATAR só nas empresas vinculadas; nunca reverter,
     expect((await voucher(u.showroom.id)).blockedAt).toBeNull();
   });
 
+  test('endpoint antigo "usado": STAFF vinculado NÃO consome o voucher por inteiro (nem na própria empresa); só o resgate com prévia e valor; ADMIN segue podendo', async () => {
+    const boss = await owner();
+    const staff = await newUser('STAFF');
+    const admin = await newUser('ADMIN');
+    await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    const u = await newUnit();
+    await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.showroom.id)).toHaveLength(0);
+    expect((await voucher(u.showroom.id)).status).toBe('ACTIVE');
+    await vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN' });
+    expect(await entries(u.showroom.id)).toHaveLength(1);
+  });
+
   test('vínculo revogado: o STAFF volta a ser recusado imediatamente (a decisão vem do banco a cada operação)', async () => {
     const boss = await owner();
     const staff = await newUser('STAFF');

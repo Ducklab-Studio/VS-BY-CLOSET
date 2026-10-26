@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { AdminRole, Prisma, ValePass, ValePassStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
@@ -138,6 +138,8 @@ export class ValePassVouchersService {
       if (target.company !== null) {
         // Mesmo isolamento por estabelecimento do resgate por saldo (este endpoint antigo NÃO é um atalho entre lojas): o caminho HTTP sempre informa o papel;
         // quem não está autorizado na empresa DESTE voucher não o consome por aqui. Chamadas internas sem papel não passam por esta checagem.
+        // Funcionário (STAFF) resgata só pelo fluxo com prévia e valor redigitado (`/redeem`); o "usado" por inteiro, sem essa confirmação, segue exclusivo de administrador.
+        if (options.role === 'STAFF') throw new ForbiddenException('Funcionários registram o resgate pelo saldo (informando o valor). A marcação "usado" por inteiro exige um administrador.');
         if (options.role !== undefined) await authorizeCompany(tx, { id: actorId, role: options.role }, target.company);
         // Voucher do modelo novo (com empresa) controla SALDO: "marcar como usado" é o resgate INTEGRAL do que resta, e só vale para voucher ainda NÃO tocado
         // (utilização parcial se registra pelo valor). Passa pelo livro-razão — o banco recusa qualquer outro caminho para USED.
