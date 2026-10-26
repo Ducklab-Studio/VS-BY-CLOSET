@@ -6,8 +6,8 @@ import { AdminLoginDto } from './dto/login.dto';
 import { SessionTokenDto } from './dto/session-token.dto';
 import { CLIENT_IP_HEADER, normalizeClientIp } from './login-keys';
 import { trustedClientIp, type ClientIpRequest } from '../client-ip';
-import { extractBearerToken, verifyAdminToken } from '../admin/admin-token';
-import { resolveAdminApiToken } from '../admin/admin-auth.config';
+import { extractBearerToken, verifyAnyAdminToken } from '../admin/admin-token';
+import { resolveAdminApiTokens } from '../admin/admin-auth.config';
 
 /**
  * Chamado só pelo servidor do apps/marketing (server-to-server, nunca
@@ -64,7 +64,7 @@ export function loginThrottleTracker(req: Record<string, unknown>): Promise<stri
 
 function hasValidServerToken(authorization: string | string[] | undefined): boolean {
   try {
-    return verifyAdminToken(extractBearerToken(Array.isArray(authorization) ? authorization[0] : authorization), resolveAdminApiToken());
+    return verifyAnyAdminToken(extractBearerToken(Array.isArray(authorization) ? authorization[0] : authorization), resolveAdminApiTokens());
   } catch {
     return false; // token do servidor não configurado: nunca confia no cabeçalho
   }

@@ -14,6 +14,16 @@ export function verifyAdminToken(presented: string | undefined, configured: stri
   return timingSafeEqual(presentedHash, configuredHash);
 }
 
+/**
+ * Aceita o token se ele conferir com QUALQUER um dos configurados (principal e, durante rotação, o "próximo"). Compara com TODOS, sem parar no primeiro acerto,
+ * para o tempo de resposta não revelar qual deles bateu.
+ */
+export function verifyAnyAdminToken(presented: string | undefined, configured: readonly string[]): boolean {
+  let ok = false;
+  for (const token of configured) if (verifyAdminToken(presented, token)) ok = true;
+  return ok;
+}
+
 /** `Authorization: Bearer <token>` — nunca um header customizado tipo
  *  `x-admin-token`, pra seguir o padrão HTTP real de autenticação, não
  *  inventar um. */

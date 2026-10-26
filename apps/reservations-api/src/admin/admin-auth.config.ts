@@ -21,3 +21,19 @@ export function resolveAdminApiToken(): string {
   }
   return token;
 }
+
+/** Tamanho mínimo do token "próximo" (rotação): valores curtos/previsíveis nunca são aceitos como segundo segredo. */
+export const MIN_NEXT_TOKEN_LENGTH = 32;
+
+/**
+ * Tokens aceitos AGORA: o principal (`ADMIN_API_TOKEN`) e, só durante uma rotação, o "próximo" (`ADMIN_API_TOKEN_NEXT`), para que a troca entre a API e o site
+ * (Vercel) não derrube o ClosetAdmin: a API passa a aceitar os DOIS, o site muda para o novo, e só então o principal vira o novo e o "próximo" é removido.
+ * Sem `ADMIN_API_TOKEN_NEXT` o comportamento é exatamente o de sempre. O "próximo" é ignorado se for curto demais ou igual ao principal (erro de configuração
+ * nunca amplia o acesso). Principal ausente continua falhando fechado (503), mesmo que o "próximo" exista.
+ */
+export function resolveAdminApiTokens(): readonly string[] {
+  const primary = resolveAdminApiToken();
+  const next = process.env.ADMIN_API_TOKEN_NEXT;
+  if (!next || next.length < MIN_NEXT_TOKEN_LENGTH || next === primary) return [primary];
+  return [primary, next];
+}
