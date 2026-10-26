@@ -30,12 +30,15 @@ funcionalidade não existe ali de propósito.
 4. Sua conta só existe se alguém com papel **Administrador** já tiver
    cadastrado seu nome, telefone e PIN. Não há cadastro público.
 
-Dois papéis existem:
+Três papéis existem, e cada pessoa também tem **módulos** liberados (reservas,
+calendário, peças, regras, relatórios, auditoria, Valle Pass):
 
 - **Equipe (STAFF)**: dashboard, calendário, reservas, criar/cancelar reserva
   manual, ver peças.
 - **Administrador (ADMIN)**: tudo o que a Equipe vê, mais regras de aluguel,
   bloqueios operacionais e a auditoria completa.
+- **Proprietário (SUPER_ADMIN)**: acesso total, inclusive funcionários e
+  permissões. Tudo é conferido no servidor a cada ação, não só escondido na tela.
 
 ## Calendário
 
@@ -109,6 +112,23 @@ Duas seções na mesma tela:
 Histórico de login/logout, reservas manuais criadas/canceladas, peças
 ativadas/desativadas, regras alteradas e bloqueios criados/removidos — quem
 fez, quando, e o que mudou. Nunca aparece PIN, senha ou qualquer token ali.
+
+## Valle Pass 2027 (`/closetadmin/valle-pass`) — módulo "Valle Pass"
+
+Só aparece para quem tem o módulo **Valle Pass** liberado (o Proprietário sempre tem). **Hoje as vendas estão fechadas**: a vitrine mostra "Em breve", o estoque da variante na Shopify é 0 e as chaves de emissão e de e-mail estão desligadas de propósito. O app **nunca escreve na Shopify**.
+
+O que cada área mostra:
+
+- **Pronta para vender?** — lista de pendências técnicas e comerciais (aprovado / pendente / bloqueado, com responsável e próximo passo). Só leitura; nada aqui abre a venda.
+- **Cartão da campanha** — preço (R$ 350), **Vendidos** (unidades emitidas e não canceladas, a mesma conta do painel de capacidade; o histórico de cancelados aparece em nota abaixo, nada é apagado), **Validade** (datas oficiais quando configuradas; **"A definir"** quando não há datas, e nesse caso todo pagamento fica **retido**, não emitido; "N dias após a compra" só em campanhas do modelo antigo) e limite.
+- **Capacidade e lotes** — limite global de 1.000 unidades, lotes de 100; um lote só abre com limite global definido e nunca reabre depois de encerrado.
+- **Benefícios** — dois vouchers independentes por unidade: **R$ 500 Valle Showroom** e **R$ 50 VS BY CLOSET**, mais o desconto informativo de 10% (sem código nem saldo).
+- **Pedidos na Shopify / Pagamentos retidos** — o que foi pago, o que emitiu e o que ficou retido (com motivo). Retido nunca é descartado por SQL: resolver ou descartar só depois do estorno na Shopify.
+- **Saldo e resgate** — consultar pelo código, **resgate parcial ou total** ("Usar saldo total" só preenche o campo), referência obrigatória, confirmação digitando o valor de novo, conferência de identidade opcional (fica no histórico), reversão com justificativa. Resgate e reversão são do **Administrador**; a Equipe só consulta (ou resgata só na loja em que foi autorizada, pelo Proprietário).
+- **Reembolsos e alertas** — reembolso é sempre feito na Shopify; aqui fica a revisão (uso bloqueado até a decisão) e o alerta de cancelamento com crédito já usado.
+- **E-mails** — fila, tentativas e entregas; com o envio desligado nada sai.
+
+Os logs da API não registram dados pessoais; a auditoria registra quem fez cada ação.
 
 ## Exportar em PDF
 
