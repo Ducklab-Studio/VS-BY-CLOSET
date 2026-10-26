@@ -36,12 +36,19 @@ describe('autorização por estabelecimento (regra pura)', () => {
     expect(decideCompanyAccess('ADMIN', ['VALLE_SHOWROOM'], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'COMPANY_NOT_AUTHORIZED' });
   });
 
-  test('política ATUAL: STAFF nunca opera, nem vinculado (decisão comercial pendente); a política padrão é a mais restritiva para STAFF e preserva o ADMIN', () => {
-    expect(OPERATOR_POLICY).toEqual({ staffMayRedeem: false, adminRequiresScope: false });
-    expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM', 'VS_BY_CLOSET'], 'VALLE_SHOWROOM')).toMatchObject({ allowed: false, code: 'STAFF_NOT_ENABLED' });
+  test('política ATUAL (decisão do Anderson, 26/10/2026): STAFF resgata, mas só nas empresas vinculadas; sem vínculo nada; o ADMIN preserva o acesso legado', () => {
+    expect(OPERATOR_POLICY).toEqual({ staffMayRedeem: true, adminRequiresScope: false });
+    expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM'], 'VALLE_SHOWROOM')).toEqual({ allowed: true, basis: 'SCOPE' });
+    expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM'], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'COMPANY_NOT_AUTHORIZED' });
     expect(decideCompanyAccess('STAFF', [], 'VALLE_SHOWROOM')).toMatchObject({ allowed: false, code: 'NO_COMPANY_AUTHORIZED' });
-    expect(describeOperatorAccess('STAFF', ['VALLE_SHOWROOM'])).toMatch(/ainda não foi liberado/);
+    expect(describeOperatorAccess('STAFF', ['VALLE_SHOWROOM'])).toMatch(/apenas na Valle Showroom/);
     expect(decideCompanyAccess('ADMIN', [], 'VS_BY_CLOSET')).toEqual({ allowed: true, basis: 'LEGACY_ADMIN' });
+  });
+
+  test('com o STAFF desligado (a trava continua testável) o vinculado também é recusado', () => {
+    const OFF: OperatorPolicy = { staffMayRedeem: false, adminRequiresScope: false };
+    expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM', 'VS_BY_CLOSET'], 'VALLE_SHOWROOM', OFF)).toMatchObject({ allowed: false, code: 'STAFF_NOT_ENABLED' });
+    expect(describeOperatorAccess('STAFF', ['VALLE_SHOWROOM'], OFF)).toMatch(/ainda não foi liberado/);
   });
 
   test('modo estrito (migração concluída): ADMIN sem vínculo deixa de operar; o proprietário nunca é bloqueado', () => {

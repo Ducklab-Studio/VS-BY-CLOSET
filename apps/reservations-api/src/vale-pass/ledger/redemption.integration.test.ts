@@ -310,7 +310,9 @@ localDescribe('autorização, privacidade e enumeração', () => {
   test('contrato HTTP: sessão administrativa + módulo VALLE_PASS em tudo; escrita e conciliação só ADMIN; consulta sem papel específico', () => {
     const proto = ValePassLedgerController.prototype as unknown as Record<string, object>;
     expect(Reflect.getMetadata(REQUIRE_MODULE_KEY, ValePassLedgerController)).toBe('VALLE_PASS');
-    for (const name of ['prepareRedeem', 'redeem', 'prepareReverse', 'reverse', 'reconcile']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto[name]), name).toBe('ADMIN');
+    for (const name of ['prepareReverse', 'reverse', 'reconcile']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto[name]), name).toBe('ADMIN');
+    // Resgate: liberado ao módulo; a decisão por estabelecimento (STAFF só nas empresas vinculadas) é do serviço, por voucher.
+    for (const name of ['prepareRedeem', 'redeem']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto[name]), name).toBeUndefined();
     for (const name of ['balance', 'history']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, proto[name]), name).toBeUndefined();
     const guards = Reflect.getMetadata('__guards__', ValePassLedgerController) as unknown[];
     expect(guards.map((g) => (g as { name: string }).name)).toEqual(['AdminAuthGuard', 'AdminRoleGuard']);

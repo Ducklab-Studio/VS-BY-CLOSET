@@ -233,35 +233,128 @@ localDescribe('isolamento entre Valle Showroom e VS BY CLOSET', () => {
   });
 });
 
-localDescribe('STAFF: o serviço e os guards dizem a MESMA coisa (resgate ainda não liberado)', () => {
+localDescribe('STAFF: pode RESGATAR só nas empresas vinculadas; nunca reverter, bloquear ou consumir de outra empresa', () => {
   test('STAFF sem vínculo: 403 NO_COMPANY_AUTHORIZED em todos os caminhos (inclusive código inexistente)', async () => {
     const staff = await newUser('STAFF');
     const u = await newUnit();
     expect((await rejection(redeem(u.showroom, staff)))?.response?.code).toBe('NO_COMPANY_AUTHORIZED');
     await expect(redemption.prepareRedeem('VALLE-NAOEXISTE-0000', { company: 'VALLE_SHOWROOM', amountCents: 100, reference: REF }, staff)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(vouchersService.markUsed(u.closet.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.closet.id)).toHaveLength(0);
   });
 
-  test('STAFF COM vínculo continua recusado (STAFF_NOT_ENABLED) em resgate, reversão e endpoint antigo: o vínculo sozinho não libera STAFF', async () => {
+  test('STAFF COM vínculo resgata (prévia + confirmação) na SUA empresa, com auditoria completa (quem, base SCOPE, referência) e saldo/histórico corretos', async () => {
+    const boss = await owner();
+    const staff = await newUser('STAFF');
+    await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    const u = await newUnit();
+    expect(OPERATOR_POLICY.staffMayRedeem).toBe(true);
+    const preview = await redemption.prepareRedeem(u.showroom.code, { company: 'VALLE_SHOWROOM', amountCents: 20_000, reference: REF }, staff);
+    expect(preview.canRedeem).toBe(true);
+    const body = { company: 'VALLE_SHOWROOM', amountCents: 20_000, reference: REF, operationId: preview.operationId, expectedBalanceCents: preview.expectedBalanceCents, confirmAmountCents: 20_000 };
+    const done = await redemption.confirmRedeem(u.showroom.code, body, staff);
+    expect(done.balanceCents).toBe(30_000);
+    const rows = await entries(u.showroom.id);
+    expect(rows.map((r) => [r.seq, r.deltaCents, r.balanceAfterCents, r.actorAdminId, r.reference])).toEqual([[1, -20_000, 30_000, staff.id, REF]]);
+    const audit = await prisma.adminAuditEvent.findMany({ where: { adminUserId: staff.id, action: 'VALE_PASS_REDEEMED' } });
+    expect(audit).toHaveLength(1);
+    expect(audit[0].detail).toMatchObject({ accessBasis: 'SCOPE', reference: REF });
+    // idempotência: repetir a MESMA operação devolve o original e não desconta de novo
+    const again = await redemption.confirmRedeem(u.showroom.code, body, staff);
+    expect(again.replayed).toBe(true);
+    expect(await entries(u.showroom.id)).toHaveLength(1);
+    expect((await voucher(u.showroom.id)).balanceCents).toBe(30_000);
+    // a tela recebe a decisão do servidor por voucher
+    expect((await redemption.lookup(u.showroom.code, staff)).operatorAccess).toMatchObject({ canOperate: true, companies: ['VALLE_SHOWROOM'] });
+    expect((await redemption.lookup(u.closet.code, staff)).operatorAccess).toMatchObject({ canOperate: false });
+  });
+
+  test('STAFF vinculado a UMA empresa não toca vouchers da outra (resgate, prévia e endpoint antigo), mesmo informando a empresa certa no corpo; nada muda', async () => {
+    const boss = await owner();
+    const staff = await newUser('STAFF');
+    await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    const u = await newUnit();
+    const closetBefore = await voucher(u.closet.id);
+    expect((await rejection(redeem(u.closet, staff)))?.response?.code).toBe('COMPANY_NOT_AUTHORIZED');
+    expect((await rejection(redemption.prepareRedeem(u.closet.code, { company: 'VS_BY_CLOSET', amountCents: 100, reference: REF }, staff)))?.response?.code).toBe('COMPANY_NOT_AUTHORIZED');
+    expect(await rejection(redeem(u.closet, staff, 100, { company: 'VALLE_SHOWROOM' }))).not.toBeNull(); // empresa trocada no corpo: recusado de qualquer forma
+    await expect(vouchersService.markUsed(u.closet.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.closet.id)).toHaveLength(0);
+    expect(await voucher(u.closet.id)).toMatchObject({ balanceCents: closetBefore.balanceCents, status: closetBefore.status });
+  });
+
+  test('STAFF vinculado NUNCA reverte, bloqueia ou desbloqueia (serviço); histórico e bloqueio intactos', async () => {
+    const boss = await owner();
+    const staff = await newUser('STAFF');
+    const admin = await newUser('ADMIN');
+    await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    await scopes.grant(staff.id, 'VS_BY_CLOSET', boss);
+    const u = await newUnit();
+    const done = await redeem(u.showroom, admin, 1_000);
+    const blocks = new ValePassBlockService(prisma, redemption);
+    await expect(redemption.prepareReverse(u.showroom.code, done.entry.id, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(redemption.confirmReverse(u.showroom.code, done.entry.id, { reason: 'tentativa sem permissão', operationId: `op-${randomUUID()}`, expectedBalanceCents: 49_000, confirmAmountCents: 1_000 }, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(blocks.prepareBlock(u.showroom.code, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(blocks.confirmBlock(u.showroom.code, { reason: 'tentativa sem permissão', operationId: `op-${randomUUID()}`, confirmCode: u.showroom.code }, staff)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.showroom.id)).toHaveLength(1); // só o resgate do admin; nenhum lançamento compensatório
+    expect((await voucher(u.showroom.id)).blockedAt).toBeNull();
+  });
+
+  test('endpoint antigo "usado": STAFF vinculado NÃO consome o voucher por inteiro (nem na própria empresa); só o resgate com prévia e valor; ADMIN segue podendo', async () => {
     const boss = await owner();
     const staff = await newUser('STAFF');
     const admin = await newUser('ADMIN');
     await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
     const u = await newUnit();
-    expect(OPERATOR_POLICY.staffMayRedeem).toBe(false);
-    expect((await rejection(redeem(u.showroom, staff)))?.response?.code).toBe('STAFF_NOT_ENABLED');
-    await expect(redemption.prepareRedeem(u.showroom.code, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: REF }, staff)).rejects.toBeInstanceOf(ForbiddenException);
-    const done = await redeem(u.showroom, admin, 1_000);
-    await expect(redemption.prepareReverse(u.showroom.code, done.entry.id, staff)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.showroom.id)).toHaveLength(0);
+    expect((await voucher(u.showroom.id)).status).toBe('ACTIVE');
+    await vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN' });
     expect(await entries(u.showroom.id)).toHaveLength(1);
-    // a consulta continua permitida, e a tela recebe a explicação
-    expect((await redemption.lookup(u.showroom.code, staff)).operatorAccess).toMatchObject({ canOperate: false, message: expect.stringMatching(/ainda não foi liberado/) });
   });
 
-  test('os guards das rotas de resgate/reversão exigem ADMIN (coerente com a política): liberar STAFF exige mudar a política E os guards', () => {
+  test('vínculo revogado: o STAFF volta a ser recusado imediatamente (a decisão vem do banco a cada operação)', async () => {
+    const boss = await owner();
+    const staff = await newUser('STAFF');
+    await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    const u = await newUnit();
+    await redeem(u.showroom, staff, 1_000);
+    await scopes.revoke(staff.id, 'VALLE_SHOWROOM', boss);
+    expect((await rejection(redeem(u.showroom, staff, 1_000)))?.response?.code).toBe('NO_COMPANY_AUTHORIZED');
+    expect(await entries(u.showroom.id)).toHaveLength(1);
+  });
+
+  test('concorrência: vários STAFF resgatando o MESMO voucher ao mesmo tempo nunca passam do saldo, e a mesma operação em paralelo grava uma vez', async () => {
+    const boss = await owner();
+    const a = await newUser('STAFF');
+    const b = await newUser('STAFF');
+    await scopes.grant(a.id, 'VALLE_SHOWROOM', boss);
+    await scopes.grant(b.id, 'VALLE_SHOWROOM', boss);
+    const u = await newUnit(); // R$ 500
+    // 8 tentativas de R$ 100 (4 por funcionário) = R$ 800 > R$ 500: no máximo 5 passam
+    const attempts = [a, b, a, b, a, b, a, b].map((actor, i) =>
+      redemption
+        .confirmRedeem(u.showroom.code, { company: 'VALLE_SHOWROOM', amountCents: 10_000, reference: `${REF} #${i}`, operationId: `op-conc-${i}-${randomUUID()}`, expectedBalanceCents: 50_000, confirmAmountCents: 10_000 }, actor)
+        .then(() => 'ok', () => 'recusado'),
+    );
+    const results = await Promise.all(attempts);
+    const rows = await entries(u.showroom.id);
+    const spent = -rows.reduce((s, r) => s + r.deltaCents, 0);
+    expect(spent).toBeLessThanOrEqual(50_000);
+    expect((await voucher(u.showroom.id)).balanceCents).toBe(50_000 - spent);
+    expect(rows.length).toBe(results.filter((r) => r === 'ok').length);
+    expect(rows.every((r, i) => r.seq === i + 1 && r.balanceAfterCents >= 0)).toBe(true);
+    const u2 = await newUnit();
+    const same = `op-same-${randomUUID()}`;
+    const body = { company: 'VALLE_SHOWROOM', amountCents: 5_000, reference: REF, operationId: same, expectedBalanceCents: 50_000, confirmAmountCents: 5_000 };
+    await Promise.all([a, b, a, b].map((actor) => redemption.confirmRedeem(u2.showroom.code, body, actor).then(() => null, () => null)));
+    expect((await entries(u2.showroom.id)).length).toBe(1);
+  });
+
+  test('guards das rotas coerentes com a política: resgate liberado ao módulo (decisão por empresa no serviço); reversão, bloqueio, conciliação e vínculos continuam restritos', () => {
     const ledgerProto = ValePassLedgerController.prototype as unknown as Record<string, unknown>;
-    for (const name of ['prepareRedeem', 'redeem', 'prepareReverse', 'reverse']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ledgerProto[name] as object), name).toBe('ADMIN');
+    for (const name of ['prepareRedeem', 'redeem']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ledgerProto[name] as object), name).toBeUndefined();
+    for (const name of ['prepareReverse', 'reverse', 'prepareBlock', 'block', 'prepareUnblock', 'unblock', 'reconcile']) expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ledgerProto[name] as object), name).toBe('ADMIN');
     expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ValePassOperatorScopeController)).toBe('SUPER_ADMIN');
   });
 });
@@ -336,7 +429,7 @@ localDescribe('gestão do vínculo: só o proprietário, auditada, idempotente',
     const mine = overview.users.filter((x) => [admin.id, scoped.id, staff.id].includes(x.id));
     expect(mine.map((x) => [x.role, x.companies.length]).sort()).toEqual([['ADMIN', 0], ['ADMIN', 1], ['STAFF', 0]]);
     expect(overview.users.some((x) => x.id === boss.id)).toBe(false); // o proprietário não aparece (sempre opera)
-    expect(overview.policy).toEqual({ staffMayRedeem: false, adminRequiresScope: false });
+    expect(overview.policy).toEqual({ staffMayRedeem: true, adminRequiresScope: false });
     expect(overview.summary.adminsWithoutScope).toBeGreaterThanOrEqual(1);
     expect(overview.summary.legacyAdminOperationsLast30Days).toBeGreaterThanOrEqual(1);
     for (const actor of [admin, staff]) await expect(scopes.overview(actor)).rejects.toBeInstanceOf(ForbiddenException);

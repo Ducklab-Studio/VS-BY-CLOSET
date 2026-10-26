@@ -1,9 +1,9 @@
 /**
  * Quem pode resgatar/reverter vouchers de qual estabelecimento (puro, sem banco). Regra de partida SEGURA:
  *  - SUPER_ADMIN (o proprietário): sempre as duas empresas.
- *  - STAFF: hoje NÃO opera, nem com vínculo (`staffMayRedeem = false`): os guards das rotas e a regra daqui dizem a MESMA coisa. Liberar STAFF é decisão
- *    comercial pendente (Anderson) e exige virar este valor E abrir o guard das rotas — nunca só um dos dois (há teste que trava a divergência).
- *    Quando liberado: só as empresas explicitamente vinculadas; sem vínculo = nenhum resgate.
+ *  - STAFF: pode RESGATAR (decisão do Anderson, 26/10/2026: "funcionários também podem validar"), mas SOMENTE as empresas explicitamente vinculadas pelo
+ *    proprietário; sem vínculo = nenhum resgate. Reversão, bloqueio/desbloqueio e conciliação continuam exclusivos de ADMIN/SUPER_ADMIN (guards das rotas E
+ *    verificação dentro do serviço). Os guards das rotas de resgate e `staffMayRedeem` dizem a MESMA coisa (há teste que trava a divergência).
  *  - ADMIN: SEM vínculo mantém o acesso administrativo de hoje (as duas empresas) até a política de migração ser definida (`adminRequiresScope = false`);
  *    COM vínculo fica restrito às empresas vinculadas (restringir é sempre o lado seguro).
  * Ninguém recebe vínculo por padrão: o vínculo é sempre uma decisão registrada do proprietário.
@@ -13,12 +13,12 @@ export const OPERATOR_COMPANIES: readonly OperatorCompany[] = ['VALLE_SHOWROOM',
 export const COMPANY_NAMES: Record<OperatorCompany, string> = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' };
 
 export interface OperatorPolicy {
-  /** STAFF vinculado pode resgatar/reverter? Hoje não (decisão comercial pendente). */
+  /** STAFF vinculado pode RESGATAR (nunca reverter/bloquear)? Sim, desde 26/10/2026 (decisão do Anderson). */
   readonly staffMayRedeem: boolean;
   /** ADMIN sem vínculo deixa de operar? Hoje não (migração segura dos administradores atuais ainda a definir). */
   readonly adminRequiresScope: boolean;
 }
-export const OPERATOR_POLICY: OperatorPolicy = { staffMayRedeem: false, adminRequiresScope: false };
+export const OPERATOR_POLICY: OperatorPolicy = { staffMayRedeem: true, adminRequiresScope: false };
 
 export type AccessBasis = 'OWNER' | 'LEGACY_ADMIN' | 'SCOPE';
 export type AccessDenial = 'NO_COMPANY_AUTHORIZED' | 'COMPANY_NOT_AUTHORIZED' | 'STAFF_NOT_ENABLED';

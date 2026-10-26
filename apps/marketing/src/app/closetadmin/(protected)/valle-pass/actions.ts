@@ -216,7 +216,7 @@ export async function lookupValePassBalanceAction(code: string): Promise<Balance
 export async function prepareValePassRedeemAction(code: string, input: ValePassRedeemInput): Promise<BalanceActionResult<ValePassRedeemPreview>> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
-  requireAdminRole(session, 'ADMIN');
+  // Resgate: STAFF vinculado a um estabelecimento também pode (a decisão por empresa é do servidor, por voucher); reversão/bloqueio seguem só ADMIN.
   try {
     return { data: await prepareValePassRedeem(code, input), error: null };
   } catch (err) {
@@ -230,7 +230,7 @@ export async function confirmValePassRedeemAction(
 ): Promise<BalanceActionResult<ValePassOperationResult>> {
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
-  requireAdminRole(session, 'ADMIN');
+  // Resgate: STAFF vinculado a um estabelecimento também pode (a decisão por empresa é do servidor, por voucher); reversão/bloqueio seguem só ADMIN.
   try {
     const data = await confirmValePassRedeem(code, input);
     revalidateValePassPath();
