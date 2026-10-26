@@ -159,11 +159,11 @@ try {
     await page.getByLabel('Código do voucher').waitFor();
     await consult(page, A);
     await metric(page, 'Saldo disponível').getByText('R$ 500,00').waitFor();
-    await page.getByText('exigem um administrador').waitFor();
+    await page.getByText(/não está autorizado a resgatar vouchers de nenhum estabelecimento/).waitFor(); // STAFF sem vínculo: a decisão e a mensagem vêm do servidor
     assert.equal(await page.getByLabel('Valor a utilizar (R$)').count(), 0);
     const text = await page.locator('section[aria-labelledby="balance-desk-title"]').innerText();
     assert.ok(text.includes('Maria S.') && !/maria\.souza|91234-5678|Silva/.test(text), 'dados pessoais mascarados no balcão');
-    pass('1) STAFF consulta: saldo R$ 500,00, titular mascarado, sem formulário de resgate (explícito)');
+    pass('1) STAFF SEM vínculo consulta: saldo R$ 500,00, titular mascarado, sem formulário de resgate e com a mensagem de permissão do servidor');
     await context.close();
   }
 
@@ -554,6 +554,59 @@ try {
   await shot(mp, '2-celular');
   pass('7) celular (375 px): sem rolagem horizontal, saldo e histórico visíveis');
   await mobile.close();
+
+  // 6g) STAFF VINCULADO só à VS BY CLOSET (decisão do Anderson, 26/10/2026): na loja autorizada vê o formulário e resgata (prévia + valor redigitado); sem botão de
+  // reversão; na outra loja a mensagem de permissão e nenhum formulário; pela API direta (guards reais) reversão, bloqueio e resgate cruzado dão 403 e nada é gravado.
+  // A API limita as consultas por minuto (60 por IP; o ClosetAdmin chama a API de um único IP): espera a janela do limitador zerar depois dos passos anteriores.
+  await new Promise((resolve) => setTimeout(resolve, 62_000));
+  {
+    const C = `VALLE-S${Date.now().toString(36).toUpperCase().slice(-3)}-CCCC`;
+    const D = `VALLE-S${Date.now().toString(36).toUpperCase().slice(-3)}-DDDD`;
+    const unitGroup = randomUUID();
+    await db.valePass.create({ data: { ...common, groupId: unitGroup, code: C, amountCents: 5_000, company: 'VS_BY_CLOSET', benefitId: b2.id } });
+    await db.valePass.create({ data: { ...common, groupId: unitGroup, code: D, amountCents: 50_000, company: 'VALLE_SHOWROOM', benefitId: b1.id } });
+    const scopedStaff = await createUser(`Funcionário vinculado sintético ${prefix}`, 'STAFF');
+    await db.valePassOperatorScope.create({ data: { adminUserId: scopedStaff.id, company: 'VS_BY_CLOSET', grantedByName: 'teste sintético' } });
+    const ctx = await newContext(scopedStaff.token, { viewport: { width: 1280, height: 900 } });
+    const sp = await newPage(ctx, errors);
+    await sp.goto(vallePass);
+    await sp.getByLabel('Código do voucher').waitFor();
+    await consult(sp, C);
+    await metric(sp, 'Saldo disponível').getByText('R$ 50,00').waitFor();
+    await sp.getByLabel('Valor a utilizar (R$)').waitFor(); // loja autorizada: o formulário aparece para o funcionário
+    await sp.getByText(/Reversões e bloqueios são feitos por um administrador/).waitFor();
+    assert.equal(await sp.getByRole('button', { name: /Bloquear voucher/ }).count(), 0, 'funcionário não vê o bloqueio');
+    await sp.getByLabel('Valor a utilizar (R$)').fill('5');
+    await sp.getByLabel('Referência da utilização').fill('Comanda STAFF 1');
+    await sp.getByRole('button', { name: 'Conferir' }).click();
+    await sp.getByLabel(/Digite novamente o valor/).fill('5');
+    await sp.getByRole('button', { name: 'Confirmar resgate' }).click();
+    await sp.getByText('Saldo disponível: R$ 45,00.').waitFor();
+    assert.equal(await sp.getByRole('button', { name: /Reverter este resgate/ }).count(), 0, 'funcionário não reverte o que registrou');
+    await shot(sp, '5-staff-vinculado');
+    assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: C } })).balanceCents, 4_500);
+    const audit = await db.adminAuditEvent.findMany({ where: { adminUserId: scopedStaff.id, action: 'VALE_PASS_REDEEMED' } });
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0].detail.accessBasis, 'SCOPE');
+    await consult(sp, D); // a outra loja
+    await sp.getByText(/não está autorizado a resgatar vouchers da Valle Showroom/).waitFor();
+    assert.equal(await sp.getByLabel('Valor a utilizar (R$)').count(), 0, 'sem formulário na loja não autorizada');
+    await ctx.close();
+
+    const call = (method, url, body) => fetch(`${apiUrl}${url}`, { method, headers: { Authorization: `Bearer ${apiToken}`, 'X-Admin-Session': scopedStaff.token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const mine = await entriesOf(C);
+    assert.equal(mine.length, 1);
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${C}/ledger/${mine[0].id}/reverse/prepare`, {})).status, 403, 'funcionário não reverte (guard da rota)');
+    assert.equal((await call('POST', `/admin/vale-pass/vouchers/${C}/block/prepare`, {})).status, 403, 'funcionário não bloqueia');
+    const cross = await call('POST', `/admin/vale-pass/vouchers/${D}/redeem`, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: 'tentativa cruzada', operationId: `staff-cross-${Date.now()}`, expectedBalanceCents: 50_000, confirmAmountCents: 100 });
+    assert.equal(cross.status, 403);
+    assert.equal((await cross.json()).code, 'COMPANY_NOT_AUTHORIZED');
+    assert.equal((await call('GET', '/admin/vale-pass/operators')).status, 403);
+    assert.equal((await call('GET', '/admin/vale-pass/ledger/reconcile')).status, 403);
+    assert.equal((await entriesOf(D)).length, 0, 'nada gravado na outra loja');
+    assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: D } })).balanceCents, 50_000);
+    pass('6g) STAFF vinculado: resgata na loja autorizada (prévia + valor redigitado, auditoria SCOPE), sem reversão/bloqueio; outra loja bloqueada; API direta (reverter, bloquear, cruzado, vínculos, conciliação) = 403');
+  }
 
   assert.deepEqual(errors, [], `erros no navegador: ${errors.join(' | ')}`);
   assert.deepEqual([...new Set(externalRequests)], [], 'nenhuma requisição saiu do computador');

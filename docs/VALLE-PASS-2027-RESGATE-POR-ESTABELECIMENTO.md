@@ -14,10 +14,17 @@ A empresa vem do **voucher**, nunca do pedido. A autorização é relida do banc
 |---|---|---|
 | SUPER_ADMIN | opera as duas | opera as duas |
 | ADMIN | **mantém o acesso atual** às duas lojas (`adminRequiresScope = false`) | **restrito** às lojas vinculadas |
-| STAFF | não opera (`NO_COMPANY_AUTHORIZED`) | **também não opera** (`STAFF_NOT_ENABLED`, `staffMayRedeem = false`) |
+| STAFF | não opera (`NO_COMPANY_AUTHORIZED`) | **resgata só as lojas vinculadas** (`staffMayRedeem = true`, decisão do Anderson em 26/10/2026); **nunca** reverte, bloqueia/desbloqueia nem concilia |
 
-### Divergência serviço × guards (fechada)
-A versão anterior do serviço permitia STAFF vinculado, enquanto os guards das rotas e as ações do ClosetAdmin exigem ADMIN. Agora o serviço diz **a mesma coisa que os guards**: STAFF não opera, vinculado ou não, até a decisão comercial. Liberar STAFF exige **duas** mudanças deliberadas e juntas: `OPERATOR_POLICY.staffMayRedeem = true` e abrir `@RequireRole('ADMIN')` nas 4 rotas (+ as 4 ações do ClosetAdmin). Há teste que trava a divergência (guards = ADMIN, política = STAFF recusado) e teste da regra futura (STAFF vinculado opera só a própria loja) sobre a função pura.
+### STAFF no resgate (liberado em 26/10/2026 — local, não publicado)
+O Anderson autorizou funcionários a validar vouchers. Mudança mínima e em camadas (todas a favor da segurança):
+1. `OPERATOR_POLICY.staffMayRedeem = true`: o STAFF resgata **somente** as empresas em que o proprietário o vinculou; sem vínculo = nenhum resgate; empresa errada = `COMPANY_NOT_AUTHORIZED`; voucher legado (sem empresa) segue exigindo ADMIN.
+2. Guards da API: `prepareRedeem` e `redeem` **deixam de exigir ADMIN** (continuam exigindo sessão + módulo `VALLE_PASS`); reversão (prévia e confirmação), bloqueio/desbloqueio, conciliação e vínculos **continuam** `ADMIN`/`SUPER_ADMIN`.
+3. Defesa em profundidade: o serviço de reversão também recusa quem não é ADMIN (não depende só do guard); o bloqueio já tinha essa checagem.
+4. ClosetAdmin: as duas *server actions* de resgate deixam de exigir ADMIN; a tela mostra o formulário ao STAFF só quando o servidor diz que ele opera aquele voucher (`operatorAccess`), com o aviso "Reversões e bloqueios são feitos por um administrador"; botões de reversão e bloqueio continuam só para ADMIN.
+5. Preservado: prévia + valor redigitado, idempotência por `operationId`, livro-razão imutável, auditoria com quem/base (`SCOPE`)/referência, nenhum dado histórico alterado. O endpoint antigo "usado" (uso integral de voucher novo sem uso parcial) passa a valer para STAFF vinculado **na própria empresa** (é o mesmo resgate integral, pelo livro-razão); em outra empresa = 403.
+Para **desfazer**: `staffMayRedeem = false` + restaurar `@RequireRole('ADMIN')` em `prepareRedeem`/`redeem` e `requireAdminRole` nas duas *server actions* (os testes travam a divergência entre serviço e guards).
+Sem migration. Depois de publicar, **ninguém recebe vínculo por padrão**: o proprietário precisa vincular cada funcionário à(s) loja(s) pelo painel de operadores (decisão registrada na auditoria).
 
 ### ADMIN sem vínculo — comportamento e proposta de migração segura
 Hoje: mantém acesso às duas lojas (para não bloquear acidentalmente quem opera hoje). Cada resgate registra `accessBasis` na auditoria (`LEGACY_ADMIN`), e a visão do proprietário mostra **quantos administradores estão sem vínculo** e **quantas operações dos últimos 30 dias ainda passaram pelo acesso legado**.
@@ -48,7 +55,7 @@ Cobertos no serviço, nos **controladores** e na **API HTTP direta com os guards
 
 ## Pendente de Anderson / decisão comercial
 1. Quem opera cada loja (lista por empresa) e quem mantém a lista.
-2. **STAFF pode resgatar?** (hoje não; ver "Divergência fechada" para o que muda).
+2. ~~STAFF pode resgatar?~~ **Sim** (Anderson, 26/10/2026), só nas lojas vinculadas e sem reversão/bloqueio. Falta: quem vincula cada funcionário e a qual loja.
 3. Quando migrar os administradores para o modo estrito (passo 3 acima).
 4. Bloqueio/desbloqueio e reversão por loja: hoje o bloqueio é de qualquer ADMIN e **não foi alterado**; a reversão já respeita a loja.
 5. Conferência de identidade do titular no balcão (intransferível): **não implementada**, aguarda aprovação.

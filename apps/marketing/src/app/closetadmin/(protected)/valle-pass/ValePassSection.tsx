@@ -376,7 +376,7 @@ export function ValePassSection({
 
       <EmailsPanel canManage={canManageCampaigns} />
 
-      <BalanceDesk canOperate={canManageCampaigns} request={deskRequest} />
+      <BalanceDesk canOperate={canManageCampaigns} canRedeem request={deskRequest} />
 
       {isOwner ? <OperatorScopesPanel /> : null}
 

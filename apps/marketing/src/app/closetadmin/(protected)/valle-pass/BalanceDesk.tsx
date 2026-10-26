@@ -52,7 +52,11 @@ interface Failure {
   readonly code: string | null;
 }
 
-export function BalanceDesk({ canOperate, request }: { canOperate: boolean; request: { code: string; nonce: number } | null }) {
+/**
+ * `canOperate` = administrador (reversão, bloqueio e demais ações administrativas). `canRedeem` = quem pode TENTAR resgatar (inclui funcionários vinculados a um
+ * estabelecimento); a decisão de verdade, por voucher, é do servidor (`view.operatorAccess`), nunca só da tela.
+ */
+export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: boolean; canRedeem: boolean; request: { code: string; nonce: number } | null }) {
   const [codeInput, setCodeInput] = useState('');
   const [view, setView] = useState<ValePassBalanceView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -142,7 +146,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
 
   // Autorização por estabelecimento: a tela só ESCONDE o que o servidor já recusaria (a barreira de verdade é do backend).
   const storeAllowed = view?.operatorAccess?.canOperate ?? true;
-  const canRedeemHere = canOperate && storeAllowed && view !== null && view.company !== null && view.redeemable;
+  const canRedeemHere = canRedeem && storeAllowed && view !== null && view.company !== null && view.redeemable;
 
   async function checkRedeem() {
     if (!view || !view.company) return;
@@ -368,7 +372,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
           ) : null}
 
           {/* ── Resgate ──────────────────────────────────────────────── */}
-          {view.company === null ? null : !canOperate ? (
+          {view.company === null ? null : !canRedeem ? (
             <p className="flex items-start gap-2 rounded-lg bg-ink/[0.04] px-3 py-2.5 text-xs text-ink/60 dark:bg-white/5 dark:text-dark-subtle">
               <Lock size={14} className="mt-0.5 shrink-0" /> Resgate e reversão por saldo exigem um administrador. Você pode consultar o saldo e o histórico.
             </p>
@@ -379,6 +383,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
           ) : canRedeemHere ? (
             <div className="space-y-3 rounded-xl border border-ink/10 p-3.5 dark:border-white/10">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink dark:text-dark-text"><ArrowDownCircle size={15} /> Registrar resgate ({COMPANY_LABELS[view.company]})</h3>
+              {!canOperate ? <p className="text-xs text-ink/55 dark:text-dark-subtle">Você pode registrar o resgate neste estabelecimento. Reversões e bloqueios são feitos por um administrador.</p> : null}
               {!preview ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] sm:items-end">

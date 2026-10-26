@@ -22,8 +22,9 @@ const WRITE_LIMIT = { default: { limit: 30, ttl: 60_000 } };
 
 /**
  * Saldo, resgate parcial e reversão de vouchers do Valle Pass 2027 (Fase 3 / PR B). Todas as rotas exigem sessão administrativa e o módulo VALLE_PASS.
- * Consulta (saldo/histórico): qualquer usuário do módulo, com dados pessoais mascarados. Resgate e reversão (prévia e confirmação): somente ADMIN —
- * não há vínculo seguro operador↔empresa para liberar STAFF. Nenhum endpoint público. A segurança é do backend: a prévia nunca é confiada na confirmação.
+ * Consulta (saldo/histórico): qualquer usuário do módulo, com dados pessoais mascarados. Resgate (prévia e confirmação): ADMIN/SUPER_ADMIN e STAFF — este
+ * SÓ nas empresas vinculadas a ele pelo proprietário (decidido no serviço, por voucher). Reversão, bloqueio/desbloqueio e conciliação: somente ADMIN.
+ * Nenhum endpoint público. A segurança é do backend: a prévia nunca é confiada na confirmação.
  */
 @Controller('admin/vale-pass')
 @UseGuards(AdminAuthGuard, AdminRoleGuard)
@@ -51,7 +52,6 @@ export class ValePassLedgerController {
   /** Prévia do resgate (nada é gravado). Devolve `operationId` e `expectedBalanceCents` para a confirmação. */
   @Post('vouchers/:code/redeem/prepare')
   @HttpCode(200)
-  @RequireRole('ADMIN')
   @Throttle(WRITE_LIMIT)
   prepareRedeem(@Param('code') code: string, @Body() dto: PrepareRedeemDto, @Req() req: RequestWithAdminUser): Promise<RedeemPreview> {
     return this.redemption.prepareRedeem(code, dto, actorOf(req));
@@ -60,7 +60,6 @@ export class ValePassLedgerController {
   /** Confirma e grava o resgate. Repetir a mesma operação devolve o resultado original (`replayed: true`); mesma chave com outro conteúdo = 409. */
   @Post('vouchers/:code/redeem')
   @HttpCode(200)
-  @RequireRole('ADMIN')
   @Throttle(WRITE_LIMIT)
   redeem(@Param('code') code: string, @Body() dto: ConfirmRedeemDto, @Req() req: RequestWithAdminUser): Promise<OperationResult> {
     return this.redemption.confirmRedeem(code, dto, actorOf(req));

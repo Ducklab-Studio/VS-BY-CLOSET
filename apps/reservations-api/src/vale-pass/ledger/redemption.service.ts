@@ -102,6 +102,8 @@ const HISTORY_LIMIT = 100;
 const CODE_SHAPE = /^[A-Za-z0-9-]{4,40}$/;
 
 const canOperate = (role: AdminRole) => role === 'ADMIN' || role === 'SUPER_ADMIN';
+/** Reversão é ato administrativo: nem STAFF vinculado a uma empresa a executa (defesa em profundidade além do guard da rota). */
+const REVERSAL_ADMIN_ONLY = 'A reversão de um resgate exige um administrador.';
 const hashOf = (parts: Record<string, string | number>): string => createHash('sha256').update(JSON.stringify(Object.entries(parts).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
 
 function maskName(name: string | null): string | null {
@@ -197,6 +199,7 @@ export class ValePassRedemptionService {
   // ─── Reversão ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   async prepareReverse(code: string, entryId: string, actor: Actor): Promise<{ canReverse: boolean; problems: { code: string; message: string }[]; entry: LedgerEntryView | null; balanceBeforeCents: number; balanceAfterCents: number | null; operationId: string; expectedBalanceCents: number }> {
+    if (!canOperate(actor.role)) throw new ForbiddenException(REVERSAL_ADMIN_ONLY);
     await this.requireAnyAuthorization(actor);
     const voucher = await this.requireByCode(code);
     await this.authorizeVoucher(this.prisma, actor, voucher);
@@ -218,6 +221,7 @@ export class ValePassRedemptionService {
     input: { reason: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number },
     actor: Actor,
   ): Promise<OperationResult> {
+    if (!canOperate(actor.role)) throw new ForbiddenException(REVERSAL_ADMIN_ONLY);
     await this.requireAnyAuthorization(actor);
     const reason = input.reason.trim();
     if (reason.length < 10) throw new BadRequestException('Informe a justificativa da reversão (mínimo de 10 caracteres).');
