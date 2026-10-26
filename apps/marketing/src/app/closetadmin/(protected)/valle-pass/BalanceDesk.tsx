@@ -69,6 +69,7 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemBusy, setRedeemBusy] = useState(false);
   const redeemLock = useRef(false);
+  const lookupSeq = useRef(0);
 
   // Reversão
   const [reversing, setReversing] = useState<string | null>(null);
@@ -113,17 +114,22 @@ export function BalanceDesk({ canOperate, request }: { canOperate: boolean; requ
       setLookupError('Informe o código do voucher.');
       return;
     }
+    // Só a consulta MAIS RECENTE vale: a atualização em segundo plano de um voucher anterior (depois de um resgate) não pode sobrescrever a tela
+    // quando a pessoa já consultou outro código.
+    const seq = ++lookupSeq.current;
     setLoading(true);
     setLookupError(null);
     if (!options.keepFlash) setFlash(null);
     const { data, error } = await lookupValePassBalanceAction(code);
+    if (seq !== lookupSeq.current) return;
     setLoading(false);
     if (error || !data) {
       setView(null);
       setLookupError(error?.message ?? 'Não foi possível consultar o voucher.');
       return;
     }
-    setCodeInput(data.code);
+    // Atualização em segundo plano (depois de um resgate/reversão) não mexe no campo: a pessoa pode já estar digitando outro código.
+    if (!options.keepForms) setCodeInput(data.code);
     setView(data);
     if (!options.keepForms) resetForms();
   }
