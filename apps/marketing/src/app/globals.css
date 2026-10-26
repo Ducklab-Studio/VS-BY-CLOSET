@@ -356,6 +356,52 @@ body {
 .winter-image:after {
   background: linear-gradient(90deg, #111b26b8, #111b2615);
 }
+/* Foto vertical (2:3): no desktop ocupa a metade direita e o texto fica no fundo escuro; no celular vira fundo com degradê. */
+.winter-rental-photo {
+  object-position: 50% 30%;
+}
+@media (min-width: 901px) {
+  .winter-image {
+    left: auto;
+    width: 48%;
+  }
+  .winter-image:after {
+    background: linear-gradient(90deg, #263039 0%, #26303900 38%), linear-gradient(transparent 70%, #15191e66);
+  }
+  .winter-content h2 {
+    font-size: clamp(40px, 4.6vw, 72px);
+  }
+  .winter-content {
+    max-width: 54%;
+  }
+}
+@media (max-width: 900px) {
+  .winter-story {
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .winter-image {
+    position: relative;
+    inset: auto;
+    height: min(118vw, 520px);
+    flex: none;
+  }
+  .winter-rental-photo {
+    object-position: 50% 26%;
+  }
+  .winter-image:after {
+    background: linear-gradient(transparent 55%, #263039 100%);
+  }
+  .winter-content {
+    padding-top: 8px;
+    padding-bottom: 56px;
+  }
+  .winter-content h2 {
+    font-size: clamp(36px, 10vw, 52px);
+    margin: 20px 0 28px;
+  }
+}
 .winter-content {
   position: relative;
   color: theme('colors.cream');

@@ -123,14 +123,13 @@ export default function HomePage() {
         <FeaturedProducts />
       </section>
       <section className="winter-story" aria-labelledby="winter-title">
-        {/* TODO(campanha "todas as estações"): trocar por foto/vídeo novo do drive — imagem de destaque desta seção */}
         <div className="winter-image">
           <Image
-            src="/editorial/winter-campaign.webp"
-            alt="Montanhas cobertas de neve em um editorial de inverno"
+            src="/editorial/winter-rental.webp"
+            alt="Mulher de macacão preto e óculos de neve ajoelhada na neve, com montanhas ao fundo"
             fill
-            sizes="100vw"
-            className="campaign-image"
+            sizes="(max-width: 900px) 100vw, 48vw"
+            className="campaign-image winter-rental-photo"
           />
         </div>
         <div className="winter-content">
