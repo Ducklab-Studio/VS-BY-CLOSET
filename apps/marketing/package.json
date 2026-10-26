@@ -22,6 +22,8 @@
     "test:valle-pass-balance": "node ../../scripts/no-real-network.mjs node test/valle-pass-balance-browser.mjs",
     "test:valle-pass-flow": "node ../../scripts/no-real-network.mjs node test/valle-pass-flow-browser.mjs",
     "test:valle-pass-emails": "node ../../scripts/no-real-network.mjs node test/valle-pass-emails-browser.mjs",
+    "test:hero-video": "node ../../scripts/no-real-network.mjs node test/hero-video-browser.mjs",
+    "check:hero-video": "node scripts/check-hero-video.mjs",
     "test:reservations-badge": "node ../../scripts/no-real-network.mjs node test/reservations-badge.mjs",
     "test:shopify-deleted-orders": "node ../../scripts/no-real-network.mjs node test/shopify-deleted-orders.mjs",
     "test:sync-panel": "node ../../scripts/no-real-network.mjs node test/sync-panel-browser.mjs",
