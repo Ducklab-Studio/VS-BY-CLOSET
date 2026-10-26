@@ -140,6 +140,12 @@ const nextConfig = {
           },
         ],
       },
+      // Vídeo do hero: arquivos com nome versionado (hero-v1.mp4, hero-v2.mp4…) nunca mudam, então podem ser guardados por um ano pelo navegador e pela CDN.
+      // Trocar o vídeo = novo nome de arquivo. (As requisições por faixa/Range e o 206 são atendidos pela própria Vercel.)
+      {
+        source: '/editorial/video/:path*',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
+      },
     ];
   },
 };
