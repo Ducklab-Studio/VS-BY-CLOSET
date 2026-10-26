@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
 
 /**
  * Segredo compartilhado que autentica os endpoints administrativos da
@@ -34,6 +34,27 @@ export const MIN_NEXT_TOKEN_LENGTH = 32;
 export function resolveAdminApiTokens(): readonly string[] {
   const primary = resolveAdminApiToken();
   const next = process.env.ADMIN_API_TOKEN_NEXT;
-  if (!next || next.length < MIN_NEXT_TOKEN_LENGTH || next === primary) return [primary];
+  if (!next) return [primary];
+  if (next.length < MIN_NEXT_TOKEN_LENGTH || next === primary) {
+    announce('ignored', 'ADMIN_API_TOKEN_NEXT está definido mas foi IGNORADO (curto demais ou igual ao principal): só o ADMIN_API_TOKEN é aceito.');
+    return [primary];
+  }
+  announce('active', 'Rotação do ADMIN_API_TOKEN em andamento: a API aceita o token principal e o ADMIN_API_TOKEN_NEXT. Remova o NEXT ao concluir a rotação.');
   return [primary, next];
+}
+
+const rotationLogger = new Logger('AdminTokenRotation');
+const announced = new Set<string>();
+
+/** Aviso de configuração, uma vez por tipo e por processo. NUNCA inclui valores de token (só o nome das variáveis). */
+function announce(kind: 'ignored' | 'active', message: string): void {
+  if (announced.has(kind)) return;
+  announced.add(kind);
+  if (kind === 'ignored') rotationLogger.warn(message);
+  else rotationLogger.log(message);
+}
+
+/** Só para testes: permite observar o aviso de novo. */
+export function resetAdminTokenRotationAnnouncementsForTest(): void {
+  announced.clear();
 }

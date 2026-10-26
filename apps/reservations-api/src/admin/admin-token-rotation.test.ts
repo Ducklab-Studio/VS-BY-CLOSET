@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
-import { MIN_NEXT_TOKEN_LENGTH, resolveAdminApiTokens } from './admin-auth.config';
+import { MIN_NEXT_TOKEN_LENGTH, resetAdminTokenRotationAnnouncementsForTest, resolveAdminApiTokens } from './admin-auth.config';
 import { AdminAuthGuard } from './admin-auth.guard';
 import { verifyAnyAdminToken } from './admin-token';
 
@@ -16,6 +16,7 @@ const NEW = 'token-novo-sintetico-9876543210-jihgfedcba';
 const saved = { primary: process.env.ADMIN_API_TOKEN, next: process.env.ADMIN_API_TOKEN_NEXT };
 
 beforeEach(() => {
+  resetAdminTokenRotationAnnouncementsForTest();
   delete process.env.ADMIN_API_TOKEN;
   delete process.env.ADMIN_API_TOKEN_NEXT;
 });
@@ -113,5 +114,67 @@ describe('sessões e permissões não dependem do token do servidor', () => {
       expect(source).toMatch(/resolveAdminApiTokens/);
       expect(source).not.toMatch(/verifyAdminToken\(/);
     }
+  });
+});
+
+describe('os tokens nunca aparecem em logs nem em respostas', () => {
+  const everything = (calls: unknown[][]) => JSON.stringify(calls);
+
+  test('avisos de configuração (rotação ativa / "próximo" ignorado) citam só o NOME das variáveis, uma vez por processo', () => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      process.env.ADMIN_API_TOKEN = OLD;
+      process.env.ADMIN_API_TOKEN_NEXT = NEW;
+      resolveAdminApiTokens();
+      resolveAdminApiTokens();
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(everything(log.mock.calls)).toMatch(/ADMIN_API_TOKEN_NEXT/);
+      process.env.ADMIN_API_TOKEN_NEXT = OLD; // igual ao principal: ignorado, com aviso
+      resolveAdminApiTokens();
+      resolveAdminApiTokens();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = everything([...log.mock.calls, ...warn.mock.calls]);
+      expect(logged).not.toContain(OLD);
+      expect(logged).not.toContain(NEW);
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test('sem ADMIN_API_TOKEN_NEXT nada é registrado', () => {
+    const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      process.env.ADMIN_API_TOKEN = OLD;
+      resolveAdminApiTokens();
+      expect(log).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test('as respostas de recusa (401/503) nunca contêm o token apresentado nem os configurados', () => {
+    process.env.ADMIN_API_TOKEN = OLD;
+    process.env.ADMIN_API_TOKEN_NEXT = NEW;
+    const probe = (authorization?: string): string => {
+      try {
+        guard.canActivate(contextWith(authorization));
+        return '';
+      } catch (error) {
+        return JSON.stringify({ message: (error as Error).message, response: (error as { response?: unknown }).response });
+      }
+    };
+    const presented = 'valor-apresentado-sintetico-0123456789abcdef';
+    for (const body of [probe(`Bearer ${presented}`), probe(undefined), probe(`Basic ${presented}`)]) {
+      expect(body).not.toContain(presented);
+      expect(body).not.toContain(OLD);
+      expect(body).not.toContain(NEW);
+    }
+    delete process.env.ADMIN_API_TOKEN;
+    expect(probe(`Bearer ${NEW}`)).not.toContain(NEW);
   });
 });
