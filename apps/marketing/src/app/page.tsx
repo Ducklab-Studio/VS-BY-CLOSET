@@ -3,6 +3,8 @@ import Image from 'next/image';
 import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { EditorialMotion } from '@/components/EditorialMotion';
+import { HeroMedia } from '@/components/HeroMedia';
+import { HERO_VIDEO } from '@/lib/hero-media';
 
 export default function HomePage() {
   return (
@@ -28,23 +30,10 @@ export default function HomePage() {
           </p>
         </div>
         <div className="hero-photo">
-          {/* TODO(campanha "todas as estações"): trocar por foto/vídeo novo do drive — imagem de destaque da home */}
-          {/*
-            Ponto de entrada do futuro vídeo do hero: quando o arquivo
-            estiver disponível, troque a <Image> abaixo por um <video
-            autoPlay muted loop playsInline poster="/editorial/winter-campaign.webp"
-            className="campaign-image"><source src="/editorial/hero.mp4" type="video/mp4" /></video>.
-            A classe "campaign-image" já resolve object-fit/position — não
-            mexe em mais nada. Nenhuma mídia nova foi baixada ou trocada
-            agora; a imagem atual continua sendo usada até lá.
-          */}
-          <Image
-            src="/editorial/winter-campaign.webp"
-            alt="Editorial de inverno: look claro em uma paisagem de montanhas nevadas"
-            fill
-            priority
-            sizes="(max-width: 760px) 100vw, 58vw"
-            className="campaign-image"
+          {/* Vídeo do hero: ver `HERO_VIDEO` em lib/hero-media.ts (hoje null = só a imagem) e docs/HERO-VIDEO.md. */}
+          <HeroMedia
+            image={{ src: '/editorial/winter-campaign.webp', alt: 'Editorial de inverno: look claro em uma paisagem de montanhas nevadas' }}
+            video={HERO_VIDEO}
           />
           <div className="photo-caption">
             <span>THE ALL-SEASON EDIT</span>

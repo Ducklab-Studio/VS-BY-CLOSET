@@ -183,6 +183,18 @@ body {
   object-fit: cover;
   object-position: 67% center;
 }
+/* Vídeo do hero (quando existir): cobre a imagem só depois de começar a tocar; a imagem fica por baixo como fallback. */
+.hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+.hero-video.is-playing {
+  opacity: 1;
+}
 .hero-photo:after {
   content: '';
   position: absolute;
