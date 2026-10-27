@@ -17,6 +17,7 @@
 ## 3. O que mudou no código (somente testes/checagens, sem migration)
 - `OFFICIAL_SPEC` da checagem de prontidão passou a exigir início 01/04/2027 e fim 15/10/2027 (data diferente = DIVERGÊNCIA; sem início = PENDÊNCIA) e a data prevista de abertura das vendas é 01/11/2026.
 - O item "Datas de validade confirmadas" do painel cita a confirmação e **continua pendente** de propósito: o sistema não guarda aprovação humana (regra do painel: nada é aprovado sem evidência medida).
+- **Texto público (vitrine):** a previsão exibida em "Em breve" passa de "Vendas previstas a partir de 30/10/2026" para "**01/11/2026** — data sujeita a confirmação" (`apps/marketing/src/lib/vale-pass-sale.ts`). É só a previsão de pré-lançamento: o estado de venda continua dependendo do estoque da Shopify. **Efeito do merge:** gera deploy de produção no Vercel (o único efeito público desta mudança).
 - Testes novos/atualizados (banco local descartável): configuração oficial, janela de uso nas bordas (um segundo antes/depois de 01/04 e de 16/10), emissão com as datas, e o plano de edição da campanha (um único PATCH, idempotência, recusa de uma data só, recuperação).
 
 ## 4. Impactos

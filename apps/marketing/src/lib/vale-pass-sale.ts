@@ -12,10 +12,10 @@ export function valePassSaleState(variant: { availableForSale?: boolean | null }
 }
 
 /**
- * Previsão de abertura das vendas informada pelo Anderson (30/10/2026). É só uma PREVISÃO exibida ao público: não confirma a venda e
+ * Previsão de abertura das vendas informada pelo Anderson (01/11/2026, confirmada em 26/10/2026). É só uma PREVISÃO exibida ao público: não confirma a venda e
  * não libera nada; a abertura real é o estoque da Shopify (acima).
  */
-export const VALE_PASS_EXPECTED_SALES_START = '2026-10-30';
+export const VALE_PASS_EXPECTED_SALES_START = '2026-11-01';
 
 const COMMERCIAL_TIME_ZONE = 'America/Sao_Paulo';
 
