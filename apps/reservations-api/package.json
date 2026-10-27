@@ -1,6 +1,6 @@
 {
   "name": "@valle/reservations-api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Fonte central de verdade das reservas — sincroniza Shopify BR e Shopify CL contra a mesma disponibilidade. Não depende do PRP: escuta os webhooks nativos da Shopify (orders/paid, orders/cancelled, refunds/create).",
   "scripts": {
