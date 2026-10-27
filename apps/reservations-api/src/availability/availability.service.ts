@@ -1,6 +1,7 @@
 import { HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RentalRuleConfigService } from '../rental-rule-config/rental-rule-config.service';
+import { numericShopifyId, valePassVariantIds } from '../vale-pass/vale-pass-order-status';
 import {
   type PlanViolation,
   blockedRangesOverlap,
@@ -210,6 +211,8 @@ export class AvailabilityService {
 
   private async loadUnits(shopifyVariantId: string): Promise<{ id: string; reservableOnline: boolean }[]> {
     try {
+      // Valle Pass é compra direta: nunca tem unidade de aluguel (mesmo que exista um cadastro por engano).
+      if ((await valePassVariantIds(this.prisma)).has(numericShopifyId(shopifyVariantId) ?? '')) return [];
       return await this.prisma.rentalUnit.findMany({
         where: { shopifyVariantId, active: true },
         select: { id: true, reservableOnline: true },

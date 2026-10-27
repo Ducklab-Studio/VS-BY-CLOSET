@@ -119,6 +119,7 @@ describe('HoldsService — retry e rollback (fault injection, item 10/11/21 da F
     let executeRawCalls = 0;
     const secondInsertError = new Error('erro simulado no 2º INSERT de reservation_items');
     const fakeTx = {
+      valePassCampaign: { findMany: vi.fn().mockResolvedValue([]) },
       store: {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({

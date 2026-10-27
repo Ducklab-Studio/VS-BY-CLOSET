@@ -26,6 +26,7 @@ import { loadOccupations } from '../availability/occupations';
 import { reasonMessage, reasonsFor, type OccupationKind } from '../availability/unavailable-reason';
 import { HOLD_BUSY_MESSAGE, HOLD_CLIENT_LIMIT_MESSAGE, HOLD_LIMITS, type HoldClient, maxHeldPieces } from './hold-client';
 import { HOLD_WINDOW_MINUTES } from '../checkout/checkout.config';
+import { numericShopifyId, valePassVariantIds } from '../vale-pass/vale-pass-order-status';
 
 const MAX_ALLOCATION_ATTEMPTS = 3;
 
@@ -295,9 +296,11 @@ export class HoldsService {
       WHERE shopify_variant_id = ANY(${variantIds}::text[]) AND active = true
       GROUP BY shopify_variant_id
     `;
+    // Valle Pass é compra direta: nunca se reserva como aluguel (cai no default {false,false} e o motor recusa).
+    const valePassIds = await valePassVariantIds(tx);
     const variantFlags = new Map(
       flagRows
-        .filter((r) => r.unitCount > 0)
+        .filter((r) => r.unitCount > 0 && !valePassIds.has(numericShopifyId(r.shopifyVariantId) ?? ''))
         .map((r) => [r.shopifyVariantId, { reservableOnline: r.reservableOnline, countsTowardRentalDuration: r.countsTowardRentalDuration }]),
     );
 
