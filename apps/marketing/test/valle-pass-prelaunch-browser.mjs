@@ -112,7 +112,7 @@ try {
   await page.getByTestId('valle-pass-prelaunch-badge').waitFor();
   assert.match(await page.getByTestId('valle-pass-unavailable').innerText(), /ainda não está disponível para compra/);
   assert.equal(await page.getByTestId('valle-pass-unavailable').getAttribute('role'), 'status');
-  assert.match(await page.getByTestId('valle-pass-closed-note').innerText(), /Vendas previstas a partir de 30\/10\/2026 — data sujeita a confirmação\.|A abertura das vendas será anunciada em breve\./);
+  assert.match(await page.getByTestId('valle-pass-closed-note').innerText(), /Vendas previstas a partir de 01\/11\/2026 — data sujeita a confirmação\.|A abertura das vendas será anunciada em breve\./);
   const describedBy = await cta.getAttribute('aria-describedby');
   assert.ok(describedBy && (await page.locator(`#${describedBy}`).count()) === 1, 'o botão aponta para o aviso que o explica');
   const values = await page.getByTestId('valle-pass-values').innerText();

@@ -103,3 +103,28 @@ describe('validade fixa dos vouchers e fim das vendas', () => {
     expect(errors({ name: '', quantityLimit: 1, salesEndDate: 'x' }, { issued: 5, sold: 5, openLot: null })).toHaveLength(3);
   });
 });
+
+describe('configuração oficial da validade (Anderson, 27/10/2026): 01/04/2027 a 15/10/2027', () => {
+  const PRODUCTION_LIKE: CampaignCurrent = { ...CURRENT, quantityLimit: null, globalLimit: 1_000 };
+  const OFFICIAL = { voucherValidFrom: '2027-04-01', voucherValidUntil: '2027-10-15', salesEndDate: '2027-05-31' } as const;
+
+  test('um único PATCH altera só início, fim e encerramento informativo; o resto da campanha (valor, limites, nome) fica intacto', () => {
+    const plan = ok({ ...OFFICIAL }, NO_SALES, PRODUCTION_LIKE);
+    expect(plan.changed).toEqual(['voucherValidFrom', 'voucherValidUntil', 'salesEndDate']);
+    expect(plan.before).toEqual({ voucherValidFrom: null, voucherValidUntil: null, salesEndDate: null });
+    expect(plan.after).toEqual({ ...OFFICIAL });
+    expect(Object.keys(plan.data).sort()).toEqual(['salesEndDate', 'voucherValidFrom', 'voucherValidUntil']);
+  });
+
+  test('reaplicar é idempotente (nada muda) e início sem fim (ou o contrário) é recusado: o banco exige as duas datas', () => {
+    const configured: CampaignCurrent = { ...PRODUCTION_LIKE, voucherValidFrom: new Date('2027-04-01T00:00:00Z'), voucherValidUntil: new Date('2027-10-15T00:00:00Z'), salesEndDate: new Date('2027-05-31T00:00:00Z') };
+    expect(ok({ ...OFFICIAL }, NO_SALES, configured).changed).toEqual([]);
+    expect(errors({ voucherValidFrom: '2027-04-01' }, NO_SALES, PRODUCTION_LIKE)[0]).toMatch(/as duas datas/);
+    expect(errors({ voucherValidUntil: '2027-10-15' }, NO_SALES, PRODUCTION_LIKE)[0]).toMatch(/as duas datas/);
+  });
+
+  test('recuperação: as duas datas voltam a vazio juntas (passes já emitidos não são alterados)', () => {
+    const configured: CampaignCurrent = { ...PRODUCTION_LIKE, voucherValidFrom: new Date('2027-04-01T00:00:00Z'), voucherValidUntil: new Date('2027-10-15T00:00:00Z') };
+    expect(ok({ voucherValidFrom: null, voucherValidUntil: null }, NO_SALES, configured).after).toEqual({ voucherValidFrom: null, voucherValidUntil: null });
+  });
+});

@@ -4,18 +4,20 @@
  * comercial que ninguém pode inventar). Só LEITURA: nenhuma função aqui altera campanha, estoque ou pedido.
  */
 
-/** Regras confirmadas pelo Anderson (preço, benefícios, meta, fim da validade). Nada aqui é suposição. */
+/** Regras confirmadas pelo Anderson (preço, benefícios, meta, validade). Nada aqui é suposição. */
 export const OFFICIAL_SPEC = {
   amountCents: 35_000,
   globalLimit: 1_000,
-  voucherValidUntil: '2027-09-30',
+  /** Validade dos vouchers, confirmada por escrito pelo Anderson (WhatsApp, 27/10/2026): 01/04/2027 a 15/10/2027, inclusive. */
+  voucherValidFrom: '2027-04-01',
+  voucherValidUntil: '2027-10-15',
   vouchers: [
     { company: 'VALLE_SHOWROOM', amountCents: 50_000 },
     { company: 'VS_BY_CLOSET', amountCents: 5_000 },
   ],
   discountPercent: 10,
-  /** Início das vendas previsto (30/10/2026). O sistema NÃO tem data de início de vendas: a venda é controlada pelo estoque da Shopify. */
-  salesStart: '2026-10-30',
+  /** Início das vendas previsto (01/11/2026). O sistema NÃO tem data de início de vendas: a venda é controlada pelo estoque da Shopify. */
+  salesStart: '2026-11-01',
   /** Encerramento previsto: último dia de maio de 2027 (ou esgotamento do estoque — interpretação comercial ainda a confirmar). */
   salesEndLastDay: '2027-05-31',
 } as const;
@@ -100,18 +102,20 @@ export function evaluateLaunchReadiness(input: ReadinessInput): ReadinessItem[] 
 
   out.push(
     campaign.voucherValidUntil === OFFICIAL_SPEC.voucherValidUntil
-      ? item('valid-until', 'OK', 'validade até 30/09/2027')
+      ? item('valid-until', 'OK', 'validade até 15/10/2027')
       : item('valid-until', 'DIVERGENCE', `fim da validade ${campaign.voucherValidUntil ?? 'não configurado'}; informado: ${OFFICIAL_SPEC.voucherValidUntil}`),
   );
   out.push(
-    campaign.voucherValidFrom
-      ? item('valid-from', 'OK', `validade começa em ${campaign.voucherValidFrom}`)
-      : item('valid-from', 'PENDING', 'data de INÍCIO da validade não definida: começa na abertura da temporada de neve de 2027, data ainda não informada (sem ela a emissão fica retida, por segurança)'),
+    campaign.voucherValidFrom === OFFICIAL_SPEC.voucherValidFrom
+      ? item('valid-from', 'OK', 'validade começa em 01/04/2027')
+      : campaign.voucherValidFrom
+        ? item('valid-from', 'DIVERGENCE', `início da validade ${campaign.voucherValidFrom}; confirmado: ${OFFICIAL_SPEC.voucherValidFrom}`)
+        : item('valid-from', 'PENDING', 'início da validade (01/04/2027) ainda não configurado na campanha (sem ele e sem o fim, a emissão fica retida, por segurança)'),
   );
-  out.push(item('extension', 'PENDING', 'prorrogação da validade: vale para todos os vouchers, mas a elegibilidade de expirados e cancelados e a data final ainda precisam de confirmação (a estrutura existe; nenhuma data foi definida)'));
+  out.push(item('extension', 'PENDING', 'prorrogação da validade: vale para todos os vouchers, mas a elegibilidade de expirados e cancelados ainda precisa de confirmação (a estrutura existe; nenhuma prorrogação foi definida)'));
 
   // Janela de vendas: o início não é campo do sistema (a Shopify controla pelo estoque); o encerramento é só informativo.
-  out.push(item('sales-start', 'PENDING', `início das vendas previsto em 30/10/2026: o sistema não tem data de início; a venda abre quando o estoque da Shopify for ajustado ao saldo do lote 1 (hoje deve estar em 0)`));
+  out.push(item('sales-start', 'PENDING', `início das vendas previsto em 01/11/2026: o sistema não tem data de início; a venda abre quando o estoque da Shopify for ajustado ao saldo do lote 1 (hoje deve estar em 0)`));
   const salesEnd = campaign.salesEndDate ?? null;
   if (salesEnd === null) out.push(item('sales-end', 'PENDING', 'encerramento das vendas (último dia de maio de 2027 ou esgotamento do estoque) não registrado: interpretação comercial a confirmar; nenhum encerramento automático existe'));
   else if (salesEnd === OFFICIAL_SPEC.salesEndLastDay) out.push(item('sales-end', 'OK', 'encerramento informativo registrado em 31/05/2027 (o esgotamento do estoque encerra antes; nada é encerrado automaticamente)'));

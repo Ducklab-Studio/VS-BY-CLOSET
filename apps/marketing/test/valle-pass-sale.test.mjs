@@ -34,20 +34,20 @@ test('a data NUNCA abre a venda: o estado não depende de relógio nem de data p
   assert.ok(!/Date|now|VALE_PASS_EXPECTED_SALES_START/.test(body), 'valePassSaleState não pode olhar para datas');
 });
 
-test('previsão de 30/10/2026 aparece como previsão sujeita a confirmação, no fuso comercial de São Paulo', () => {
-  assert.equal(sale.VALE_PASS_EXPECTED_SALES_START, '2026-10-30');
-  assert.equal(sale.formatIsoDateBr('2026-10-30'), '30/10/2026');
-  const previsao = 'Vendas previstas a partir de 30/10/2026 — data sujeita a confirmação.';
+test('previsão de 01/11/2026 aparece como previsão sujeita a confirmação, no fuso comercial de São Paulo', () => {
+  assert.equal(sale.VALE_PASS_EXPECTED_SALES_START, '2026-11-01');
+  assert.equal(sale.formatIsoDateBr('2026-11-01'), '01/11/2026');
+  const previsao = 'Vendas previstas a partir de 01/11/2026 — data sujeita a confirmação.';
   assert.equal(sale.valePassClosedNote(new Date('2026-10-22T12:00:00Z')), previsao);
-  assert.equal(sale.valePassClosedNote(new Date('2026-10-30T12:00:00Z')), previsao, 'no próprio dia ainda é previsão');
-  // 30/10 23:59 em São Paulo (UTC-3) = 31/10 02:59 UTC: ainda é o dia 30 comercial
-  assert.equal(sale.valePassClosedNote(new Date('2026-10-31T02:59:00Z')), previsao);
+  assert.equal(sale.valePassClosedNote(new Date('2026-11-01T12:00:00Z')), previsao, 'no próprio dia ainda é previsão');
+  // 01/11 23:59 em São Paulo (UTC-3) = 02/11 02:59 UTC: ainda é o dia 1º comercial
+  assert.equal(sale.valePassClosedNote(new Date('2026-11-02T02:59:00Z')), previsao);
 });
 
 test('depois da data prevista, a página não repete uma data vencida', () => {
-  // 31/10 00:00 em São Paulo = 31/10 03:00 UTC
+  // 02/11 00:00 em São Paulo = 02/11 03:00 UTC
   const depois = 'A abertura das vendas será anunciada em breve.';
-  assert.equal(sale.valePassClosedNote(new Date('2026-10-31T03:00:00Z')), depois);
+  assert.equal(sale.valePassClosedNote(new Date('2026-11-02T03:00:00Z')), depois);
   assert.equal(sale.valePassClosedNote(new Date('2027-02-01T12:00:00Z')), depois);
 });
 

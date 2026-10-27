@@ -37,6 +37,11 @@ test('campanha com benefícios e datas configuradas mostra as datas oficiais', (
   assert.deepEqual(v, { kind: 'FIXED_WINDOW', text: '01/12/2026 a 30/09/2027', note: null });
 });
 
+test('validade oficial confirmada pelo Anderson (27/10/2026): 01/04/2027 a 15/10/2027', () => {
+  const v = j(validityIndicator({ ...base, benefitsCount: 3, voucherValidFrom: '2027-04-01', voucherValidUntil: '2027-10-15' }));
+  assert.deepEqual(v, { kind: 'FIXED_WINDOW', text: '01/04/2027 a 15/10/2027', note: null });
+});
+
 test('janela incompleta ou inválida com benefícios = a definir, com aviso (o banco exige as duas datas juntas)', () => {
   for (const win of [{ voucherValidFrom: '2026-12-01', voucherValidUntil: null }, { voucherValidFrom: null, voucherValidUntil: '2027-09-30' }]) {
     const v = j(validityIndicator({ ...base, benefitsCount: 3, ...win }));

@@ -7,11 +7,12 @@ import { purgeLedgerForTest } from './ledger/ledger-test-utils';
 import { ValePassIssuanceService, type IssuanceOutcome } from './vale-pass-issuance.service';
 import { ValePassLotsService } from './vale-pass-lots.service';
 import { evaluateLaunchReadiness } from './vale-pass-launch-readiness';
+import { ValePassRedemptionService } from './ledger/redemption.service';
 
 /**
- * Campanha OFICIAL do Valle Pass 2027 (1.000 unidades, R$ 350 = R$ 500 Valle Showroom + R$ 50 VS BY CLOSET + 10% descritivo, validade até
- * 30/09/2027) em PostgreSQL LOCAL descartável. A data de INÍCIO da validade ainda não foi definida pelo Anderson: aqui usa-se um valor
- * SINTÉTICO só para o teste (nunca é configuração de produção). Nenhuma Shopify, nenhum e-mail, nenhum pagamento.
+ * Campanha OFICIAL do Valle Pass 2027 (1.000 unidades, R$ 350 = R$ 500 Valle Showroom + R$ 50 VS BY CLOSET + 10% descritivo, validade de
+ * 01/04/2027 a 15/10/2027, inclusive — confirmada pelo Anderson por escrito em 27/10/2026) em PostgreSQL LOCAL descartável. Nenhuma
+ * Shopify, nenhum e-mail, nenhum pagamento.
  */
 const localDatabase = /^postgres(?:ql)?:\/\/[^@]+@(localhost|127\.0\.0\.1)(:\d+)?\/[^/]*(test|audit|operational)/i.test(process.env.DATABASE_URL ?? '');
 const localDescribe = localDatabase ? describe : describe.skip;
@@ -21,7 +22,11 @@ const issuance = new ValePassIssuanceService();
 const lots = new ValePassLotsService(prisma);
 
 const TAG = `VPO-${Date.now()}`;
-const SYNTHETIC_VALID_FROM = '2027-01-01'; // SINTÉTICO — a data real de início é pendência do Anderson
+const VALID_FROM = '2027-04-01';
+const VALID_UNTIL = '2027-10-15';
+// Fuso America/Sao_Paulo (UTC−3, sem horário de verão em 2027): o primeiro instante de uso é 00:00 de 01/04; o primeiro instante FORA é 00:00 de 16/10.
+const FROM_INSTANT = '2027-04-01T03:00:00.000Z';
+const EXPIRES_INSTANT = '2027-10-16T03:00:00.000Z';
 let counter = 0;
 let storeId: string;
 let adminId: string;
@@ -36,8 +41,8 @@ async function officialCampaign(): Promise<ValePassCampaign> {
       validityDays: 30,
       quantityLimit: null,
       globalLimit: 1_000,
-      voucherValidFrom: new Date(`${SYNTHETIC_VALID_FROM}T00:00:00.000Z`),
-      voucherValidUntil: new Date('2027-09-30T00:00:00.000Z'),
+      voucherValidFrom: new Date(`${VALID_FROM}T00:00:00.000Z`),
+      voucherValidUntil: new Date(`${VALID_UNTIL}T00:00:00.000Z`),
       shopifyVariantId: `${TAG}-var-${counter++}`,
     },
   });
@@ -114,8 +119,8 @@ async function preSold(campaign: ValePassCampaign, units: number): Promise<void>
         amountCents: benefit.amountCents!,
         status: 'ACTIVE' as const,
         purchasedAt: new Date(),
-        validFrom: new Date('2027-01-01T03:00:00.000Z'),
-        expiresAt: new Date('2027-10-01T03:00:00.000Z'),
+        validFrom: new Date(FROM_INSTANT),
+        expiresAt: new Date(EXPIRES_INSTANT),
         company: benefit.company!,
         groupId,
         benefitId: benefit.id,
@@ -163,7 +168,7 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     const c = await officialCampaign();
     const benefits = await prisma.valePassCampaignBenefit.findMany({ where: { campaignId: c.id } });
     const items = evaluateLaunchReadiness({
-      campaign: { amountCents: c.amountCents, active: c.active, quantityLimit: c.quantityLimit, globalLimit: c.globalLimit, voucherValidFrom: SYNTHETIC_VALID_FROM, voucherValidUntil: '2027-09-30', salesEndDate: '2027-05-31' },
+      campaign: { amountCents: c.amountCents, active: c.active, quantityLimit: c.quantityLimit, globalLimit: c.globalLimit, voucherValidFrom: VALID_FROM, voucherValidUntil: VALID_UNTIL, salesEndDate: '2027-05-31' },
       benefits: benefits.map((b) => ({ kind: b.kind, company: b.company, amountCents: b.amountCents, discountPercent: b.discountPercent, terms: 'x', active: b.active })),
       shopifyStock: 1_000,
       hasOpenLot: true,
@@ -171,7 +176,7 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     expect(items.filter((i) => i.kind !== 'OK').map((i) => i.id)).toEqual(['extension', 'sales-start']);
   });
 
-  test('cada unidade gera DOIS vouchers independentes, com a validade até 30/09/2027 (fim às 00:00 de 01/10 no fuso configurado)', async () => {
+  test('cada unidade gera DOIS vouchers independentes, com a validade de 01/04/2027 a 15/10/2027 (fim às 00:00 de 16/10 no fuso configurado)', async () => {
     const c = await officialCampaign();
     const order = paidOrder(c, 2);
     const outcome = outcomeOf(await issue(c, order));
@@ -182,12 +187,31 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
     expect(rows.filter((r) => r.company === 'VS_BY_CLOSET').every((r) => r.amountCents === 5_000)).toBe(true);
     expect(new Set(rows.map((r) => r.code)).size).toBe(4);
     for (const r of rows) {
-      expect(r.expiresAt.toISOString()).toBe('2027-10-01T03:00:00.000Z'); // 30/09/2027 inclusive, America/Sao_Paulo (UTC−3)
+      expect(r.validFrom?.toISOString()).toBe(FROM_INSTANT); // 01/04/2027 00:00, America/Sao_Paulo (UTC−3)
+      expect(r.expiresAt.toISOString()).toBe(EXPIRES_INSTANT); // 15/10/2027 inclusive
       expect(r.balanceCents).toBe(r.amountCents); // saldo próprio por voucher
     }
     const byGroup = new Map<string, string[]>();
     for (const r of rows) byGroup.set(r.groupId!, [...(byGroup.get(r.groupId!) ?? []), r.company!]);
     expect([...byGroup.values()].every((companies) => companies.sort().join() === 'VALLE_SHOWROOM,VS_BY_CLOSET')).toBe(true);
+  }, 60_000);
+
+  test('a janela de uso respeita as bordas: antes de 01/04/2027 00:00 ainda não vale; de 01/04 a 15/10 vale; a partir de 16/10 00:00 expirou; a data da COMPRA não muda a janela', async () => {
+    const c = await officialCampaign();
+    const order = paidOrder(c, 1);
+    await issue(c, order);
+    const rows = await prisma.valePass.findMany({ where: { shopifyOrderId: order.id } });
+    expect(rows).toHaveLength(2);
+    const redemption = new ValePassRedemptionService(prisma);
+    const at = (iso: string) => Promise.all(rows.map((r) => redemption.restrictionsOf(prisma, r, new Date(iso))));
+    const flat = async (iso: string) => (await at(iso)).flat();
+    expect(await flat('2027-03-31T23:00:00.000Z')).toContain('NOT_YET_VALID'); // véspera: nenhum uso (comprado em 2026, usado só em 2027)
+    expect(await flat('2027-04-01T02:59:59.000Z')).toContain('NOT_YET_VALID'); // 1 s antes de 00:00 em São Paulo
+    expect(await flat(FROM_INSTANT)).toEqual([]); // 01/04/2027 00:00: já vale
+    expect(await flat('2027-07-01T15:00:00.000Z')).toEqual([]); // meio da janela
+    expect(await flat('2027-10-16T02:59:59.000Z')).toEqual([]); // 15/10/2027 23:59:59: último segundo válido
+    expect(await flat(EXPIRES_INSTANT)).toEqual(['EXPIRED', 'EXPIRED']); // 16/10/2027 00:00: expirou (os dois vouchers)
+    expect(await flat('2028-01-10T12:00:00.000Z')).toEqual(['EXPIRED', 'EXPIRED']);
   }, 60_000);
 
   test('idempotência: reprocessar o mesmo pedido não cria nada além das duas unidades', async () => {
@@ -290,7 +314,7 @@ localDescribe('Valle Pass 2027 — campanha oficial de 1.000 unidades', () => {
 
   test('sem benefícios o modelo novo não é usado: uma campanha só com o preço (sem os dois vouchers) NÃO emite pelo fluxo oficial', async () => {
     const campaign = await prisma.valePassCampaign.create({
-      data: { name: `${TAG}-sem-beneficios`, amountCents: 35_000, validityDays: 30, voucherValidFrom: new Date('2027-01-01'), voucherValidUntil: new Date('2027-09-30'), shopifyVariantId: `${TAG}-var-${counter++}` },
+      data: { name: `${TAG}-sem-beneficios`, amountCents: 35_000, validityDays: 30, voucherValidFrom: new Date(VALID_FROM), voucherValidUntil: new Date(VALID_UNTIL), shopifyVariantId: `${TAG}-var-${counter++}` },
     });
     createdCampaigns.push(campaign.id);
     const outcome = await issue(campaign, paidOrder(campaign, 1));

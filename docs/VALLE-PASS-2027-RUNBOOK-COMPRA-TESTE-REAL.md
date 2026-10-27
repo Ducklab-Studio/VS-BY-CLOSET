@@ -7,7 +7,7 @@
 ## 0. Pré-condições (todas verificáveis; se alguma faltar, NÃO começar)
 | # | Condição | Como verificar | Quem destrava |
 |---|---|---|---|
-| 1 | Campanha **com validade** (início e fim juntos) | painel "Pronta para vender?" → "Início da validade" aprovado | **Anderson** (datas) — sem validade o pagamento é **retido**, não emite |
+| 1 | Campanha **com validade** (início e fim juntos) | painel "Pronta para vender?" → "Início da validade" aprovado | datas **confirmadas** (01/04/2027 a 15/10/2027, 27/10/2026); falta **configurar** (`VALLE-PASS-2027-VALIDADE-15-10.md` §5) — sem validade o pagamento é **retido**, não emite |
 | 2 | Benefícios, limite 1.000, preço R$ 350 | painel (já aprovados hoje) | pronto |
 | 3 | Estoque Shopify da variante usada = 0 e vitrine "Em breve" (estado atual) | painel (leitura do Storefront) e vitrine pública | pronto |
 | 4 | Destinatário do e-mail de teste = endereço da equipe (nunca de cliente) | quem compra | equipe |
@@ -15,7 +15,7 @@
 | 6 | Responsável pelo estorno e pelo acompanhamento (titular/substituto) | combinado | **Anderson** |
 | 7 | Backup lógico/snapshot recente do banco | console do Neon (snapshot manual) | equipe |
 
-**Sobre a validade (ponto crítico):** a campanha real **não tem validade** hoje. Opções, a decidir (**[DECISÃO PENDENTE]**):
+**Sobre a validade (ponto crítico):** as datas estão decididas (01/04/2027 a 15/10/2027), mas a campanha real **ainda não tem validade configurada**. Com ela configurada, vale a **opção A** (o voucher do teste não é resgatável antes de 01/04/2027; terminar em estorno). As demais ficam como histórico:
 - **A.** Esperar as datas aprovadas pelo Anderson e testar na campanha real (caminho mais fiel).
 - **B.** Campanha de TESTE separada (variante própria, nome claramente "TESTE", validade curta fictícia só nela, benefícios idênticos). Não conta no limite de 1.000 da campanha real. Exige criar a variante na Shopify (fora do app) e a campanha no ClosetAdmin.
 - **C. (Fase 0, opcional)** Compra na campanha real **sem validade**: prova a **retenção** (pagamento aparece em "Pagamentos retidos" com motivo "Campanha sem validade/benefícios prontos", nada é emitido, nada some) e termina em estorno. Não prova a emissão.

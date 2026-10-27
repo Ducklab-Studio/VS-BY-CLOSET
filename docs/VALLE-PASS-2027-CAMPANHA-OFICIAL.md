@@ -10,7 +10,7 @@
 | Limite global | **sem teto** | 1.000 unidades |
 | Limite legado (`quantityLimit`) | **10** | nenhum (o modelo de benefícios o ignora; limpar para não confundir o painel) |
 | Benefícios | **nenhum** (campanha ainda no modelo legado: 1 voucher) | R$ 500 Valle Showroom + R$ 50 VS BY CLOSET (independentes) + 10% em passeios/transfers Valle Experience (descritivo) |
-| Validade | **30 dias da compra**; sem janela fixa | até 30/09/2027 |
+| Validade | **30 dias da compra**; sem janela fixa | de 01/04/2027 a 15/10/2027 (confirmado em 27/10/2026; ver `VALLE-PASS-2027-VALIDADE-15-10.md`) |
 | Lotes | nenhum | dependem do Anderson |
 | Vendido | 1 voucher legado (cancelado); 7 pedidos (1 confirmado, 6 cancelados); 0 retenções | — |
 | Shopify | produto "Valle Pass" (variante `…595684`, SKU 01), **R$ 350, disponível para venda, estoque 499** | meta 1.000 |
@@ -27,11 +27,11 @@ Limite global contado por **unidade** (2 vouchers = 1), "tudo ou nada" por pedid
 ## Pode ser configurado imediatamente (com autorização, pelo painel, nesta ordem)
 1. Limpar o limite legado (10) e definir o limite global 1.000.
 2. Cadastrar os 3 benefícios (R$ 500 / R$ 50 / 10% descritivo).
-3. Definir o **fim** da validade (30/09/2027).
+3. Definir o **início e o fim** da validade juntos (01/04/2027 e 15/10/2027, confirmados em 27/10/2026).
 Tudo isso com a campanha **sem estoque aberto/lote** — pedido pago nessa fase fica retido, nunca emite.
 
 ## Depende do Anderson (não inventado)
-- **Data de INÍCIO da validade** (sem ela a emissão fica retida).
+- ~~Data de INÍCIO da validade~~ — definida (01/04/2027); falta só configurá-la na campanha, junto do fim (sem as duas a emissão fica retida).
 - Lotes (quantidade, datas), início e fim das vendas, textos/condições do desconto de 10% e dos vouchers.
 - Prorrogação da validade, transferência e reembolso (fora desta implementação).
 - Fuso da validade (Brasil × Chile; padrão atual `America/Sao_Paulo`).
@@ -69,9 +69,9 @@ Fontes: mensagem de Anderson (preço, dois vouchers, intransferíveis, ADMIN ope
 | ADMIN opera as duas lojas; Anderson cadastra/autoriza funcionários | ✅ ADMIN sem vínculo opera as duas (política atual); STAFF segue sem resgatar (decisão pendente se STAFF vinculado resgata) |
 | Limite global de 1.000 e lotes | ✅ limite global por unidade, lote não cabe além do saldo global (nem é cadastrado), estoque recomendado = saldo do lote aberto (0 sem lote); **quantidades dos lotes: Anderson** |
 | Reaproveitar o produto Shopify existente | ✅ compatível: a campanha atual aponta para a variante do produto; só falta configurar a campanha (benefícios, limite global, validade) e ajustar o estoque quando autorizado |
-| Início das vendas 30/10/2026 | ⚠️ o sistema **não tem data de início de vendas**: a abertura é o ajuste de estoque na Shopify (hoje 0). A checagem de prontidão registra isso como pendência. Impedir compra antes da data = manter estoque 0 |
+| Início das vendas 01/11/2026 (atualizado em 26/10) | ⚠️ o sistema **não tem data de início de vendas**: a abertura é o ajuste de estoque na Shopify (hoje 0). A checagem de prontidão registra isso como pendência. Impedir compra antes da data = manter estoque 0 |
 | Encerramento: último dia de maio/2027 **ou esgotamento** | ⚠️ `salesEndDate` é só informativo (nenhum encerramento automático). Interpretação (31/05/2027 firme? esgotar antes?) a confirmar; a checagem aceita 31/05/2027 como registro informativo |
-| Validade começa na abertura da temporada de neve 2027 | ⏳ **data não informada**: `voucher_valid_from` fica sem valor (a emissão fica retida por segurança); nenhuma data foi presumida |
+| Validade de 01/04/2027 a 15/10/2027 | ✅ **datas confirmadas** (26–27/10/2026); ⏳ ainda **não configuradas em produção** (`voucher_valid_from/until` vazios: a emissão fica retida por segurança) |
 | Prorrogação para todos os vouchers | ✅ estrutura pronta e em produção na API (SUPER_ADMIN, só aumenta); elegibilidade de expirados/cancelados e data final: **Anderson** |
 | Reembolso de R$ 350 (valor efetivamente pago) | ✅ a Shopify devolve; o sistema só cancela os vouchers. Restrição "sem reembolso após qualquer uso": **não automatizada** (validação jurídica, direito de arrependimento) — hoje o crédito parcialmente usado exige decisão do ADMIN |
 | 10% nos passeios: cliente informa a compra e a equipe confere na tabela de vendas | ✅ benefício **descritivo** (sem código/saldo); o procedimento é manual da equipe. Texto das condições (`terms`): **Anderson** |
@@ -83,7 +83,7 @@ Fontes: mensagem de Anderson (preço, dois vouchers, intransferíveis, ADMIN ope
 - **Segue a revisar quando os termos chegarem:** termos de uso do site (hoje só tratam do aluguel de peças; o "não transferir a peça" é do aluguel, não do Valle Pass) e o e-mail dos vouchers (não declara intransferibilidade nem os 10% — redação aprovada pendente).
 
 ### O que pode ser preparado agora (e o que não)
-- Pode, com autorização expressa em produção: configurar a campanha (limite global 1.000, limpar o limite legado, três benefícios, fim da validade 30/09/2027) — a checagem de prontidão mostra o que falta. **Não** pode ainda: início da validade, lotes (quantidades), condições dos 10%, texto dos termos.
+- Pode, com autorização expressa em produção: configurar a campanha (limite global 1.000, limpar o limite legado, três benefícios, início 01/04/2027 e fim 15/10/2027 da validade) — a checagem de prontidão mostra o que falta. **Não** pode ainda: lotes (quantidades), condições dos 10%, texto dos termos.
 - Venda e emissão fora das condições: emissão **nunca** passa de 1.000 unidades (tudo ou nada, fila de retenção); sem validade/benefícios a emissão fica **retida**; campanha desativada **continua emitindo para quem já pagou** (a venda nova é fechada pelo estoque da Shopify, hoje 0); pedido fora da janela de vendas **não** é bloqueado pelo sistema (decisão pendente: o que fazer com pagamento fora da janela).
 
 ### Validação jurídica necessária
