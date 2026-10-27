@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import { resolveAdminApiToken } from './admin-auth.config';
-import { extractBearerToken, verifyAdminToken } from './admin-token';
+import { resolveAdminApiTokens } from './admin-auth.config';
+import { extractBearerToken, verifyAnyAdminToken } from './admin-token';
 
 /** Só o que este guard precisa do Request — mesmo motivo de
  *  webhooks.controller.ts (evita depender do tipo do pacote `express`
@@ -21,10 +21,10 @@ interface AuthorizableRequest {
 export class AdminAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<AuthorizableRequest>();
-    const configured = resolveAdminApiToken(); // ausente → 503, não um "true" acidental
+    const configured = resolveAdminApiTokens(); // principal ausente → 503, não um "true" acidental; em rotação aceita também o "próximo"
     const presented = extractBearerToken(request.headers.authorization);
 
-    if (!verifyAdminToken(presented, configured)) {
+    if (!verifyAnyAdminToken(presented, configured)) {
       throw new UnauthorizedException('Credencial administrativa inválida ou ausente.');
     }
     return true;
