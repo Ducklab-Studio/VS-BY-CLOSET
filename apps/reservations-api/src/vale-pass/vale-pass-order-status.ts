@@ -25,6 +25,19 @@ function lastDigits(raw: string): string {
 export const KNOWN_VALE_PASS_VARIANT_ID = lastDigits(process.env.VALE_PASS_VARIANT_ID?.trim() || '49174518595684');
 export const KNOWN_VALE_PASS_PRODUCT_ID = lastDigits(process.env.VALE_PASS_PRODUCT_ID?.trim() || '8723909804132');
 
+/**
+ * Variantes (só dígitos) que são Valle Pass: a conhecida e as das campanhas. O Valle Pass é compra direta e NUNCA entra no aluguel: mesmo que alguém
+ * cadastre uma peça (RentalUnit) para a variante dele, disponibilidade e reserva a tratam como "sem unidade" (trava no servidor; a vitrine já esconde).
+ */
+export async function valePassVariantIds(db: { valePassCampaign: { findMany(args: { select: { shopifyVariantId: true } }): Promise<{ shopifyVariantId: string }[]> } }): Promise<Set<string>> {
+  const ids = new Set<string>([KNOWN_VALE_PASS_VARIANT_ID]);
+  for (const campaign of await db.valePassCampaign.findMany({ select: { shopifyVariantId: true } })) {
+    const numeric = numericShopifyId(campaign.shopifyVariantId);
+    if (numeric) ids.add(numeric);
+  }
+  return ids;
+}
+
 export interface OrderLine {
   readonly variantId: string | number | null | undefined;
   readonly productId?: string | number | null | undefined;
