@@ -6,7 +6,7 @@ const voucher = (company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET', amountCents: number
 const discount: ReadinessBenefit = { kind: 'DISCOUNT', company: null, amountCents: null, discountPercent: 10, terms: 'Condições aprovadas', active: true };
 
 const configured: ChecklistInput = {
-  campaign: { amountCents: 35_000, active: true, quantityLimit: null, globalLimit: 1_000, voucherValidFrom: '2026-12-01', voucherValidUntil: '2027-09-30', salesEndDate: '2027-05-31' },
+  campaign: { amountCents: 35_000, active: true, quantityLimit: null, globalLimit: 1_000, voucherValidFrom: '2027-04-01', voucherValidUntil: '2027-10-15', salesEndDate: '2027-05-31' },
   benefits: [voucher('VALLE_SHOWROOM', 50_000), voucher('VS_BY_CLOSET', 5_000), discount],
   hasOpenLot: true,
   shopifyStock: null,
@@ -44,6 +44,8 @@ describe('checklist "Pronta para vender?"', () => {
     const k = byId(list.items);
     for (const id of [...UNPROVABLE, 'extension', 'sales-start', 'shopify-stock', 'sales-end']) expect(k[id].status, id).toBe('PENDING');
     expect(list.readyToSell).toBe(false);
+    // A confirmação do Anderson (27/10/2026) é citada, mas o sistema não a prova: segue pendente.
+    expect(k['validity-confirmed'].message).toMatch(/01[/]04[/]2027.*15[/]10[/]2027/);
   });
 
   test('só fica "pronto" se TODOS os itens estiverem aprovados (hoje impossível pelos itens não comprováveis)', () => {

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { evaluateLaunchReadiness, isReadyToSell, type ReadinessBenefit, type ReadinessInput } from './vale-pass-launch-readiness';
+import { evaluateLaunchReadiness, isReadyToSell, OFFICIAL_SPEC, type ReadinessBenefit, type ReadinessInput } from './vale-pass-launch-readiness';
 
 const voucher = (company: 'VALLE_SHOWROOM' | 'VS_BY_CLOSET', amountCents: number): ReadinessBenefit => ({ kind: 'VOUCHER', company, amountCents, discountPercent: null, terms: null, active: true });
 const discount: ReadinessBenefit = { kind: 'DISCOUNT', company: null, amountCents: null, discountPercent: 10, terms: 'Condições aprovadas', active: true };
 const ready: ReadinessInput = {
-  campaign: { amountCents: 35_000, active: true, quantityLimit: null, globalLimit: 1_000, voucherValidFrom: '2026-12-01', voucherValidUntil: '2027-09-30', salesEndDate: '2027-05-31' },
+  campaign: { amountCents: 35_000, active: true, quantityLimit: null, globalLimit: 1_000, voucherValidFrom: '2027-04-01', voucherValidUntil: '2027-10-15', salesEndDate: '2027-05-31' },
   benefits: [voucher('VALLE_SHOWROOM', 50_000), voucher('VS_BY_CLOSET', 5_000), discount],
   shopifyStock: 1_000,
   hasOpenLot: true,
@@ -46,9 +46,17 @@ describe('prontidão da campanha oficial', () => {
     expect(kinds(ready)['sales-start']).toBe('PENDING');
   });
 
-  test('a validade só pode começar na abertura da temporada (data a informar): sem ela é pendência, nunca um valor presumido', () => {
-    const k = evaluateLaunchReadiness({ ...ready, campaign: { ...ready.campaign, voucherValidFrom: null } }).find((i) => i.id === 'valid-from');
-    expect(k).toMatchObject({ kind: 'PENDING' });
-    expect(k?.message).toMatch(/temporada de neve/);
+  test('validade confirmada pelo Anderson (27/10/2026): 01/04/2027 a 15/10/2027; sem início é pendência, nunca um valor presumido', () => {
+    expect(OFFICIAL_SPEC.voucherValidFrom).toBe('2027-04-01');
+    expect(OFFICIAL_SPEC.voucherValidUntil).toBe('2027-10-15');
+    const kindOf = (over: Partial<typeof ready.campaign>, id: string) => evaluateLaunchReadiness({ ...ready, campaign: { ...ready.campaign, ...over } }).find((i) => i.id === id);
+    expect(kindOf({}, 'valid-from')).toMatchObject({ kind: 'OK' });
+    expect(kindOf({}, 'valid-until')).toMatchObject({ kind: 'OK' });
+    const none = kindOf({ voucherValidFrom: null }, 'valid-from');
+    expect(none).toMatchObject({ kind: 'PENDING' });
+    expect(none?.message).toMatch(/01[/]04[/]2027/);
+    expect(kindOf({ voucherValidFrom: '2026-12-01' }, 'valid-from')).toMatchObject({ kind: 'DIVERGENCE' });
+    for (const old of ['2027-09-30', '2027-10-14', '2027-10-16']) expect(kindOf({ voucherValidUntil: old }, 'valid-until'), old).toMatchObject({ kind: 'DIVERGENCE' });
+    expect(kindOf({ voucherValidUntil: null }, 'valid-until')).toMatchObject({ kind: 'DIVERGENCE' });
   });
 });

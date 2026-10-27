@@ -12,7 +12,7 @@
 
 ## 2. Antes de qualquer abertura (checklist — painel "Pronta para vender?")
 Todos os itens técnicos aprovados **e** estas decisões recebidas por escrito:
-1. Validade (início e fim) confirmada e configurada **juntas**. **[Anderson]**
+1. Validade (início 01/04/2027 e fim 15/10/2027 — **confirmadas**) **configurada juntas** na campanha (ação de `VALLE-PASS-2027-VALIDADE-15-10.md` §5, com autorização).
 2. Datas de abertura de cada lote. **[Anderson]**
 3. Data final de comercialização e se o esgotamento encerra antes. **[Anderson]**
 4. Termos e condições aprovados e publicados (`VALE_PASS_TERMS_PAGE=on` + `NEXT_PUBLIC_VALE_PASS_TERMS_URL`). **[Anderson + jurídico]**

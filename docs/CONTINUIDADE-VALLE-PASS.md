@@ -27,7 +27,7 @@ Valle Pass: R$ 350 = voucher R$ 500 Valle Showroom + voucher R$ 50 VS BY CLOSET 
 | Compra de teste real | **C** | runbook pronto (`docs/VALLE-PASS-2027-RUNBOOK-COMPRA-TESTE-REAL.md`) | validade configurada (**Anderson**), autorizações e pagamento real |
 
 ## 4. Decisões que dependem do Anderson / jurídico (nada decidido pelo sistema)
-1. Datas de início e fim da validade (30/09/2027 foi só sugestão) — o banco exige as duas juntas; sem elas todo pagamento fica retido.
+1. ~~Datas de início e fim da validade~~ — **confirmadas** (01/04/2027 a 15/10/2027; Anderson, 27/10/2026): falta configurá-las juntas na campanha (autorização; `VALLE-PASS-2027-VALIDADE-15-10.md`). Sem elas todo pagamento fica retido.
 2. Datas de abertura dos lotes. 3. Data final de comercialização (31/05/2027 sugerida; esgotar antes encerra?).
 4. Política de reembolso (inclui direito de arrependimento de 7 dias e "sem reembolso após uso"): análise jurídica. 5. Reembolso por falta de modelo/tamanho/roupa.
 6. Saldo remanescente em visitas futuras. 7. Condições do desconto de 10%. 8. Resgate por STAFF (hoje: ADMIN/SUPER_ADMIN; STAFF só com autorização por estabelecimento).
