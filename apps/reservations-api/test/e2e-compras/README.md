@@ -10,3 +10,9 @@ pnpm --filter @valle/reservations-api run db:migrate     # com a mesma URL, uma 
 node apps/reservations-api/test/e2e-compras/suite.mjs    # ~4 minutos (inclui a espera da nova tentativa de e-mail)
 ```
 Nenhuma chamada de rede real: o `fetch` do processo da API é substituído; qualquer outro destino é bloqueado.
+
+## Sonda de privacidade
+`privacy-probe.mjs` faz uma compra de um cliente "sentinela" (e-mail, telefone e sobrenome inconfundíveis) e percorre **todas** as rotas de leitura do Valle Pass como STAFF, ADMIN e SUPER_ADMIN, procurando os dados completos do cliente no corpo de cada resposta. STAFF não pode receber nenhum; ADMIN/SUPER_ADMIN continuam vendo os dados nas telas operacionais.
+```bash
+node apps/reservations-api/test/e2e-compras/privacy-probe.mjs
+```

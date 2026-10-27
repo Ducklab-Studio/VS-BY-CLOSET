@@ -395,9 +395,23 @@ describe('Pedidos de Valle Pass — acesso no ClosetAdmin', () => {
     expect(Reflect.getMetadata(REQUIRE_ROLE_KEY, ValePassOrdersController.prototype.list)).toBeUndefined();
 
     const controller = new ValePassOrdersController(service);
-    const all = await controller.list('NAO_EXISTE');
+    const adminReq = { adminUser: { id: 'admin-teste', name: 'Admin', role: 'ADMIN' as const } };
+    const staffReq = { adminUser: { id: 'staff-teste', name: 'Funcionário', role: 'STAFF' as const } };
+    const all = await controller.list(adminReq, 'NAO_EXISTE');
     expect(all.length).toBeGreaterThan(0);
-    const expired = await controller.list('EXPIRED');
+    const expired = await controller.list(adminReq, 'EXPIRED');
     expect(expired.every((o) => o.status === 'EXPIRED')).toBe(true);
+
+    // Dados pessoais do cliente: ADMIN vê tudo; STAFF só a versão mascarada (nome, telefone e e-mail completos nunca saem para ele).
+    const full = await service.list();
+    const forStaff = await controller.list(staffReq);
+    expect(forStaff).toHaveLength(full.length);
+    for (const row of forStaff) {
+      const original = full.find((o) => o.shopifyOrderId === row.shopifyOrderId)!;
+      if (original.customerEmail) expect(row.customerEmail).not.toBe(original.customerEmail);
+      if (original.customerPhone && original.customerPhone.replace(/\D/g, '').length >= 4) expect(row.customerPhone).not.toBe(original.customerPhone);
+      expect(JSON.stringify(row)).not.toContain(original.customerEmail ?? '\u0000');
+    }
+    expect(await controller.list(adminReq)).toEqual(full);
   }, 30_000);
 });
