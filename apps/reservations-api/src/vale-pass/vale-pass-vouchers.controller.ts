@@ -7,6 +7,7 @@ import { RequireModule } from '../admin/require-module.decorator';
 import { ValePassVouchersService, type ValePassVoucherItem } from './vale-pass-vouchers.service';
 import { CancelValePassDto } from './dto/cancel-vale-pass.dto';
 import { RestoreValePassDto } from './dto/restore-vale-pass.dto';
+import { forRole } from './vale-pass-voucher-privacy';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string; role: AdminRole };
@@ -27,19 +28,20 @@ export class ValePassVouchersController {
   constructor(private readonly vouchers: ValePassVouchersService) {}
 
   @Get()
-  list(@Query('status') status?: string, @Query('campaignId') campaignId?: string, @Query('search') search?: string): Promise<ValePassVoucherItem[]> {
+  async list(@Req() req: RequestWithAdminUser, @Query('status') status?: string, @Query('campaignId') campaignId?: string, @Query('search') search?: string): Promise<ValePassVoucherItem[]> {
     const parsedStatus = status && (VALID_STATUSES as readonly string[]).includes(status) ? (status as ValePassStatus) : undefined;
-    return this.vouchers.list({ status: parsedStatus, campaignId: campaignId || undefined, search: search || undefined });
+    const items = await this.vouchers.list({ status: parsedStatus, campaignId: campaignId || undefined, search: search || undefined });
+    return items.map((item) => forRole(item, req.adminUser!.role));
   }
 
   @Get(':code')
-  findByCode(@Param('code') code: string): Promise<ValePassVoucherItem> {
-    return this.vouchers.findByCode(code);
+  async findByCode(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
+    return forRole(await this.vouchers.findByCode(code), req.adminUser!.role);
   }
 
   @Post(':code/use')
-  markUsed(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
-    return this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name, { role: req.adminUser!.role });
+  async markUsed(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
+    return forRole(await this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name, { role: req.adminUser!.role }), req.adminUser!.role);
   }
 
   @Post(':code/cancel')
