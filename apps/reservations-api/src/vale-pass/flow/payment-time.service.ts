@@ -209,6 +209,7 @@ export class ValePassPaymentTimeService {
 
   private async requireAdmin(db: Pick<Tx, 'adminUser'>, id: string): Promise<void> {
     const admin = await db.adminUser.findUnique({ where: { id }, select: { role: true, active: true } });
-    if (!admin || !admin.active || admin.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador ativo pode confirmar o horário do pagamento.');
+    // SUPER_ADMIN (o proprietário) satisfaz qualquer checagem de ADMIN por hierarquia (ver satisfiesRole em admin-role.guard.ts); STAFF e inativos seguem barrados.
+    if (!admin || !admin.active || (admin.role !== 'ADMIN' && admin.role !== 'SUPER_ADMIN')) throw new ForbiddenException('Somente um administrador ativo pode confirmar o horário do pagamento.');
   }
 }

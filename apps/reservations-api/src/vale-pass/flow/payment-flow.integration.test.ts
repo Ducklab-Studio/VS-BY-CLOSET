@@ -846,6 +846,29 @@ localDescribe('MÉDIO-1/2 — pagamento sem tratamento: variante sem campanha e 
     expect(await outboxOf(orderId)).toHaveLength(3);
   });
 
+  test('regularizar: SUPER_ADMIN ativo passa pela verificação de papel como o ADMIN (chega ao pedido); STAFF e usuários inativos (ADMIN ou SUPER_ADMIN) seguem barrados', async () => {
+    flags.twoVoucher = true;
+    const created: string[] = [];
+    const user = async (role: 'STAFF' | 'ADMIN' | 'SUPER_ADMIN', active: boolean) => {
+      const id = (await prisma.adminUser.create({ data: { name: `Teste papel ${role}`, phone: `${TAG}-reg-${role}-${active}`, pinHash: 'x', role, active } })).id;
+      created.push(id);
+      return { id, name: 'Teste papel' };
+    };
+    const input = { orderId: 'pedido-inexistente-papel', note: 'Conferência administrativa de teste' };
+    try {
+      for (const denied of [await user('STAFF', true), await user('ADMIN', false), await user('SUPER_ADMIN', false)]) {
+        await expect(flowService().regularizeOrder(denied, input)).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      // papéis permitidos passam do portão e só então falham pelo pedido inexistente (NotFound, não Forbidden)
+      for (const allowed of [await user('SUPER_ADMIN', true), await user('ADMIN', true)]) {
+        await expect(flowService().regularizeOrder(allowed, input)).rejects.toThrow(/não encontrado/);
+      }
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: { in: created } } });
+      await prisma.adminUser.deleteMany({ where: { id: { in: created } } });
+    }
+  });
+
   test('NÃO emite sem comprovante: valor do acréscimo não pago, último evento não pago, sem evento guardado, sem instante do pagamento, chave desligada, funcionário comum ou justificativa curta', async () => {
     flags.twoVoucher = true;
     const campaign = await newCampaign(true);
@@ -1321,6 +1344,42 @@ localDescribe('HORÁRIO DO PAGAMENTO — política estrita por padrão; fonte au
     await storeEvent('orders/paid', { ...payload, updated_at: paidAt });
     return { campaign, payload, orderId, paidAt };
   }
+
+  test('papéis: SUPER_ADMIN ativo (o proprietário) confere na Shopify e confirma manualmente como o ADMIN; STAFF e usuários inativos (ADMIN ou SUPER_ADMIN) seguem barrados', async () => {
+    const created: string[] = [];
+    const user = async (role: 'STAFF' | 'ADMIN' | 'SUPER_ADMIN', active: boolean) => {
+      const id = (await prisma.adminUser.create({ data: { name: `Teste papel ${role}`, phone: `${TAG}-papel-${role}-${active}`, pinHash: 'x', role, active } })).id;
+      created.push(id);
+      return { id, name: 'Teste papel' };
+    };
+    try {
+      const verifyOrder = await strictPaid();
+      const manualOrder = await strictPaid();
+      for (const denied of [await user('STAFF', true), await user('ADMIN', false), await user('SUPER_ADMIN', false)]) {
+        await expect(paymentTimeService().verifyFromShopify(denied, { orderId: verifyOrder.orderId, note })).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(paymentTimeService().confirmManually(denied, { orderId: manualOrder.orderId, confirmedAt: manualOrder.paidAt, note })).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect((await registryOf(verifyOrder.orderId)).paymentConfirmedAt).toBeNull();
+      expect((await registryOf(manualOrder.orderId)).paymentConfirmedAt).toBeNull();
+
+      // o proprietário (SUPER_ADMIN) e o ADMIN passam pela MESMA verificação: conferência na Shopify...
+      const owner = await user('SUPER_ADMIN', true);
+      const processedAt = new Date(new Date(verifyOrder.paidAt).getTime() - 20_000).toISOString();
+      shopify(verifyOrder.orderId, [txn({ processedAt })]);
+      expect(await paymentTimeService().verifyFromShopify(owner, { orderId: verifyOrder.orderId, note })).toMatchObject({ status: 'CONFIRMED', confirmedAt: processedAt, source: 'ADMIN_API_TRANSACTION' });
+      expect(await registryOf(verifyOrder.orderId)).toMatchObject({ paymentConfirmedSource: 'ADMIN_API_TRANSACTION' });
+      // ...e confirmação manual
+      expect((await paymentTimeService().confirmManually(owner, { orderId: manualOrder.orderId, confirmedAt: manualOrder.paidAt, note: 'Pix confirmado no painel do banco (teste)' })).confirmedAt).toBe(manualOrder.paidAt);
+      expect(await registryOf(manualOrder.orderId)).toMatchObject({ paymentConfirmedSource: 'ADMIN_MANUAL' });
+      // o ADMIN continua passando (regressão)
+      const confirmedByAdmin = await strictPaid();
+      shopify(confirmedByAdmin.orderId, [txn({ processedAt: new Date(new Date(confirmedByAdmin.paidAt).getTime() - 20_000).toISOString() })]);
+      expect(await paymentTimeService().verifyFromShopify(actor(), { orderId: confirmedByAdmin.orderId, note })).toMatchObject({ status: 'CONFIRMED' });
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: { in: created } } });
+      await prisma.adminUser.deleteMany({ where: { id: { in: created } } });
+    }
+  });
 
   test('ESTRITA (padrão): sinais perfeitos do webhook NÃO bastam — retenção PAYMENT_TIME_UNKNOWN, evidência registrada (diferença entre os sinais), nada emitido', async () => {
     const { orderId, paidAt } = await strictPaid();

@@ -303,7 +303,8 @@ export class ValePassPaymentFlowService {
       async (tx) => {
         await lockShopifyOrder(tx, input.orderId);
         const admin = await tx.adminUser.findUnique({ where: { id: actor.id }, select: { role: true, active: true } });
-        if (!admin || !admin.active || admin.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador ativo pode regularizar pedidos.');
+        // SUPER_ADMIN (o proprietário) satisfaz qualquer checagem de ADMIN por hierarquia (ver satisfiesRole em admin-role.guard.ts); STAFF e inativos seguem barrados.
+        if (!admin || !admin.active || (admin.role !== 'ADMIN' && admin.role !== 'SUPER_ADMIN')) throw new ForbiddenException('Somente um administrador ativo pode regularizar pedidos.');
         const registry = await tx.valePassOrder.findUnique({ where: { shopifyOrderId: input.orderId } });
         if (!registry) throw new NotFoundException('Pedido não encontrado no registro do Valle Pass.');
         if (!registry.paymentConfirmedAt) throw new ConflictException('O instante real do pagamento é desconhecido: confira na Shopify e use a emissão excepcional da retenção (a base do prazo fica registrada).');
