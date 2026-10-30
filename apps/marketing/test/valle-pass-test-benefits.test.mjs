@@ -36,7 +36,7 @@ test('os dois vouchers de teste: códigos, empresas, valores simbólicos, condi�
   assert.ok(T.VALLE_PASS_TEST_PRESET.every((b) => b.kind === 'VOUCHER' && b.discountPercent == null));
 });
 
-test('o rótulo marca TESTE e "sem valor comercial" (é o que o operador vê na consulta de saldo e o cliente vê no e-mail)', () => {
+test('o rótulo marca TESTE e "sem valor comercial" (é o que o operador vê na consulta de saldo; o e-mail do voucher não usa o rótulo)', () => {
   for (const benefit of T.VALLE_PASS_TEST_PRESET) {
     assert.ok(benefit.label.startsWith('TESTE — '), benefit.label);
     assert.ok(/sem valor comercial/.test(benefit.label), benefit.label);
