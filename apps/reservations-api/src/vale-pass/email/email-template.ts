@@ -32,7 +32,12 @@ export interface VoucherEmailInput {
   readonly timeZone?: string;
   /** URL HTTPS pública do logotipo claro (ex.: /brand/logo-horizontal-cream.png). Ausente/ inválida = monograma em texto. */
   readonly logoUrl?: string | null;
+  /** Campanha de TESTE (mesmo critério que bloqueia o resgate: `isTestCampaign`): assunto "[TESTE]" e faixa visível. A campanha oficial nunca recebe a marcação. */
+  readonly testCampaign?: boolean;
 }
+
+export const TEST_EMAIL_BANNER = 'VOUCHERS DE TESTE — SEM VALOR COMERCIAL';
+export const TEST_SUBJECT_PREFIX = '[TESTE] ';
 
 export const COMPANY_NAMES: Record<VoucherCompany, string> = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' };
 const COMPANY_ORDER: Record<VoucherCompany, number> = { VALLE_SHOWROOM: 0, VS_BY_CLOSET: 1 };
@@ -70,7 +75,6 @@ export const EMAIL_TERMS: readonly string[] = [
 
 const SUBTITLE = 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.';
 const HERO_TITLE = 'Sua experiência começa aqui.';
-const SEPARATE_COMPANIES = 'Os vouchers pertencem a empresas diferentes: cada um é válido apenas na empresa indicada no seu cartão.';
 const CLOSING = 'Obrigada por escolher o Valle Pass 2027.';
 
 /**
@@ -119,7 +123,9 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
   const vouchers = [...input.vouchers].sort((a, b) => COMPANY_ORDER[a.company] - COMPANY_ORDER[b.company]);
   const name = firstName(input.customerName);
   const multi = Boolean(input.unit && input.unit.total > 1);
-  const subject = multi && input.unit ? `Seus vouchers do Valle Pass 2027 (${input.unit.index} de ${input.unit.total})` : 'Seus vouchers do Valle Pass 2027';
+  const baseSubject = multi && input.unit ? `Seus vouchers do Valle Pass 2027 (${input.unit.index} de ${input.unit.total})` : 'Seus vouchers do Valle Pass 2027';
+  const isTest = input.testCampaign === true;
+  const subject = isTest ? `${TEST_SUBJECT_PREFIX}${baseSubject}` : baseSubject;
   const logoUrl = safeLogoUrl(input.logoUrl !== undefined ? input.logoUrl : (process.env.VALE_PASS_EMAIL_LOGO_URL ?? OFFICIAL_LOGO_URL));
 
   const window = (voucher: EmailVoucher) => {
@@ -194,6 +200,7 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
         <div style="font-family:${SANS};font-size:11px;line-height:16px;letter-spacing:5px;text-transform:uppercase;color:${C.champagne};">Valle Pass &bull; 2027</div>
       </td></tr>
       <tr><td height="3" bgcolor="${C.gold}" style="background:${C.gold};font-size:0;line-height:0;height:3px;">&nbsp;</td></tr>
+      ${isTest ? `<tr><td align="center" bgcolor="${C.champagne}" style="background:${C.champagne};padding:12px 16px;font-family:${SANS};font-size:13px;line-height:18px;letter-spacing:2px;font-weight:bold;text-transform:uppercase;color:${C.marsalaDark};">${escapeHtml(TEST_EMAIL_BANNER)}</td></tr>` : ''}
       <tr><td class="sheet px" align="center" bgcolor="${C.cream}" style="background:${C.cream};padding:50px 40px 10px 40px;">
         <h1 class="h1 tx" style="margin:0;font-family:${SERIF};font-size:36px;line-height:44px;color:${C.marsala};font-weight:normal;">${escapeHtml(HERO_TITLE)}</h1>
         <div style="height:20px;line-height:20px;font-size:0;">&nbsp;</div>
@@ -222,8 +229,6 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
         <div style="height:18px;line-height:18px;font-size:0;">&nbsp;</div>
         <div style="font-family:${SERIF};font-size:17px;line-height:26px;color:${C.cream};">${escapeHtml(CLOSING)}</div>
         <div style="height:16px;line-height:16px;font-size:0;">&nbsp;</div>
-        <div style="font-family:${SANS};font-size:12px;line-height:19px;color:#D9CFC6;">${escapeHtml(SEPARATE_COMPANIES)}</div>
-        <div style="height:10px;line-height:10px;font-size:0;">&nbsp;</div>
         <div style="font-family:${SANS};font-size:12px;line-height:19px;color:#D9CFC6;">${escapeHtml(contactText)}</div>
       </td></tr>
     </table>
@@ -235,6 +240,7 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
   const line = '────────────────────────────';
   const text = [
     'VS BY CLOSET  ·  VALLE PASS • 2027',
+    ...(isTest ? [TEST_EMAIL_BANNER] : []),
     line,
     '',
     HERO_TITLE.toUpperCase(),
@@ -256,7 +262,6 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
     'COMO UTILIZAR SEUS BENEFÍCIOS',
     ...EMAIL_TERMS.map((entry) => `- ${entry}`),
     '',
-    SEPARATE_COMPANIES,
     contactText,
     '',
     CLOSING,

@@ -202,6 +202,7 @@ export class ValePassEmailWorkerService {
       orderName: verdict.order.orderName,
       unit: verdict.unit,
       replyTo: this.config.replyTo,
+      testCampaign: verdict.testCampaign,
       vouchers: verdict.vouchers.map((voucher) => ({
         company: voucher.company as 'VALLE_SHOWROOM' | 'VS_BY_CLOSET',
         amountCents: voucher.amountCents,

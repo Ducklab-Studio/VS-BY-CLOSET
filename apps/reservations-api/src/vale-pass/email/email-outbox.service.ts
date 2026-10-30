@@ -8,6 +8,7 @@ import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { EMAIL_CONFIG_TOKEN } from './email-tokens';
 import { DELIVERY_DEADLINE_DAYS, publicEmailStatus, recipientAllowed, recipientsUnrestricted, senderAddress, type EmailConfig } from './email-config';
 import { renderVoucherEmail } from './email-template';
+import { isTestCampaign } from '../vale-pass-test-campaign';
 import { maskCode, maskCodeFully, maskEmail } from './email-mask';
 
 type Tx = Prisma.TransactionClient;
@@ -26,7 +27,7 @@ export const IN_FLIGHT_STATUSES: readonly ValePassEmailStatus[] = ['QUEUED', 'SE
 export const SATISFIED_STATUSES: readonly ValePassEmailStatus[] = ['ACCEPTED', 'DELIVERED'];
 
 export type GroupVerdict =
-  | { readonly ok: true; readonly order: { readonly orderId: string; readonly orderName: string | null; readonly customerName: string | null; readonly customerEmail: string | null; readonly confirmedAt: Date; readonly paymentConfirmedAt: Date | null }; readonly vouchers: readonly (ValePass & { benefit: ValePassCampaignBenefit | null })[]; readonly unit: { readonly index: number; readonly total: number } }
+  | { readonly ok: true; readonly order: { readonly orderId: string; readonly orderName: string | null; readonly customerName: string | null; readonly customerEmail: string | null; readonly confirmedAt: Date; readonly paymentConfirmedAt: Date | null }; readonly vouchers: readonly (ValePass & { benefit: ValePassCampaignBenefit | null })[]; readonly unit: { readonly index: number; readonly total: number }; readonly testCampaign: boolean }
   | { readonly ok: false; readonly outcome: 'CANCELLED' | 'NEEDS_ATTENTION' | 'WAIT'; readonly reason: string };
 
 /**
@@ -49,6 +50,7 @@ export async function evaluateGroup(db: Db, orderId: string, groupId: string): P
   if (vouchers.some((voucher) => voucher.status === 'USED' || (voucher.company !== null && voucher.balanceCents < voucher.amountCents))) return { ok: false, outcome: 'NEEDS_ATTENTION', reason: 'voucher_already_used' };
 
   const campaignId = vouchers[0].campaignId;
+  const campaignRow = await db.valePassCampaign.findUnique({ where: { id: campaignId }, select: { id: true, shopifyVariantId: true } });
   const expected = await db.valePassCampaignBenefit.findMany({ where: { campaignId, active: true, kind: 'VOUCHER' }, select: { id: true } });
   const present = new Set(vouchers.map((voucher) => voucher.benefitId));
   if (expected.length === 0 || expected.some((benefit) => !present.has(benefit.id))) return { ok: false, outcome: 'WAIT', reason: 'group_incomplete' };
@@ -60,6 +62,7 @@ export async function evaluateGroup(db: Db, orderId: string, groupId: string): P
     order: { orderId, orderName: order.shopifyOrderName, customerName: order.customerName, customerEmail: order.customerEmail, confirmedAt: order.statusChangedAt, paymentConfirmedAt: order.paymentConfirmedAt },
     vouchers,
     unit: { index: Math.max(1, ordered.findIndex((group) => group.id === groupId) + 1), total: Math.max(1, ordered.length) },
+    testCampaign: campaignRow !== null && isTestCampaign(campaignRow),
   };
 }
 
@@ -292,6 +295,7 @@ export class ValePassEmailOutboxService {
       orderName: verdict.order.orderName,
       unit: verdict.unit,
       replyTo: this.config.replyTo,
+      testCampaign: verdict.testCampaign,
       vouchers: verdict.vouchers.map((voucher, index) => ({
         company: voucher.company as 'VALLE_SHOWROOM' | 'VS_BY_CLOSET',
         amountCents: voucher.amountCents,
