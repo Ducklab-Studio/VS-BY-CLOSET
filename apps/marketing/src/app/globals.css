@@ -384,6 +384,130 @@ body {
   letter-spacing: 0.15em;
   color: #74655d;
 }
+/* Lookbook editorial: quatro retratos 4:5 em grade assimétrica (desktop) e em ritmo alternado (celular). Sem recorte forçado; o quadro só reserva o espaço. */
+.lookbook {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 24px 40px 130px;
+}
+.lookbook-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: 28px;
+  align-items: start;
+}
+.lookbook-figure {
+  margin: 0;
+}
+.lookbook-frame {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 5;
+  background: #e9e1d6;
+}
+.lookbook-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* o quadro já é 4:5, igual à foto: nenhum recorte real */
+}
+.lookbook-figure figcaption {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #53131e30;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #74655d;
+}
+.lookbook-number {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: theme('colors.marsala.DEFAULT');
+}
+.lookbook-intro h2 {
+  font-size: clamp(34px, 3.7vw, 56px);
+  margin: 24px 0;
+  color: theme('colors.marsala.DEFAULT');
+}
+.lookbook-lead {
+  max-width: 380px;
+  margin-bottom: 28px;
+  line-height: 1.8;
+  color: #6a615a;
+}
+@media (min-width: 901px) {
+  /* Coluna esquerda estica até a altura da foto grande e ancora a foto 01 na base: as duas legendas ficam alinhadas. */
+  .lookbook-left {
+    grid-column: 1 / span 5;
+    grid-row: 1;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 56px;
+    padding-top: 36px;
+  }
+  .lookbook-b {
+    width: 72%;
+  }
+  /* As bases das fotos 01 e 02 ficam sempre alinhadas na base da linha, qualquer que seja a altura do texto da coluna esquerda. */
+  .lookbook-a {
+    grid-column: 6 / span 7;
+    grid-row: 1;
+    align-self: end;
+  }
+  .lookbook-c {
+    grid-column: 2 / span 4;
+    grid-row: 2;
+    margin-top: 110px;
+  }
+  .lookbook-d {
+    grid-column: 7 / span 5;
+    grid-row: 2;
+    margin-top: 190px;
+  }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .lookbook-photo {
+    transition: transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .lookbook-figure:hover .lookbook-photo {
+    transform: scale(1.03);
+  }
+}
+@media (max-width: 900px) {
+  .lookbook {
+    padding: 8px 24px 84px;
+  }
+  .lookbook-grid {
+    grid-template-columns: 1fr;
+    row-gap: 40px;
+  }
+  .lookbook-left {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  .lookbook-intro h2 {
+    font-size: clamp(30px, 8.4vw, 42px);
+    margin: 18px 0;
+  }
+  .lookbook-b,
+  .lookbook-c {
+    width: 78%;
+  }
+  .lookbook-b {
+    align-self: flex-end;
+  }
+  .lookbook-c {
+    justify-self: start;
+  }
+}
 .collection-section {
   padding: 75px max(24px, calc((100vw - 1280px) / 2)) 100px;
   background: #f3eee6;
