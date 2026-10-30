@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EMAIL_CONFIG_TOKEN } from './email-tokens';
-import { IDEMPOTENCY_WINDOW_MS, liveBlockers, recipientAllowed, type EmailConfig } from './email-config';
+import { IDEMPOTENCY_WINDOW_MS, liveBlockers, recipientAllowed, recipientsUnrestricted, type EmailConfig } from './email-config';
 import { EMAIL_PROVIDER, type EmailProvider, type SendEmailResult } from './email-provider';
 import { renderVoucherEmail } from './email-template';
 import { IN_FLIGHT_STATUSES, ValePassEmailOutboxService, evaluateGroup, isValidRecipient } from './email-outbox.service';
@@ -152,8 +152,9 @@ export class ValePassEmailWorkerService {
 
   /** Reserva atômica de um lote: dois workers nunca pegam a mesma mensagem (FOR UPDATE SKIP LOCKED). */
   async claim(client: Pick<PrismaService, '$queryRaw'>, limit: number, now: Date): Promise<string[]> {
-    // Lista de destinatários autorizados: quem não está nela NUNCA é reservado (a mensagem fica QUEUED, intacta). Lista inválida = vazia = nada é reservado.
-    const unrestricted = this.config.allowedRecipients === null;
+    // Fail closed: quem não está na lista de destinatários autorizados NUNCA é reservado (a mensagem fica QUEUED, intacta). Sem lista e sem liberação comercial,
+    // ninguém é reservado; lista inválida = vazia = nada é reservado.
+    const unrestricted = recipientsUnrestricted(this.config);
     const allowed = this.config.allowedRecipients ?? [];
     // CTE MATERIALIZED: com `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` o PostgreSQL pode reavaliar a subconsulta e
     // reservar MAIS que o LIMIT (observado: lote de 3 reservou 4). Materializar a escolha garante exatamente até `limit` linhas.
@@ -172,13 +173,13 @@ export class ValePassEmailWorkerService {
     return rows.sort((x, y) => x.next.getTime() - y.next.getTime() || x.created.getTime() - y.created.getTime()).map((row) => row.id);
   }
 
-  /** Quantas mensagens prontas para sair ficam retidas pela lista de destinatários autorizados (0 quando não há lista). */
+  /** Quantas mensagens prontas para sair ficam retidas pela lista de destinatários autorizados (ou pela falta dela). 0 só com a liberação comercial e sem lista. */
   async countHeldByAllowlist(now: Date): Promise<number> {
-    if (this.config.allowedRecipients === null) return 0;
+    if (recipientsUnrestricted(this.config)) return 0;
     const [row] = await this.prisma.$queryRaw<{ held: number }[]>`
       SELECT count(*)::int AS held FROM vale_pass_email_outbox
       WHERE status IN ('QUEUED', 'UNKNOWN') AND next_attempt_at <= ${now} AND (locked_until IS NULL OR locked_until < ${now})
-        AND NOT (lower(to_email) = ANY(${this.config.allowedRecipients}::text[]))`;
+        AND NOT (lower(to_email) = ANY(${this.config.allowedRecipients ?? []}::text[]))`;
     return row?.held ?? 0;
   }
 

@@ -11,6 +11,14 @@ export function maskEmail(email: string | null | undefined): string {
 import { maskCode } from '../vale-pass-code-mask';
 export { maskCode } from '../vale-pass-code-mask';
 
+/** Máscara TOTAL dos caracteres secretos: `VALLE-AB12-CD34` → `VALLE-****-****` (só o prefixo público fica). Entrada fora do formato vira `****`. */
+export function maskCodeFully(code: string | null | undefined): string {
+  if (!code) return '****';
+  const parts = code.split('-');
+  if (parts.length < 2) return '****';
+  return [parts[0], ...parts.slice(1).map(() => '****')].join('-');
+}
+
 /** Troca qualquer código de voucher (VALLE-XXXX-XXXX) e qualquer e-mail em um texto por versões mascaradas. Rede de proteção para mensagens de erro. */
 export function scrubSensitive(text: string): string {
   return text

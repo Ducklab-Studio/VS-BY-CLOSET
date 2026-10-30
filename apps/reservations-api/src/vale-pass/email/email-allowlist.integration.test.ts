@@ -6,7 +6,7 @@ import { REQUIRE_ROLE_KEY } from '../../admin/require-role.decorator';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { purgeLedgerForTest } from '../ledger/ledger-test-utils';
 import { ValePassIssuanceService } from '../vale-pass-issuance.service';
-import { MAX_ALLOWED_RECIPIENTS, liveBlockers, loadEmailConfig, parseAllowedRecipients, publicEmailStatus, recipientAllowed, type EmailConfig } from './email-config';
+import { MAX_ALLOWED_RECIPIENTS, canSendLive, liveBlockers, loadEmailConfig, parseAllowedRecipients, publicEmailStatus, recipientAllowed, type EmailConfig } from './email-config';
 import type { EmailProvider, SendEmailInput, SendEmailResult } from './email-provider';
 import { ValePassEmailOutboxService } from './email-outbox.service';
 import { ValePassEmailWorkerService } from './email-worker.service';
@@ -26,12 +26,31 @@ const OTHER = 'cliente-comum@exemplo.invalid';
 describe('VALE_PASS_EMAIL_ALLOWED_RECIPIENTS — leitura e validação da configuração', () => {
   const base = { VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true' };
 
-  test('ausente = sem restrição (comportamento anterior)', () => {
+  test('FASE DE TESTES: live sem lista e sem liberação comercial = BLOQUEADO (fail closed), ninguém é permitido', () => {
     const config = loadEmailConfig(base);
     expect(config.allowedRecipients).toBeNull();
-    expect(config.allowlistProblems).toEqual([]);
-    expect(recipientAllowed(config, OTHER)).toBe(true);
-    expect(liveBlockers(config)).toEqual([]);
+    expect(config.commercialRelease).toBe(false);
+    expect(recipientAllowed(config, OTHER)).toBe(false);
+    expect(canSendLive(config)).toBe(false);
+    expect(liveBlockers(config).join(' ')).toContain('VALE_PASS_EMAIL_COMMERCIAL_RELEASE');
+    expect(publicEmailStatus(config)).toMatchObject({ canSend: false, commercialRelease: false, recipientAllowlist: { active: false } });
+  });
+
+  test('só a liberação comercial explícita (exatamente "true") libera o envio sem lista', () => {
+    for (const raw of ['', 'false', '1', 'yes', 'on', 'verdadeiro']) expect(canSendLive(loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: raw })), raw).toBe(false);
+    const released = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: ' TRUE ' });
+    expect(canSendLive(released)).toBe(true);
+    expect(recipientAllowed(released, OTHER)).toBe(true);
+  });
+
+  test('lista presente SEMPRE restringe, mesmo com a liberação; lista inválida nunca é ignorada pela liberação', () => {
+    const both = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED });
+    expect(recipientAllowed(both, ALLOWED)).toBe(true);
+    expect(recipientAllowed(both, OTHER)).toBe(false);
+    const invalid = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: 'lixo' });
+    expect(canSendLive(invalid)).toBe(false);
+    expect(recipientAllowed(invalid, ALLOWED)).toBe(false);
+    expect(recipientAllowed(invalid, OTHER)).toBe(false);
   });
 
   test('lista válida: normaliza (minúsculas, sem repetição), aceita vírgula, ponto e vírgula e espaço', () => {
@@ -299,12 +318,53 @@ localDescribe('Lista de destinatários autorizados — worker', () => {
     expect((await rowOf(blocked.orderId)).status).toBe('QUEUED');
   });
 
-  test('sem lista configurada o comportamento anterior é mantido (envia ao cliente)', async () => {
+  test('AUSÊNCIA da lista em live: nada é enviado e a mensagem fica QUEUED intacta (fail closed)', async () => {
     const { outbox, worker, provider } = stack(config());
     const { orderId } = await paidOrder(OTHER);
     await enqueue(outbox, orderId);
+    const report = await worker.tick(soon());
+    expect(report.blocked.join(' ')).toContain('VALE_PASS_EMAIL_COMMERCIAL_RELEASE');
+    expect(report.claimed).toBe(0);
+    expect(provider.calls).toHaveLength(0);
+    expect(await rowOf(orderId)).toMatchObject({ status: 'QUEUED', attempts: 0, lockedUntil: null, toEmail: OTHER });
+    // mesmo forçando a reserva e o processamento, o provedor não é chamado
+    const row = await rowOf(orderId);
+    await prisma.valePassEmailOutbox.update({ where: { id: row.id }, data: { lockedUntil: new Date(Date.now() + 60_000) } });
+    expect(await worker.processOne(row.id, new Date())).toBe('retrying');
+    expect(provider.calls).toHaveLength(0);
+    expect(await rowOf(orderId)).toMatchObject({ status: 'QUEUED', attempts: 0, lockedUntil: null });
+  });
+
+  test('REMOÇÃO da lista: as mensagens retidas NÃO são liberadas; só a liberação comercial explícita as libera', async () => {
+    const guarded = stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    const { orderId } = await paidOrder(OTHER);
+    await enqueue(guarded.outbox, orderId);
+    await guarded.worker.tick(soon());
+    expect(guarded.provider.calls).toHaveLength(0);
+    // a variável foi removida da Railway (e nada mais mudou)
+    const removed = stack(config());
+    const report = await removed.worker.tick(soon());
+    expect(report.claimed).toBe(0);
+    expect(removed.provider.calls).toHaveLength(0);
+    expect(await rowOf(orderId)).toMatchObject({ status: 'QUEUED', attempts: 0 });
+    // lista trocada por uma inválida: continua tudo retido
+    const broken = stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ' ' }));
+    expect((await broken.worker.tick(soon())).claimed).toBe(0);
+    expect(broken.provider.calls).toHaveLength(0);
+    // a decisão comercial é explícita e separada
+    const released = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' }));
+    expect((await released.worker.tick(soon())).accepted).toBe(1);
+    expect(released.provider.calls.map((call) => call.to)).toEqual([OTHER]);
+  });
+
+  test('liberação comercial + lista válida: continua enviando só aos autorizados', async () => {
+    const { outbox, worker, provider } = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    const ok = await paidOrder(ALLOWED);
+    const blocked = await paidOrder(OTHER);
+    await enqueue(outbox, ok.orderId);
+    await enqueue(outbox, blocked.orderId);
     await worker.tick(soon());
-    expect(provider.calls.map((call) => call.to)).toEqual([OTHER]);
+    expect(provider.calls.map((call) => call.to)).toEqual([ALLOWED]);
   });
 
   test('modo off: não enfileira nem chama o provedor; dry-run: valida e renderiza sem enviar, com ou sem lista', async () => {
@@ -330,7 +390,7 @@ localDescribe('Lista de destinatários autorizados — worker', () => {
 
 localDescribe('Lista de destinatários autorizados — reenvio administrativo', () => {
   async function accepted(allowedList: string) {
-    const first = stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: undefined }));
+    const first = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' })); // a original saiu antes da lista existir
     const { orderId, groupId } = await paidOrder(OTHER);
     await enqueue(first.outbox, orderId);
     await first.worker.tick(soon()); // antes da lista existir: a mensagem original foi aceita
@@ -359,6 +419,27 @@ localDescribe('Lista de destinatários autorizados — reenvio administrativo', 
     expect((await prisma.valePassEmailOutbox.findMany({ where: { shopifyOrderId: orderId, kind: 'RESEND' } }))).toHaveLength(1);
   });
 
+  test('AUSÊNCIA da lista em live (sem liberação): o reenvio é recusado para qualquer endereço e nada é criado', async () => {
+    const { original, outbox, orderId, provider } = await accepted(ALLOWED);
+    const absent = stack(config());
+    await expect(absent.outbox.requestResend(original.id, { note, toEmail: ALLOWED }, actor())).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(absent.outbox.requestResend(original.id, { note }, actor())).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(await prisma.valePassEmailOutbox.count({ where: { shopifyOrderId: orderId, kind: 'RESEND' } })).toBe(0);
+    void outbox; void provider;
+  });
+
+  test('dry-run sem lista: o reenvio segue como antes (a mensagem é criada e nunca enviada); com lista, a regra vale', async () => {
+    const { original, orderId } = await accepted(ALLOWED);
+    const dry = stack(config({ VALE_PASS_EMAIL_MODE: 'dry-run' }));
+    const created = await dry.outbox.requestResend(original.id, { note, toEmail: 'qualquer@exemplo.invalid' }, actor());
+    expect(created.status).toBe('QUEUED');
+    await dry.worker.tick(soon());
+    expect(dry.provider.calls).toHaveLength(0);
+    const dryGuarded = stack(config({ VALE_PASS_EMAIL_MODE: 'dry-run', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    await expect(dryGuarded.outbox.requestResend(original.id, { note, toEmail: 'outro@exemplo.invalid' }, actor())).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(await prisma.valePassEmailOutbox.count({ where: { shopifyOrderId: orderId, kind: 'RESEND' } })).toBe(1);
+  });
+
   test('lista inválida: o reenvio é recusado para qualquer endereço', async () => {
     const { original, outbox } = await accepted('lixo');
     await expect(outbox.requestResend(original.id, { note, toEmail: ALLOWED }, actor())).rejects.toBeInstanceOf(UnprocessableEntityException);
@@ -379,11 +460,18 @@ localDescribe('Prévia administrativa do e-mail', () => {
       expect(preview.html).not.toContain(code);
       expect(preview.text).not.toContain(code);
     }
-    expect(preview.codesMasked).toHaveLength(2);
-    for (const masked of preview.codesMasked) {
-      expect(preview.html).toContain(masked);
-      expect(masked.endsWith('****')).toBe(true);
+    expect(preview.codesMasked).toEqual(['VALLE-****-****', 'VALLE-****-****']);
+    for (const code of codes) {
+      for (const secret of code.split('-').slice(1)) {
+        expect(preview.html).not.toContain(secret);
+        expect(preview.text).not.toContain(secret);
+        expect(JSON.stringify(preview)).not.toContain(secret);
+      }
     }
+    expect(preview.html).toContain('VALLE-****-****');
+    // só o primeiro nome do cliente, nunca o nome completo
+    expect(preview.html).toContain('Maria');
+    expect(preview.html + preview.text).not.toMatch(/Souza|Sint[ée]tica/);
     expect(preview.html).toContain('Valle Showroom');
     expect(preview.html).toContain('VS BY CLOSET');
     expect(preview.toMasked).toBe('c***@exemplo.invalid');
@@ -413,6 +501,11 @@ localDescribe('Prévia administrativa do e-mail', () => {
     const summary = await outbox.summary();
     expect(summary.alerts.map((alert) => alert.code)).toContain('EMAIL_RECIPIENT_ALLOWLIST');
     expect(JSON.stringify(summary)).not.toContain(ALLOWED);
+    const noList = await stack(config()).outbox.summary();
+    expect(noList.alerts.find((alert) => alert.code === 'EMAIL_NO_RECIPIENT_ALLOWLIST')?.severity).toBe('critical');
+    expect(noList.config).toMatchObject({ canSend: false, commercialRelease: false });
+    const offSummary = await stack(config({ VALE_PASS_EMAIL_MODE: 'off' })).outbox.summary();
+    expect(offSummary.alerts.map((alert) => alert.code)).not.toContain('EMAIL_NO_RECIPIENT_ALLOWLIST');
     const invalid = await stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: 'lixo' })).outbox.summary();
     expect(invalid.alerts.find((alert) => alert.code === 'EMAIL_RECIPIENT_ALLOWLIST_INVALID')?.severity).toBe('critical');
   });

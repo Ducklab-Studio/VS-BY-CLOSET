@@ -1,55 +1,63 @@
-# E-mail dos vouchers: lista de destinatários autorizados e prévia administrativa
+# E-mail dos vouchers: destinatários autorizados (fase de testes) e prévia administrativa
 
 Este documento não contém segredos, dados pessoais nem códigos de vouchers.
 
 ## Para que serve
-Permitir uma validação real do envio por e-mail (`VALE_PASS_EMAIL_MODE=live`) **sem risco de escapar uma mensagem para um cliente ou para uma mensagem antiga**. A lista restringe o envio real a endereços escolhidos; a prévia mostra o e-mail como será enviado, com os códigos mascarados.
+Permitir uma validação real do envio por e-mail (`VALE_PASS_EMAIL_MODE=live`) **sem que uma mensagem escape para um cliente ou saia uma mensagem antiga**, e dar ao ADMIN uma prévia do e-mail com os códigos totalmente mascarados.
 
-## Variável nova: `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS`
+## Regra de envio real (FAIL CLOSED na fase de testes)
+O envio real de vouchers exige, além do que já era exigido (`live`, chave, domínio verificado, remetente válido), **uma destas duas condições**:
 
-| Situação da variável | Efeito |
+| Configuração | Efeito |
 |---|---|
-| **Ausente** | Sem restrição. É o comportamento de hoje (nenhuma mudança para quem não a usa). |
-| **Lista válida** | O envio real vai **somente** a esses endereços. |
-| **Presente, mas vazia ou com qualquer item inválido** | **Falha fechada.** Nenhum envio real, para ninguém. O motivo aparece nos bloqueios e no resumo (sem expor o valor). |
+| `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS` com lista **válida** | O envio vai **somente** a esses endereços. |
+| Lista **ausente** | **Nenhum envio real**, para ninguém (bloqueio visível no resumo). |
+| Lista presente, mas **vazia ou com item inválido** | **Nenhum envio real**, nem com a liberação comercial. |
+| Lista ausente **e** `VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true` | Envio ao cliente do pedido (liberação comercial). **Ainda não habilitada.** |
+| Lista válida **e** liberação comercial | A lista continua restringindo (a mais restritiva vence). |
 
-Formato: endereços completos separados por vírgula, ponto e vírgula, espaço ou quebra de linha. A comparação não diferencia maiúsculas de minúsculas. Não são aceitos nome + endereço (`Maria <m@x>`), curingas (`*@x`), domínios inteiros (`@x`), nem mais de 20 endereços.
+`VALE_PASS_EMAIL_COMMERCIAL_RELEASE` é uma decisão **explícita e separada**: só o valor exato `true` vale (sem diferenciar maiúsculas). Não deve ser habilitada na fase de testes.
 
-### Onde a lista é aplicada
-1. **Reserva do worker** (`claim`): quem não está na lista **nunca é reservado**. A mensagem continua `QUEUED`, sem alteração de tentativa, trava, chave de idempotência nem evento.
-2. **Defesa em profundidade** em `processOne`: se alguma mensagem fora da lista chegar até lá, o provedor não é chamado, a reserva é devolvida e a mensagem continua na fila.
-3. **Reenvio administrativo** (`POST /admin/vale-pass/emails/:id/resend`): destino fora da lista (informado ou o do cliente) é recusado com 422 e **nada é criado**.
-4. A chamada ao provedor existe em um único ponto do código (`email-worker.service.ts`), coberto pelos itens 1 e 2.
+Formato da lista: endereços completos separados por vírgula, ponto e vírgula, espaço ou quebra de linha, sem diferenciar maiúsculas. Não são aceitos nome + endereço, curingas, domínios inteiros nem mais de 20 endereços.
 
-Os modos `off` e `dry-run` não mudam: `off` não faz nada; `dry-run` enfileira, valida e renderiza e nunca chama o provedor, com ou sem lista.
+### Onde a regra é aplicada
+1. **Reserva do worker** (`claim`): quem não está autorizado **nunca é reservado**. A mensagem continua `QUEUED`, sem alteração de tentativa, trava, chave de idempotência nem evento.
+2. **Defesa em profundidade** em `processOne`: se uma mensagem não autorizada chegar até lá, o provedor não é chamado, a reserva é devolvida e a mensagem continua na fila.
+3. **Reenvio administrativo** (`POST /admin/vale-pass/emails/:id/resend`): destino não autorizado é recusado (422) e **nada é criado**. A recusa vale com lista configurada (em qualquer modo) ou em `live` sem liberação comercial. Em `off`/`dry-run` sem lista nada pode ser enviado de qualquer forma, então o reenvio segue como antes.
+4. A chamada ao provedor de vouchers existe em um único ponto (`email-worker.service.ts`), coberto pelos itens 1 e 2.
 
-### Mensagens fora da lista
-Ficam `QUEUED`, intactas. O resumo (`GET /admin/vale-pass/emails/summary`) mostra um alerta com a quantidade retida, e o relatório do worker traz `heldByAllowlist`. Tratamento posterior seguro: cancelar a mensagem (procedimento auditado) ou autorizar o endereço. **Atenção:** se a lista for removida depois, o que estiver `QUEUED` e elegível sai para o cliente. Antes disso, confira o outbox.
+### Remover a lista é uma operação sensível, e agora é segura
+Remover `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS` **não libera** as mensagens retidas: sem lista e sem liberação comercial o envio real continua bloqueado. Só a variável separada `VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true` libera, e essa é uma decisão comercial consciente. Antes dela, conferir o outbox (as mensagens `QUEUED` elegíveis sairão para os clientes).
+
+### Modos `off` e `dry-run`
+Inalterados. `off` não faz nada; `dry-run` enfileira, valida e renderiza e nunca chama o provedor, com ou sem lista e com ou sem liberação.
+
+### Mensagens retidas
+Ficam `QUEUED`, intactas. O resumo (`GET /admin/vale-pass/emails/summary`) mostra um alerta (crítico em `live`) com a quantidade retida, e o relatório do worker traz `heldByAllowlist`. Tratamento posterior seguro: cancelar a mensagem (procedimento auditado) ou autorizar o endereço.
 
 ## Prévia administrativa
 `GET /admin/vale-pass/emails/:id/preview` (só **ADMIN**/SUPER_ADMIN, mesma autenticação e guardas do módulo `VALLE_PASS`, resposta com `Cache-Control: no-store`).
-- Renderiza o **mesmo modelo** do envio com os códigos **mascarados** (`VALLE-XXXX-****`); o destinatário vem mascarado e informa se estaria autorizado.
+- Renderiza o **mesmo modelo** do envio com os caracteres secretos **mascarados por inteiro**: `VALLE-****-****` (fica só o prefixo público; o benefício é identificado pelo cartão, Valle Showroom ou VS BY CLOSET).
+- Mostra **somente o primeiro nome** do cliente (nunca o nome completo) e o destinatário mascarado (`m***@dominio`).
 - Não envia, não grava, não cria evento e não chama o provedor.
-- Só existe enquanto o pedido está pago e a unidade completa e ativa (a mesma regra do envio). Caso contrário, 409; mensagem inexistente, 404.
+- Só existe enquanto o pedido está pago e a unidade completa e ativa. Caso contrário, 409; mensagem inexistente, 404.
 - Esta entrega é só a API. Não há tela no ClosetAdmin ainda.
 
 ## Testes
-Novo arquivo `email-allowlist.integration.test.ts`: leitura/validação da configuração (ausente, válida, vazia, curingas, nome+endereço, limite, status público sem endereços), destinatário permitido (com os dois vouchers) e não permitido, caixa alta/baixa, misto, lista inválida, defesa em profundidade, concorrência (3 ticks simultâneos), idempotência (vários ciclos), `off`/`dry-run` com e sem lista, reenvio (recusado, aceito, lista inválida), prévia (mascaramento, sem escrita, 404/409, ADMIN), alerta no resumo.
+`email-allowlist.integration.test.ts` (banco local descartável, sem rede): configuração (ausente, liberação só com `true`, lista válida/vazia/inválida/curinga/nome, limite, status público sem endereços, lista sempre restringe), destinatário permitido (com os dois vouchers) e não permitido, caixa alta/baixa, misto, ausência da lista em live, **remoção da lista com mensagens `QUEUED`**, lista inválida, defesa em profundidade, concorrência (3 ciclos), idempotência, `off`/`dry-run` com e sem lista, reenvio (recusado, aceito, ausente, lista inválida, dry-run), prévia (máscara total, só primeiro nome, sem escrita, 404/409, ADMIN), alertas do resumo.
+Os testes existentes que usam `live` passam a declarar `VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true'` (a liberação comercial é agora um pré-requisito explícito).
 
 ## Riscos
-- **Baixo, por padrão:** sem a variável nada muda.
-- **Falha fechada:** erro de digitação na lista bloqueia todo o envio real. É intencional e visível no resumo.
-- **Mascaramento:** a máscara existente mostra os 4 primeiros caracteres do segundo grupo do código; o código completo nunca sai pela prévia.
-- **Lista não restringe outros e-mails** (lembretes de retirada e alertas operacionais usam outro caminho), só os vouchers.
-- A prévia revela o primeiro nome do cliente (já visível ao ADMIN no pedido).
+- **Mudança de padrão (intencional):** `live` sem lista e sem liberação passa a ser bloqueado. Em produção hoje o modo é `dry-run` e nada muda; ao ir para `live` será preciso definir a lista.
+- Erro de digitação na lista bloqueia todo o envio real (visível no resumo).
+- A lista cobre só os e-mails de vouchers (lembretes de retirada e alertas usam outro caminho).
+- A prévia mostra o primeiro nome do cliente e o número do pedido (já visíveis ao ADMIN).
 
-## Plano de implantação (cada passo com autorização expressa; nada disso acontece com este PR)
-1. Revisar e fazer o merge. A API reconstrói sozinha; sem a variável, o comportamento é igual ao de hoje.
-2. Com `EMAIL_MODE=dry-run` ainda ativo, definir `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS` com o(s) endereço(s) de teste.
-3. Conferir o outbox (nenhuma mensagem `QUEUED` indevida) e o alerta do resumo.
-4. Só então decidir sobre `live` e uma compra real controlada, com `VALE_PASS_EMAIL_DAILY_LIMIT=1`.
+## Plano de implantação (cada passo com autorização expressa; nada disso ocorre com este PR)
+1. Revisar e fazer o merge. A API reconstrói; `dry-run` permanece como está.
+2. Definir `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS` com o(s) endereço(s) de teste (ainda em `dry-run`) e conferir o resumo.
+3. Conferir o outbox e só então decidir sobre `live` e uma compra real controlada, com `VALE_PASS_EMAIL_DAILY_LIMIT=1`.
+4. Não definir `VALE_PASS_EMAIL_COMMERCIAL_RELEASE` na fase de testes.
 
 ## Rollback
-- Remover `VALE_PASS_EMAIL_ALLOWED_RECIPIENTS` volta ao comportamento anterior (cuidado com mensagens `QUEUED`, ver acima).
-- `VALE_PASS_EMAIL_MODE=off` interrompe tudo imediatamente.
-- Reverter o PR não exige migration: **não há mudança de banco**.
+`VALE_PASS_EMAIL_MODE=off` interrompe tudo. Reverter o PR não exige migration (não há mudança de banco).

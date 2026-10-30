@@ -6,9 +6,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../../admin/admin-audit';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { EMAIL_CONFIG_TOKEN } from './email-tokens';
-import { DELIVERY_DEADLINE_DAYS, publicEmailStatus, recipientAllowed, senderAddress, type EmailConfig } from './email-config';
+import { DELIVERY_DEADLINE_DAYS, publicEmailStatus, recipientAllowed, recipientsUnrestricted, senderAddress, type EmailConfig } from './email-config';
 import { renderVoucherEmail } from './email-template';
-import { maskCode, maskEmail } from './email-mask';
+import { maskCode, maskCodeFully, maskEmail } from './email-mask';
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | PrismaService;
@@ -259,16 +259,18 @@ export class ValePassEmailOutboxService {
     if (counts.NEEDS_ATTENTION > 0) alerts.push({ code: 'EMAIL_NEEDS_ATTENTION', severity: 'critical', message: `${counts.NEEDS_ATTENTION} mensagem(ns) precisam de intervenção (tentativas esgotadas, resultado desconhecido, sem destinatário ou credencial recusada).` });
     if (counts.FAILED > 0) alerts.push({ code: 'EMAIL_FAILED', severity: 'warning', message: `${counts.FAILED} mensagem(ns) falharam definitivamente (endereço recusado ou devolvido). Corrija o e-mail e reenvie.` });
     if (counts.QUEUED + counts.UNKNOWN > 0 && !status.canSend) alerts.push({ code: 'EMAIL_QUEUE_BLOCKED', severity: counts.QUEUED + counts.UNKNOWN > 0 && overdue > 0 ? 'critical' : 'warning', message: `Há ${counts.QUEUED + counts.UNKNOWN} mensagem(ns) na fila, mas o envio real está bloqueado: ${status.blockers.join('; ')}.` });
-    if (status.recipientAllowlist.active) {
+    if ((status.recipientAllowlist.active || this.config.mode === 'live') && !recipientsUnrestricted(this.config)) {
       const list = this.config.allowedRecipients ?? [];
       const [heldRow] = await this.prisma.$queryRaw<{ held: number }[]>`SELECT count(*)::int AS held FROM vale_pass_email_outbox WHERE status IN ('QUEUED','UNKNOWN') AND NOT (lower(to_email) = ANY(${list}::text[]))`;
       const held = heldRow?.held ?? 0;
       alerts.push({
-        code: status.recipientAllowlist.valid ? 'EMAIL_RECIPIENT_ALLOWLIST' : 'EMAIL_RECIPIENT_ALLOWLIST_INVALID',
-        severity: status.recipientAllowlist.valid ? 'info' : 'critical',
-        message: status.recipientAllowlist.valid
-          ? `Envio real restrito a ${status.recipientAllowlist.size} endereço(s) autorizado(s); ${held} mensagem(ns) na fila ficam retidas por não estarem na lista.`
-          : 'A lista de destinatários autorizados é inválida: NENHUM envio real será feito até corrigi-la (ou removê-la).',
+        code: !status.recipientAllowlist.active ? 'EMAIL_NO_RECIPIENT_ALLOWLIST' : status.recipientAllowlist.valid ? 'EMAIL_RECIPIENT_ALLOWLIST' : 'EMAIL_RECIPIENT_ALLOWLIST_INVALID',
+        severity: status.recipientAllowlist.valid && status.recipientAllowlist.active ? 'info' : this.config.mode === 'live' ? 'critical' : 'warning',
+        message: !status.recipientAllowlist.active
+          ? `Sem lista de destinatários autorizados e sem liberação comercial: NENHUM envio real será feito (${held} mensagem(ns) na fila ficam retidas).`
+          : status.recipientAllowlist.valid
+            ? `Envio real restrito a ${status.recipientAllowlist.size} endereço(s) autorizado(s); ${held} mensagem(ns) na fila ficam retidas por não estarem na lista.`
+            : 'A lista de destinatários autorizados é inválida: NENHUM envio real será feito até corrigi-la.',
       });
     }
     if (acceptedLast24h >= Math.ceil(this.config.dailyLimit * 0.8)) alerts.push({ code: 'EMAIL_DAILY_LIMIT_NEAR', severity: acceptedLast24h >= this.config.dailyLimit ? 'critical' : 'warning', message: `${acceptedLast24h} de ${this.config.dailyLimit} envios do limite diário usados nas últimas 24 horas; o excedente espera o dia seguinte.` });
@@ -276,7 +278,7 @@ export class ValePassEmailOutboxService {
   }
 
   /**
-   * Prévia somente leitura do e-mail desta mensagem: o MESMO modelo do envio, com os códigos MASCARADOS. Não envia, não grava e não chama o provedor.
+   * Prévia somente leitura do e-mail desta mensagem: o MESMO modelo do envio, com os caracteres secretos dos códigos MASCARADOS por inteiro (só o prefixo público fica) e só o primeiro nome do cliente. Não envia, não grava e não chama o provedor.
    * Só existe enquanto o pedido está pago e a unidade completa e ativa (a mesma regra do envio).
    */
   async preview(id: string): Promise<{ subject: string; html: string; text: string; toMasked: string; codesMasked: string[]; status: ValePassEmailStatus; recipientAllowed: boolean }> {
@@ -284,9 +286,9 @@ export class ValePassEmailOutboxService {
     if (!row) throw new NotFoundException('Mensagem não encontrada.');
     const verdict = await evaluateGroup(this.prisma, row.shopifyOrderId, row.groupId);
     if (!verdict.ok) throw new ConflictException(`Sem prévia: o pedido não está pago ou a unidade não está completa e ativa (${verdict.reason}).`);
-    const masked = verdict.vouchers.map((voucher) => maskCode(voucher.code));
+    const masked = verdict.vouchers.map((voucher) => maskCodeFully(voucher.code));
     const rendered = renderVoucherEmail({
-      customerName: verdict.order.customerName,
+      customerName: verdict.order.customerName?.trim().split(/\s+/)[0] ?? null, // a prévia nunca leva o nome completo
       orderName: verdict.order.orderName,
       unit: verdict.unit,
       replyTo: this.config.replyTo,
@@ -333,7 +335,8 @@ export class ValePassEmailOutboxService {
           if (!verdict.ok) throw new ConflictException('O pedido não está pago ou a unidade não está completa e ativa: os códigos não podem ser reenviados.');
           const target = override ?? (isValidRecipient(original.toEmail) ? original.toEmail : verdict.order.customerEmail?.trim() ?? '');
           if (!isValidRecipient(target)) throw new UnprocessableEntityException('Não há e-mail válido do cliente. Informe o endereço correto.');
-          if (!recipientAllowed(this.config, target)) throw new UnprocessableEntityException('Este endereço não está na lista de destinatários autorizados (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS). Nada foi enviado nem criado.');
+          // Com lista configurada (qualquer modo) ou em live sem liberação comercial, só se reenvia a endereço autorizado. Em off/dry-run sem lista nada pode sair mesmo, então o pedido segue como antes.
+          if ((this.config.allowedRecipients !== null || this.config.mode === 'live') && !recipientAllowed(this.config, target)) throw new UnprocessableEntityException('Este endereço não está na lista de destinatários autorizados (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS) e não há liberação comercial. Nada foi enviado nem criado.');
 
           const previous = await tx.valePassEmailOutbox.count({ where: { groupId: original.groupId, kind: 'RESEND' } });
           if (previous >= MAX_MANUAL_RESENDS) throw new ConflictException(`Limite de ${MAX_MANUAL_RESENDS} reenvios por unidade atingido.`);

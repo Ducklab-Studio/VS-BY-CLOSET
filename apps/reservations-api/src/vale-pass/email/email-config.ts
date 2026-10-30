@@ -6,8 +6,10 @@
  *   2) RESEND_API_KEY presente                        (a chave nunca vai para o código, logs ou banco)
  *   3) VALE_PASS_EMAIL_DOMAIN_VERIFIED=true           (a pessoa confirma no painel da Resend que o DNS foi verificado)
  *   4) remetente válido (VALE_PASS_EMAIL_FROM)
- * Opcional e restritiva: VALE_PASS_EMAIL_ALLOWED_RECIPIENTS (lista de endereços). Ausente = sem restrição (comportamento anterior). Presente = o envio real
- * vai SOMENTE a esses endereços; vazia ou com qualquer item inválido = FALHA FECHADA (nenhum envio real). Vale para o worker e para reenvios.
+ * Fase de testes (FAIL CLOSED): o envio real exige uma lista VÁLIDA de destinatários (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS) e vai SOMENTE a esses endereços.
+ * Sem lista, ou com lista vazia/inválida, NADA é enviado — a menos que exista a liberação comercial explícita e separada
+ * VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true (ainda não habilitada). Mesmo com a liberação, uma lista presente continua restringindo; lista inválida nunca é ignorada.
+ * Vale para o worker e para reenvios administrativos.
  * Cadastrar o domínio na Resend, ou já existir RESEND_API_KEY para os lembretes de retirada, NÃO liga o envio de vouchers.
  */
 export type EmailMode = 'off' | 'dry-run' | 'live';
@@ -38,6 +40,8 @@ export interface EmailConfig {
   readonly allowedRecipients: readonly string[] | null;
   /** Descrição (nunca os endereços) dos problemas da lista; qualquer um bloqueia todo envio real. */
   readonly allowlistProblems: readonly string[];
+  /** Liberação comercial explícita (VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true): só ela permite envio real SEM lista de destinatários. */
+  readonly commercialRelease: boolean;
 }
 
 export const MAX_ALLOWED_RECIPIENTS = 20;
@@ -70,9 +74,14 @@ export function parseAllowedRecipients(raw: string | undefined): Pick<EmailConfi
   return { allowedRecipients: problems.length > 0 ? [] : [...valid], allowlistProblems: problems };
 }
 
-/** Este endereço pode receber envio real? Sem lista configurada, sim; com lista, só se estiver nela (comparação sem diferenciar maiúsculas). */
-export function recipientAllowed(config: Pick<EmailConfig, 'allowedRecipients'>, address: string | null | undefined): boolean {
-  if (config.allowedRecipients === null) return true;
+/** Não há restrição de destinatário? Só com a liberação comercial explícita e SEM lista (lista presente sempre restringe). */
+export function recipientsUnrestricted(config: Pick<EmailConfig, 'allowedRecipients' | 'commercialRelease'>): boolean {
+  return config.allowedRecipients === null && config.commercialRelease;
+}
+
+/** Este endereço pode receber envio real? Com lista, só se estiver nela (sem diferenciar maiúsculas). Sem lista, ninguém — salvo a liberação comercial explícita. */
+export function recipientAllowed(config: Pick<EmailConfig, 'allowedRecipients' | 'commercialRelease'>, address: string | null | undefined): boolean {
+  if (config.allowedRecipients === null) return config.commercialRelease;
   const normalized = (address ?? '').trim().toLowerCase();
   return normalized !== '' && config.allowedRecipients.includes(normalized);
 }
@@ -100,6 +109,7 @@ export function loadEmailConfig(env: Record<string, string | undefined> = proces
     workerIntervalSeconds,
     webhookSecret: env.RESEND_WEBHOOK_SECRET?.trim() || null,
     ...parseAllowedRecipients(env.VALE_PASS_EMAIL_ALLOWED_RECIPIENTS),
+    commercialRelease: env.VALE_PASS_EMAIL_COMMERCIAL_RELEASE?.trim().toLowerCase() === 'true',
   };
 }
 
@@ -117,6 +127,7 @@ export function liveBlockers(config: EmailConfig): string[] {
   if (!config.apiKey) reasons.push('RESEND_API_KEY ausente');
   if (!config.domainVerified) reasons.push('domínio ainda não marcado como verificado (VALE_PASS_EMAIL_DOMAIN_VERIFIED)');
   if (!senderAddress(config.from)) reasons.push('remetente inválido (VALE_PASS_EMAIL_FROM)');
+  if (config.allowedRecipients === null && !config.commercialRelease) reasons.push('sem lista de destinatários autorizados (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS) e sem liberação comercial explícita (VALE_PASS_EMAIL_COMMERCIAL_RELEASE)');
   for (const problem of config.allowlistProblems) reasons.push(`lista de destinatários autorizados inválida (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS): ${problem}`);
   return reasons;
 }
@@ -137,6 +148,8 @@ export function publicEmailStatus(config: EmailConfig): {
   sender: string | null;
   /** Só o estado e a quantidade — nunca os endereços. */
   recipientAllowlist: { active: boolean; size: number; valid: boolean };
+  /** Sem lista e sem liberação comercial: o envio real fica bloqueado (fase de testes). */
+  commercialRelease: boolean;
 } {
   const blockers = liveBlockers(config);
   return {
@@ -149,5 +162,6 @@ export function publicEmailStatus(config: EmailConfig): {
     dailyLimit: config.dailyLimit,
     sender: senderAddress(config.from),
     recipientAllowlist: { active: config.allowedRecipients !== null, size: config.allowedRecipients?.length ?? 0, valid: config.allowlistProblems.length === 0 },
+    commercialRelease: config.commercialRelease,
   };
 }
