@@ -93,7 +93,7 @@ export function WinterCarousel() {
     <div ref={root} className="winter-image winter-carousel" role="region" aria-label="Campanha VS BY CLOSET">
       {photos.map(([file, alt], i) => (
         <div key={file} className="winter-slide" aria-hidden={i !== 0}>
-          <Image src={`/editorial/${file}`} alt={i === 0 ? alt : ''} fill sizes="(max-width: 448px) calc(100vw - 48px), (max-width: 900px) 400px, 560px" />
+          <Image src={`/editorial/${file}`} alt={i === 0 ? alt : ''} fill sizes="(max-width: 900px) 100vw, 64vw" />
         </div>
       ))}
       <button className="winter-carousel-pause" aria-pressed={isPaused} onClick={() => {

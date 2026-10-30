@@ -684,13 +684,14 @@ body {
 /* Rental editorial: text and full portrait share a light, compact composition. */
 .winter-story {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  grid-template-columns: minmax(0, 36fr) minmax(0, 64fr);
   align-items: center;
-  gap: clamp(32px, 5vw, 72px);
-  padding: 64px max(28px, calc((100vw - 1280px) / 2));
+  gap: 0;
+  padding: 0;
   background: #f7f3ed;
 }
 .winter-content {
+  padding: 48px clamp(28px, 4vw, 76px);
   grid-column: 1;
   grid-row: 1;
   color: #53131e;
@@ -713,9 +714,10 @@ body {
 @media (max-width: 900px) {
   .winter-story {
     grid-template-columns: minmax(0, 1fr);
-    gap: 28px;
-    padding: 44px 24px;
+    gap: 0;
+    padding: 0;
   }
+  .winter-content { padding: 40px 24px; }
   .winter-content h2 { font-size: clamp(28px, 6.5vw, 38px); }
   .winter-description { font-size: 15px; }
 }
@@ -2773,21 +2775,26 @@ body {
   }
 }
 
-/* The reserved portrait ratio avoids cropping the campaign looks. */
+/* Edge-to-edge campaign stage; focal point protects face and coat. */
 .winter-carousel {
   position: relative;
   grid-column: 2;
   grid-row: 1;
   width: 100%;
-  aspect-ratio: 4 / 5;
+  height: clamp(660px, 62vw, 1060px);
+  align-self: stretch;
   overflow: hidden;
 }
 .winter-slide { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
 .winter-slide:first-child { opacity: 1; }
-.winter-slide img { object-fit: contain; object-position: center; }
+.winter-slide img { object-fit: cover; object-position: 50% 55%; }
+.winter-slide:nth-child(2) img { object-position: 50% 50%; }
+.winter-slide:nth-child(3) img { object-position: 50% 45%; }
+.winter-slide:nth-child(4) img { object-position: 50% 35%; }
 .winter-carousel:after { display: none; }
 .winter-carousel-pause { position: absolute; bottom: 16px; right: 16px; z-index: 4; padding: 8px 12px; color: #fff; background: #53131ecc; border: 1px solid #ffffff55; font-size: 11px; letter-spacing: .08em; }
 @media (max-width: 900px) {
-  .winter-carousel { grid-column: 1; grid-row: 2; max-width: 400px; justify-self: center; }
+  .winter-carousel { grid-column: 1; grid-row: 2; height: auto; aspect-ratio: 4 / 5; }
+  .winter-carousel .winter-slide img { object-position: center; }
 }
 @media (prefers-reduced-motion: reduce) { .winter-carousel-pause { display: none; } }
