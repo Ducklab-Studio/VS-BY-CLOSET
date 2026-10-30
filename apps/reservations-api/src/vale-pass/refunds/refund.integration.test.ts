@@ -309,6 +309,31 @@ localDescribe('voucher já usado: retenção administrativa (fail-closed) e reso
     expect((await prisma.adminAuditEvent.findFirstOrThrow({ where: { entityId: application.id } })).after).toMatchObject({ resolution: 'CANCEL_ACTIVE_VOUCHERS', vouchersCancelled: 1 });
   });
 
+  test('papéis da resolução: SUPER_ADMIN ativo (o proprietário) resolve como o ADMIN; STAFF, ADMIN inativo e SUPER_ADMIN inativo seguem barrados (a revisão fica aberta)', async () => {
+    const f = await usedScenario();
+    const { application } = (await apply(refundFor(f, { quantity: 3 }))) as { application: { id: string } };
+    const created: string[] = [];
+    const user = async (role: 'STAFF' | 'ADMIN' | 'SUPER_ADMIN', active: boolean) => {
+      const id = (await prisma.adminUser.create({ data: { name: `Teste papel ${role}`, phone: `${TAG}-papel-${role}-${active}`, pinHash: 'x', role, active } })).id;
+      created.push(id);
+      return { id, name: 'Teste papel' };
+    };
+    const note = 'Política: voucher usado não se desfaz';
+    try {
+      for (const denied of [await user('STAFF', true), await user('ADMIN', false), await user('SUPER_ADMIN', false)]) {
+        await expect(refunds.resolveReview(application.id, { action: 'KEEP_VOUCHERS', note }, denied)).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect((await prisma.valePassRefundApplication.findUniqueOrThrow({ where: { id: application.id } })).status).toBe('NEEDS_REVIEW');
+      const owner = await user('SUPER_ADMIN', true);
+      expect(await refunds.resolveReview(application.id, { action: 'KEEP_VOUCHERS', note }, owner)).toMatchObject({ status: 'RESOLVED', resolution: 'KEEP_VOUCHERS' });
+      const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { entityId: application.id, action: 'VALE_PASS_REFUND_REVIEW_RESOLVED' } });
+      expect(audit).toMatchObject({ adminUserId: owner.id, isCritical: true });
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: { in: created } } });
+      await prisma.adminUser.deleteMany({ where: { id: { in: created } } });
+    }
+  });
+
   test('segurança da resolução: STAFF/inativo/inexistente (403), justificativa curta ou ação inválida (422), id inexistente (404); rota só ADMIN', async () => {
     const f = await usedScenario();
     const { application } = (await apply(refundFor(f, { quantity: 3 }))) as { application: { id: string } };

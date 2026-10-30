@@ -913,6 +913,31 @@ localDescribe('E-mail dos vouchers — reenvio administrativo', () => {
     expect(f.email).not.toBe('novo.endereco@exemplo.invalid');
   });
 
+  test('papéis do reenvio: SUPER_ADMIN ativo (o proprietário) reenvia como o ADMIN; STAFF, ADMIN inativo e SUPER_ADMIN inativo seguem barrados (nada é criado)', async () => {
+    const { outbox, row } = await sentMessage();
+    const created: string[] = [];
+    const user = async (role: 'STAFF' | 'ADMIN' | 'SUPER_ADMIN', active: boolean) => {
+      const id = (await prisma.adminUser.create({ data: { name: `Teste papel ${role}`, phone: `${TAG}-papel-${role}-${active}`, pinHash: 'x', role, active } })).id;
+      created.push(id);
+      return { id, name: 'Teste papel' };
+    };
+    const note = 'Justificativa suficiente';
+    try {
+      const before = await prisma.valePassEmailOutbox.count({ where: { groupId: row.groupId } });
+      for (const denied of [await user('STAFF', true), await user('ADMIN', false), await user('SUPER_ADMIN', false)]) {
+        await expect(outbox.requestResend(row.id, { note }, denied)).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect(await prisma.valePassEmailOutbox.count({ where: { groupId: row.groupId } })).toBe(before);
+      const resent = await outbox.requestResend(row.id, { note }, await user('SUPER_ADMIN', true));
+      expect(resent).toMatchObject({ status: 'QUEUED' });
+      expect(await prisma.valePassEmailOutbox.count({ where: { groupId: row.groupId } })).toBe(before + 1);
+      expect(await outbox.requestResend(row.id, { note }, await user('ADMIN', true))).toMatchObject({ status: 'QUEUED' }); // o ADMIN segue passando (regressão)
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: { in: created } } });
+      await prisma.adminUser.deleteMany({ where: { id: { in: created } } });
+    }
+  });
+
   test('recusas: STAFF/inativo (403), justificativa curta (422), original em andamento ou cancelada, pedido reembolsado, limite de reenvios', async () => {
     const { outbox, f, row } = await sentMessage();
     await expect(outbox.requestResend(row.id, { note: 'Justificativa suficiente' }, { id: staffId, name: 'Operador' })).rejects.toBeInstanceOf(ForbiddenException);

@@ -958,6 +958,34 @@ localDescribe('MÉDIO-3 — a emissão excepcional do ADMIN registra a mensagem 
     expect(await vouchersOf(orderId)).toHaveLength(4);
   });
 
+  test('papéis da emissão excepcional: SUPER_ADMIN ativo (o proprietário) emite como o ADMIN; STAFF, ADMIN inativo e SUPER_ADMIN inativo seguem barrados (nada é emitido)', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true, { globalLimit: 1 });
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    await runAt(service(), { ...payload, created_at: hoursAgo(11) }, hoursAgo(10));
+    const [hold] = await holdsOf(orderId);
+    expect(hold.reason).toBe('CAPACITY_EXCEEDED');
+    await prisma.valePassCampaign.update({ where: { id: campaign.id }, data: { globalLimit: 2 } });
+    const preview = await holdsService.preview(hold.id);
+    const input: IssueHoldInput = { note: 'Capacidade revisada pela diretoria (teste)', confirmTotal: preview.projectedTotal, expected: { projectedTotal: preview.projectedTotal, consumedTotal: preview.consumedBefore, globalLimit: preview.globalLimit, capacityLimit: preview.capacityLimit, holdUpdatedAt: preview.holdUpdatedAt } };
+    const created: string[] = [];
+    const user = async (role: 'STAFF' | 'ADMIN' | 'SUPER_ADMIN', active: boolean) => (created.push((await prisma.adminUser.create({ data: { name: `Teste papel ${role}`, phone: `${TAG}-papel-${role}-${active}`, pinHash: 'x', role, active } })).id), created[created.length - 1]);
+    try {
+      for (const denied of [await user('STAFF', true), await user('ADMIN', false), await user('SUPER_ADMIN', false)]) {
+        await expect(holdsService.issue(hold.id, input, denied, 'Teste papel')).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect(await vouchersOf(orderId)).toHaveLength(0);
+      expect((await holdsOf(orderId))[0].status).toBe('OPEN');
+      await holdsService.issue(hold.id, input, await user('SUPER_ADMIN', true), 'Teste papel');
+      expect(await vouchersOf(orderId)).toHaveLength(4);
+      expect((await holdsOf(orderId))[0].status).not.toBe('OPEN');
+    } finally {
+      await prisma.adminAuditEvent.deleteMany({ where: { adminUserId: { in: created } } });
+      await prisma.adminUser.deleteMany({ where: { id: { in: created } } });
+    }
+  });
+
   test('sem o instante do pagamento, a base do prazo é o momento em que a retenção foi aberta (registrada na linha do tempo), nunca um horário inventado', async () => {
     flags.twoVoucher = true;
     const campaign = await newCampaign(true);
