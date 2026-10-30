@@ -391,7 +391,7 @@ body {
   color: theme('colors.ink.DEFAULT');
 }
 .lookbook-inner {
-  width: min(100%, 1560px);
+  width: min(100%, 1040px);
   margin: 0 auto;
 }
 .lookbook-intro {
@@ -410,7 +410,7 @@ body {
 .lookbook-intro h2 {
   margin: 0;
   color: theme('colors.marsala.DEFAULT');
-  font-size: clamp(40px, 5vw, 72px);
+  font-size: clamp(38px, 4.2vw, 60px);
   line-height: 0.99;
 }
 .lookbook-intro h2 em {
@@ -443,10 +443,12 @@ body {
   color: theme('colors.marsala.DEFAULT');
 }
 .lookbook-grid {
+  width: min(100%, 740px);
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  column-gap: clamp(16px, 2.2vw, 34px);
-  row-gap: clamp(48px, 7vw, 104px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: clamp(32px, 4vw, 52px);
   align-items: start;
 }
 .lookbook-figure {
@@ -485,19 +487,9 @@ body {
   letter-spacing: 0.04em;
 }
 @media (min-width: 1101px) {
-  .lookbook-a {
-    grid-column: 1 / span 5;
-    margin-top: 72px;
-  }
-  .lookbook-b {
-    grid-column: 6 / span 7;
-  }
-  .lookbook-c {
-    grid-column: 2 / span 5;
-    margin-top: 28px;
-  }
-  .lookbook-d {
-    grid-column: 7 / span 6;
+  .lookbook-intro {
+    grid-template-columns: minmax(0, 1.1fr) minmax(250px, 0.7fr) auto;
+    gap: clamp(28px, 4vw, 56px);
   }
 }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
@@ -528,8 +520,7 @@ body {
     margin-top: -10px;
   }
   .lookbook-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 48px 20px;
+    gap: 32px 20px;
   }
 }
 @media (max-width: 700px) {
@@ -582,8 +573,9 @@ body {
     font-size: 9px;
   }
   .lookbook-grid {
+    width: min(100%, 320px);
     grid-template-columns: minmax(0, 1fr);
-    row-gap: 32px;
+    row-gap: 26px;
   }
   .lookbook-figure {
     grid-column: 1;
