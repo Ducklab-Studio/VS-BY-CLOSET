@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { getAdminSession, hasAdminModule, requireAdminModule, requireAdminRole, requireAdminSession } from '@/lib/admin-session';
+import { isTestCampaign, isTestPreset, touchesTestBenefits, TEST_CAMPAIGN_ID, VALLE_PASS_TEST_PRESET } from '@/lib/valle-pass-test-benefits';
 import {
   confirmValePassBlock,
   confirmValePassUnblock,
@@ -431,12 +432,40 @@ export async function replaceValePassBenefitsAction(campaignId: string, benefits
   const session = await requireAdminSession();
   requireAdminModule(session, 'VALLE_PASS');
   requireAdminRole(session, 'ADMIN');
+  // Isolamento da campanha de TESTE: o modelo oficial nunca entra nela e o modelo de teste nunca entra em outra campanha.
+  if (campaignId === TEST_CAMPAIGN_ID || touchesTestBenefits(benefits)) {
+    return { error: 'Os benefícios da campanha de teste só podem ser cadastrados pela opção própria da campanha de teste.' };
+  }
   try {
     await replaceValePassBenefits(campaignId, benefits, session.id);
     revalidateValePassPath();
     return { error: null };
   } catch (err) {
     return { error: err instanceof AdminApiError ? err.message : 'Não foi possível salvar os benefícios.' };
+  }
+}
+
+/**
+ * Cadastra os dois benefícios SIMBÓLICOS (R$ 5,00 e R$ 0,50) da campanha de TESTE. Só ADMIN. As travas valem AQUI (servidor), não só na tela:
+ * o ID da campanha precisa ser o da campanha de teste E a variante da Shopify precisa ser a do produto de teste; e a campanha não pode ter nenhum
+ * benefício (nada é regravado). A API só recebe o modelo de teste exato, definido em `valle-pass-test-benefits.ts`.
+ */
+export async function registerTestBenefitsAction(campaignId: string): Promise<{ error: string | null }> {
+  const session = await requireAdminSession();
+  requireAdminModule(session, 'VALLE_PASS');
+  requireAdminRole(session, 'ADMIN');
+  if (campaignId !== TEST_CAMPAIGN_ID) return { error: 'Esta opção existe só para a campanha de teste específica.' };
+  try {
+    const [campaigns, capacity] = await Promise.all([listValePassCampaigns(session.id), getValePassCapacity(campaignId, session.id)]);
+    const campaign = campaigns.find((item) => item.id === campaignId);
+    if (!campaign || !isTestCampaign(campaign)) return { error: 'A campanha não corresponde à campanha de teste (ID e variante da Shopify): nada foi alterado.' };
+    if (capacity.benefits.length > 0) return { error: 'Esta campanha já tem benefícios cadastrados: nada foi alterado.' };
+    if (!isTestPreset(VALLE_PASS_TEST_PRESET)) return { error: 'Modelo de teste inválido: nada foi alterado.' };
+    await replaceValePassBenefits(campaignId, VALLE_PASS_TEST_PRESET, session.id);
+    revalidateValePassPath();
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof AdminApiError ? err.message : 'Não foi possível cadastrar os benefícios de teste.' };
   }
 }
 

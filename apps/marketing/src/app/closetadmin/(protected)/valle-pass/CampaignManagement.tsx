@@ -6,6 +6,7 @@ import type { ValePassCampaign, ValePassCapacity, ValePassCapacityAlert, ValePas
 import { editFormValidityCopy, syncCampaignWithCapacity } from '@/lib/valle-pass-campaign-indicators';
 import { ConfirmDialog } from '@/components/closetadmin/ConfirmDialog';
 import { BenefitsPanel, CancellationAlertsPanel, HoldsPanel, RefundReviewsPanel } from './HoldsAndBenefits';
+import { isTestCampaign } from '@/lib/valle-pass-test-benefits';
 import {
   actOnValePassLotAction,
   createValePassLotAction,
@@ -117,7 +118,7 @@ export function CampaignManagement({
               {capacity.holds.length > 0 ? <HoldsPanel holds={capacity.holds} canManage={canManage} onChanged={refresh} /> : null}
               {(capacity.cancellationAlerts ?? []).length > 0 ? <CancellationAlertsPanel alerts={capacity.cancellationAlerts ?? []} canManage={canManage} onChanged={refresh} /> : null}
               {(capacity.refundReviews ?? []).length > 0 ? <RefundReviewsPanel reviews={capacity.refundReviews ?? []} canManage={canManage} onChanged={refresh} /> : null}
-              <BenefitsPanel campaignId={campaign.id} benefits={capacity.benefits} canManage={canManage} onChanged={refresh} />
+              <BenefitsPanel campaignId={campaign.id} benefits={capacity.benefits} canManage={canManage} onChanged={refresh} isTestCampaign={isTestCampaign(campaign)} />
               <LotsPanel campaignId={campaign.id} capacity={capacity} canManage={canManage} onChanged={refresh} />
             </>
           ) : null}

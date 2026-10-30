@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ArrowDownCircle, CheckCircle2, Loader2, Lock, LockOpen, RotateCcw, Search, Wallet } from 'lucide-react';
 import type { ValePassBalanceView, ValePassBlockPreview, ValePassLedgerEntry, ValePassRedeemPreview, ValePassReversePreview } from '@/lib/admin-data';
 import { centsToInput, COMPANY_LABELS, describeBalanceError, formatCents, parseReaisToCents, usedPercent } from '@/lib/valle-pass-balance';
+import { isTestBenefitLabel } from '@/lib/valle-pass-test-benefits';
 import {
   confirmValePassBlockAction,
   prepareValePassBlockAction,
@@ -358,6 +359,11 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
           </div>
 
           <div className="grid gap-x-6 gap-y-1 text-xs text-ink/60 dark:text-dark-subtle sm:grid-cols-2">
+            {isTestBenefitLabel(view.benefitLabel) ? (
+              <p role="alert" data-testid="test-voucher-warning" className="rounded-lg border border-red-500/40 bg-red-500/10 px-2 py-1.5 font-semibold text-red-600 sm:col-span-2 dark:text-red-400">
+                VOUCHER DE TESTE — sem valor comercial. Não aceite como crédito de cliente.
+              </p>
+            ) : null}
             {view.benefitLabel ? <p>Benefício: {view.benefitLabel}</p> : null}
             <p>Validade: {view.validFrom ? `${day(view.validFrom)} a ` : 'até '}{day(view.expiresAt)}</p>
             {view.orderName ? <p>Pedido: {view.orderName}</p> : null}
