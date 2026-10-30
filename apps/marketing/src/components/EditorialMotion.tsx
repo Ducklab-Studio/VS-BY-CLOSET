@@ -40,7 +40,9 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
           '.winter-content .eyebrow',
           '.winter-content h2',
           '.winter-description',
-          '.winter-content .editorial-button',
+          '.winter-feature-item',
+          '.winter-cta-row',
+          '.winter-carousel-stage',
         ]);
 
         gsap.from(winterElements, {

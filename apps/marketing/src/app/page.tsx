@@ -113,21 +113,57 @@ export default function HomePage() {
         <FeaturedProducts />
       </section>
       <section className="winter-story" aria-labelledby="winter-title">
-        <WinterCarousel />
         <div className="winter-content">
-          <p className="eyebrow">ALUGUEL VS BY CLOSET</p>
-          <h2 id="winter-title">
-            Por que comprar para uma viagem,
-            <br />
-            <em>se você pode ter um closet à disposição?</em>
-          </h2>
-          <p className="winter-description">
-            Use os looks que deseja, sem precisar comprar. Ter seu closet em Santiago é mais simples do que você imagina.
-          </p>
-          <Link href="/como-funciona" className="editorial-button light">
-            Descubra como funciona o aluguel <ArrowUpRight size={18} />
-          </Link>
+          <div className="winter-header-block">
+            <p className="eyebrow">ALUGUEL VS BY CLOSET · SANTIAGO</p>
+            <h2 id="winter-title">
+              Por que comprar para uma viagem,
+              <br />
+              <em>se você pode ter um closet à disposição?</em>
+            </h2>
+          </div>
+
+          <div className="winter-body-block">
+            <p className="winter-description">
+              Use os looks que deseja, sem precisar comprar. Ter seu closet em Santiago é mais simples do que você imagina: peças selecionadas para cada ocasião do seu roteiro.
+            </p>
+
+            <div className="winter-features">
+              <div className="winter-feature-item">
+                <span className="winter-feature-badge">01</span>
+                <div>
+                  <strong>Mala sem excesso</strong>
+                  <p>Viaje leve sem pagar taxa de bagagem nem carregar sobretudos pesados.</p>
+                </div>
+              </div>
+              <div className="winter-feature-item">
+                <span className="winter-feature-badge">02</span>
+                <div>
+                  <strong>Retirada flexível</strong>
+                  <p>Retire no nosso espaço em Santiago ou solicite entrega no seu hotel.</p>
+                </div>
+              </div>
+              <div className="winter-feature-item">
+                <span className="winter-feature-badge">03</span>
+                <div>
+                  <strong>Peças impecáveis</strong>
+                  <p>Higienização profissional a vapor, prontas para vestir e fotografar.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="winter-cta-row">
+              <Link href="/como-funciona" className="editorial-button light">
+                Descubra como funciona o aluguel <ArrowUpRight size={18} />
+              </Link>
+              <span className="winter-guarantee">
+                ✦ Reserva antecipada online · Suporte em Santiago
+              </span>
+            </div>
+          </div>
         </div>
+
+        <WinterCarousel />
       </section>
       <section className="rental-steps" aria-label="Como alugar">
         <div data-reveal>
