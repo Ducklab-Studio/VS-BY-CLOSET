@@ -61,3 +61,9 @@ Os testes existentes que usam `live` passam a declarar `VALE_PASS_EMAIL_COMMERCI
 
 ## Rollback
 `VALE_PASS_EMAIL_MODE=off` interrompe tudo. Reverter o PR não exige migration (não há mudança de banco).
+
+## Identificação do e-mail da campanha de TESTE
+- A campanha de teste é identificada pelo **mesmo critério que bloqueia o resgate** (`isTestCampaign`: ID da campanha ou variante da Shopify do produto de teste), nunca por nome, rótulo ou valor.
+- Só para ela: assunto com o prefixo **`[TESTE] `** e a faixa **"VOUCHERS DE TESTE — SEM VALOR COMERCIAL"** no HTML (logo abaixo do cabeçalho) e no texto simples. Vale para o worker, para o reenvio administrativo, para o `dry-run` e para a prévia.
+- A campanha **oficial** Valle Pass 2027 não recebe nenhuma marcação (assunto, HTML e texto idênticos aos de antes).
+- Em "Como utilizar", saiu a frase redundante "Os vouchers pertencem a empresas diferentes…" (a mesma regra já consta no primeiro item). Nenhuma regra comercial foi alterada.

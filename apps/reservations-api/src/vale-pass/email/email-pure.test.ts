@@ -214,11 +214,29 @@ describe('template do e-mail — redesign editorial (compatibilidade, segurança
   const two = [base, { ...base, company: 'VS_BY_CLOSET' as const, amountCents: 5_000, code: 'VALLE-BBBB-2222' }];
   const render = (over: Record<string, unknown> = {}) => renderVoucherEmail({ customerName: 'Maria', orderName: '#1001', vouchers: two, timeZone: 'America/Sao_Paulo', ...over });
 
-  test('estrutura editorial: título, subtítulo, selo, "Como utilizar seus benefícios", aviso de empresas diferentes e encerramento', () => {
+  test('estrutura editorial: título, subtítulo, selo, "Como utilizar seus benefícios", e encerramento', () => {
     const { html, text } = render();
-    for (const part of ['Sua experiência começa aqui.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'Valle Pass &bull; 2027', 'Como utilizar seus benefícios', 'Os vouchers pertencem a empresas diferentes', 'Obrigada por escolher o Valle Pass 2027.']) expect(html, part).toContain(part);
-    for (const part of ['SUA EXPERIÊNCIA COMEÇA AQUI.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'COMO UTILIZAR SEUS BENEFÍCIOS', 'Os vouchers pertencem a empresas diferentes', 'Obrigada por escolher o Valle Pass 2027.', 'Voucher Valle Showroom — R$ 500,00', 'Voucher VS BY CLOSET — R$ 50,00', 'Código: VALLE-AAAA-1111', 'Código: VALLE-BBBB-2222']) expect(text, part).toContain(part);
+    for (const part of ['Sua experiência começa aqui.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'Valle Pass &bull; 2027', 'Como utilizar seus benefícios', 'Obrigada por escolher o Valle Pass 2027.']) expect(html, part).toContain(part);
+    for (const part of ['SUA EXPERIÊNCIA COMEÇA AQUI.', 'Seus benefícios exclusivos Valle Pass 2027 estão prontos para acompanhar você.', 'COMO UTILIZAR SEUS BENEFÍCIOS', 'Obrigada por escolher o Valle Pass 2027.', 'Voucher Valle Showroom — R$ 500,00', 'Voucher VS BY CLOSET — R$ 50,00', 'Código: VALLE-AAAA-1111', 'Código: VALLE-BBBB-2222']) expect(text, part).toContain(part);
     for (const line of EMAIL_TERMS) expect(text).toContain(line); // a versão texto é completa
+  });
+
+  test('campanha de TESTE: assunto "[TESTE]" e faixa visível no HTML e no texto; a oficial não recebe nenhuma marcação; a frase redundante saiu', () => {
+    const banner = 'VOUCHERS DE TESTE — SEM VALOR COMERCIAL';
+    const test = render({ testCampaign: true });
+    expect(test.subject).toBe('[TESTE] Seus vouchers do Valle Pass 2027');
+    expect(test.html).toContain(banner);
+    expect(test.text).toContain(banner);
+    expect(test.html).toContain('<title>[TESTE] Seus vouchers do Valle Pass 2027</title>');
+    expect(render({ testCampaign: true, unit: { index: 1, total: 2 } }).subject).toBe('[TESTE] Seus vouchers do Valle Pass 2027 (1 de 2)');
+    for (const official of [render(), render({ testCampaign: false }), render({ testCampaign: undefined })]) {
+      expect(official.subject).toBe('Seus vouchers do Valle Pass 2027');
+      expect((official.html + official.text + official.subject).toUpperCase()).not.toMatch(/TESTE|SEM VALOR COMERCIAL/);
+    }
+    for (const rendered of [test, render()]) {
+      expect(rendered.html + rendered.text).not.toContain('empresas diferentes');
+      expect(rendered.html).toContain('Cada voucher vale somente na empresa indicada e não pode ser usado na outra.');
+    }
   });
 
   test('compatibilidade: tabelas + estilos inline, 600 px, sem JavaScript, CSS/fonte/imagem externa ou imagem de fundo; códigos são TEXTO (selecionável), nunca imagem', () => {

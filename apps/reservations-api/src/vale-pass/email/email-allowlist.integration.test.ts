@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite
 import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TEST_CAMPAIGN_VARIANT_ID } from '../vale-pass-test-campaign';
 import { REQUIRE_ROLE_KEY } from '../../admin/require-role.decorator';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { purgeLedgerForTest } from '../ledger/ledger-test-utils';
@@ -134,10 +135,10 @@ function stack(cfg: EmailConfig, provider: MockProvider = new MockProvider()) {
   return { outbox, worker, provider };
 }
 
-async function newCampaign(): Promise<ValePassCampaign> {
+async function newCampaign(variantId?: string): Promise<ValePassCampaign> {
   const campaign = await prisma.valePassCampaign.create({
     data: {
-      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: `${TAG}-var-${counter++}`,
+      name: `${TAG}-camp-${counter++}`, amountCents: 35_000, validityDays: 30, globalLimit: 1_000, shopifyVariantId: variantId ?? `${TAG}-var-${counter++}`,
       voucherValidFrom: new Date('2027-01-01T00:00:00.000Z'), voucherValidUntil: new Date('2027-12-31T00:00:00.000Z'),
     },
   });
@@ -152,8 +153,8 @@ async function newCampaign(): Promise<ValePassCampaign> {
 }
 
 /** Pedido PAGO com 2 vouchers emitidos pelo emissor real, SEM enfileirar. */
-async function paidOrder(email: string): Promise<{ orderId: string; groupId: string }> {
-  const campaign = await newCampaign();
+async function paidOrder(email: string, options: { testVariant?: boolean } = {}): Promise<{ orderId: string; groupId: string }> {
+  const campaign = await newCampaign(options.testVariant ? TEST_CAMPAIGN_VARIANT_ID : undefined);
   const orderId = `${TAG}-o${counter++}`;
   orderIds.push(orderId);
   await prisma.valePassOrder.create({
@@ -508,5 +509,69 @@ localDescribe('Prévia administrativa do e-mail', () => {
     expect(offSummary.alerts.map((alert) => alert.code)).not.toContain('EMAIL_NO_RECIPIENT_ALLOWLIST');
     const invalid = await stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: 'lixo' })).outbox.summary();
     expect(invalid.alerts.find((alert) => alert.code === 'EMAIL_RECIPIENT_ALLOWLIST_INVALID')?.severity).toBe('critical');
+  });
+});
+
+localDescribe('E-mail da campanha de TESTE — identificação e marcação', () => {
+  const BANNER = 'VOUCHERS DE TESTE — SEM VALOR COMERCIAL';
+  const cfg = () => config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED });
+
+  test('campanha de teste (mesmo critério do bloqueio de resgate): envio com "[TESTE]" no assunto e a faixa no HTML e no texto', async () => {
+    const { outbox, worker, provider } = stack(cfg());
+    const { orderId } = await paidOrder(ALLOWED, { testVariant: true });
+    await enqueue(outbox, orderId);
+    await worker.tick(soon());
+    expect(provider.calls).toHaveLength(1);
+    expect(provider.calls[0].subject).toBe('[TESTE] Seus vouchers do Valle Pass 2027');
+    expect(provider.calls[0].html).toContain(BANNER);
+    expect(provider.calls[0].text).toContain(BANNER);
+  });
+
+  test('campanha OFICIAL (outra variante): nenhuma marcação de teste no assunto, no HTML nem no texto', async () => {
+    const { outbox, worker, provider } = stack(cfg());
+    const { orderId } = await paidOrder(ALLOWED);
+    await enqueue(outbox, orderId);
+    await worker.tick(soon());
+    expect(provider.calls).toHaveLength(1);
+    const call = provider.calls[0];
+    expect(call.subject).toBe('Seus vouchers do Valle Pass 2027');
+    expect((call.html + call.text + call.subject).toUpperCase()).not.toMatch(/TESTE|SEM VALOR COMERCIAL/);
+  });
+
+  test('reenvio administrativo de mensagem da campanha de teste também sai marcado; o da oficial, não', async () => {
+    const actor = { id: adminId, name: 'Admin Teste Allowlist' };
+    const note = 'Reenvio de teste da marcação de campanha de teste.';
+    for (const testVariant of [true, false]) {
+      const { outbox, worker, provider } = stack(cfg());
+      const { orderId } = await paidOrder(ALLOWED, { testVariant });
+      await enqueue(outbox, orderId);
+      await worker.tick(soon());
+      const original = await rowOf(orderId);
+      await outbox.requestResend(original.id, { note, toEmail: ALLOWED }, actor);
+      await worker.tick(soon());
+      expect(provider.calls).toHaveLength(2);
+      for (const call of provider.calls) {
+        expect(call.subject.startsWith('[TESTE] '), `testVariant=${testVariant}`).toBe(testVariant);
+        expect(call.html.includes(BANNER)).toBe(testVariant);
+        expect(call.text.includes(BANNER)).toBe(testVariant);
+      }
+      await cleanRows();
+    }
+  });
+
+  test('prévia administrativa e dry-run: a campanha de teste aparece marcada e a oficial não; nada é enviado', async () => {
+    const { outbox, provider } = stack(config({ VALE_PASS_EMAIL_MODE: 'dry-run', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    const test = await paidOrder(OTHER, { testVariant: true });
+    const official = await paidOrder(OTHER);
+    await enqueue(outbox, test.orderId);
+    await enqueue(outbox, official.orderId);
+    const previewTest = await outbox.preview((await rowOf(test.orderId)).id);
+    expect(previewTest.subject).toBe('[TESTE] Seus vouchers do Valle Pass 2027');
+    expect(previewTest.html).toContain(BANNER);
+    expect(previewTest.text).toContain(BANNER);
+    const previewOfficial = await outbox.preview((await rowOf(official.orderId)).id);
+    expect(previewOfficial.subject).toBe('Seus vouchers do Valle Pass 2027');
+    expect((previewOfficial.html + previewOfficial.text).toUpperCase()).not.toMatch(/TESTE|SEM VALOR COMERCIAL/);
+    expect(provider.calls).toHaveLength(0);
   });
 });
