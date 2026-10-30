@@ -6,7 +6,8 @@ import { supportsValePassCapacityContract, VALE_PASS_CAPACITY_CONTRACT_VERSION }
 import { formatCents } from '@/lib/valle-pass-balance';
 import { holdElapsed, holdGuidance } from '@/lib/valle-pass-holds';
 import { VALLE_PASS_2027_PRESET } from '@/lib/valle-pass-benefits-preset';
-import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import { acknowledgeValePassCancellationAlertAction, resumeHeldPaymentsAction, resolveValePassRefundReviewAction, issueValePassHoldAction, previewValePassHoldAction, registerTestBenefitsAction, replaceValePassBenefitsAction, resolveValePassHoldAction } from './actions';
+import { TEST_CONFIRMATION_WORD } from '@/lib/valle-pass-test-benefits';
 
 /**
  * Valle Pass 2027 — fila de pagamentos retidos e benefícios da campanha (ClosetAdmin).
@@ -252,8 +253,10 @@ function HoldRow({ hold, canManage, onChanged }: { hold: ValePassCapacityHold; c
   );
 }
 
-export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { campaignId: string; benefits: readonly ValePassCapacityBenefit[]; canManage: boolean; onChanged: () => void }) {
+export function BenefitsPanel({ campaignId, benefits, canManage, onChanged, isTestCampaign = false }: { campaignId: string; benefits: readonly ValePassCapacityBenefit[]; canManage: boolean; onChanged: () => void; isTestCampaign?: boolean }) {
   const [confirming, setConfirming] = useState(false);
+  const [testConfirming, setTestConfirming] = useState(false);
+  const [typed, setTyped] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -264,6 +267,17 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
     setPending(false);
     if (result.error) return setError(result.error);
     setConfirming(false);
+    onChanged();
+  }
+
+  async function saveTest() {
+    setPending(true);
+    setError(null);
+    const result = await registerTestBenefitsAction(campaignId);
+    setPending(false);
+    if (result.error) return setError(result.error);
+    setTestConfirming(false);
+    setTyped('');
     onChanged();
   }
 
@@ -291,7 +305,7 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
           ))}
         </ul>
       )}
-      {canManage && benefits.length === 0 ? (
+      {canManage && benefits.length === 0 && !isTestCampaign ? (
         confirming ? (
           <div className="mt-2 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs text-ink dark:text-dark-text">
             <p>
@@ -315,6 +329,37 @@ export function BenefitsPanel({ campaignId, benefits, canManage, onChanged }: { 
         ) : (
           <button type="button" className={`${secondaryButton} mt-2`} onClick={() => setConfirming(true)}>
             Sugerir modelo Valle Pass 2027
+          </button>
+        )
+      ) : null}
+      {canManage && benefits.length === 0 && isTestCampaign ? (
+        testConfirming ? (
+          <div className="mt-2 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs text-ink dark:text-dark-text" aria-label="Confirmação dos benefícios de teste">
+            <p>
+              Cadastrar os benefícios SIMBÓLICOS de TESTE desta campanha: voucher de <strong>R$ 5,00</strong> (Valle Showroom) e voucher de <strong>R$ 0,50</strong> (VS BY CLOSET), com a condição
+              &quot;Voucher de teste, sem valor comercial&quot;, sem o desconto de 10%. Isto só registra a configuração; a emissão continua dependendo das chaves da integração e de um pagamento.
+            </p>
+            <label className="block">
+              Digite <strong>{TEST_CONFIRMATION_WORD}</strong> para confirmar
+              <input className={`${inputClass} mt-1`} value={typed} onChange={(event) => setTyped(event.target.value.toUpperCase())} maxLength={20} autoComplete="off" />
+            </label>
+            {error ? (
+              <p role="alert" className="text-red-500">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex gap-2">
+              <button type="button" className={secondaryButton} disabled={pending || typed.trim() !== TEST_CONFIRMATION_WORD} onClick={() => void saveTest()}>
+                Confirmar cadastro de teste
+              </button>
+              <button type="button" className={secondaryButton} disabled={pending} onClick={() => { setTestConfirming(false); setTyped(''); setError(null); }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className={`${secondaryButton} mt-2`} onClick={() => setTestConfirming(true)}>
+            Cadastrar benefícios de TESTE (R$ 5,00 + R$ 0,50)
           </button>
         )
       ) : null}
