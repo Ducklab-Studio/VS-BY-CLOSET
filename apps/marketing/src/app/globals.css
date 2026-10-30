@@ -2775,26 +2775,23 @@ body {
   }
 }
 
-/* Edge-to-edge campaign stage; focal point protects face and coat. */
+/* Contained portraits stay complete at every viewport and animation frame. */
 .winter-carousel {
   position: relative;
   grid-column: 2;
   grid-row: 1;
   width: 100%;
-  height: clamp(600px, 56vw, 940px);
+  height: min(840px, max(240px, calc(100svh - 120px)));
   align-self: stretch;
   overflow: hidden;
 }
 .winter-slide { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
 .winter-slide:first-child { opacity: 1; }
-.winter-slide img { object-fit: cover; object-position: 50% 55%; }
-.winter-slide:nth-child(2) img { object-position: 50% 50%; }
-.winter-slide:nth-child(3) img { object-position: 50% 45%; }
-.winter-slide:nth-child(4) img { object-position: 50% 35%; }
+.winter-slide img { object-fit: contain; object-position: center; }
 .winter-carousel:after { display: none; }
 .winter-carousel-pause { position: absolute; bottom: 16px; right: 16px; z-index: 4; padding: 8px 12px; color: #fff; background: #53131ecc; border: 1px solid #ffffff55; font-size: 11px; letter-spacing: .08em; }
 @media (max-width: 900px) {
-  .winter-carousel { grid-column: 1; grid-row: 2; height: auto; aspect-ratio: 4 / 5; }
+  .winter-carousel { grid-column: 1; grid-row: 2; height: min(125vw, max(240px, calc(100svh - 110px))); }
   .winter-carousel .winter-slide img { object-position: center; }
 }
 @media (prefers-reduced-motion: reduce) { .winter-carousel-pause { display: none; } }

@@ -46,11 +46,11 @@ export function WinterCarousel() {
             const current = slides[i];
             const next = slides[(i + 1) % slides.length];
             const start = i * 6.1;
-            timeline.fromTo(current.querySelector('img'), { scale: 1.04 }, { scale: 1, duration: 6.1, ease: 'none', immediateRender: false }, start);
+            timeline.fromTo(current.querySelector('img'), { scale: 0.98 }, { scale: 1, duration: 6.1, ease: 'none', immediateRender: false }, start);
             timeline.set(slides, { zIndex: 0 }, start + 5);
             timeline.set(current, { zIndex: 1 }, start + 5);
             timeline.set(next, { zIndex: 2 }, start + 5);
-            timeline.set(next.querySelector('img'), { scale: 1.04 }, start + 5);
+            timeline.set(next.querySelector('img'), { scale: 0.98 }, start + 5);
             timeline.fromTo(next, { opacity: 0 }, { opacity: 1, duration: 1.1, ease: 'sine.inOut', immediateRender: false }, start + 5);
             timeline.set(current, { opacity: 0 }, start + 6.1);
           }
