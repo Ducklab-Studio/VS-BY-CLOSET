@@ -232,9 +232,18 @@ test('Railway uses the package start command and preserves migrations and health
   assert.equal(railway.deploy.startCommand, 'pnpm --filter @valle/reservations-api run start');
   assert.equal(pkg.scripts.start, 'node dist/src/main.js');
   assert.equal(railway.deploy.healthcheckPath, '/health');
+  // As migrations rodam pela conexão DIRETA do Neon (script db:migrate:deploy), nunca pelo pooler: o advisory lock do Prisma vazava no pooler.
   assert.deepEqual(railway.deploy.preDeployCommand, [
-    'pnpm --filter @valle/reservations-api run db:migrate',
+    'pnpm --filter @valle/reservations-api run db:migrate:deploy',
   ]);
+  // db:migrate (CI e ambiente local) continua sendo o prisma migrate deploy puro; o comando da Railway existe e executa o MESMO prisma migrate deploy.
+  assert.equal(pkg.scripts['db:migrate'], 'prisma migrate deploy');
+  assert.equal(pkg.scripts['db:migrate:deploy'], 'node scripts/migrate-deploy.mjs');
+  const migrateDeploy = read('apps/reservations-api/scripts/migrate-deploy.mjs');
+  assert.match(migrateDeploy, /'migrate', 'deploy'/);
+  assert.match(migrateDeploy, /MIGRATE_DATABASE_URL/);
+  assert.match(migrateDeploy, /delete env\.PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK/); // o advisory lock do Prisma fica habilitado
+  assert.match(read('apps/reservations-api/scripts/migrate-deploy-lib.mjs'), /-pooler/); // rejeita o host do pooler (fail closed)
 });
 test('Shopify production config audits order creation before payment and syncs updates/deletes', () => {
   const config = read('apps/shopify-app/shopify.app.production.toml');

@@ -52,7 +52,7 @@ e o lockfile da raiz, quebrando a instalação.
     "buildCommand": "pnpm --filter @valle/reservations-api run db:generate && pnpm --filter @valle/reservations-api run build"
   },
   "deploy": {
-    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate"],
+    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate:deploy"],
     "startCommand": "pnpm --filter @valle/reservations-api exec node dist/main.js",
     "healthcheckPath": "/health"
   }
@@ -61,7 +61,11 @@ e o lockfile da raiz, quebrando a instalação.
 
 - `preDeployCommand` roda `prisma migrate deploy` **uma vez**, antes de
   qualquer réplica subir — nunca embutido no `startCommand` (que rodaria uma
-  vez por réplica, correndo risco de duas migrations simultâneas).
+  vez por réplica, correndo risco de duas migrations simultâneas). Ele chama o
+  script `db:migrate:deploy`, que exige `MIGRATE_DATABASE_URL` (conexão
+  **direta** do Neon, sem `-pooler`) e aborta se ela faltar ou for de pooler;
+  a `DATABASE_URL` de runtime segue pelo pooler. Ver
+  [MIGRACOES-NA-RAILWAY.md](MIGRACOES-NA-RAILWAY.md).
 - `/health` confirma conectividade real com o Postgres (`SELECT 1`), não só
   que o processo respondeu.
 
@@ -165,7 +169,7 @@ automatizar sem revisão humana do que mudou desde a versão ativa.
 
 Mecanismo único, em todo ambiente que não seja a máquina de quem está
 desenvolvendo: `prisma migrate deploy` (rodado pelo `preDeployCommand` do
-Railway). Nunca `prisma db push`, nunca editar uma migration já aplicada.
+Railway, via `db:migrate:deploy`, pela conexão direta do Neon). Nunca `prisma db push`, nunca editar uma migration já aplicada.
 
 Todas as migrations aplicadas até a Fase 10 são aditivas (nenhuma removeu
 coluna, tabela ou dado). A Fase 10 em si **não introduziu nenhuma migration**
