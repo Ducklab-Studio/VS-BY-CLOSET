@@ -4,7 +4,6 @@ import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { EditorialMotion } from '@/components/EditorialMotion';
 import { WinterCarousel } from '@/components/WinterCarousel';
-import { EditorialLookbook } from '@/components/EditorialLookbook';
 import { HeroMedia } from '@/components/HeroMedia';
 import { HERO_VIDEO } from '@/lib/hero-media';
 
@@ -94,7 +93,6 @@ export default function HomePage() {
           <span className="mark-caption">VS BY CLOSET / SEU CLOSET EM TODAS AS ESTAÇÕES</span>
         </div>
       </section>
-      <EditorialLookbook />
       <section id="colecao" className="collection-section">
         <div className="collection-heading" data-reveal>
           <div>

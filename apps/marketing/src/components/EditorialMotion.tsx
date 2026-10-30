@@ -35,31 +35,6 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
           });
         });
 
-        const lookbook = scope.current?.querySelector('.lookbook');
-        if (lookbook) {
-          const lookbookElements = gsap.utils.toArray<HTMLElement>([
-            '.lookbook-heading .eyebrow',
-            '.lookbook-heading h2',
-            '.lookbook-lead',
-            '.lookbook-intro .editorial-link',
-            '.lookbook-figure',
-          ]);
-
-          gsap.from(lookbookElements, {
-            y: 18,
-            opacity: 0,
-            duration: 0.72,
-            stagger: 0.09,
-            ease: 'power2.out',
-            clearProps: 'all',
-            scrollTrigger: {
-              trigger: lookbook,
-              start: 'top 78%',
-              once: true,
-            },
-          });
-        }
-
         // Revelação coreografada dos textos da seção winter-story
         const winterElements = gsap.utils.toArray<HTMLElement>([
           '.winter-content .eyebrow',
