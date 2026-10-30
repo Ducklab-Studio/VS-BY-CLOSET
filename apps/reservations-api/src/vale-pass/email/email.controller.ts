@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminAuthGuard } from '../../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../../admin/admin-role.guard';
 import { RequireRole } from '../../admin/require-role.decorator';
@@ -33,6 +33,14 @@ export class ValePassEmailController {
   @Get(':id/events')
   events(@Param('id', ParseUUIDPipe) id: string): Promise<{ type: string; detail: unknown; createdAt: string }[]> {
     return this.outbox.events(id);
+  }
+
+  /** Prévia do e-mail com os códigos mascarados (nada é enviado nem gravado). Só ADMIN. */
+  @Get(':id/preview')
+  @RequireRole('ADMIN')
+  @Header('Cache-Control', 'no-store')
+  preview(@Param('id', ParseUUIDPipe) id: string) {
+    return this.outbox.preview(id);
   }
 
   @Post(':id/resend')

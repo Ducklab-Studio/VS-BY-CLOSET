@@ -78,7 +78,7 @@ class MockProvider implements EmailProvider {
 }
 
 const liveConfig = (over: Record<string, string | undefined> = {}): EmailConfig =>
-  loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000', ...(over as Record<string, string>) });
+  loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000', ...(over as Record<string, string>) });
 
 function stack(config: EmailConfig, provider: MockProvider = new MockProvider()) {
   const outbox = new ValePassEmailOutboxService(prisma, config);

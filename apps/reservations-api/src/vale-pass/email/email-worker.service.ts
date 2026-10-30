@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EMAIL_CONFIG_TOKEN } from './email-tokens';
-import { IDEMPOTENCY_WINDOW_MS, liveBlockers, type EmailConfig } from './email-config';
+import { IDEMPOTENCY_WINDOW_MS, liveBlockers, recipientAllowed, recipientsUnrestricted, type EmailConfig } from './email-config';
 import { EMAIL_PROVIDER, type EmailProvider, type SendEmailResult } from './email-provider';
 import { renderVoucherEmail } from './email-template';
 import { IN_FLIGHT_STATUSES, ValePassEmailOutboxService, evaluateGroup, isValidRecipient } from './email-outbox.service';
@@ -38,10 +38,12 @@ export interface TickReport {
   readonly unknown: number;
   readonly dryRunReady: number;
   readonly recoveredLeases: number;
+  /** Mensagens prontas para sair que NÃO foram reservadas porque o destinatário não está em VALE_PASS_EMAIL_ALLOWED_RECIPIENTS (continuam na fila, intactas). */
+  readonly heldByAllowlist: number;
 }
 
 const emptyReport = (mode: EmailConfig['mode']): TickReport => ({
-  mode, blocked: [], paused: false, limitReached: false, enqueued: 0, claimed: 0, accepted: 0, retrying: 0, failed: 0, cancelled: 0, needsAttention: 0, unknown: 0, dryRunReady: 0, recoveredLeases: 0,
+  mode, blocked: [], paused: false, limitReached: false, enqueued: 0, claimed: 0, accepted: 0, retrying: 0, failed: 0, cancelled: 0, needsAttention: 0, unknown: 0, dryRunReady: 0, recoveredLeases: 0, heldByAllowlist: 0,
 });
 
 type Counters = { -readonly [K in keyof TickReport]: TickReport[K] };
@@ -89,6 +91,7 @@ export class ValePassEmailWorkerService {
       report.paused = true;
       return report;
     }
+    report.heldByAllowlist = await this.countHeldByAllowlist(now);
     const { ids, limitReached } = await this.claimWithinLimit(now);
     report.limitReached = limitReached;
     report.claimed = ids.length;
@@ -149,12 +152,17 @@ export class ValePassEmailWorkerService {
 
   /** Reserva atômica de um lote: dois workers nunca pegam a mesma mensagem (FOR UPDATE SKIP LOCKED). */
   async claim(client: Pick<PrismaService, '$queryRaw'>, limit: number, now: Date): Promise<string[]> {
+    // Fail closed: quem não está na lista de destinatários autorizados NUNCA é reservado (a mensagem fica QUEUED, intacta). Sem lista e sem liberação comercial,
+    // ninguém é reservado; lista inválida = vazia = nada é reservado.
+    const unrestricted = recipientsUnrestricted(this.config);
+    const allowed = this.config.allowedRecipients ?? [];
     // CTE MATERIALIZED: com `UPDATE ... WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` o PostgreSQL pode reavaliar a subconsulta e
     // reservar MAIS que o LIMIT (observado: lote de 3 reservou 4). Materializar a escolha garante exatamente até `limit` linhas.
     const rows = await client.$queryRaw<{ id: string; next: Date; created: Date }[]>`
       WITH picked AS MATERIALIZED (
         SELECT id FROM vale_pass_email_outbox
         WHERE status IN ('QUEUED', 'UNKNOWN') AND next_attempt_at <= ${now} AND (locked_until IS NULL OR locked_until < ${now})
+          AND (${unrestricted} OR lower(to_email) = ANY(${allowed}::text[]))
         ORDER BY next_attempt_at ASC, created_at ASC
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED)
@@ -163,6 +171,16 @@ export class ValePassEmailWorkerService {
       RETURNING o.id::text AS id, o.next_attempt_at AS next, o.created_at AS created`;
     // O RETURNING não garante ordem: processa sempre a mensagem mais antiga primeiro.
     return rows.sort((x, y) => x.next.getTime() - y.next.getTime() || x.created.getTime() - y.created.getTime()).map((row) => row.id);
+  }
+
+  /** Quantas mensagens prontas para sair ficam retidas pela lista de destinatários autorizados (ou pela falta dela). 0 só com a liberação comercial e sem lista. */
+  async countHeldByAllowlist(now: Date): Promise<number> {
+    if (recipientsUnrestricted(this.config)) return 0;
+    const [row] = await this.prisma.$queryRaw<{ held: number }[]>`
+      SELECT count(*)::int AS held FROM vale_pass_email_outbox
+      WHERE status IN ('QUEUED', 'UNKNOWN') AND next_attempt_at <= ${now} AND (locked_until IS NULL OR locked_until < ${now})
+        AND NOT (lower(to_email) = ANY(${this.config.allowedRecipients ?? []}::text[]))`;
+    return row?.held ?? 0;
   }
 
   private async dryRun(now: Date): Promise<number> {
@@ -225,6 +243,11 @@ export class ValePassEmailWorkerService {
     if (!isValidRecipient(row.toEmail)) {
       await this.finish(id, waiting, { status: 'NEEDS_ATTENTION', lastError: 'no_recipient' }, 'NEEDS_ATTENTION', { reason: 'no_recipient' });
       return 'needsAttention';
+    }
+    // Defesa em profundidade (a reserva já filtra): fora da lista autorizada nada chega ao provedor; a reserva é devolvida e a mensagem continua na fila.
+    if (!recipientAllowed(this.config, row.toEmail)) {
+      await this.prisma.valePassEmailOutbox.updateMany({ where: { id, status: { in: ['QUEUED', 'UNKNOWN'] } }, data: { lockedUntil: null } });
+      return 'retrying';
     }
     if (row.attempts >= this.config.maxAttempts) {
       await this.finish(id, waiting, { status: 'NEEDS_ATTENTION', lastError: row.status === 'UNKNOWN' ? 'attempts_exhausted_unknown_result' : 'attempts_exhausted' }, 'NEEDS_ATTENTION', { reason: 'attempts_exhausted', attempts: row.attempts });
