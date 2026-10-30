@@ -195,4 +195,5 @@ const RESTRICTION_AFTER: Record<Restriction, string> = {
   USED_UP: 'Continuará sem saldo.',
   REFUND_UNDER_REVIEW: 'Pedido com reembolso aguardando decisão de um administrador: o desbloqueio e o resgate esperam a decisão.',
   ORDER_CANCELLED: 'O pedido deste voucher foi cancelado ou reembolsado: o voucher não é desbloqueado.',
+  TEST_CAMPAIGN: 'Voucher da campanha de TESTE: o resgate continua bloqueado (sem valor comercial).',
 };

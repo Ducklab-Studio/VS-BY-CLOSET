@@ -6,6 +6,7 @@ import { writeAdminAuditEvent } from '../../admin/admin-audit';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { maskCode, maskEmail } from '../email/email-mask';
 import { maskName, maskPhone } from '../vale-pass-pii-mask';
+import { isTestCampaignVoucher, TEST_CAMPAIGN_BLOCK_MESSAGE } from '../vale-pass-test-campaign';
 import { ledgerRefusal } from './ledger-errors';
 import { formatBRL, parsePositiveCents } from './money';
 import { activeCompanies, authorizeCompany } from './operator-scope.service';
@@ -21,7 +22,7 @@ export interface Actor {
 }
 
 /** Por que um voucher não pode ser resgatado agora (todos verificados no servidor, e de novo pelo banco). */
-export type Restriction = 'LEGACY_NO_BALANCE' | 'CANCELLED' | 'EXPIRED' | 'NOT_YET_VALID' | 'BLOCKED' | 'USED_UP' | 'REFUND_UNDER_REVIEW' | 'ORDER_CANCELLED';
+export type Restriction = 'LEGACY_NO_BALANCE' | 'CANCELLED' | 'EXPIRED' | 'NOT_YET_VALID' | 'BLOCKED' | 'USED_UP' | 'REFUND_UNDER_REVIEW' | 'ORDER_CANCELLED' | 'TEST_CAMPAIGN';
 
 const RESTRICTION_TEXT: Record<Restriction, string> = {
   LEGACY_NO_BALANCE: 'Voucher legado: não tem controle de saldo.',
@@ -32,6 +33,7 @@ const RESTRICTION_TEXT: Record<Restriction, string> = {
   USED_UP: 'Voucher sem saldo (utilizado por inteiro).',
   REFUND_UNDER_REVIEW: 'Pedido com reembolso aguardando decisão de um administrador: resgate bloqueado até a decisão.',
   ORDER_CANCELLED: 'O pedido deste voucher foi cancelado ou reembolsado.',
+  TEST_CAMPAIGN: TEST_CAMPAIGN_BLOCK_MESSAGE,
 };
 
 export interface LedgerEntryView {
@@ -344,6 +346,8 @@ export class ValePassRedemptionService {
     if (voucher.status === 'USED' || (voucher.company !== null && voucher.balanceCents <= 0 && voucher.status !== 'CANCELLED')) out.push('USED_UP');
     if (voucher.validFrom && voucher.validFrom.getTime() > now.getTime()) out.push('NOT_YET_VALID');
     if (voucher.blockedAt) out.push('BLOCKED');
+    // Campanha de TESTE: sem valor comercial, resgate recusado para qualquer papel (emissão, e-mail e cancelamento seguem normais).
+    if (await isTestCampaignVoucher(db, voucher)) out.push('TEST_CAMPAIGN');
     out.push(...(await this.orderRestrictions(db, voucher)));
     return out;
   }

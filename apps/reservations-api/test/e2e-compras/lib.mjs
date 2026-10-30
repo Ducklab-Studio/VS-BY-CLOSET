@@ -107,15 +107,16 @@ export function adminClient(api, user) {
 let orderSeq = 0;
 export const money = (amount) => ({ shop_money: { amount, currency_code: 'BRL' }, presentment_money: { amount, currency_code: 'BRL' } });
 /** Pedido pago de Valle Pass como a Shopify entrega (valores do preço oficial: R$ 350 por unidade). */
-export function orderPayload({ variant, quantity = 1, status = 'paid', email, orderId, paidAt = new Date(), over = {} }) {
+export function orderPayload({ variant, quantity = 1, unitCents = 35_000, status = 'paid', email, orderId, paidAt = new Date(), over = {} }) {
   const id = orderId ?? String(7_000_000_000_000 + Date.now() % 1e9 * 10 + (orderSeq++ % 10));
-  const total = ((35_000 * quantity) / 100).toFixed(2);
+  const total = ((unitCents * quantity) / 100).toFixed(2);
+  const unit = (unitCents / 100).toFixed(2);
   return {
     id, admin_graphql_api_id: `gid://shopify/Order/${id}`, name: `#E2E${orderSeq}`, financial_status: status, cancelled_at: null, currency: 'BRL', presentment_currency: 'BRL',
     created_at: new Date(paidAt.getTime() - 60_000).toISOString(), updated_at: paidAt.toISOString(),
     current_total_price: total, total_outstanding: status === 'paid' ? '0.00' : total, total_discounts: '0.00', discount_codes: [], refunds: [],
     total_shipping_price_set: money('0.00'), email: email ?? `cliente.${id}@exemplo.invalid`, customer: { first_name: 'Maria', last_name: 'Teste E2E', email: email ?? `cliente.${id}@exemplo.invalid` },
-    line_items: [{ variant_id: Number(variant), product_id: null, quantity, current_quantity: quantity, price: '350.00', price_set: money('350.00'), discount_allocations: [] }],
+    line_items: [{ variant_id: Number(variant), product_id: null, quantity, current_quantity: quantity, price: unit, price_set: money(unit), discount_allocations: [] }],
     ...over,
   };
 }
@@ -135,10 +136,10 @@ export async function webhook(api, topic, body, { webhookId = crypto.randomUUID(
   return res.status;
 }
 
-export async function newCampaign({ name, variant, validFrom, validUntil, globalLimit = 1000 }) {
-  const campaign = await db.valePassCampaign.create({ data: { name, amountCents: 35_000, validityDays: 30, shopifyVariantId: String(variant), globalLimit, voucherValidFrom: new Date(`${validFrom}T00:00:00.000Z`), voucherValidUntil: new Date(`${validUntil}T00:00:00.000Z`) } });
+export async function newCampaign({ id, name, variant, validFrom, validUntil, globalLimit = 1000, amountCents = 35_000, benefits }) {
+  const campaign = await db.valePassCampaign.create({ data: { ...(id ? { id } : {}), name, amountCents, validityDays: 30, shopifyVariantId: String(variant), globalLimit, voucherValidFrom: new Date(`${validFrom}T00:00:00.000Z`), voucherValidUntil: new Date(`${validUntil}T00:00:00.000Z`) } });
   await db.valePassCampaignBenefit.createMany({
-    data: [
+    data: benefits ? benefits.map((b) => ({ campaignId: campaign.id, ...b })) : [
       { campaignId: campaign.id, code: 'valle_showroom_500', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'Voucher Valle Showroom', amountCents: 50_000, sortOrder: 0 },
       { campaignId: campaign.id, code: 'vs_by_closet_50', kind: 'VOUCHER', company: 'VS_BY_CLOSET', label: 'Voucher VS BY CLOSET', amountCents: 5_000, sortOrder: 1 },
       { campaignId: campaign.id, code: 'passeios_10', kind: 'DISCOUNT', label: '10% em passeios e transfers Valle Experience', discountPercent: 10, sortOrder: 2 },
