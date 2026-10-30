@@ -16,3 +16,5 @@ Nenhuma chamada de rede real: o `fetch` do processo da API é substituído; qual
 ```bash
 node apps/reservations-api/test/e2e-compras/privacy-probe.mjs
 ```
+
+A seção **9b** do `suite.mjs` cobre a campanha de TESTE (IDs fixos da campanha e da variante de teste, só neste banco descartável): emissão e e-mail funcionam; resgate, prévia e "marcar como utilizado" são recusados para ADMIN, SUPER_ADMIN e STAFF; o cancelamento funciona.

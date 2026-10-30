@@ -7,6 +7,7 @@ import { maskCode } from './vale-pass-code-mask';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { authorizeCompany } from './ledger/operator-scope.service';
 import { configuredCapacityLimit, loadCapacity } from './vale-pass-capacity';
+import { assertNotTestCampaignVoucher } from './vale-pass-test-campaign';
 
 export interface ValePassVoucherItem {
   readonly id: string;
@@ -107,6 +108,8 @@ export class ValePassVouchersService {
 
   async markUsed(code: string, actorId: string, actorName: string, options: { role?: AdminRole } = {}): Promise<ValePassVoucherItem> {
     const updated = await this.inVoucherTransaction(code, 'Não foi possível marcar o Valle Pass como utilizado no momento.', async (tx, target) => {
+      // Campanha de TESTE: sem valor comercial; o uso (por qualquer papel) é recusado. Cancelar continua permitido.
+      await assertNotTestCampaignVoucher(tx, target);
       if (target.blockedAt) throw new ConflictException('Este Valle Pass está bloqueado administrativamente — o resgate está indisponível.');
       if (target.status !== 'ACTIVE') {
         throw new BadRequestException(`Este Valle Pass não pode ser utilizado — status atual: ${STATUS_LABELS[target.status]}.`);

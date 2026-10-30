@@ -234,6 +234,46 @@ try {
   check('9.3', 'retomar com a chave desligada é recusado; mesmo confirmado o horário, nenhum voucher nasce', pRes.status >= 400 && (await vouchersOf(prodOrder)).length === 0, `${pRes.status}`);
   check('9.4', 'e nenhum e-mail sai com o envio desligado', L.fakeLog().filter((x) => x.type === 'resend.send' && x.to?.[0] === `cliente.hoje.${RUN}@exemplo.invalid`).length === 0);
 
+  console.log('\n== 11. CAMPANHA DE TESTE: emite e envia e-mail, mas o voucher NÃO vale como crédito comercial');
+  // Mesmos identificadores da campanha de teste real (só existem neste banco descartável): ID da campanha e Variant ID da Shopify.
+  const TEST_ID = 'f6f16b3b-2ed0-4e8b-9420-e856adc1bf93';
+  const TEST_VARIANT = 67916371165284;
+  const testCampaign = await L.newCampaign({
+    id: TEST_ID, name: `E2E VALLE PASS TESTE ${RUN}`, variant: TEST_VARIANT, validFrom: day(-1), validUntil: day(60), globalLimit: 1, amountCents: 10,
+    benefits: [
+      { code: 'teste_showroom', kind: 'VOUCHER', company: 'VALLE_SHOWROOM', label: 'TESTE — Voucher Valle Showroom (sem valor comercial)', amountCents: 500, terms: 'Voucher de teste, sem valor comercial', sortOrder: 0 },
+      { code: 'teste_closet', kind: 'VOUCHER', company: 'VS_BY_CLOSET', label: 'TESTE — Voucher VS BY CLOSET (sem valor comercial)', amountCents: 50, terms: 'Voucher de teste, sem valor comercial', sortOrder: 1 },
+    ],
+  });
+  const testEmail = `cliente.teste.${RUN}@exemplo.invalid`;
+  const tOrder = L.orderPayload({ variant: TEST_VARIANT, unitCents: 10, email: testEmail });
+  check('9b.1', 'pedido de R$ 0,10 da campanha de teste: webhook aceito e, com a política estrita, fica retido até a conferência na Shopify', (await L.webhook(api, 'orders/paid', tOrder)) === 200 && (await vouchersOf(tOrder)).length === 0);
+  L.setPaid(tOrder);
+  await A('POST', '/admin/vale-pass/flow/payment-time/verify', { orderId: String(tOrder.id), note: 'conferido na Shopify (e2e)' });
+  await A('POST', '/admin/vale-pass/flow/resume', { limit: 25, note: 'retomar retenções do e2e' });
+  const tVs = await vouchersOf(tOrder);
+  const xShow = byCompany(tVs, 'VALLE_SHOWROOM');
+  const xClo = byCompany(tVs, 'VS_BY_CLOSET');
+  check('9b.2', 'a EMISSÃO continua funcionando: dois vouchers de teste (R$ 5,00 e R$ 0,50), sem o desconto de 10%', tVs.length === 2 && xShow?.amountCents === 500 && xClo?.amountCents === 50 && tVs.every((v) => v.campaignId === TEST_ID));
+  const tMail = await L.waitFor(() => L.fakeLog().find((x) => x.type === 'resend.send' && x.to?.[0] === testEmail), { timeout: 40_000 });
+  check('9b.3', 'o E-MAIL de teste é enviado, com os dois códigos (o e-mail não leva rótulo "TESTE": a proteção é o bloqueio de resgate)', !!tMail && tMail.text.includes(xShow.code) && tMail.text.includes(xClo.code), tMail?.subject);
+  const tCons = await A('GET', `/admin/vale-pass/vouchers/${xShow.code}/balance`);
+  check('9b.4', 'a CONSULTA continua funcionando e mostra a restrição de teste', tCons.status === 200 && JSON.stringify(tCons.body.restrictions ?? []).includes('TEST_CAMPAIGN'), JSON.stringify(tCons.body).slice(0, 160));
+  const tPrep = await A('POST', `/admin/vale-pass/vouchers/${xShow.code}/redeem/prepare`, redeemBody(xShow, 100));
+  check('9b.5', 'ADMIN: prévia do resgate recusada (TEST_CAMPAIGN)', tPrep.status === 200 && tPrep.body.canRedeem === false && tPrep.body.problems?.some((p) => p.code === 'TEST_CAMPAIGN'), JSON.stringify(tPrep.body).slice(0, 160));
+  const tConf = await redeem(A, xShow, 100);
+  const tOwner = await redeem(O, xClo, 10);
+  const tStaff = await redeem(S, xShow, 100);
+  const tUse = await A('POST', `/admin/vale-pass/vouchers/${xShow.code}/use`, {});
+  check('9b.6', 'confirmar o resgate é recusado (409) para ADMIN e SUPER_ADMIN; STAFF também (403); o "marcar como utilizado" legado idem (409)', tConf.status === 409 && tOwner.status === 409 && tStaff.status >= 400 && tUse.status === 409, `${tConf.status}/${tOwner.status}/${tStaff.status}/${tUse.status}`);
+  check('9b.7', 'nada foi gravado: saldos intactos e zero lançamentos no livro-razão', (await balance(xShow)) === 500 && (await balance(xClo)) === 50 && (await db.valePassLedgerEntry.count({ where: { valePassId: { in: [xShow.id, xClo.id] } } })) === 0);
+  const tCancel = await A('POST', `/admin/vale-pass/vouchers/${xShow.code}/cancel`, { reason: 'Encerramento do teste de compra (e2e), sem valor comercial.' });
+  await L.webhook(api, 'orders/cancelled', { ...tOrder, cancelled_at: new Date().toISOString(), financial_status: 'voided' });
+  const tAfter = await vouchersOf(tOrder);
+  check('9b.8', 'o CANCELAMENTO funciona: um voucher pelo ADMIN e o pedido cancelado na Shopify cancela o resto; nenhum crédito ativo sobra', tCancel.status < 300 && tAfter.every((v) => v.status === 'CANCELLED'), `${tCancel.status} ${tAfter.map((v) => v.status)}`);
+  // a campanha OFICIAL continua resgatando (já provado na seção 4); aqui só confirmamos que a de teste não contaminou a lista de oficial
+  check('9b.9', 'a campanha OFICIAL do ensaio segue resgatável depois da campanha de teste existir', (await A('POST', `/admin/vale-pass/vouchers/${show.code}/redeem/prepare`, redeemBody(show, 100))).body?.problems?.every((p) => p.code === 'NOT_YET_VALID'));
+
   console.log('\n== 10. AUDITORIA');
   const audit = await db.adminAuditEvent.findMany({ where: { createdAt: { gte: new Date(RUN) } }, orderBy: { createdAt: 'asc' } });
   const actions = [...new Set(audit.map((a) => a.action))];
