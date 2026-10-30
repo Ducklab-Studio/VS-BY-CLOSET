@@ -82,27 +82,6 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
           clearProps: 'all',
         });
 
-        // Parallax cinemático da foto com as montanhas e a neve.
-        // O excesso da escala em cada lado, (scale - 1) / 2 em %, precisa cobrir sempre o deslocamento (yPercent): 1.16 → 1.12 deixa 8% → 6% de folga
-        // para um deslocamento de ±5%, então nunca aparece faixa vazia no topo ou no rodapé do quadro.
-        gsap.fromTo(
-          '.winter-rental-photo',
-          {
-            yPercent: -5,
-            scale: 1.16,
-          },
-          {
-            yPercent: 5,
-            scale: 1.12,
-            ease: 'none',
-            scrollTrigger: {
-              trigger: '.winter-story',
-              start: 'top bottom',
-              end: 'bottom top',
-              scrub: 1.2,
-            },
-          },
-        );
       });
       mm.add('(min-width: 900px) and (prefers-reduced-motion: no-preference)', () => {
         gsap.to('.hero-photo .campaign-image', {

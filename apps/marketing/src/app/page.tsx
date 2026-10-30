@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { EditorialMotion } from '@/components/EditorialMotion';
+import { WinterCarousel } from '@/components/WinterCarousel';
 import { EditorialLookbook } from '@/components/EditorialLookbook';
 import { HeroMedia } from '@/components/HeroMedia';
 import { HERO_VIDEO } from '@/lib/hero-media';
@@ -114,15 +115,7 @@ export default function HomePage() {
         <FeaturedProducts />
       </section>
       <section className="winter-story" aria-labelledby="winter-title">
-        <div className="winter-image">
-          <Image
-            src="/editorial/winter-rental.webp"
-            alt="Mulher de macacão preto e óculos de neve ajoelhada na neve, com montanhas ao fundo"
-            fill
-            sizes="(max-width: 900px) 100vw, 48vw"
-            className="campaign-image winter-rental-photo"
-          />
-        </div>
+        <WinterCarousel />
         <div className="winter-content">
           <p className="eyebrow">ALUGUEL VS BY CLOSET</p>
           <h2 id="winter-title">

@@ -2818,3 +2818,20 @@ body {
     font-size: 24px;
   }
 }
+
+/* Campaign carousel: portrait-safe framing and a stable, reserved stage. */
+.winter-carousel { background: #263039; }
+.winter-slide { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
+.winter-slide:first-child { opacity: 1; }
+.winter-slide img { object-fit: contain; object-position: center; }
+.winter-carousel:after { pointer-events: none; z-index: 3; }
+.winter-carousel-pause { position: absolute; bottom: 16px; right: 20px; z-index: 4; padding: 8px 12px; color: #fff; background: #263039dd; border: 1px solid #ffffff55; font-size: 11px; letter-spacing: .08em; }
+@media (min-width: 901px) {
+  .winter-carousel .winter-slide { inset: 0 max(12px, calc((100% - 440px) / 2)); }
+}
+@media (max-width: 900px) {
+  .winter-carousel { order: 2; height: 400px; }
+  .winter-carousel .winter-slide { inset: 0 max(12px, calc((100% - 320px) / 2)); }
+  .winter-carousel:after { background: linear-gradient(#263039 0%, transparent 12%, transparent 90%, #263039); }
+}
+@media (prefers-reduced-motion: reduce) { .winter-carousel-pause { display: none; } }
