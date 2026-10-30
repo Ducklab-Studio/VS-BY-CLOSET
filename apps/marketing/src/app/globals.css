@@ -681,89 +681,43 @@ body {
   line-height: 1.7;
   margin-top: 14px;
 }
+/* Rental editorial: text and full portrait share a light, compact composition. */
 .winter-story {
-  min-height: 520px;
-  position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
   align-items: center;
-  overflow: hidden;
-  background: #263039;
-}
-.winter-image {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-}
-.winter-image:after {
-  background: linear-gradient(90deg, #111b26b8, #111b2615);
-}
-.winter-rental-photo {
-  object-position: 50% 30%;
-  will-change: transform;
+  gap: clamp(32px, 5vw, 72px);
+  padding: 64px max(28px, calc((100vw - 1280px) / 2));
+  background: #f7f3ed;
 }
 .winter-content {
-  position: relative;
-  color: theme('colors.cream');
-  padding: 56px max(24px, calc((100vw - 1280px) / 2));
+  grid-column: 1;
+  grid-row: 1;
+  color: #53131e;
 }
 .winter-content h2 {
-  font-size: clamp(32px, 3.8vw, 52px);
+  font-size: clamp(32px, 3.4vw, 48px);
   margin: 20px 0 24px;
 }
 .winter-description {
-  color: theme('colors.cream');
+  color: #6a615a;
   font-size: 16px;
-  line-height: 1.65;
-  opacity: 0.85;
-  max-width: 500px;
+  line-height: 1.7;
+  max-width: 460px;
   margin-bottom: 28px;
 }
-@media (min-width: 901px) {
-  .winter-image {
-    left: auto;
-    width: 48%;
-  }
-  .winter-image:after {
-    background: linear-gradient(90deg, #263039 0%, #26303900 38%), linear-gradient(transparent 70%, #15191e66);
-  }
-  .winter-content {
-    max-width: 52%;
-    padding: 56px max(24px, calc((100vw - 1280px) / 2));
-  }
-  .winter-content h2 {
-    font-size: clamp(32px, 3.5vw, 48px);
-    margin: 20px 0 24px;
-  }
+.winter-content .editorial-button.light {
+  background: #53131e;
+  color: #fffaf4;
 }
 @media (max-width: 900px) {
   .winter-story {
-    min-height: 0;
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding: 44px 24px;
   }
-  .winter-image {
-    position: relative;
-    inset: auto;
-    height: clamp(260px, 68vw, 380px);
-    flex: none;
-  }
-  .winter-rental-photo {
-    object-position: 50% 25%;
-  }
-  .winter-image:after {
-    background: linear-gradient(transparent 55%, #263039 100%);
-  }
-  .winter-content {
-    padding: 20px 24px 44px;
-  }
-  .winter-content h2 {
-    font-size: clamp(24px, 6.5vw, 34px);
-    margin: 14px 0 18px;
-  }
-  .winter-description {
-    font-size: 15px;
-    margin-bottom: 24px;
-  }
+  .winter-content h2 { font-size: clamp(28px, 6.5vw, 38px); }
+  .winter-description { font-size: 15px; }
 }
 .rental-steps {
   display: grid;
@@ -2819,19 +2773,21 @@ body {
   }
 }
 
-/* Campaign carousel: portrait-safe framing and a stable, reserved stage. */
-.winter-carousel { background: #263039; }
+/* The reserved portrait ratio avoids cropping the campaign looks. */
+.winter-carousel {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+}
 .winter-slide { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
 .winter-slide:first-child { opacity: 1; }
 .winter-slide img { object-fit: contain; object-position: center; }
-.winter-carousel:after { pointer-events: none; z-index: 3; }
-.winter-carousel-pause { position: absolute; bottom: 16px; right: 20px; z-index: 4; padding: 8px 12px; color: #fff; background: #263039dd; border: 1px solid #ffffff55; font-size: 11px; letter-spacing: .08em; }
-@media (min-width: 901px) {
-  .winter-carousel .winter-slide { inset: 0 max(12px, calc((100% - 440px) / 2)); }
-}
+.winter-carousel:after { display: none; }
+.winter-carousel-pause { position: absolute; bottom: 16px; right: 16px; z-index: 4; padding: 8px 12px; color: #fff; background: #53131ecc; border: 1px solid #ffffff55; font-size: 11px; letter-spacing: .08em; }
 @media (max-width: 900px) {
-  .winter-carousel { order: 2; height: 400px; }
-  .winter-carousel .winter-slide { inset: 0 max(12px, calc((100% - 320px) / 2)); }
-  .winter-carousel:after { background: linear-gradient(#263039 0%, transparent 12%, transparent 90%, #263039); }
+  .winter-carousel { grid-column: 1; grid-row: 2; max-width: 400px; justify-self: center; }
 }
 @media (prefers-reduced-motion: reduce) { .winter-carousel-pause { display: none; } }
