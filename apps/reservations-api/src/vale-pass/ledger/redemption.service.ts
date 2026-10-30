@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../../admin/admin-audit';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { maskCode, maskEmail } from '../email/email-mask';
+import { maskName, maskPhone } from '../vale-pass-pii-mask';
 import { ledgerRefusal } from './ledger-errors';
 import { formatBRL, parsePositiveCents } from './money';
 import { activeCompanies, authorizeCompany } from './operator-scope.service';
@@ -106,15 +107,6 @@ const canOperate = (role: AdminRole) => role === 'ADMIN' || role === 'SUPER_ADMI
 const REVERSAL_ADMIN_ONLY = 'A reversão de um resgate exige um administrador.';
 const hashOf = (parts: Record<string, string | number>): string => createHash('sha256').update(JSON.stringify(Object.entries(parts).sort(([a], [b]) => a.localeCompare(b)))).digest('hex');
 
-function maskName(name: string | null): string | null {
-  const parts = name?.trim().split(/\s+/).filter(Boolean) ?? [];
-  if (parts.length === 0) return null;
-  return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[parts.length - 1][0]}.`;
-}
-function maskPhone(phone: string | null): string | null {
-  const digits = phone?.replace(/\D/g, '') ?? '';
-  return digits.length >= 4 ? `***${digits.slice(-2)}` : phone ? '***' : null;
-}
 
 const conflict = (code: string, message: string, extra: Record<string, unknown> = {}) => new ConflictException({ statusCode: 409, error: 'Conflict', code, message, ...extra });
 
