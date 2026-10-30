@@ -16,28 +16,28 @@ const LOOKS = [
     src: '/editorial/lookbook-01-noite.webp',
     alt: 'Mulher de casaco trench em tweed bege, com cinto, apoiada em uma varanda ao entardecer, com montanhas e luzes acesas ao fundo',
     caption: 'Entardecer nas montanhas',
-    sizes: '(min-width: 1101px) 358px, (min-width: 701px) 48vw, 320px',
+    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
   },
   {
     id: 'vinicola',
     src: '/editorial/lookbook-02-vinicola.webp',
     alt: 'Mulher de casaco longo off-white com cinto caminhando entre videiras, em frente a uma vinícola de montanha',
     caption: 'Brinde na vinícola',
-    sizes: '(min-width: 1101px) 358px, (min-width: 701px) 48vw, 320px',
+    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
   },
   {
     id: 'jardim',
     src: '/editorial/lookbook-03-jardim.webp',
     alt: 'Mulher de trench coat preto de botões duplos e botas pretas em um caminho de jardim, entre arbustos floridos',
     caption: 'Passeio no jardim',
-    sizes: '(min-width: 1101px) 358px, (min-width: 701px) 48vw, 320px',
+    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
   },
   {
     id: 'varanda',
     src: '/editorial/lookbook-04-varanda.webp',
     alt: 'Mulher de casaco preto com gola e punhos de pelo, segurando uma taça de vinho em uma varanda com vista para as montanhas',
     caption: 'Taça na varanda',
-    sizes: '(min-width: 1101px) 358px, (min-width: 701px) 48vw, 320px',
+    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
   },
 ] as const;
 

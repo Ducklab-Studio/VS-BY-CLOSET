@@ -443,12 +443,13 @@ body {
   color: theme('colors.marsala.DEFAULT');
 }
 .lookbook-grid {
-  width: min(100%, 740px);
+  width: min(100%, 900px);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 24px;
-  row-gap: clamp(32px, 4vw, 52px);
+  grid-template-columns: repeat(2, minmax(0, 336px));
+  justify-content: center;
+  column-gap: 48px;
+  row-gap: 32px;
   align-items: start;
 }
 .lookbook-figure {
@@ -457,6 +458,8 @@ body {
 }
 .lookbook-frame {
   position: relative;
+  width: 336px;
+  max-width: 100%;
   overflow: hidden;
   aspect-ratio: 4 / 5;
   background: #e9e1d6;
@@ -520,7 +523,8 @@ body {
     margin-top: -10px;
   }
   .lookbook-grid {
-    gap: 32px 20px;
+    column-gap: 20px;
+    row-gap: 28px;
   }
 }
 @media (max-width: 700px) {
@@ -573,17 +577,18 @@ body {
     font-size: 9px;
   }
   .lookbook-grid {
-    width: min(100%, 320px);
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 26px;
+    width: min(100%, 600px);
+    grid-template-columns: minmax(0, 280px);
+    column-gap: 0;
+    row-gap: 20px;
   }
   .lookbook-figure {
     grid-column: 1;
     margin: 0;
   }
   .lookbook-figure figcaption {
-    margin-top: 10px;
-    padding-top: 9px;
+    margin-top: 8px;
+    padding-top: 7px;
     font-size: 10px;
   }
 }
