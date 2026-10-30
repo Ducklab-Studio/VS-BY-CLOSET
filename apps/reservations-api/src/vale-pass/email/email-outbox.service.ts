@@ -284,7 +284,8 @@ export class ValePassEmailOutboxService {
           if (!located) throw new NotFoundException('Mensagem não encontrada.');
           await lockShopifyOrder(tx, located.shopifyOrderId);
           const admin = await tx.adminUser.findUnique({ where: { id: actor.id }, select: { role: true, active: true } });
-          if (!admin || !admin.active || admin.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode reenviar.');
+          // SUPER_ADMIN (o proprietário) satisfaz qualquer checagem de ADMIN por hierarquia (ver satisfiesRole em admin-role.guard.ts); STAFF e inativos seguem barrados.
+          if (!admin || !admin.active || (admin.role !== 'ADMIN' && admin.role !== 'SUPER_ADMIN')) throw new ForbiddenException('Somente um administrador pode reenviar.');
           const original = await tx.valePassEmailOutbox.findUniqueOrThrow({ where: { id: originalId } });
           if (IN_FLIGHT_STATUSES.includes(original.status)) throw new ConflictException('Esta mensagem ainda está na fila ou sendo enviada. Aguarde a conclusão antes de reenviar.');
           if (original.status === 'CANCELLED') throw new ConflictException('Esta mensagem foi cancelada porque o pedido deixou de estar pago. Não há o que reenviar.');

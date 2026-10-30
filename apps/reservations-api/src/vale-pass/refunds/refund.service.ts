@@ -233,7 +233,8 @@ export class ValePassRefundService {
         if (!located) throw new NotFoundException('Revisão de reembolso não encontrada.');
         await lockShopifyOrder(tx, located.shopifyOrderId);
         const admin = await tx.adminUser.findUnique({ where: { id: actor.id }, select: { role: true, active: true } });
-        if (!admin || !admin.active || admin.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode resolver reembolsos em revisão.');
+        // SUPER_ADMIN (o proprietário) satisfaz qualquer checagem de ADMIN por hierarquia (ver satisfiesRole em admin-role.guard.ts); STAFF e inativos seguem barrados.
+        if (!admin || !admin.active || (admin.role !== 'ADMIN' && admin.role !== 'SUPER_ADMIN')) throw new ForbiddenException('Somente um administrador pode resolver reembolsos em revisão.');
         const row = await tx.valePassRefundApplication.findUniqueOrThrow({ where: { id } });
         if (row.status !== 'NEEDS_REVIEW') throw new ConflictException('Esta revisão já foi resolvida.');
 

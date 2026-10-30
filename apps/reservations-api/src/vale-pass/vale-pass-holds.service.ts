@@ -214,7 +214,8 @@ export class ValePassHoldsService {
 
         // Perfil revalidado AQUI (o guard da rota não basta): ADMIN e ativo.
         const actor = await tx.adminUser.findUnique({ where: { id: actorId }, select: { role: true, active: true } });
-        if (!actor || !actor.active || actor.role !== 'ADMIN') throw new ForbiddenException('Somente um administrador pode resolver esta retenção.');
+        // SUPER_ADMIN (o proprietário) satisfaz qualquer checagem de ADMIN por hierarquia (ver satisfiesRole em admin-role.guard.ts); STAFF e inativos seguem barrados.
+        if (!actor || !actor.active || (actor.role !== 'ADMIN' && actor.role !== 'SUPER_ADMIN')) throw new ForbiddenException('Somente um administrador pode resolver esta retenção.');
 
         const hold = await tx.valePassIssuanceHold.findUniqueOrThrow({ where: { id: holdId }, include: { campaign: { select: { name: true, globalLimit: true, quantityLimit: true, benefits: { select: { id: true }, take: 1 } } } } });
         if (hold.status !== 'OPEN') throw new ConflictException('Esta retenção já foi resolvida.');
