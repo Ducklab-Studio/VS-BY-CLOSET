@@ -684,7 +684,7 @@ body {
 /* Rental editorial: text and full portrait share a light, compact composition. */
 .winter-story {
   display: grid;
-  grid-template-columns: minmax(0, 36fr) minmax(0, 64fr);
+  grid-template-columns: minmax(0, 40fr) minmax(0, 60fr);
   align-items: center;
   gap: 0;
   padding: 0;
@@ -2781,7 +2781,7 @@ body {
   grid-column: 2;
   grid-row: 1;
   width: 100%;
-  height: clamp(660px, 62vw, 1060px);
+  height: clamp(600px, 56vw, 940px);
   align-self: stretch;
   overflow: hidden;
 }
