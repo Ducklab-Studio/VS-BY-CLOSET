@@ -55,6 +55,12 @@ Alternativas para o Anderson: (a) registrar como pedido de teste histórico e n�
 
 `node apps/reservations-api/scripts/preview-voucher-email.mjs` (após `pnpm --filter @valle/reservations-api run build`) gera HTML e texto com **dados fictícios** em `apps/reservations-api/tmp/email-preview` (ignorado pelo git). Conferido no navegador em modo escuro, modo claro e largura de celular (375 px): faixa da marca, dois cartões de voucher (Valle Showroom primeiro), código em texto selecionável, validade, "Como utilizar" só com regras confirmadas. O modelo **não menciona** o desconto de 10%, uso parcial, transferência nem reembolso, porque essas regras ainda não foram aprovadas.
 
+## 6b. Condições para ligar a verificação automática (`VALE_PASS_AUTO_VERIFY`) — NÃO ativada
+
+Como funciona (código + testes locais): a cada 60 s (configurável, 20–900 s), até 10 retenções `PAYMENT_TIME_UNKNOWN` são conferidas na Shopify (somente leitura): transação de venda/captura com sucesso, `test:false`, gateway não manual, valor igual ao total, sem estorno, moeda BRL, e **pelo menos um sinal de webhook** (a transação sozinha não confirma). Se tudo passar, retoma pelo mesmo caminho do administrador (revalidação completa sob o lock do pedido). Qualquer dúvida mantém a retenção para um ADMIN. O e-mail de uma emissão automática só fica elegível após uma janela de assentamento (padrão 10 min, 0–120) para que um estorno tardio cancele antes do envio.
+
+Pré-requisitos para ligar (todos com autorização): `VALE_PASS_TWO_VOUCHER_FLOW=on` (já); e-mail validado em `dry-run` e depois `live`; decisão do Anderson sobre quem acompanha as retenções (`VALE_PASS_ALERTS_MODE`); ligar primeiro com o lote 1 pequeno e conferir as primeiras compras reais em leitura. **Não foi validada em produção** (testes locais não substituem uma compra real). Rollback: remover a variável (as retenções voltam ao fluxo manual; nada é apagado).
+
 ## 7. Checklist de lançamento
 
 | Item | Situação |
