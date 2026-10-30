@@ -4,7 +4,7 @@
     "buildCommand": "pnpm --filter @valle/reservations-api run db:generate && pnpm --filter @valle/reservations-api run build"
   },
   "deploy": {
-    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate"],
+    "preDeployCommand": ["pnpm --filter @valle/reservations-api run db:migrate:deploy"],
     "startCommand": "pnpm --filter @valle/reservations-api run start",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,

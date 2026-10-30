@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
+    "db:migrate:deploy": "node scripts/migrate-deploy.mjs",
     "db:migrate:dev": "prisma migrate dev",
     "db:drift": "node scripts/check-schema-drift.mjs",
     "db:drift:snapshot": "node scripts/check-schema-drift.mjs --write-snapshot"
