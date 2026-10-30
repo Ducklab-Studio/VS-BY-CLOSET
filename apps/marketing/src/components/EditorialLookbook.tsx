@@ -3,10 +3,9 @@ import Image from 'next/image';
 import { ArrowUpRight } from 'lucide-react';
 
 /**
- * Lookbook editorial da home: abertura editorial e quatro retratos em uma grade assimétrica responsiva.
+ * Lookbook editorial da home: quatro retratos em uma composição assimétrica responsiva.
  *
- * - Todas as fotos são retratos 4:5 (1600×2000): `width`/`height` + `aspect-ratio` no quadro eliminam o layout shift e nenhum recorte é aplicado (sem `object-fit: cover`
- *   forçando outra proporção), então rosto e peça aparecem inteiros.
+ * - As fotos seguem enquadramentos próximos ao original; os quadros reservam espaço antes do carregamento para evitar layout shift.
  * - Estão abaixo da primeira dobra: carregamento preguiçoso (padrão do `next/image`), sem `priority`.
  * - A revelação usa `data-reveal` (GSAP, já respeitando `prefers-reduced-motion` em `EditorialMotion`); o zoom suave ao passar o mouse é só CSS e também respeita a preferência.
  */
@@ -16,28 +15,28 @@ const LOOKS = [
     src: '/editorial/lookbook-01-noite.webp',
     alt: 'Mulher de casaco trench em tweed bege, com cinto, apoiada em uma varanda ao entardecer, com montanhas e luzes acesas ao fundo',
     caption: 'Entardecer nas montanhas',
-    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
+    sizes: '(min-width: 701px) 320px, (min-width: 381px) 300px, calc(100vw - 32px)',
   },
   {
     id: 'vinicola',
     src: '/editorial/lookbook-02-vinicola.webp',
     alt: 'Mulher de casaco longo off-white com cinto caminhando entre videiras, em frente a uma vinícola de montanha',
     caption: 'Brinde na vinícola',
-    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
+    sizes: '(min-width: 701px) 270px, (min-width: 381px) 260px, calc(100vw - 32px)',
   },
   {
     id: 'jardim',
     src: '/editorial/lookbook-03-jardim.webp',
     alt: 'Mulher de trench coat preto de botões duplos e botas pretas em um caminho de jardim, entre arbustos floridos',
     caption: 'Passeio no jardim',
-    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
+    sizes: '(min-width: 701px) 240px, (min-width: 381px) 230px, calc(100vw - 32px)',
   },
   {
     id: 'varanda',
     src: '/editorial/lookbook-04-varanda.webp',
     alt: 'Mulher de casaco preto com gola e punhos de pelo, segurando uma taça de vinho em uma varanda com vista para as montanhas',
     caption: 'Taça na varanda',
-    sizes: '(min-width: 1101px) 336px, (min-width: 701px) calc((100vw - 76px) / 2), 280px',
+    sizes: '(min-width: 701px) 300px, (min-width: 381px) 280px, calc(100vw - 32px)',
   },
 ] as const;
 
@@ -51,13 +50,12 @@ function LookFigure({
   className: string;
 }) {
   return (
-    <figure data-reveal className={`lookbook-figure ${className}`}>
+    <figure className={`lookbook-figure ${className}`}>
       <div className="lookbook-frame">
         <Image
           src={look.src}
           alt={look.alt}
-          width={1600}
-          height={2000}
+          fill
           sizes={look.sizes}
           className="lookbook-photo"
         />
@@ -75,7 +73,7 @@ export function EditorialLookbook() {
   return (
     <section className="lookbook" aria-labelledby="lookbook-title">
       <div className="lookbook-inner">
-        <header className="lookbook-intro" data-reveal>
+        <header className="lookbook-intro">
           <div className="lookbook-heading">
             <p className="eyebrow">Lookbook · Chile</p>
             <h2 id="lookbook-title">
