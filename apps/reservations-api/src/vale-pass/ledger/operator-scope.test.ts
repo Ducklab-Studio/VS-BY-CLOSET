@@ -30,19 +30,22 @@ describe('autorização por estabelecimento (regra pura)', () => {
     expect(describeOperatorAccess('STAFF', both, STAFF_ENABLED)).toMatch(/dois estabelecimentos/);
   });
 
-  test('ADMIN sem vínculo mantém o acesso atual (legado, até a política de migração); com vínculo fica restrito a ele', () => {
-    expect(decideCompanyAccess('ADMIN', [], 'VS_BY_CLOSET')).toEqual({ allowed: true, basis: 'LEGACY_ADMIN' });
+  test('ADMIN sem vínculo NÃO opera nenhuma empresa (política padrão estrita); com vínculo fica restrito a ele', () => {
+    expect(decideCompanyAccess('ADMIN', [], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'NO_COMPANY_AUTHORIZED' });
+    expect(decideCompanyAccess('ADMIN', [], 'VALLE_SHOWROOM')).toMatchObject({ allowed: false, code: 'NO_COMPANY_AUTHORIZED' });
     expect(decideCompanyAccess('ADMIN', ['VALLE_SHOWROOM'], 'VALLE_SHOWROOM')).toEqual({ allowed: true, basis: 'SCOPE' });
     expect(decideCompanyAccess('ADMIN', ['VALLE_SHOWROOM'], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'COMPANY_NOT_AUTHORIZED' });
   });
 
-  test('política ATUAL (decisão do Anderson, 26/10/2026): STAFF resgata, mas só nas empresas vinculadas; sem vínculo nada; o ADMIN preserva o acesso legado', () => {
-    expect(OPERATOR_POLICY).toEqual({ staffMayRedeem: true, adminRequiresScope: false });
+  test('política ATUAL (decisão do Anderson, 26/10/2026): STAFF resgata, mas só nas empresas vinculadas; sem vínculo nada; o ADMIN também precisa de vínculo', () => {
+    expect(OPERATOR_POLICY).toEqual({ staffMayRedeem: true, adminRequiresScope: true });
     expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM'], 'VALLE_SHOWROOM')).toEqual({ allowed: true, basis: 'SCOPE' });
     expect(decideCompanyAccess('STAFF', ['VALLE_SHOWROOM'], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'COMPANY_NOT_AUTHORIZED' });
     expect(decideCompanyAccess('STAFF', [], 'VALLE_SHOWROOM')).toMatchObject({ allowed: false, code: 'NO_COMPANY_AUTHORIZED' });
     expect(describeOperatorAccess('STAFF', ['VALLE_SHOWROOM'])).toMatch(/apenas na Valle Showroom/);
-    expect(decideCompanyAccess('ADMIN', [], 'VS_BY_CLOSET')).toEqual({ allowed: true, basis: 'LEGACY_ADMIN' });
+    expect(decideCompanyAccess('ADMIN', [], 'VS_BY_CLOSET')).toMatchObject({ allowed: false, code: 'NO_COMPANY_AUTHORIZED' });
+    expect(decideCompanyAccess('SUPER_ADMIN', [], 'VS_BY_CLOSET')).toEqual({ allowed: true, basis: 'OWNER' });
+    expect(decideCompanyAccess('SUPER_ADMIN', [], 'VALLE_SHOWROOM')).toEqual({ allowed: true, basis: 'OWNER' });
   });
 
   test('com o STAFF desligado (a trava continua testável) o vinculado também é recusado', () => {

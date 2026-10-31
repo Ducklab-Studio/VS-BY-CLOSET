@@ -11,7 +11,7 @@ import { ValePassBlockService } from './block.service';
 import { ValePassLedgerController } from './ledger.controller';
 import { ValePassLedgerService } from './ledger.service';
 import { ValePassRedemptionService, type Actor } from './redemption.service';
-import { purgeLedgerForTest } from './ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger-test-utils';
 
 /**
  * Fase 3 / PR C1 — bloqueio e desbloqueio administrativo (serviço + banco), em PostgreSQL LOCAL descartável.
@@ -81,6 +81,7 @@ async function cleanRows() {
 beforeAll(async () => {
   if (!localDatabase) return;
   const row = await prisma.adminUser.create({ data: { name: 'Admin Teste Bloqueio', phone: `${TAG}-admin`, pinHash: 'x', role: 'ADMIN', active: true } });
+  await grantAllCompaniesForTest(prisma, row.id); // a política exige vínculo para ADMIN resgatar
   admin = { id: row.id, name: row.name, role: 'ADMIN' };
   staff.id = (await prisma.adminUser.create({ data: { name: staff.name, phone: `${TAG}-staff`, pinHash: 'x', role: 'STAFF', active: true } })).id;
 });

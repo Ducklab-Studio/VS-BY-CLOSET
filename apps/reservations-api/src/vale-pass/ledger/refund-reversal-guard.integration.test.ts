@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { ValePass } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { purgeLedgerForTest } from './ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger-test-utils';
 import { ValePassLedgerService } from './ledger.service';
 import { ValePassRedemptionService, type Actor } from './redemption.service';
 import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
@@ -76,6 +76,7 @@ async function cleanRows() {
 beforeAll(async () => {
   if (!localDatabase) return;
   const user = await prisma.adminUser.create({ data: { name: 'Admin Teste Reembolso', phone: `${TAG}-admin`, pinHash: 'x', role: 'ADMIN', active: true } });
+  await grantAllCompaniesForTest(prisma, user.id); // a política exige vínculo para ADMIN resgatar
   admin = { id: user.id, name: user.name, role: 'ADMIN' };
 });
 afterEach(async () => {

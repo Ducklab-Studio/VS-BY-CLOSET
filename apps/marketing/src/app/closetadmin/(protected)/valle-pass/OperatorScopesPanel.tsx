@@ -90,7 +90,7 @@ export function OperatorScopesPanel() {
           {overview ? (
             <>
               <p className="text-xs text-ink/60 dark:text-dark-subtle">
-                {overview.summary.adminsWithoutScope} administrador(es) sem vínculo (acesso legado às duas lojas) · {overview.summary.legacyAdminOperationsLast30Days} operação(ões) pelo acesso legado nos últimos 30 dias.
+                {overview.summary.adminsWithoutScope} administrador(es) sem vínculo (não realizam resgates) · {overview.summary.legacyAdminOperationsLast30Days} operação(ões) pelo antigo acesso às duas lojas nos últimos 30 dias.
               </p>
               {overview.users.length === 0 ? <p className="text-sm text-ink/60">Nenhum administrador ou funcionário do Valle Pass encontrado.</p> : null}
               <ul className="space-y-2">
@@ -121,13 +121,13 @@ export function OperatorScopesPanel() {
                     <p className="mt-1.5 text-[0.7rem] text-ink/50 dark:text-dark-subtle">
                       {user.role === 'STAFF'
                         ? user.companies.length > 0 ? 'Vinculado, mas o resgate por funcionários ainda não foi liberado.' : 'Sem vínculo: não realiza resgates.'
-                        : user.companies.length === 0 ? 'Sem vínculo: acesso legado às duas lojas.' : 'Restrito às lojas marcadas.'}
+                        : user.companies.length === 0 ? 'Sem vínculo: não realiza resgates.' : 'Restrito às lojas marcadas.'}
                     </p>
                     {pending && pending.userId === user.id ? (
                       <div role="alertdialog" aria-label="Confirmar alteração de vínculo" className="mt-2 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.07] p-2.5 text-xs">
                         <p>
                           {pending.grant ? 'Conceder' : 'Revogar'} o vínculo de <strong>{pending.userName}</strong> com a <strong>{COMPANIES.find((c) => c.id === pending.company)?.label}</strong>?
-                          {!pending.grant && user.companies.length === 1 && user.role === 'ADMIN' ? ' Sem nenhum vínculo, este administrador volta ao acesso legado às duas lojas.' : ''}
+                          {!pending.grant && user.companies.length === 1 && user.role === 'ADMIN' ? ' Sem nenhum vínculo, este administrador deixa de realizar resgates.' : ''}
                         </p>
                         <div className="flex gap-2">
                           <button type="button" disabled={busy} onClick={() => void confirm()} className={buttonClass}>{busy ? 'Salvando…' : 'Confirmar'}</button>

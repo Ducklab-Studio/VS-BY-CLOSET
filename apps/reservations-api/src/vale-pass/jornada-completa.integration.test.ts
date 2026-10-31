@@ -4,7 +4,7 @@ import type { ValePassCampaign } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
-import { purgeLedgerForTest } from './ledger/ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger/ledger-test-utils';
 import { ValePassBlockService } from './ledger/block.service';
 import { ValePassLedgerService } from './ledger/ledger.service';
 import { ValePassRedemptionService, type Actor } from './ledger/redemption.service';
@@ -198,6 +198,7 @@ async function storeEvent(topic: string, body: Record<string, unknown>, triggere
 }
 async function newUser(role: 'SUPER_ADMIN' | 'ADMIN' | 'STAFF'): Promise<Actor> {
   const row = await prisma.adminUser.create({ data: { name: `${role} ${TAG}-${counter}`, phone: `${TAG}-${counter++}`, pinHash: 'x', role, active: true } });
+  if (role === 'ADMIN') await grantAllCompaniesForTest(prisma, row.id); // a política exige vínculo para ADMIN resgatar
   userIds.push(row.id);
   return { id: row.id, name: row.name, role };
 }

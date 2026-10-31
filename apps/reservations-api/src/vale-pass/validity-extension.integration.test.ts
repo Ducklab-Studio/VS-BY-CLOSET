@@ -4,7 +4,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { ValePass, ValePassCampaign } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQUIRE_ROLE_KEY } from '../admin/require-role.decorator';
-import { purgeLedgerForTest } from './ledger/ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger/ledger-test-utils';
 import { ValePassLedgerService } from './ledger/ledger.service';
 import { ValePassRedemptionService, type Actor } from './ledger/redemption.service';
 import { ValePassVouchersService } from './vale-pass-vouchers.service';
@@ -34,6 +34,7 @@ const NEW_EXPIRY = '2027-12-01T03:00:00.000Z';
 
 async function newUser(role: 'SUPER_ADMIN' | 'ADMIN' | 'STAFF'): Promise<Actor & { id: string }> {
   const row = await prisma.adminUser.create({ data: { name: `${role} ${TAG}-${counter}`, phone: `${TAG}-${counter++}`, pinHash: 'x', role, active: true } });
+  if (role === 'ADMIN') await grantAllCompaniesForTest(prisma, row.id); // a política exige vínculo para ADMIN resgatar
   userIds.push(row.id);
   return { id: row.id, name: row.name, role };
 }

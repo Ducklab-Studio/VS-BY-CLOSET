@@ -4,8 +4,8 @@
  *  - STAFF: pode RESGATAR (decisão do Anderson, 26/10/2026: "funcionários também podem validar"), mas SOMENTE as empresas explicitamente vinculadas pelo
  *    proprietário; sem vínculo = nenhum resgate. Reversão, bloqueio/desbloqueio e conciliação continuam exclusivos de ADMIN/SUPER_ADMIN (guards das rotas E
  *    verificação dentro do serviço). Os guards das rotas de resgate e `staffMayRedeem` dizem a MESMA coisa (há teste que trava a divergência).
- *  - ADMIN: SEM vínculo mantém o acesso administrativo de hoje (as duas empresas) até a política de migração ser definida (`adminRequiresScope = false`);
- *    COM vínculo fica restrito às empresas vinculadas (restringir é sempre o lado seguro).
+ *  - ADMIN: SEM vínculo NÃO resgata nem reverte em NENHUMA empresa (`adminRequiresScope = true`, desde a revisão de segurança de 31/10/2026: um administrador de uma
+ *    empresa nunca opera a outra); COM vínculo fica restrito às empresas vinculadas. A base `LEGACY_ADMIN` só existe para ler o histórico de operações antigas.
  * Ninguém recebe vínculo por padrão: o vínculo é sempre uma decisão registrada do proprietário.
  */
 export type OperatorCompany = 'VALLE_SHOWROOM' | 'VS_BY_CLOSET';
@@ -15,10 +15,10 @@ export const COMPANY_NAMES: Record<OperatorCompany, string> = { VALLE_SHOWROOM: 
 export interface OperatorPolicy {
   /** STAFF vinculado pode RESGATAR (nunca reverter/bloquear)? Sim, desde 26/10/2026 (decisão do Anderson). */
   readonly staffMayRedeem: boolean;
-  /** ADMIN sem vínculo deixa de operar? Hoje não (migração segura dos administradores atuais ainda a definir). */
+  /** ADMIN sem vínculo deixa de operar? SIM: só o proprietário (SUPER_ADMIN) opera as duas empresas sem vínculo. */
   readonly adminRequiresScope: boolean;
 }
-export const OPERATOR_POLICY: OperatorPolicy = { staffMayRedeem: true, adminRequiresScope: false };
+export const OPERATOR_POLICY: OperatorPolicy = { staffMayRedeem: true, adminRequiresScope: true };
 
 export type AccessBasis = 'OWNER' | 'LEGACY_ADMIN' | 'SCOPE';
 export type AccessDenial = 'NO_COMPANY_AUTHORIZED' | 'COMPANY_NOT_AUTHORIZED' | 'STAFF_NOT_ENABLED';
