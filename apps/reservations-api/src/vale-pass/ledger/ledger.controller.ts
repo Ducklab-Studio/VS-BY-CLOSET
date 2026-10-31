@@ -5,6 +5,7 @@ import { AdminAuthGuard } from '../../admin/admin-auth.guard';
 import { AdminRoleGuard } from '../../admin/admin-role.guard';
 import { RequireRole } from '../../admin/require-role.decorator';
 import { RequireModule } from '../../admin/require-module.decorator';
+import { adminSessionThrottleTracker } from '../../admin/admin-session-throttle';
 import { ConfirmBlockDto, ConfirmRedeemDto, ConfirmReverseDto, PrepareRedeemDto } from '../dto/voucher-balance.dto';
 import { ValePassBlockService, type BlockPreview, type BlockResult } from './block.service';
 import { ValePassLedgerService, type LedgerProblem } from './ledger.service';
@@ -15,10 +16,10 @@ interface RequestWithAdminUser {
 }
 const actorOf = (req: RequestWithAdminUser): Actor => ({ id: req.adminUser!.id, name: req.adminUser!.name, role: req.adminUser!.role });
 
-/** Consulta: 60/min por IP (a mesma resposta para código inexistente e inválido; o limite barra a tentativa de enumerar códigos). */
-const LOOKUP_LIMIT = { default: { limit: 60, ttl: 60_000 } };
+/** Consulta: 60/min por SESSÃO administrativa (admin-session-throttle.ts; a mesma resposta para código inexistente e inválido; o limite barra a tentativa de enumerar códigos). */
+const LOOKUP_LIMIT = { default: { limit: 60, ttl: 60_000, getTracker: adminSessionThrottleTracker } };
 /** Escrita: bem mais restrita. */
-const WRITE_LIMIT = { default: { limit: 30, ttl: 60_000 } };
+const WRITE_LIMIT = { default: { limit: 30, ttl: 60_000, getTracker: adminSessionThrottleTracker } };
 
 /**
  * Saldo, resgate parcial e reversão de vouchers do Valle Pass 2027 (Fase 3 / PR B). Todas as rotas exigem sessão administrativa e o módulo VALLE_PASS.
