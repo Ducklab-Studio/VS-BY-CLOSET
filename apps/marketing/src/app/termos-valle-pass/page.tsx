@@ -61,6 +61,11 @@ export default function ValePassTermsPage() {
               <Link href="/contato">Ir para a página de contato</Link>
             </p>
           ) : null}
+          {section.id === 'dados-pessoais' ? (
+            <p>
+              <Link href="/politica-de-privacidade">Ler a política de privacidade</Link>
+            </p>
+          ) : null}
         </div>,
       ])}
     </LegalPage>
