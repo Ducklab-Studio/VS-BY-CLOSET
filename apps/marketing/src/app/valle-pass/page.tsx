@@ -12,7 +12,6 @@ import {
   valePassPageIndexable,
   valePassValidityText,
 } from '@/lib/vale-pass-offer';
-import { valePassCheckoutHref } from '@/lib/vale-pass-product';
 import { valePassClosedNote } from '@/lib/vale-pass-sale';
 import { TERMS_APPROVED } from '@/lib/vale-pass-terms-draft';
 
@@ -35,10 +34,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * botão desabilitado, que não é link, e o endereço do checkout nem chega ao HTML.
  */
 function PassCta({ offer, now, where }: { offer: ValePassOffer; now: Date; where: 'hero' | 'final' }) {
-  if (offer.purchasable && offer.checkoutVariantId) {
+  if (offer.purchasable && offer.checkoutHref) {
     return (
       <div className="vp-cta-block">
-        <a href={valePassCheckoutHref(offer.checkoutVariantId)} data-testid={`vp-cta-${where}`} data-state="open" className="vp-cta vp-cta-open">
+        <a href={offer.checkoutHref} data-testid={`vp-cta-${where}`} data-state="open" className="vp-cta vp-cta-open">
           Comprar o Valle Pass
         </a>
         <p className="vp-cta-note">Pagamento processado com segurança pela Shopify.</p>
@@ -64,7 +63,7 @@ export default async function ValePassPage() {
   const ready = offer.purchasable;
 
   return (
-    <div className="vp" data-testid="vp-page" data-sale-state={offer.saleState} data-purchasable={ready ? 'yes' : 'no'}>
+    <div className="vp" data-testid="vp-page" data-sale-state={ready ? 'open' : 'closed'} data-shopify-state={offer.saleState} data-purchasable={ready ? 'yes' : 'no'}>
       <section className="vp-hero" aria-labelledby="vp-title">
         <span className="vp-orbit" aria-hidden="true" />
         <Image src="/brand/logo-mark.svg" alt="" width={335} height={380} unoptimized aria-hidden="true" className="vp-mark" />

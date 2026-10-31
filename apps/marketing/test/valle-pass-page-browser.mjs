@@ -182,10 +182,11 @@ try {
   setSale('open');
   await page.goto(pageUrl);
   await page.getByTestId('vp-cta-hero').waitFor();
-  assert.equal(await page.getByTestId('vp-page').getAttribute('data-sale-state'), 'open');
+  assert.equal(await page.getByTestId('vp-page').getAttribute('data-shopify-state'), 'open', 'a Shopify informa a variante à venda');
+  assert.equal(await page.getByTestId('vp-page').getAttribute('data-sale-state'), 'closed', 'mas sem termos publicados e aprovados a página não se declara aberta');
   assert.equal(await page.getByTestId('vp-page').getAttribute('data-purchasable'), 'no');
   assert.equal(await page.getByTestId('vp-cta-hero').evaluate((el) => el.tagName), 'BUTTON');
-  assert.match(await page.getByTestId('vp-note-hero').innerText(), /somente depois da publicação dos termos e condições/);
+  assert.match(await page.getByTestId('vp-note-hero').innerText(), /somente depois da publicação e da aprovação dos termos e condições/);
   assert.equal(await page.locator('a[href*="/cart/"]').count(), 0);
   assert.ok(!/\/cart\/\d+:\d+/.test(await (await fetch(pageUrl)).text()), 'sem termos, o checkout nem chega ao HTML');
   assert.match((await robots(page)) ?? '', /noindex/);
@@ -205,32 +206,30 @@ try {
   assert.match(await unknown.getByTestId('vp-price').innerText(), /R\$\s?350,00/);
   pass('7) produto não encontrado na Shopify: fechado (fail closed) e com o preço aprovado de referência');
 
-  // 8) venda aberta E termos publicados: só então o link de compra aparece (e continua noindex enquanto o texto oficial não é aprovado)
+  // 8) venda aberta E termos com endereço publicado, mas o TEXTO OFICIAL ainda é rascunho (TERMS_APPROVED = false): continua BLOQUEADO
   assert.deepEqual(errors, [], 'erros de console/página nas telas anteriores');
   while (contexts.length) await contexts.pop().close();
   await stopServer();
   await startServer({ NEXT_PUBLIC_VALE_PASS_TERMS_URL: '/termos-valle-pass-teste' });
   setSale('open');
-  const ready = await newPage({ viewport: { width: 1280, height: 1000 } });
-  await ready.goto(pageUrl);
-  await ready.getByTestId('vp-cta-hero').waitFor();
-  assert.equal(await ready.getByTestId('vp-page').getAttribute('data-purchasable'), 'yes');
-  const buy = ready.getByTestId('vp-cta-hero');
-  assert.equal(await buy.getAttribute('data-state'), 'open');
-  assert.match((await buy.getAttribute('href')) ?? '', /\/cart\/49174518595684:1$/);
-  assert.equal(await ready.getByTestId('vp-badge').count(), 0, 'pronta para compra: sem selo de pré-lançamento');
-  assert.equal(await ready.getByTestId('vp-terms-link').getAttribute('href'), '/termos-valle-pass-teste');
-  assert.equal(await ready.getByTestId('vp-terms-pending').count(), 0);
-  assert.match(await ready.getByTestId('vp-step').first().innerText(), /checkout oficial/);
-  assert.doesNotMatch(await ready.getByTestId('vp-step').first().innerText(), /pré-lançamento/i);
-  assert.match((await robots(ready)) ?? '', /noindex/, 'texto oficial ainda não aprovado: continua noindex');
-  await noForbiddenClaims(ready, 'venda aberta com termos');
-  setSale('closed');
-  await ready.reload();
-  await ready.getByTestId('vp-cta-hero').waitFor();
-  assert.equal(await ready.getByTestId('vp-cta-hero').evaluate((el) => el.tagName), 'BUTTON', 'a Shopify fechou: volta a ficar inerte');
-  assert.equal(await ready.getByTestId('vp-terms-link').count(), 1, 'termos publicados continuam aparecendo');
-  pass('8) venda aberta E termos publicados: só então o link de compra aparece; fechando a Shopify, volta a ser inerte; continua noindex sem texto aprovado');
+  const published = await newPage({ viewport: { width: 1280, height: 1000 } });
+  await published.goto(pageUrl);
+  await published.getByTestId('vp-cta-hero').waitFor();
+  assert.equal(await published.getByTestId('vp-page').getAttribute('data-sale-state'), 'closed', 'sem termos aprovados a página não se declara aberta');
+  assert.equal(await published.getByTestId('vp-page').getAttribute('data-purchasable'), 'no');
+  for (const where of ['hero', 'final']) {
+    const cta = published.getByTestId(`vp-cta-${where}`);
+    assert.equal(await cta.evaluate((el) => el.tagName), 'BUTTON', 'endereço dos termos publicado, texto não aprovado: continua inerte');
+    assert.equal(await cta.isDisabled(), true);
+  }
+  assert.equal(await published.locator('a[href*="/cart/"]').count(), 0);
+  assert.ok(!/\/cart\/\d+:\d+/.test(await (await fetch(pageUrl)).text()), 'o checkout nem chega ao HTML');
+  assert.equal(await published.getByTestId('vp-terms-link').getAttribute('href'), '/termos-valle-pass-teste', 'o link dos termos aparece, mas não libera a compra');
+  assert.equal(await published.getByTestId('vp-terms-pending').count(), 0);
+  assert.match(await published.getByTestId('vp-note-hero').innerText(), /somente depois da publicação e da aprovação dos termos e condições/);
+  assert.match((await robots(published)) ?? '', /noindex/);
+  await noForbiddenClaims(published, 'venda aberta, termos publicados e não aprovados');
+  pass('8) venda aberta + endereço dos termos publicado, mas texto oficial ainda não aprovado: continua bloqueado (botão inerte, sem checkout no HTML, noindex)');
 
   // O único destino externo permitido é o mapa do rodapé (iframe do OpenStreetMap), o mesmo que os outros testes da vitrine já aceitam.
   assert.deepEqual(externalRequests.filter((host) => host !== 'www.openstreetmap.org'), [], `houve requisição externa: ${[...new Set(externalRequests)].join(', ')}`);

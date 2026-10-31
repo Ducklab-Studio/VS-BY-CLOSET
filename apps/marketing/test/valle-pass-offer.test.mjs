@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 // Regras e conteúdo PUROS da página /valle-pass: nada abre sozinho (fail closed), termos pendentes mantêm a oferta fechada e o texto nunca promete o que não
@@ -17,13 +17,52 @@ function load(file) {
 }
 const offer = load('vale-pass-offer.ts');
 
-test('a oferta só é "pronta para compra" com a Shopify aberta E os termos publicados', () => {
-  assert.deepEqual(offer.valePassPageGate({ saleState: 'closed', termsHref: null }), { purchasable: false, reason: 'sale_closed' });
-  assert.deepEqual(offer.valePassPageGate({ saleState: 'closed', termsHref: '/termos-valle-pass' }), { purchasable: false, reason: 'sale_closed' });
-  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: null }), { purchasable: false, reason: 'terms_pending' });
-  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: '' }), { purchasable: false, reason: 'terms_pending' });
-  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: '/termos-valle-pass' }), { purchasable: true, reason: 'ok' });
-  assert.deepEqual(offer.valePassPageGate({ saleState: undefined, termsHref: '/termos-valle-pass' }), { purchasable: false, reason: 'sale_closed' });
+test('liberação comercial: só com a Shopify aberta E os termos publicados E aprovados (as 8 combinações)', () => {
+  const states = ['closed', 'open'];
+  const hrefs = [null, '/termos-valle-pass'];
+  const approvals = [false, true];
+  let releases = 0;
+  for (const saleState of states)
+    for (const termsHref of hrefs)
+      for (const termsApproved of approvals) {
+        const gate = offer.valePassPageGate({ saleState, termsHref, termsApproved });
+        const expected = saleState === 'open' && termsHref !== null && termsApproved === true;
+        assert.equal(gate.purchasable, expected, `${saleState} / ${termsHref} / aprovado=${termsApproved}`);
+        if (gate.purchasable) releases++;
+      }
+  assert.equal(releases, 1, 'exatamente UMA combinação libera a compra');
+  assert.deepEqual(offer.valePassPageGate({ saleState: 'closed', termsHref: null, termsApproved: false }), { purchasable: false, reason: 'sale_closed' });
+  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: null, termsApproved: true }), { purchasable: false, reason: 'terms_pending' });
+  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: '', termsApproved: true }), { purchasable: false, reason: 'terms_pending' });
+  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: '/termos-valle-pass', termsApproved: false }), { purchasable: false, reason: 'terms_pending' });
+  assert.deepEqual(offer.valePassPageGate({ saleState: 'open', termsHref: '/termos-valle-pass', termsApproved: true }), { purchasable: true, reason: 'ok' });
+  // fail closed: valores estranhos nunca liberam
+  assert.equal(offer.valePassPageGate({ saleState: undefined, termsHref: '/t', termsApproved: true }).purchasable, false);
+  assert.equal(offer.valePassPageGate({ saleState: 'open', termsHref: '/t', termsApproved: 'true' }).purchasable, false);
+  assert.equal(offer.valePassPageGate({ saleState: 'open', termsHref: '/t', termsApproved: undefined }).purchasable, false);
+});
+
+test('enquanto o texto dos termos for rascunho (TERMS_APPROVED = false), NENHUM caminho pode liberar o checkout', () => {
+  const draft = readFileSync(new URL('src/lib/vale-pass-terms-draft.ts', root), 'utf8');
+  assert.match(draft, /export const TERMS_APPROVED = false;/, 'o texto oficial ainda não foi aprovado');
+});
+
+test('há um ÚNICO caminho para o checkout: só resolveValePassCheckout chama valePassCheckoutHref, e o cartão antigo e a página nova passam por ele', () => {
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(new URL(`${entry.name}/`, dir)) : [new URL(entry.name, dir)]));
+  const callers = walk(new URL('src/', root))
+    .filter((file) => /\.(ts|tsx)$/.test(file.pathname))
+    .filter((file) => /valePassCheckoutHref\(/.test(readFileSync(file, 'utf8')))
+    .map((file) => file.pathname.split('/src/')[1])
+    .sort();
+  assert.deepEqual(callers, ['lib/vale-pass-offer-data.ts', 'lib/vale-pass-product.ts'], 'só a definição e a decisão única podem tocar no permalink do checkout');
+  const card = readFileSync(new URL('src/components/ValePassPresentation.tsx', root), 'utf8');
+  const page = readFileSync(new URL('src/app/valle-pass/page.tsx', root), 'utf8');
+  const data = readFileSync(new URL('src/lib/vale-pass-offer-data.ts', root), 'utf8');
+  assert.match(card, /resolveValePassCheckout\(/, 'o cartão usa a decisão única');
+  assert.doesNotMatch(card, /valePassCheckoutHref/, 'o cartão não monta o checkout por conta própria');
+  assert.match(data, /resolveValePassCheckout\(\{ saleState, variantId: variant\?\.id \}\)/, 'a página usa a decisão única');
+  assert.doesNotMatch(page, /valePassCheckoutHref/, 'a página não monta o checkout por conta própria');
+  assert.match(data, /termsApproved: TERMS_APPROVED/, 'a decisão exige os termos APROVADOS');
 });
 
 test('noindex até a venda estar aberta, os termos publicados E o texto oficial aprovado', () => {
@@ -36,7 +75,7 @@ test('noindex até a venda estar aberta, os termos publicados E o texto oficial 
 
 test('aviso do bloqueio por termos pendentes não afirma que os termos existem', () => {
   const note = offer.valePassGateNote('terms_pending');
-  assert.match(note, /somente depois da publicação dos termos e condições/);
+  assert.match(note, /somente depois da publicação e da aprovação dos termos e condições/);
   assert.equal(offer.valePassGateNote('ok'), null);
   assert.equal(offer.valePassGateNote('sale_closed'), null);
 });

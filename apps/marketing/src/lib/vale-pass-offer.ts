@@ -74,12 +74,17 @@ export type ValePassPageSaleState = 'closed' | 'open';
 export type ValePassPageGateReason = 'ok' | 'sale_closed' | 'terms_pending';
 
 /**
- * A página só apresenta a oferta como PRONTA PARA COMPRA quando as DUAS condições valem: a Shopify informa a variante à venda E os termos e condições estão
- * publicados (endereço válido). Sem termos, mesmo com a Shopify aberta, o botão continua desabilitado e o endereço do checkout nem chega ao HTML.
+ * LIBERAÇÃO COMERCIAL (única regra, usada pela página /valle-pass e pelo cartão da página do produto): a oferta só é apresentada como PRONTA PARA COMPRA quando as
+ * TRÊS condições valem: a Shopify informa a variante à venda, os termos e condições estão PUBLICADOS (endereço válido) e o texto oficial foi APROVADO. Falta
+ * qualquer uma: o botão fica desabilitado e o endereço do checkout nem chega ao HTML (FAIL CLOSED).
  */
-export function valePassPageGate(input: { saleState: ValePassPageSaleState; termsHref: string | null }): { purchasable: boolean; reason: ValePassPageGateReason } {
+export function valePassPageGate(input: {
+  saleState: ValePassPageSaleState;
+  termsHref: string | null;
+  termsApproved: boolean;
+}): { purchasable: boolean; reason: ValePassPageGateReason } {
   if (input.saleState !== 'open') return { purchasable: false, reason: 'sale_closed' };
-  if (!input.termsHref) return { purchasable: false, reason: 'terms_pending' };
+  if (!input.termsHref || input.termsApproved !== true) return { purchasable: false, reason: 'terms_pending' };
   return { purchasable: true, reason: 'ok' };
 }
 
@@ -90,6 +95,6 @@ export function valePassPageIndexable(input: { saleState: ValePassPageSaleState;
 
 /** Aviso exibido no lugar do botão quando a oferta ainda não está pronta para compra (nunca afirma que os termos existem). */
 export function valePassGateNote(reason: ValePassPageGateReason): string | null {
-  if (reason === 'terms_pending') return 'As vendas serão apresentadas como disponíveis somente depois da publicação dos termos e condições.';
+  if (reason === 'terms_pending') return 'As vendas serão apresentadas como disponíveis somente depois da publicação e da aprovação dos termos e condições.';
   return null;
 }
