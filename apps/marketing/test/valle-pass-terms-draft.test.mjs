@@ -36,8 +36,14 @@ test('nunca indexada e marcada como rascunho enquanto o texto oficial não for a
   assert.match(DRAFT_NOTICE, /não deve ser divulgada/);
 });
 
-test('cobre as seções pedidas: utilização, validade, crédito, titularidade, reembolso e atendimento', () => {
-  assert.equal(JSON.stringify(TERMS_SECTIONS.map((s) => s.id)), JSON.stringify(['utilizacao', 'validade', 'credito', 'titularidade', 'reembolso', 'atendimento']));
+test('cobre as 11 seções pedidas, nesta ordem: descrição, valor, benefícios, empresas, período, condições, saldo/resgate, reembolso, limitações, atendimento e dados pessoais', () => {
+  assert.equal(
+    JSON.stringify(TERMS_SECTIONS.map((s) => s.id)),
+    JSON.stringify(['descricao', 'valor', 'beneficios', 'empresas', 'periodo', 'condicoes', 'saldo-resgate', 'reembolso', 'limitacoes', 'atendimento', 'dados-pessoais']),
+  );
+  // reembolso e limitações NUNCA trazem cláusula inventada: só o aviso de que serão preenchidos com o texto oficial
+  for (const id of ['reembolso', 'limitacoes']) assert.equal(TERMS_SECTIONS.find((s) => s.id === id).confirmed.length, 0, id);
+  assert.match(TERMS_SECTIONS.find((s) => s.id === 'limitacoes').pending.join(' '), /não estabelece nenhuma limitação/);
   for (const section of TERMS_SECTIONS) assert.ok(section.pending.length > 0 || section.confirmed.length > 0, section.id);
 });
 
@@ -61,8 +67,9 @@ test('não inventa cláusulas: nenhum prazo, multa, percentual, data ou polític
 
 test('o que ainda depende de decisão fica em "Em definição" e a página separa as duas listas sem apresentar rascunho como contrato', () => {
   const pending = TERMS_SECTIONS.flatMap((s) => s.pending).join(' ');
-  for (const topic of ['validade', 'prorrogação', 'saldo remanescente', 'desconto informativo', 'identificação']) assert.match(pending, new RegExp(topic, 'i'));
+  for (const topic of ['período de utilização', 'prorrogação', 'saldo remanescente', 'desconto informativo', 'identificação', 'dados específicos', 'perda do código']) assert.match(pending, new RegExp(topic, 'i'));
   assert.match(page, /Já confirmado/);
+  assert.match(page, /politica-de-privacidade/); // a seção de dados remete à política de privacidade que já existe no site
   assert.match(page, /Em definição/);
   assert.doesNotMatch(page, /Aceito os termos|Li e concordo|checkbox/i);
 });

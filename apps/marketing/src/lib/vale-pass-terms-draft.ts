@@ -28,54 +28,94 @@ export interface TermsSection {
 
 export const TERMS_SECTIONS: readonly TermsSection[] = [
   {
-    id: 'utilizacao',
-    title: 'Utilização',
+    id: 'descricao',
+    title: 'Descrição do Valle Pass 2027',
     confirmed: [
-      'Cada Valle Pass reúne dois vouchers independentes: um da Valle Showroom e um da VS BY CLOSET.',
-      'Cada voucher só vale na empresa indicada; o saldo de um nunca é usado no outro.',
-      'Os vouchers são validados pela equipe no momento do uso.',
+      'O Valle Pass 2027 é um passe que reúne dois vouchers independentes: um da Valle Showroom e um da VS BY CLOSET.',
+      'A compra é feita pelo checkout oficial da loja, e os vouchers são liberados pela equipe depois que o pagamento é confirmado.',
     ],
-    pending: [
-      'Procedimento do uso presencial (identificação do titular e código recebido por e-mail): informado pelo Anderson, aguardando o texto oficial.',
-      'Valor que excede o crédito do voucher: informado pelo Anderson, aguardando o texto oficial.',
-      'Condições do desconto informativo em passeios e transfers: aguardando o texto oficial.',
-    ],
+    pending: ['Texto descritivo oficial do produto: aguardando aprovação do Anderson e do jurídico.'],
   },
   {
-    id: 'validade',
-    title: 'Validade',
-    confirmed: ['A validade é definida pela campanha vigente e informada em cada voucher.'],
+    id: 'valor',
+    title: 'Valor de compra',
+    confirmed: ['O Valle Pass custa R$ 350,00.'],
+    pending: ['Formas de pagamento, parcelamento e eventuais condições promocionais: a definir.'],
+  },
+  {
+    id: 'beneficios',
+    title: 'Benefícios',
+    confirmed: ['Cada Valle Pass inclui um voucher de R$ 500,00 da Valle Showroom e um voucher de R$ 50,00 da VS BY CLOSET.'],
+    pending: ['Condições do desconto informativo em passeios e transfers: aguardando o texto oficial.'],
+  },
+  {
+    id: 'empresas',
+    title: 'Empresas participantes',
+    confirmed: [
+      'Valle Showroom: voucher de R$ 500,00, de uso exclusivo na Valle Showroom.',
+      'VS BY CLOSET: voucher de R$ 50,00, de uso exclusivo na VS BY CLOSET.',
+      'Cada voucher só vale na empresa indicada; o saldo de um nunca é usado no outro.',
+    ],
+    pending: ['Razão social, CNPJ e endereço de cada empresa para constarem do texto oficial: aguardando o Anderson e o jurídico.'],
+  },
+  {
+    id: 'periodo',
+    title: 'Período de utilização',
+    confirmed: ['A validade de cada voucher é a da campanha vigente e vem informada no próprio voucher, no e-mail da compra.'],
     pending: [
-      'Data de início e de término da validade: a confirmar pelo Anderson.',
+      'Datas de início e de término do período de utilização: previstas no site e sujeitas à confirmação do Anderson no texto oficial.',
       'Regras de prorrogação: a confirmar pelo Anderson.',
       'Data final de comercialização do Valle Pass: a confirmar pelo Anderson.',
     ],
   },
   {
-    id: 'credito',
-    title: 'Crédito',
-    confirmed: ['O Valle Pass custa R$ 350,00 e inclui um voucher de R$ 500,00 (Valle Showroom) e um de R$ 50,00 (VS BY CLOSET).'],
-    pending: ['Uso do saldo remanescente em visitas futuras: a confirmar pelo Anderson.'],
+    id: 'condicoes',
+    title: 'Condições de utilização',
+    confirmed: [
+      'Os vouchers são intransferíveis.',
+      'Os vouchers são validados pela equipe no momento do uso.',
+      'Cada voucher só pode ser usado enquanto estiver ativo e dentro do período de utilização.',
+    ],
+    pending: [
+      'Procedimento do uso presencial (identificação do titular e código recebido por e-mail): informado pelo Anderson, aguardando o texto oficial.',
+      'Documento de identificação e comparecimento do titular: informado pelo Anderson, aguardando o texto oficial.',
+    ],
   },
   {
-    id: 'titularidade',
-    title: 'Titularidade',
-    confirmed: ['Os vouchers são intransferíveis.'],
-    pending: ['Documento de identificação e comparecimento do titular: informado pelo Anderson, aguardando o texto oficial.'],
+    id: 'saldo-resgate',
+    title: 'Regras de saldo e resgate',
+    confirmed: ['O saldo de cada voucher é controlado separadamente pela equipe, e o resgate nunca pode ultrapassar o saldo disponível do próprio voucher.'],
+    pending: [
+      'Valor que excede o crédito do voucher: informado pelo Anderson, aguardando o texto oficial.',
+      'Uso do saldo remanescente em visitas futuras: a confirmar pelo Anderson.',
+      'Procedimento em caso de perda do código: a definir (a equipe pode reenviar o voucher mediante conferência).',
+    ],
   },
   {
     id: 'reembolso',
-    title: 'Reembolso, cancelamento e desistência',
+    title: 'Cancelamentos, reembolsos e desistência',
     confirmed: [],
     pending: [
       'Esta seção será preenchida com o texto oficial aprovado, em conformidade com a legislação aplicável. Até lá, esta página não estabelece nenhuma condição de reembolso, cancelamento ou desistência.',
     ],
   },
   {
+    id: 'limitacoes',
+    title: 'Limitações e responsabilidades',
+    confirmed: [],
+    pending: ['Esta seção será preenchida com o texto oficial aprovado pelo jurídico. Até lá, esta página não estabelece nenhuma limitação ou isenção de responsabilidade.'],
+  },
+  {
     id: 'atendimento',
-    title: 'Atendimento',
-    confirmed: ['Dúvidas gerais podem ser enviadas pela página de contato do site.'],
+    title: 'Atendimento e suporte',
+    confirmed: ['Dúvidas gerais podem ser enviadas pela página de contato do site, e o e-mail dos vouchers pode ser respondido.'],
     pending: ['Canal e prazos de atendimento específicos do Valle Pass: a definir.'],
+  },
+  {
+    id: 'dados-pessoais',
+    title: 'Tratamento de dados pessoais',
+    confirmed: ['O tratamento dos dados pessoais segue a política de privacidade do site.'],
+    pending: ['Finalidades e compartilhamento de dados específicos do Valle Pass (por exemplo, com a Valle Showroom): aguardando a revisão do jurídico.'],
   },
 ];
 
