@@ -148,21 +148,22 @@ try {
   assert.ok(box && box.x >= 0 && box.x + box.width <= 376 && box.height >= 44, 'botão dentro da tela e com área de toque de 44 px');
   pass('4) 375 px: sem rolagem horizontal e botão com área de toque adequada');
 
-  // 5) venda aberta pela Shopify: fluxo normal de compra, sem avisos de pré-lançamento (nenhuma data abre nada: só o estado da Shopify)
+  // 5) Shopify aberta, mas termos oficiais ainda não publicados/aprovados: MESMA regra da página /valle-pass: a compra continua BLOQUEADA
   setSale('open');
   await page.reload();
   await page.getByTestId('valle-pass-cta').waitFor();
-  assert.equal(await page.getByTestId('valle-pass-presentation').getAttribute('data-sale-state'), 'open');
-  const open = page.getByTestId('valle-pass-cta');
-  assert.equal(await open.evaluate((el) => el.tagName), 'A');
-  assert.equal(await open.getAttribute('data-state'), 'open');
-  assert.equal(await open.getAttribute('href'), 'https://127.0.0.1:8443/cart/49174518595684:1');
-  assert.match((await open.innerText()).trim(), /^Comprar Valle Pass$/i);
-  assert.equal(await page.getByTestId('valle-pass-prelaunch-badge').count(), 0);
-  assert.equal(await page.getByTestId('valle-pass-unavailable').count(), 0);
-  assert.equal(await page.getByTestId('valle-pass-closed-note').count(), 0);
-  assert.equal(await page.getByTestId('valle-pass-terms-pending').count(), 0, 'aberto sem termos: não promete nem afirma termos');
-  pass('5) venda aberta pela Shopify: botão volta a ser o link de compra normal, sem avisos de pré-lançamento');
+  assert.equal(await page.getByTestId('valle-pass-presentation').getAttribute('data-sale-state'), 'closed', 'sem termos aprovados o cartão não se declara aberto');
+  const blocked = page.getByTestId('valle-pass-cta');
+  assert.equal(await blocked.evaluate((el) => el.tagName), 'BUTTON', 'não é link');
+  assert.equal(await blocked.isDisabled(), true);
+  assert.equal(await blocked.getAttribute('data-state'), 'closed');
+  assert.equal(await blocked.getAttribute('href'), null);
+  assert.equal(await page.locator('a[href*="/cart/"]').count(), 0, 'nenhum link para o checkout');
+  assert.ok(!/\/cart\/\d+:\d+/.test(await (await fetch(productUrl)).text()), 'o permalink do checkout nem chega ao HTML do servidor');
+  await page.getByTestId('valle-pass-prelaunch-badge').waitFor();
+  assert.match(await page.getByTestId('valle-pass-closed-note').innerText(), /somente depois da publicação e da aprovação dos termos e condições/);
+  assert.equal(await page.getByTestId('valle-pass-terms-pending').count(), 1, 'termos não publicados: o aviso continua');
+  pass('5) Shopify aberta sem termos publicados e aprovados: o cartão continua bloqueado (botão inerte, sem checkout no HTML), como a página /valle-pass'.replace('\\', '\\'));
 
   // 6) fail closed: estado ilegível/ausente = fechado
   rmSync(stateFile);
@@ -187,8 +188,12 @@ try {
   setSale('open');
   await withTerms.reload();
   await withTerms.getByTestId('valle-pass-terms-link').waitFor();
-  assert.equal(await withTerms.getByTestId('valle-pass-cta').getAttribute('data-state'), 'open');
-  pass('7) com o endereço dos termos configurado, o link aparece (fechado e aberto) e o aviso "serão publicados" some');
+  // endereço dos termos publicado, mas o texto oficial ainda é rascunho (TERMS_APPROVED = false): a compra NÃO é liberada
+  assert.equal(await withTerms.getByTestId('valle-pass-cta').getAttribute('data-state'), 'closed');
+  assert.equal(await withTerms.getByTestId('valle-pass-cta').evaluate((el) => el.tagName), 'BUTTON');
+  assert.equal(await withTerms.locator('a[href*="/cart/"]').count(), 0);
+  assert.ok(!/\/cart\/\d+:\d+/.test(await (await fetch(productUrl)).text()), 'o checkout nem chega ao HTML');
+  pass('7) com o endereço dos termos configurado, o link aparece (fechado e aberto) e o aviso "serão publicados" some; sem texto aprovado a compra continua bloqueada');
 
   assert.deepEqual(externalRequests.filter((host) => host !== 'www.openstreetmap.org'), [], 'houve requisição externa');
   assert.deepEqual(errors, []);
