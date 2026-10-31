@@ -94,6 +94,9 @@ export function paymentInstantFromTransactions(order: ShopifyOrderTransactions, 
   // INSTANTE EFETIVO. `processedAt`/`createdAt` de uma transação assíncrona (Pix) é o da COBRANÇA, não o da confirmação: com os eventos da linha do tempo vale o
   // MAIS TARDIO dos dois (a confirmação nunca vem antes da cobrança). Um evento por transação de sucesso, na mesma ordem cronológica; qualquer diferença (evento
   // faltando, repetido ou ilegível) deixa o horário desconhecido e o pedido volta para o ADMIN.
+  // NÃO há vínculo verificável evento↔transação (a consulta não pede o assunto do evento): a segurança vem de (1) os eventos serem DESTE pedido (consulta `order(id)`
+  // + GID conferido acima), (2) contagem exata, (3) o instante só poder ficar MAIS TARDIO que o processedAt, nunca mais cedo, e (4) o webhook concordar em ±tolerância.
+  // O pareamento por ordem não altera o resultado: o pagamento só se confirma com a soma de TODAS as transações = total, então vale sempre o último pedaço.
   let basis: 'SUCCESS_EVENT' | 'TRANSACTION' = 'TRANSACTION';
   let effective = dated.map((item) => item.at);
   if (order.successEvents !== undefined) {

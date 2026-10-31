@@ -110,3 +110,37 @@ describe('paymentInstantFromTransactions — instante EFETIVO da confirmação (
     expect(paymentInstantFromTransactions(order([tx()]))).toMatchObject({ instant: new Date('2026-10-18T12:00:00Z'), basis: 'TRANSACTION' });
   });
 });
+
+const ptx = (processedAt: string, amount: string, over: Partial<ShopifyTransaction> = {}): ShopifyTransaction => ({ id: 'gid://shopify/OrderTransaction/' + processedAt + amount, kind: 'SALE', status: 'SUCCESS', test: false, processedAt, amount, currency: 'BRL', gateway: 'Gateway Pix', ...over });
+const pev = (createdAt: string) => ({ action: 'sale_success', createdAt });
+const permutations = <T,>(a: T[]): T[][] => (a.length <= 1 ? [a] : a.flatMap((x, i) => permutations([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p])));
+
+describe('associação cronológica evento ↔ transação: o instante não depende de qual evento casa com qual transação', () => {
+  test('dois Pix pagos FORA DE ORDEM da criação: qualquer permutação das listas dá o mesmo instante = a ÚLTIMA confirmação', () => {
+    const txs = [ptx('2026-10-18T10:00:00Z', '100.00'), ptx('2026-10-18T10:10:00Z', '250.00')];
+    const events = [pev('2026-10-18T12:00:00Z'), pev('2026-10-18T11:00:00Z')]; // A pago às 12:00, B pago às 11:00
+    const results = new Set<string>();
+    for (const t of permutations(txs)) for (const e of permutations(events)) results.add(String(paymentInstantFromTransactions({ totalAmount: '350.00', currency: 'BRL', transactions: t, successEvents: e }).instant?.toISOString()));
+    expect([...results]).toEqual(['2026-10-18T12:00:00.000Z']);
+  });
+  test('três pedaços (cartão + vale + Pix), eventos embaralhados: sempre o mais tardio; nunca antecipa', () => {
+    const txs = [ptx('2026-10-18T09:00:00Z', '50.00', { gateway: 'card' }), ptx('2026-10-18T09:05:00Z', '100.00', { gateway: 'card' }), ptx('2026-10-18T09:10:00Z', '200.00')];
+    const events = [pev('2026-10-18T09:00:01Z'), pev('2026-10-18T09:05:01Z'), pev('2026-10-18T13:45:00Z')];
+    const results = new Set<string>();
+    for (const t of permutations(txs)) for (const e of permutations(events)) results.add(String(paymentInstantFromTransactions({ totalAmount: '350.00', currency: 'BRL', transactions: t, successEvents: e }).instant?.toISOString()));
+    expect([...results]).toEqual(['2026-10-18T13:45:00.000Z']);
+  });
+  test('um pedaço sem evento (2 transações, 1 evento) e evento sobrando (1 transação, 2 eventos) nunca confirmam', () => {
+    const two = [ptx('2026-10-18T10:00:00Z', '100.00'), ptx('2026-10-18T10:10:00Z', '250.00')];
+    expect(paymentInstantFromTransactions({ totalAmount: '350.00', currency: 'BRL', transactions: two, successEvents: [pev('2026-10-18T12:00:00Z')] }).reason).toBe('SUCCESS_EVENT_MISMATCH');
+    expect(paymentInstantFromTransactions({ totalAmount: '350.00', currency: 'BRL', transactions: [ptx('2026-10-18T10:00:00Z', '350.00')], successEvents: [pev('2026-10-18T12:00:00Z'), pev('2026-10-18T12:00:03Z')] }).reason).toBe('SUCCESS_EVENT_MISMATCH');
+  });
+});
+
+describe('eventos nunca de outro pedido nem de transação alheia', () => {
+  test('a consulta é do pedido (Order.events): pedido devolvido com outro GID é recusado ANTES de olhar eventos; sem vínculo por transação, só a contagem exata e o webhook (±120 s) autorizam', () => {
+    const base = { totalAmount: '350.00', currency: 'BRL', transactions: [ptx('2026-10-18T10:00:00Z', '350.00')], successEvents: [pev('2026-10-18T12:00:00Z')] };
+    expect(paymentInstantFromTransactions({ ...base, orderGid: 'gid://shopify/Order/999' }, { expectedOrderGid: 'gid://shopify/Order/1' }).reason).toBe('ORDER_MISMATCH');
+    expect(paymentInstantFromTransactions({ ...base, orderGid: 'gid://shopify/Order/1' }, { expectedOrderGid: 'gid://shopify/Order/1' }).instant).toEqual(new Date('2026-10-18T12:00:00Z'));
+  });
+});
