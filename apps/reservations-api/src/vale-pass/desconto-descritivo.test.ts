@@ -47,7 +47,8 @@ describe('o desconto de 10% é só descritivo (nenhum mecanismo de aplicação e
       join(SRC, '../../marketing/src/app/valle-pass/page.tsx'), // página pública /valle-pass
       join(SRC, '../../marketing/src/lib/vale-pass-offer.ts'), // textos da oferta (vouchers, validade, passos)
     ];
-    for (const file of customerFacing) expect(code(file), file).not.toMatch(/10\s?%|desconto|passeio|transfer/i);
+    // `\btransfers?\b`: a palavra "Intransferível" (os vouchers são intransferíveis) não é o benefício e não conta.
+    for (const file of customerFacing) expect(code(file), file).not.toMatch(/10\s?%|desconto|passeios?|\btransfers?\b/i);
   });
   test('nenhum código da API ou do site cria, aplica ou lê cupom/desconto na Shopify (a integração Admin é só leitura e sem escopo de descontos)', () => {
     const offenders = production.filter((file) => /discountCodeBasic|discountAutomatic|cartDiscountCodesUpdate|priceRuleCreate|discountCodeCreate/i.test(text(file))).map(rel);
