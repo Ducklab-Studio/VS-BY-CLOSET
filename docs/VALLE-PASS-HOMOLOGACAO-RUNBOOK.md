@@ -15,13 +15,14 @@ API='@valle/reservations-api'
 2. Retrato do estado (chaves, migrações, campanhas, vouchers, retenções, outbox):
    `railway run $RW -s "$API" -- node apps/reservations-api/scripts/estado-producao.mjs`
    Esperado: `TWO_VOUCHER_FLOW=on`, `AUTO_VERIFY` **ausente**, `EMAIL_MODE=dry-run`, `COMMERCIAL_RELEASE` ausente, 47 migrações / 0 pendentes, campanha oficial **sem vouchers ativos**, 0 retenções abertas, campanha de teste **inativa**. Guardar a saída (sem dados pessoais) como "antes".
-3. **Backup + restauração verificada [AUTORIZAÇÃO]** — `docs/VALLE-PASS-BACKUP-NEON.md` (`aprovado: true`, 0 divergências, 47 migrações). Registrar o SHA-256.
-4. Conferir na Shopify (somente leitura no painel): a variante da **campanha oficial** segue indisponível; a do **produto de teste** (`67916371165284`, R$ 0,10) existe. Anotar o estoque atual de teste.
+3. **Backup + restauração verificada [AUTORIZAÇÃO]** — `docs/VALLE-PASS-BACKUP-NEON.md`: primeiro `--preflight` (somente leitura), depois o backup; pasta de saída **protegida** (`C:\Users\<usuário>\BackupsNeon`, não `C:\Temp`). Aprovação: `aprovado: true`, 0 divergências, migrações origem = cópia (47). Registrar o SHA-256.
+4. **Estoque de teste (somente leitura):** `railway run $RW -s "$API" -- node apps/reservations-api/scripts/shopify-estoque-teste.mjs --expect closed` → `RESULTADO: OK (closed)`: variante de teste (`67916371165284`, R$ 0,10) **rastreada**, `availableForSale=false`, **quantidade −2**, política DENY; oficial indisponível (estoque 0). O rastreamento do estoque da variante de teste já foi religado manualmente em 31/10/2026 (sem ele a Shopify ignora a quantidade e a política DENY e a variante fica à venda).
 5. Cronograma: escolher a janela, avisar quem tem acesso ao ClosetAdmin e ao Pix. Ninguém mais compra durante a janela (a oficial está bloqueada).
 
 ## 1. Reativar a campanha de teste **[AUTORIZAÇÃO 1]**
 - ClosetAdmin → **Valle Pass** → campanhas → "VALLE PASS TESTE" → **Reativar campanha** → confirmar.
-- Shopify (proprietário): disponibilizar **1 unidade** da variante de teste (R$ 0,10). **Não** tocar na campanha oficial nem no estoque oficial.
+- Shopify (proprietário, pelo Admin): **abrir a variante de teste com 1 unidade** — manter "Rastrear quantidade" LIGADO e ajustar o disponível de **−2 para 1** (ajuste de **+3**). Não desligar o rastreamento, não habilitar "continuar vendendo sem estoque" e **não tocar** na campanha oficial nem no estoque oficial.
+- Confirmar: `shopify-estoque-teste.mjs --expect open` → `RESULTADO: OK (open)` (teste rastreada, `availableForSale=true`, quantidade 1; oficial indisponível).
 - Conferir: `estado-producao.mjs` → campanha de teste ativa; oficial inalterada. (Os vouchers de teste continuam com **resgate bloqueado** no servidor.)
 
 ## 2. Ligar o `AUTO_VERIFY` **[AUTORIZAÇÃO 2]**
@@ -58,7 +59,7 @@ Também: `estado-producao.mjs` (0 retenções abertas; outbox com 1 `QUEUED`; ne
 
 ## 5. Encerrar a homologação
 1. **Desligar o `AUTO_VERIFY`**: `railway variable delete VALE_PASS_AUTO_VERIFY $RW -s "$API"` (aguardar SUCCESS; log volta a "DESLIGADA").
-2. ClosetAdmin → campanha de teste → **Encerrar campanha** (volta a inativa). Shopify: zerar o estoque da variante de teste.
+2. ClosetAdmin → campanha de teste → **Encerrar campanha** (volta a inativa). Shopify (proprietário): **encerrar em estoque 0 com o rastreamento ligado** — se a compra foi feita, o estoque já caiu de 1 para 0; se não foi, ajustar de 1 para 0 (−1). Confirmar: `shopify-estoque-teste.mjs` → teste rastreada, `availableForSale=false` (quantidade 0; ou −2 se o ajuste for desfeito). Nunca encerrar desligando o rastreamento.
 3. **Cancelar o pedido de teste** no ClosetAdmin (cancela os 2 vouchers e a mensagem pendente) — o Pix de R$ 0,10 não é estornado (decisão do proprietário).
 4. `estado-producao.mjs` → "depois": chaves como no §0; campanha de teste inativa; oficial inalterada; outbox do teste `CANCELLED`; 0 retenções abertas.
 5. Registrar o resultado (abaixo) e apagar o dump do backup quando a janela encerrar.
@@ -74,6 +75,7 @@ Também: `estado-producao.mjs` (0 retenções abertas; outbox com 1 `QUEUED`; ne
 |---|---|
 | Data/hora, executor | |
 | SHA-256 do backup / `aprovado` | |
+| Estoque de teste antes (−2) / aberto (1) / depois (0) | |
 | Pedido de teste / QR gerado em / pago em | |
 | Critérios 1a–4b (OK/FALHA) | |
 | `fingerprint` (1ª e última leitura) | |
