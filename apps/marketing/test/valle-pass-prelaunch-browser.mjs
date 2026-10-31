@@ -195,6 +195,32 @@ try {
   assert.ok(!/\/cart\/\d+:\d+/.test(await (await fetch(productUrl)).text()), 'o checkout nem chega ao HTML');
   pass('7) com o endereço dos termos configurado, o link aparece (fechado e aberto) e o aviso "serão publicados" some; sem texto aprovado a compra continua bloqueada');
 
+  // 7b) a descrição editável da Shopify (que cita 10% sem condições) NÃO aparece; SEO/Open Graph só com o texto aprovado; noindex com a venda bloqueada; rótulo correto
+  {
+    const approved = 'Conheça o Valle Pass 2027: um voucher de R$ 500 para a Valle Showroom e outro de R$ 50 para a VS BY CLOSET.';
+    for (const state of ['closed', 'open']) {
+      setSale(state);
+      const view = await newPage({ viewport: { width: 1280, height: 1000 } });
+      await view.goto(productUrl);
+      await view.getByTestId('valle-pass-presentation').waitFor();
+      const body = await view.locator('body').innerText();
+      assert.doesNotMatch(body, /10\s?%|desconto|Valle Experience|Valle Compras/i, `${state}: a descrição antiga da Shopify não pode aparecer`);
+      assert.match(body, /Valle Pass 2027/);
+      assert.doesNotMatch(body, /O aluguel/, `${state}: o rótulo de aluguel não se aplica ao Valle Pass`);
+      assert.equal(await view.title(), 'Valle Pass 2027 | VS by Closet');
+      const meta = (name) => view.locator(`meta[${name}]`).first().getAttribute('content');
+      assert.equal(await meta('name="description"'), approved);
+      assert.equal(await meta('property="og:description"'), approved);
+      assert.equal(await meta('property="og:title"'), 'Valle Pass 2027');
+      assert.equal(await meta('name="robots"'), 'noindex, nofollow', `${state}: sem termos aprovados a página não é indexável`);
+      assert.equal(await view.locator('a[href*="/cart/"]').count(), 0, 'nenhum link para o checkout na página');
+      const raw = await (await fetch(productUrl)).text();
+      assert.doesNotMatch(raw, /10\s?%|Valle Experience|Valle Compras/i, `${state}: nem no HTML do servidor (inclusive nos dados embutidos da página)`);
+    }
+    setSale('closed');
+    pass('7b) página do produto: sem a descrição antiga da Shopify (10%), SEO/Open Graph só com o texto aprovado, noindex enquanto a venda não estiver liberada e rótulo "Valle Pass 2027" (fechada e aberta)');
+  }
+
   assert.deepEqual(externalRequests.filter((host) => host !== 'www.openstreetmap.org'), [], 'houve requisição externa');
   assert.deepEqual(errors, []);
   pass('8) nenhuma requisição externa e nenhum erro de console/página');
