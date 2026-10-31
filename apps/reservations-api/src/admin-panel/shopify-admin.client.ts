@@ -47,6 +47,8 @@ export interface ShopifyOrderTransactionsResult {
   readonly totalAmount: string | null;
   readonly currency: string | null;
   readonly transactions: readonly { readonly id: string; readonly kind: string; readonly status: string; readonly test: boolean; readonly processedAt: string | null; readonly amount: string | null; readonly currency: string | null; readonly gateway?: string | null }[];
+  /** Eventos `sale_success`/`capture_success` da linha do tempo (instante da confirmação efetiva do pagamento); sempre presente quando devolvido pela Admin API. */
+  readonly successEvents?: readonly { readonly action: string; readonly createdAt: string }[];
 }
 
 export interface ShopifyOrderWithLines {
@@ -199,9 +201,13 @@ const ORDER_TRANSACTIONS_QUERY = `
         processedAt
         amountSet { shopMoney { amount currencyCode } }
       }
+      events(first: 50) { nodes { ... on BasicEvent { action createdAt } } }
     }
   }
 `;
+
+/** Ações da linha do tempo do pedido que marcam a CONFIRMAÇÃO EFETIVA do pagamento (a transação do Pix traz o horário da cobrança, não o da confirmação). */
+const PAYMENT_SUCCESS_EVENT_ACTIONS = new Set(['sale_success', 'capture_success']);
 
 interface RawOrderTransactions {
   readonly order: {
@@ -216,6 +222,7 @@ interface RawOrderTransactions {
       readonly processedAt: string | null;
       readonly amountSet: { readonly shopMoney: { readonly amount: string; readonly currencyCode: string } } | null;
     }[];
+    readonly events?: { readonly nodes: readonly { readonly action?: string; readonly createdAt?: string }[] } | null;
   } | null;
 }
 
@@ -380,6 +387,11 @@ export class ShopifyAdminClient {
         amount: tx.amountSet?.shopMoney.amount ?? null,
         currency: tx.amountSet?.shopMoney.currencyCode ?? null,
       })),
+      // Só os eventos de confirmação de pagamento; lista vazia = a confirmação não foi encontrada (o consumidor falha fechado).
+      successEvents: (order.events?.nodes ?? [])
+        .filter((node): node is { action: string; createdAt: string } => typeof node.action === 'string' && typeof node.createdAt === 'string')
+        .filter((node) => PAYMENT_SUCCESS_EVENT_ACTIONS.has(node.action))
+        .map((node) => ({ action: node.action, createdAt: node.createdAt })),
     };
   }
 

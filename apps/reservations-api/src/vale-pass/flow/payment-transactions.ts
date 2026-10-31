@@ -27,17 +27,37 @@ export interface ShopifyTransaction {
   readonly gateway?: string | null;
 }
 
+/** Evento da linha do tempo do pedido (Admin API: `Order.events`, `BasicEvent`). `createdAt` é o instante em que a Shopify REGISTROU o fato. */
+export interface ShopifyPaymentSuccessEvent {
+  readonly action: string;
+  readonly createdAt: string;
+}
+
+/**
+ * Eventos da linha do tempo que marcam a CONFIRMAÇÃO EFETIVA do pagamento. Para Pix (gateway de Pix da loja, medido em produção em 30/10/2026) a transação SALE/SUCCESS
+ * carrega `createdAt` = `processedAt` = o instante em que a COBRANÇA foi criada (33 s antes do pedido existir); o pagamento só é confirmado minutos ou horas
+ * depois e isso aparece na linha do tempo como `sale_success` (cartão com captura posterior: `capture_success`).
+ */
+export const PAYMENT_SUCCESS_EVENT_ACTIONS: ReadonlySet<string> = new Set(['sale_success', 'capture_success']);
+
 export interface ShopifyOrderTransactions {
   /** GID que a Shopify devolveu; conferido contra `expectedOrderGid` quando informado. */
   readonly orderGid?: string | null;
   readonly totalAmount: string | null;
   readonly currency: string | null;
   readonly transactions: readonly ShopifyTransaction[];
+  /**
+   * Eventos de sucesso de pagamento da linha do tempo do pedido. `undefined` = a fonte não os consultou (só testes/legado: vale o `processedAt` da transação);
+   * array (mesmo vazio) = foram consultados: PRECISA haver exatamente um evento por transação de sucesso usada, senão o horário é desconhecido (fail-closed).
+   */
+  readonly successEvents?: readonly ShopifyPaymentSuccessEvent[] | null;
 }
 
 export interface TransactionVerdict extends TransactionEvidence {
   /** Quantas transações elegíveis foram somadas até cobrir o total. */
   readonly used: number;
+  /** De onde veio o instante: o evento de confirmação do pedido (produção) ou o `processedAt` da transação (fonte sem eventos). */
+  readonly basis?: 'SUCCESS_EVENT' | 'TRANSACTION';
 }
 
 /** A Shopify devolve no máximo `first: 50`; com 50 itens pode haver mais: ambíguo. */
@@ -70,6 +90,28 @@ export function paymentInstantFromTransactions(order: ShopifyOrderTransactions, 
     dated.push({ at, cents });
   }
   dated.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  // INSTANTE EFETIVO. `processedAt`/`createdAt` de uma transação assíncrona (Pix) é o da COBRANÇA, não o da confirmação: com os eventos da linha do tempo vale o
+  // MAIS TARDIO dos dois (a confirmação nunca vem antes da cobrança). Um evento por transação de sucesso, na mesma ordem cronológica; qualquer diferença (evento
+  // faltando, repetido ou ilegível) deixa o horário desconhecido e o pedido volta para o ADMIN.
+  // NÃO há vínculo verificável evento↔transação (a consulta não pede o assunto do evento): a segurança vem de (1) os eventos serem DESTE pedido (consulta `order(id)`
+  // + GID conferido acima), (2) contagem exata, (3) o instante só poder ficar MAIS TARDIO que o processedAt, nunca mais cedo, e (4) o webhook concordar em ±tolerância.
+  // O pareamento por ordem não altera o resultado: o pagamento só se confirma com a soma de TODAS as transações = total, então vale sempre o último pedaço.
+  let basis: 'SUCCESS_EVENT' | 'TRANSACTION' = 'TRANSACTION';
+  let effective = dated.map((item) => item.at);
+  if (order.successEvents !== undefined) {
+    const events: Date[] = [];
+    for (const event of order.successEvents ?? []) {
+      if (!PAYMENT_SUCCESS_EVENT_ACTIONS.has(event.action)) continue;
+      const at = new Date(event.createdAt);
+      if (Number.isNaN(at.getTime())) return unknown('SUCCESS_EVENT_UNKNOWN');
+      events.push(at);
+    }
+    if (events.length !== dated.length) return unknown('SUCCESS_EVENT_MISMATCH');
+    events.sort((a, b) => a.getTime() - b.getTime());
+    effective = dated.map((item, i) => (events[i].getTime() > item.at.getTime() ? events[i] : item.at));
+    basis = 'SUCCESS_EVENT';
+  }
   let sum = 0;
   for (let i = 0; i < dated.length; i++) {
     sum += dated[i].cents;
@@ -77,7 +119,7 @@ export function paymentInstantFromTransactions(order: ShopifyOrderTransactions, 
       // Soma de TODAS as transações elegíveis diferente do total (pagou a mais) é ambígua: não confirma sozinho.
       const all = dated.reduce((acc, item) => acc + item.cents, 0);
       if (all !== total) return unknown('AMBIGUOUS_OVERPAYMENT');
-      return { instant: dated[i].at, reason: 'OK', used: i + 1 };
+      return { instant: effective[i], reason: 'OK', used: i + 1, basis };
     }
   }
   return unknown('PARTIAL_PAYMENT');

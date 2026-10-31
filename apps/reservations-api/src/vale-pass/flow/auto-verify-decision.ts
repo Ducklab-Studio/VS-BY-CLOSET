@@ -32,7 +32,7 @@ export type AutoVerifyDecision =
   | { readonly confirm: false; readonly reason: string; readonly retryable: boolean; readonly instant: Date | null };
 
 /** Motivos que costumam se resolver sozinhos (Pix ainda não pago, pagamento parcial a caminho): a tentativa se repete em intervalos curtos. */
-const RETRYABLE = new Set(['NO_SUCCESS_TRANSACTION', 'PARTIAL_PAYMENT', 'SHOPIFY_UNAVAILABLE']);
+const RETRYABLE = new Set(['NO_SUCCESS_TRANSACTION', 'PARTIAL_PAYMENT', 'SHOPIFY_UNAVAILABLE', 'SUCCESS_EVENT_MISMATCH']);
 
 export function decideAutoVerification(input: AutoVerifyInput): AutoVerifyDecision {
   const no = (reason: string, instant: Date | null = null): AutoVerifyDecision => ({ confirm: false, reason, retryable: RETRYABLE.has(reason), instant });

@@ -98,7 +98,8 @@ async function storeEvent(topic: string, payload: Record<string, unknown>) {
 }
 
 const txn = (over: Partial<Tx> = {}): Tx => ({ id: `gid://shopify/OrderTransaction/${counter++}`, kind: 'SALE', status: 'SUCCESS', test: false, processedAt: hoursAgo(9), amount: '350.00', currency: 'BRL', gateway: 'gateway_pix', ...over });
-const shopify = (orderId: string, transactions: Tx[], total = '350.00') => fakeTransactions.set(gidOf(orderId), { orderGid: gidOf(orderId), totalAmount: total, currency: 'BRL', transactions });
+const shopify = (orderId: string, transactions: Tx[], total = '350.00', successEvents?: { action: string; createdAt: string }[]) =>
+  fakeTransactions.set(gidOf(orderId), { orderGid: gidOf(orderId), totalAmount: total, currency: 'BRL', transactions, ...(successEvents ? { successEvents } : {}) });
 
 /** Pedido pago (política ESTRITA de produção), entregue com sinais perfeitos do webhook → retenção PAYMENT_TIME_UNKNOWN. */
 async function heldOrder(over: Record<string, unknown> = {}, quantity = 1, paidHoursAgo = 9) {
@@ -518,5 +519,53 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — agendador', () => {
     expect(calls).toHaveLength(1);
     await scheduler.runOnce();
     expect(calls).toHaveLength(2);
+  });
+});
+
+localDescribe('VERIFICAÇÃO AUTOMÁTICA — Pix com pagamento DEMORADO: vale a confirmação efetiva, não a criação da cobrança', () => {
+  test('cobrança criada 5 h antes, confirmação (sale_success) = webhook: confirma pelo EVENTO, emite 2 vouchers + 1 e-mail (prazo = confirmação + 3 dias); webhook duplicado/antigo depois e nova execução não mudam nada', async () => {
+    const { orderId, payload, paidAt } = await heldOrder({}, 1, 2);
+    shopify(orderId, [txn({ processedAt: hoursAgo(7) })], '350.00', [{ action: 'sale_success', createdAt: paidAt }]);
+    expect(await auto().runOnce()).toMatchObject({ confirmed: 1, issued: 1, reclassified: 0 });
+    const registry = await registryOf(orderId);
+    expect(registry).toMatchObject({ paymentConfirmedSource: 'ADMIN_API_TRANSACTION_AUTO' });
+    expect(registry.paymentConfirmedAt?.toISOString()).toBe(paidAt); // nunca o horário da cobrança
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    const rows = await outboxOf(orderId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].deadlineAt.getTime()).toBe(new Date(paidAt).getTime() + 3 * DAY);
+    // duplicados e fora de ordem DEPOIS da emissão
+    await run('orders/paid', payload, paidAt);
+    await run('orders/paid', payload, paidAt);
+    await run('orders/updated', { ...payload, updated_at: hoursAgo(5) }, null);
+    expect(await auto().runOnce()).toMatchObject({ considered: 0, issued: 0 });
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect(await outboxOf(orderId)).toHaveLength(1);
+    expect(await autoAudits()).toHaveLength(1);
+    expect((await registryOf(orderId)).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+  });
+
+  test('linha do tempo SEM o evento de confirmação (ou com evento repetido): NADA é confirmado nem emitido; a retenção continua para o ADMIN e a nova tentativa fica agendada', async () => {
+    const { orderId, paidAt } = await heldOrder({}, 1, 2);
+    shopify(orderId, [txn({ processedAt: hoursAgo(7) })], '350.00', []);
+    expect(await auto().runOnce()).toMatchObject({ confirmed: 0, issued: 0, held: [{ reason: 'SUCCESS_EVENT_MISMATCH' }] });
+    expect((await registryOf(orderId)).paymentConfirmedAt).toBeNull();
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect((await autoOf(orderId))?.lastReason).toBe('SUCCESS_EVENT_MISMATCH');
+    shopify(orderId, [txn({ processedAt: hoursAgo(7) })], '350.00', [{ action: 'sale_success', createdAt: paidAt }, { action: 'sale_success', createdAt: paidAt }]);
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: orderId }, data: { paymentTimeEvidence: { ...((await registryOf(orderId)).paymentTimeEvidence as object), auto: { attempts: 1, lastAt: hoursAgo(1), lastReason: 'SUCCESS_EVENT_MISMATCH', nextAttemptAt: hoursAgo(1) } } as never } });
+    expect(await auto().runOnce()).toMatchObject({ confirmed: 0, issued: 0 });
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+  });
+
+  test('Pix ainda PENDENTE (só sale_pending): continua bloqueado; depois de pago (sale_success), a MESMA retenção é confirmada e emitida uma única vez', async () => {
+    const { orderId, paidAt } = await heldOrder({}, 1, 2);
+    shopify(orderId, [txn({ status: 'PENDING', processedAt: hoursAgo(7) })], '350.00', []);
+    expect(await auto().runOnce()).toMatchObject({ confirmed: 0, held: [{ reason: 'NO_SUCCESS_TRANSACTION' }] });
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    shopify(orderId, [txn({ processedAt: hoursAgo(7) })], '350.00', [{ action: 'sale_success', createdAt: paidAt }]);
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: orderId }, data: { paymentTimeEvidence: { ...((await registryOf(orderId)).paymentTimeEvidence as object), auto: { attempts: 1, lastAt: hoursAgo(1), lastReason: 'NO_SUCCESS_TRANSACTION', nextAttemptAt: hoursAgo(1) } } as never } });
+    expect(await auto().runOnce()).toMatchObject({ confirmed: 1, issued: 1 });
+    expect(await vouchersOf(orderId)).toHaveLength(2);
   });
 });

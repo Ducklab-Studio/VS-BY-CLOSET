@@ -88,3 +88,46 @@ describe('nextAttemptAt — escada de novas tentativas', () => {
     expect((nextAttemptAt(NOW, 1, false).getTime() - NOW.getTime()) / 60_000).toBe(TERMINAL_RETRY_MINUTES);
   });
 });
+
+describe('decideAutoVerification — Pix com pagamento DEMORADO (a transação traz a cobrança; o evento traz a confirmação)', () => {
+  const sale = (at: string) => ({ action: 'sale_success', createdAt: at });
+  const pixInput = (chargeAt: string, events: { action: string; createdAt: string }[] | null, over: Partial<AutoVerifyInput> = {}) =>
+    input({ fetched: { orderGid: GID, totalAmount: '350.00', currency: 'BRL', transactions: [tx({ processedAt: chargeAt, gateway: 'Gateway Pix' })], successEvents: events }, ...over });
+
+  test('Pix pago 4 h depois da cobrança, webhook no momento da confirmação → CONFIRMA com o instante da confirmação (antes: TRANSACTION_DIVERGENT)', () => {
+    const decision = decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [sale(PAID)]));
+    expect(decision).toMatchObject({ confirm: true, instant: new Date(PAID), used: 1 });
+  });
+  test('o caso real (#1013): cobrança 120 s antes do webhook, confirmação 1 s antes → confirma com a tolerância ORIGINAL de 120 s (sem aumentá-la)', () => {
+    const decision = decideAutoVerification(
+      pixInput('2026-10-30T04:40:01Z', [sale('2026-10-30T04:42:00Z')], { webhook: { triggered: new Date('2026-10-30T04:42:01.058Z'), updated: new Date('2026-10-30T04:42:01Z') }, orderCreatedAt: new Date('2026-10-30T04:40:34Z'), now: new Date('2026-10-30T05:00:00Z') }),
+    );
+    expect(decision).toMatchObject({ confirm: true, instant: new Date('2026-10-30T04:42:00Z') });
+    expect(STRICT_PAYMENT_TIME_CONFIG.toleranceSeconds).toBe(120);
+  });
+  test('o evento de confirmação precisa CONCORDAR com o webhook: evento a 5 min do webhook → TRANSACTION_DIVERGENT (ADMIN decide); a tolerância não foi ampliada', () => {
+    const decision = decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [sale('2026-10-18T11:55:00Z')]));
+    expect(decision).toMatchObject({ confirm: false, reason: 'TRANSACTION_DIVERGENT', retryable: false });
+  });
+  test('Pix SEM evento de confirmação (linha do tempo vazia/duplicada): NÃO confirma — SUCCESS_EVENT_MISMATCH, com nova tentativa em breve', () => {
+    expect(decideAutoVerification(pixInput('2026-10-18T08:00:00Z', []))).toMatchObject({ confirm: false, reason: 'SUCCESS_EVENT_MISMATCH', retryable: true });
+    expect(decideAutoVerification(pixInput(PAID, [sale(PAID), sale(PAID)]))).toMatchObject({ confirm: false, reason: 'SUCCESS_EVENT_MISMATCH' });
+  });
+  test('Pix ainda NÃO pago (PENDING + sale_pending) continua bloqueado e tentará de novo', () => {
+    const decision = decideAutoVerification(
+      input({ fetched: { orderGid: GID, totalAmount: '350.00', currency: 'BRL', transactions: [tx({ status: 'PENDING' })], successEvents: [{ action: 'sale_pending', createdAt: PAID }] } }),
+    );
+    expect(decision).toMatchObject({ confirm: false, reason: 'NO_SUCCESS_TRANSACTION', retryable: true });
+  });
+  test('eventos fora de ordem na lista da Shopify e repetição da consulta dão a MESMA decisão', () => {
+    const events = [{ action: 'mail_sent', createdAt: PAID }, sale(PAID), { action: 'sale_pending', createdAt: '2026-10-18T08:00:00Z' }];
+    const first = decideAutoVerification(pixInput('2026-10-18T08:00:00Z', events));
+    const again = decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [...events].reverse()));
+    expect(first).toEqual(again);
+    expect(first.confirm).toBe(true);
+  });
+  test('a validação financeira continua valendo: total diferente, moeda ≠ BRL e confirmação no futuro seguem bloqueando', () => {
+    expect(reason(decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [sale(PAID)], { unitPriceCents: 1_000 })))).toBe('ORDER_TOTAL_MISMATCH');
+    expect(reason(decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [sale('2026-10-18T20:00:00Z')], { webhook: { triggered: new Date('2026-10-18T20:00:00Z'), updated: new Date('2026-10-18T20:00:00Z') } })))).toBe('INSTANT_IN_FUTURE');
+  });
+});
