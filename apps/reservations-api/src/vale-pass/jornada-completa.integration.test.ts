@@ -605,6 +605,96 @@ localDescribe('6) CONFIGURAÇÃO DE PRODUÇÃO — política ESTRITA do horário
   });
 });
 
+localDescribe('7) CICLO COMPLETO CONTÍNUO — Pix demorado em produção (política estrita + AUTO_VERIFY): compra → webhook → verificação → 2 vouchers → e-mail simulado → saldo → resgates concorrentes → cancelamento', () => {
+  test('os 12 passos encadeados, com a Shopify, a Resend e a rede SIMULADAS: nada em dobro, saldo nunca ultrapassado, cancelamento bloqueia o uso', async () => {
+    policy.mode = 'strict';
+    policy.autoVerify = true;
+    const c = await newCampaign();
+    // 1-2) o cliente gera o Pix às T-5h e paga às T-4h30; a Shopify confirma (sale_success) e dispara orders/paid no mesmo instante
+    const chargedAt = new Date(Date.now() - 5 * 3_600_000).toISOString();
+    const paidAt = new Date(Date.now() - 4.5 * 3_600_000).toISOString();
+    const p = payload(c, 1, { created_at: new Date(Date.now() - 5 * 3_600_000 + 30_000).toISOString(), updated_at: paidAt });
+    const orderId = String(p.id);
+    // 3) o webhook chega (e chega de novo, duplicado)
+    for (let i = 0; i < 2; i++) {
+      await prisma.$transaction(async (tx) => {
+        await lockShopifyOrder(tx, orderId);
+        return webhook.handleOrderWebhook(tx, 'orders/paid', p, { triggeredAt: paidAt });
+      });
+    }
+    await storeEvent('orders/paid', p, paidAt);
+    expect(await vouchersOf(orderId)).toHaveLength(0); // sinais do webhook sozinhos não bastam
+    // 4) a verificação automática lê a Shopify: a transação traz a COBRANÇA (T-5h), a linha do tempo traz a confirmação (T-4h30)
+    fakeTransactions.set(`gid://shopify/Order/${orderId}`, {
+      orderGid: `gid://shopify/Order/${orderId}`,
+      totalAmount: '350.00',
+      currency: 'BRL',
+      transactions: [{ id: 'gid://shopify/OrderTransaction/e2e', kind: 'SALE', status: 'SUCCESS', test: false, processedAt: chargedAt, amount: '350.00', currency: 'BRL', gateway: 'Gateway Pix' }],
+      successEvents: [{ action: 'sale_success', createdAt: paidAt }],
+    });
+    expect(await autoVerify.runOnce(new Date())).toMatchObject({ confirmed: 1, issued: 1 });
+    await autoVerify.runOnce(new Date());
+    // 5) dois vouchers (R$ 500 + R$ 50), horário efetivo = a confirmação, não a cobrança
+    const rows = await vouchersOf(orderId);
+    expect(rows.map((v) => [v.company, v.amountCents, v.balanceCents]).sort()).toEqual([['VALLE_SHOWROOM', 50_000, 50_000], ['VS_BY_CLOSET', 5_000, 5_000]]);
+    expect((await prisma.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: orderId } })).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+    // 6-7) uma mensagem na caixa de saída; o worker (Resend SIMULADA) a processa uma única vez, mesmo com dois ciclos
+    expect(await outboxOf(orderId)).toHaveLength(1);
+    await worker.tick(new Date(Date.now() + 5_000));
+    await worker.tick(new Date(Date.now() + 10_000));
+    expect(provider.calls).toHaveLength(1);
+    expect((await outboxOf(orderId))[0].status).toBe('ACCEPTED');
+    // 8) o administrador consulta o saldo
+    const [showroom] = await byCompany(orderId, 'VALLE_SHOWROOM');
+    const [closet] = await byCompany(orderId, 'VS_BY_CLOSET');
+    expect(await redemption.lookup(showroom.code, admin)).toMatchObject({ company: 'VALLE_SHOWROOM', balanceCents: 50_000, redeemable: true });
+    // 9-10) resgate parcial: saldo atualizado, o outro voucher intacto
+    expect(await redeem(showroom, 20_000, admin)).toMatchObject({ balanceCents: 30_000, status: 'ACTIVE' });
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: closet.id } })).balanceCents).toBe(5_000);
+    // 11) dois resgates SIMULTÂNEOS de R$ 200 sobre R$ 300 de saldo: nunca passam do saldo
+    const attempts = await Promise.allSettled([redeem(showroom, 20_000, admin), redeem(showroom, 20_000, owner)]);
+    expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: showroom.id } })).balanceCents).toBe(10_000);
+    expect(await ledger.reconcile()).toEqual([]);
+    // 12) cancelamento do pedido: os dois vouchers deixam de valer e nenhum novo resgate é aceito
+    await cancelOrder({ ...p, financial_status: 'voided', cancelled_at: new Date().toISOString(), updated_at: new Date(Date.now() + 1_000).toISOString() });
+    expect((await vouchersOf(orderId)).every((v) => v.status === 'CANCELLED')).toBe(true);
+    expect(await rejection(redeem(showroom, 1_000, admin))).not.toBeNull();
+    expect(await ledger.reconcile()).toEqual([]);
+    // nada novo foi emitido ou enviado depois de tudo
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect(await outboxOf(orderId)).toHaveLength(1);
+  });
+
+  test('pagamento DIVIDIDO (dois Pix) com confirmações fora de ordem: só emite quando a soma fecha o total; um pedaço sem confirmação mantém a retenção', async () => {
+    policy.mode = 'strict';
+    policy.autoVerify = true;
+    const c = await newCampaign();
+    const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const paidAt = hoursAgo(3);
+    const p = payload(c, 1, { created_at: hoursAgo(6), updated_at: paidAt });
+    const orderId = String(p.id);
+    await prisma.$transaction(async (tx) => {
+      await lockShopifyOrder(tx, orderId);
+      return webhook.handleOrderWebhook(tx, 'orders/paid', p, { triggeredAt: paidAt });
+    });
+    await storeEvent('orders/paid', p, paidAt);
+    const gid = `gid://shopify/Order/${orderId}`;
+    const piece = (id: string, charged: string, amount: string) => ({ id: `gid://shopify/OrderTransaction/${id}`, kind: 'SALE', status: 'SUCCESS', test: false, processedAt: charged, amount, currency: 'BRL', gateway: 'Gateway Pix' });
+    // segundo pedaço ainda sem o evento de confirmação: nada é emitido
+    fakeTransactions.set(gid, { orderGid: gid, totalAmount: '350.00', currency: 'BRL', transactions: [piece('a', hoursAgo(6), '100.00'), piece('b', hoursAgo(5.9), '250.00')], successEvents: [{ action: 'sale_success', createdAt: hoursAgo(5) }] });
+    await autoVerify.runOnce(new Date());
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    // os dois confirmados, fora de ordem em relação à cobrança: a soma fecha; vale a última confirmação, que coincide com o webhook
+    fakeTransactions.set(gid, { orderGid: gid, totalAmount: '350.00', currency: 'BRL', transactions: [piece('a', hoursAgo(6), '100.00'), piece('b', hoursAgo(5.9), '250.00')], successEvents: [{ action: 'sale_success', createdAt: hoursAgo(5) }, { action: 'sale_success', createdAt: paidAt }] });
+    const current = await prisma.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: orderId } });
+    await prisma.valePassOrder.update({ where: { shopifyOrderId: orderId }, data: { paymentTimeEvidence: { ...(current.paymentTimeEvidence as object), auto: { attempts: 1, lastAt: hoursAgo(1), lastReason: 'SUCCESS_EVENT_MISMATCH', nextAttemptAt: hoursAgo(1) } } as never } });
+    expect(await autoVerify.runOnce(new Date())).toMatchObject({ confirmed: 1, issued: 1 });
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect((await prisma.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: orderId } })).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+  });
+});
+
 localDescribe('8) VERIFICADOR DA HOMOLOGAÇÃO — o que o runbook confere na compra de teste (somente leitura)', () => {
   async function pixOrder() {
     policy.mode = 'strict';
