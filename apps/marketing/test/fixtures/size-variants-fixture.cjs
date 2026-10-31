@@ -40,6 +40,11 @@ const products = [
   product(7003, 'peca-unica', 'Peça de Variante Única', [variant(70031, 'UNI-1', 'Default Title', '120.00', true, [{ name: 'Title', value: 'Default Title' }])]),
   product(8723909804132, 'valle-pass-fixture', 'Valle Pass', [variant(49174518595684, 'VP-1', 'Default Title', '350.00', true, [{ name: 'Title', value: 'Default Title' }])], 'Valle Pass'),
 ];
+// O Valle Pass da loja real traz uma descrição editável que cita um benefício sem condições aprovadas: a fixture a reproduz para provar que a vitrine NÃO a exibe.
+Object.assign(products.find((item) => item.handle === 'valle-pass-fixture'), {
+  description: 'Valle Compras 500,00 - Valle Showroom 50,00- valle by closet 10% de desconto - Valle Experience',
+  descriptionHtml: '<p>Valle Compras </p>\n<p>500,00 - Valle Showroom</p>\n<p>50,00- valle by closet </p>\n<p>10% de desconto - Valle Experience </p>',
+});
 module.exports = { products, STORE_HOST };
 
 // Disponibilidade do Valle Pass simulada, lida A CADA consulta de um arquivo de estado ("open" | "closed") indicado pelo teste. Sem a variável, o produto

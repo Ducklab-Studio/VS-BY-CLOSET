@@ -93,6 +93,28 @@ export function valePassPageIndexable(input: { saleState: ValePassPageSaleState;
   return input.saleState === 'open' && Boolean(input.termsHref) && input.termsApproved === true;
 }
 
+/** Texto comercial APROVADO (o mesmo da descrição de `/valle-pass`): é o único que os metadados SEO/Open Graph do Valle Pass podem usar. */
+export const VALE_PASS_PUBLIC_DESCRIPTION = 'Conheça o Valle Pass 2027: um voucher de R$ 500 para a Valle Showroom e outro de R$ 50 para a VS BY CLOSET.';
+/** Nome comercial exibido no lugar do rótulo de aluguel e no título da página do produto. */
+export const VALE_PASS_PRODUCT_LABEL = 'Valle Pass 2027';
+
+/**
+ * Metadados da página do PRODUTO Valle Pass (`/pecas/<handle>`): título, descrição e Open Graph vêm SOMENTE do texto aprovado — nunca da descrição editável da Shopify,
+ * que pode citar benefícios sem condições aprovadas. `noindex` enquanto a venda não estiver liberada (mesma regra de `valePassPageIndexable`).
+ */
+export function valePassProductMetadata(input: { indexable: boolean; imageUrl?: string | null }) {
+  return {
+    title: VALE_PASS_PRODUCT_LABEL,
+    description: VALE_PASS_PUBLIC_DESCRIPTION,
+    robots: input.indexable ? { index: true, follow: true } : { index: false, follow: false },
+    openGraph: {
+      title: VALE_PASS_PRODUCT_LABEL,
+      description: VALE_PASS_PUBLIC_DESCRIPTION,
+      images: input.imageUrl ? [{ url: input.imageUrl }] : undefined,
+    },
+  };
+}
+
 /** Aviso exibido no lugar do botão quando a oferta ainda não está pronta para compra (nunca afirma que os termos existem). */
 export function valePassGateNote(reason: ValePassPageGateReason): string | null {
   if (reason === 'terms_pending') return 'As vendas serão apresentadas como disponíveis somente depois da publicação e da aprovação dos termos e condições.';

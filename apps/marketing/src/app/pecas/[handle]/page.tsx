@@ -14,6 +14,9 @@ import {
 import { getDemoProductDetail, isDemoCatalogEnabled } from '@/lib/demo-catalog';
 import { isValePassProduct } from '@/lib/vale-pass-product';
 import { sanitizeProductDescription } from '@/lib/product-description';
+import { getValePassOffer } from '@/lib/vale-pass-offer-data';
+import { VALE_PASS_PRODUCT_LABEL, valePassPageIndexable, valePassProductMetadata } from '@/lib/vale-pass-offer';
+import { TERMS_APPROVED } from '@/lib/vale-pass-terms-draft';
 import type { ReactNode } from 'react';
 import type { StorefrontVariant } from '@/lib/shopify';
 
@@ -26,6 +29,14 @@ import type { StorefrontVariant } from '@/lib/shopify';
  */
 
 export const revalidate = 60;
+
+/** O produto é o Valle Pass? (produto ou qualquer variante conhecida: a MESMA regra usada no corpo da página.) */
+function productIsValePass(product: { id: string; variants: readonly { id: string }[] }): boolean {
+  return (
+    isValePassProduct({ productId: product.id, variantId: product.variants[0]?.id }) ||
+    product.variants.some((candidate) => isValePassProduct({ variantId: candidate.id }))
+  );
+}
 
 // Peça nova cadastrada pelo cliente não pode dar 404 até o próximo build.
 export const dynamicParams = true;
@@ -58,6 +69,18 @@ export async function generateMetadata({
     // metadata de not-found.tsx quando quem aciona é notFound(), não uma
     // URL sem rota nenhuma.
     if (!product) return { title: 'Página não encontrada' };
+    // Valle Pass: título, descrição e Open Graph SÓ do texto aprovado (a descrição da Shopify é editável e pode citar benefícios sem condições aprovadas) e `noindex`
+    // enquanto a venda não estiver liberada — a mesma regra de /valle-pass. Qualquer falha ao decidir mantém `noindex` (fail closed).
+    if (productIsValePass(product)) {
+      let indexable = false;
+      try {
+        const offer = await getValePassOffer();
+        indexable = valePassPageIndexable({ saleState: offer.saleState, termsHref: offer.termsHref, termsApproved: TERMS_APPROVED });
+      } catch {
+        indexable = false;
+      }
+      return valePassProductMetadata({ indexable, imageUrl: product.featuredImage?.url ?? null });
+    }
     return {
       title: product.title,
       description: product.description?.slice(0, 160),
@@ -206,13 +229,14 @@ export default async function PecaPage({ params }: { params: Promise<{ handle: s
                   {formatPrice(variant.price.amount, variant.price.currencyCode)}
                 </p>
                 <span className="text-[0.75rem] uppercase tracking-widest text-ink/40 mb-1 font-medium">
-                  O aluguel
+                  {isValePass ? VALE_PASS_PRODUCT_LABEL : 'O aluguel'}
                 </span>
               </div>
             )
           )}
 
-          {descriptionHtml && (
+          {/* Valle Pass: a descrição editável da Shopify NÃO é exibida (pode citar benefícios sem condições aprovadas); o cartão ValePassPresentation carrega o texto aprovado. */}
+          {descriptionHtml && !isValePass && (
             <div
               className="prose prose-sm prose-p:text-ink/65 prose-p:leading-relaxed prose-p:text-[0.95rem] prose-strong:text-ink/80 prose-strong:font-semibold border-y border-ink/5 py-6 mb-8"
               dangerouslySetInnerHTML={{ __html: descriptionHtml }}
