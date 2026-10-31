@@ -88,3 +88,37 @@ describe('ShopifyAdminClient.getOrdersWithLinesByGid', () => {
     expect(result.size).toBe(23);
   });
 });
+
+describe('ShopifyAdminClient.getOrderPaymentTransactions — eventos de confirmação do pagamento', () => {
+  const raw = (events: unknown) => ({
+    order: {
+      id: 'gid://shopify/Order/1',
+      currentTotalPriceSet: { shopMoney: { amount: '350.0', currencyCode: 'BRL' } },
+      transactions: [{ id: 'gid://shopify/OrderTransaction/1', kind: 'SALE', status: 'SUCCESS', test: false, gateway: 'Gateway Pix', processedAt: '2026-10-30T04:40:01Z', amountSet: { shopMoney: { amount: '350.0', currencyCode: 'BRL' } } }],
+      ...(events === undefined ? {} : { events }),
+    },
+  });
+
+  test('a consulta pede a linha do tempo e só os eventos de confirmação (sale_success/capture_success) passam; ruído e nós sem ação são descartados', async () => {
+    const { client, calls } = clientWith(() =>
+      raw({ nodes: [{ action: 'sale_pending', createdAt: '2026-10-30T04:40:34Z' }, {}, { action: 'mail_sent', createdAt: '2026-10-30T04:42:01Z' }, { action: 'sale_success', createdAt: '2026-10-30T04:42:00Z' }, { action: 'capture_success' }] }),
+    );
+    const result = await client.getOrderPaymentTransactions('gid://shopify/Order/1');
+    expect(calls[0].query).toContain('events(first: 50)');
+    expect(calls[0].query).not.toMatch(/mutation/i);
+    expect(result?.successEvents).toEqual([{ action: 'sale_success', createdAt: '2026-10-30T04:42:00Z' }]);
+    expect(result?.transactions[0].processedAt).toBe('2026-10-30T04:40:01Z');
+  });
+
+  test('sem linha do tempo (events nulo ou ausente): lista VAZIA — nunca undefined —, para o consumidor falhar fechado em vez de cair no processedAt da cobrança', async () => {
+    for (const events of [null, undefined, { nodes: [] }]) {
+      const { client } = clientWith(() => raw(events));
+      expect((await client.getOrderPaymentTransactions('gid://shopify/Order/1'))?.successEvents).toEqual([]);
+    }
+  });
+
+  test('pedido não devolvido pela Shopify → null', async () => {
+    const { client } = clientWith(() => ({ order: null }));
+    expect(await client.getOrderPaymentTransactions('gid://shopify/Order/1')).toBeNull();
+  });
+});
