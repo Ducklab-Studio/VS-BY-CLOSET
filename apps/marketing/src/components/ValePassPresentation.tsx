@@ -1,5 +1,6 @@
 import { formatPrice, type StorefrontVariant } from '@/lib/shopify';
-import { valePassCheckoutHref } from '@/lib/vale-pass-product';
+import { resolveValePassCheckout } from '@/lib/vale-pass-offer-data';
+import { valePassGateNote } from '@/lib/vale-pass-offer';
 import { valePassClosedNote, valePassSaleState } from '@/lib/vale-pass-sale';
 import { VALE_PASS_TERMS_HREF } from '@/lib/vale-pass-terms';
 
@@ -23,8 +24,10 @@ export function ValePassPresentation({
   productTitle: string;
   now?: Date;
 }) {
-  const state = valePassSaleState(variant);
-  const closed = state === 'closed';
+  // MESMA regra da página /valle-pass: o checkout só existe com a Shopify aberta, os termos publicados E aprovados (fail closed).
+  const checkout = resolveValePassCheckout({ saleState: valePassSaleState(variant), variantId: variant.id });
+  const closed = !checkout.purchasable;
+  const state = closed ? 'closed' : 'open';
   const price = formatPrice(variant.price.amount, variant.price.currencyCode);
 
   return (
@@ -101,13 +104,13 @@ export function ValePassPresentation({
             Em breve
           </button>
           <p id="valle-pass-closed-note" data-testid="valle-pass-closed-note" className="mt-3 text-center text-[0.72rem] leading-relaxed text-ink/60">
-            {valePassClosedNote(now)}
+            {valePassGateNote(checkout.gateReason) ?? valePassClosedNote(now)}
           </p>
         </>
       ) : (
         <>
           <a
-            href={valePassCheckoutHref(variant.id)}
+            href={checkout.href ?? undefined}
             data-testid="valle-pass-cta"
             data-state="open"
             className="flex w-full items-center justify-center rounded-xl bg-marsala px-5 py-3.5 text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-cream transition-opacity hover:opacity-90"

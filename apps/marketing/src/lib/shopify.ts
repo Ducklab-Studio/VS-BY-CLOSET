@@ -129,7 +129,9 @@ export async function listFeaturedProducts(first = 8): Promise<StorefrontProduct
   );
   // ISR de 60 s como o resto da home; o ClosetAdmin revalida a home ao cadastrar/alterar peça.
   const eligible = await filterPublicCatalogProducts(dedupeProducts(data.products.nodes), { revalidate: 60 }, { includeAwaiting: false });
-  return eligible.slice(0, first);
+  // Destaques da vitrine são estritamente para aluguel de looks/peças (exclui produtos de compra direta como o Valle Pass).
+  const rentalProducts = eligible.filter((product) => !isDirectPurchaseProduct(product));
+  return rentalProducts.slice(0, first);
 }
 
 export interface CatalogCategory {
@@ -284,7 +286,7 @@ async function filterPublicCatalogProducts(
   return catalogWithStatus(products, state, isDirectPurchaseProduct, options);
 }
 
-function isDirectPurchaseProduct(product: StorefrontProduct): boolean {
+export function isDirectPurchaseProduct(product: StorefrontProduct): boolean {
   const configuredId = process.env.NEXT_PUBLIC_VALE_PASS_PRODUCT_ID?.trim() || '8723909804132';
   const numericId = product.id.match(/(\d+)\s*$/)?.[1] ?? product.id;
   return numericId === (configuredId.match(/(\d+)\s*$/)?.[1] ?? configuredId);
@@ -376,6 +378,27 @@ export async function getProductDetail(handle: string): Promise<StorefrontProduc
     images: raw.images?.nodes ?? [],
     variants: raw.variants?.nodes ?? [],
   };
+}
+
+/**
+ * Variantes de um produto pelo ID (número ou GID), SOMENTE LEITURA: disponibilidade e preço. Usado pela página do Valle Pass, que conhece o produto pelo ID
+ * configurado (`NEXT_PUBLIC_VALE_PASS_PRODUCT_ID`) e não por um handle. `null` = a Shopify não devolveu o produto (por exemplo, não publicado no canal).
+ */
+export async function getProductVariantsById(
+  productId: string,
+): Promise<Pick<StorefrontVariant, 'id' | 'availableForSale' | 'price'>[] | null> {
+  const id = productId.startsWith('gid://') ? productId : `gid://shopify/Product/${productId}`;
+  const data = await storefrontFetch<{
+    product: { variants?: { nodes?: Pick<StorefrontVariant, 'id' | 'availableForSale' | 'price'>[] } } | null;
+  }>(
+    `query ProductVariantsById($id: ID!) {
+      product(id: $id) {
+        variants(first: 20) { nodes { id availableForSale price { amount currencyCode } } }
+      }
+    }`,
+    { id },
+  );
+  return data.product?.variants?.nodes ?? null;
 }
 
 /** Handles de todas as peças — usado pra pré-gerar as páginas no build. */

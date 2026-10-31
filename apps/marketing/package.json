@@ -16,6 +16,7 @@
     "test:valle-pass-readiness": "node ../../scripts/no-real-network.mjs node test/valle-pass-launch-readiness-browser.mjs",
     "test:product-variants": "node ../../scripts/no-real-network.mjs node test/product-variants-browser.mjs",
     "test:valle-pass-prelaunch": "node ../../scripts/no-real-network.mjs node test/valle-pass-prelaunch-browser.mjs",
+    "test:valle-pass-page": "node ../../scripts/no-real-network.mjs node test/valle-pass-page-browser.mjs",
     "test:valle-pass-lots": "node ../../scripts/no-real-network.mjs node test/valle-pass-lots-browser.mjs",
     "test:valle-pass-test-benefits": "node ../../scripts/no-real-network.mjs node test/valle-pass-test-benefits-browser.mjs",
     "test:valle-pass-two-vouchers": "node ../../scripts/no-real-network.mjs node test/valle-pass-two-vouchers-browser.mjs",

@@ -34,6 +34,31 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
             clearProps: 'all',
           });
         });
+
+        // Revelação coreografada dos textos da seção winter-story
+        const winterElements = gsap.utils.toArray<HTMLElement>([
+          '.winter-content .eyebrow',
+          '.winter-content h2',
+          '.winter-description',
+          '.winter-feature-item',
+          '.winter-cta-row',
+          '.winter-carousel-stage',
+        ]);
+
+        gsap.from(winterElements, {
+          y: 32,
+          opacity: 0,
+          duration: 0.9,
+          stagger: 0.12,
+          ease: 'power3.out',
+          scrollTrigger: {
+            trigger: '.winter-story',
+            start: 'top 82%',
+            once: true,
+          },
+          clearProps: 'all',
+        });
+
       });
       mm.add('(min-width: 900px) and (prefers-reduced-motion: no-preference)', () => {
         gsap.to('.hero-photo .campaign-image', {
@@ -46,18 +71,6 @@ export function EditorialMotion({ children }: { children: React.ReactNode }) {
             scrub: 1,
           },
         });
-        gsap
-          .timeline({
-            scrollTrigger: {
-              trigger: '.winter-story',
-              start: 'top 110px',
-              end: '+=550',
-              pin: true,
-              scrub: 1,
-            },
-          })
-          .fromTo('.winter-image', { scale: 1.15 }, { scale: 1, duration: 1 })
-          .fromTo('.winter-content h2', { y: 45 }, { y: -15, duration: 1 }, 0);
       });
 
       /**

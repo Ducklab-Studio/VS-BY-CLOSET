@@ -64,10 +64,13 @@ if (process.env.SIZE_VARIANTS_FIXTURE === '1') {
     if (url.host !== STORE_HOST) return original(input, init);
     const body = JSON.parse(init?.body || '{}');
     const handle = body.variables?.handle;
+    const id = body.variables?.id; // consulta por ID (página /valle-pass): GID do produto
     const current = products.map(withValePassAvailability);
     const data = handle
       ? { product: current.find((item) => item.handle === handle) || null }
-      : { products: { nodes: current } };
+      : id
+        ? { product: current.find((item) => item.id === id) || null }
+        : { products: { nodes: current } };
     return Response.json({ data });
   };
 }
