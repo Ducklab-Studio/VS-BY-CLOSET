@@ -6,7 +6,7 @@ import { ValePassVouchersService } from '../vale-pass-vouchers.service';
 import { ValePassRedemptionService, type Actor } from './redemption.service';
 import { ValePassOperatorScopeService } from './operator-scope.service';
 import { ValePassLedgerService } from './ledger.service';
-import { purgeLedgerForTest } from './ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger-test-utils';
 import { TEST_CAMPAIGN_ID, TEST_CAMPAIGN_VARIANT_ID } from '../vale-pass-test-campaign';
 
 /**
@@ -31,6 +31,7 @@ const REF = 'Nota teste (sintética)';
 
 async function newUser(role: 'SUPER_ADMIN' | 'ADMIN' | 'STAFF'): Promise<Actor> {
   const row = await prisma.adminUser.create({ data: { name: `${role} ${TAG}-${counter}`, phone: `${TAG}-${counter++}`, pinHash: 'x', role, active: true } });
+  if (role === 'ADMIN') await grantAllCompaniesForTest(prisma, row.id); // a política exige vínculo para ADMIN resgatar
   userIds.push(row.id);
   return { id: row.id, name: row.name, role };
 }

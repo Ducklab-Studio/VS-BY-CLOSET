@@ -120,6 +120,8 @@ const metric = (page, label) => page.locator('dt', { hasText: label }).locator('
 
 try {
   const admin = await createUser(`Admin Saldo sintético ${prefix}`, 'ADMIN');
+  // a política exige vínculo para um ADMIN resgatar: este administrador sintético recebe as duas empresas
+  await db.valePassOperatorScope.createMany({ data: ['VALLE_SHOWROOM', 'VS_BY_CLOSET'].map((company) => ({ adminUserId: admin.id, company, grantedByName: 'teste' })) });
   const staff = await createUser(`Operador Saldo sintético ${prefix}`, 'STAFF');
 
   // ── vouchers sintéticos (uma unidade: R$ 500 Valle Showroom + R$ 50 VS BY CLOSET) ──
@@ -362,7 +364,7 @@ try {
     await op.getByRole('button', { name: /Quem opera cada estabelecimento/ }).click();
     const row = op.locator('[data-testid="operator-row"]', { hasText: `Operador vinculável sintético ${prefix}` });
     await row.waitFor();
-    await row.getByText('Sem vínculo: acesso legado às duas lojas.').waitFor();
+    await row.getByText('Sem vínculo: não realiza resgates.').waitFor();
     await row.getByRole('button', { name: /Valle Showroom: sem vínculo/ }).click();
     await row.getByRole('alertdialog').waitFor();
     assert.equal(await db.valePassOperatorScope.count({ where: { adminUserId: target.id } }), 0, 'nada é gravado antes da confirmação');

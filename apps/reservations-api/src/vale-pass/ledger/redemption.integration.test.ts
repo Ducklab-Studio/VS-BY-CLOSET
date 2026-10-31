@@ -10,7 +10,7 @@ import { ConfirmRedeemDto, ConfirmReverseDto, PrepareRedeemDto } from '../dto/vo
 import { ValePassLedgerController } from './ledger.controller';
 import { ValePassLedgerService } from './ledger.service';
 import { ValePassRedemptionService, type Actor } from './redemption.service';
-import { purgeLedgerForTest } from './ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger-test-utils';
 
 /**
  * Fase 3 / PR B — resgate parcial e reversão (serviço), em PostgreSQL LOCAL descartável. O serviço valida tudo no backend; os gatilhos do PR A são a rede de baixo.
@@ -84,6 +84,7 @@ async function cleanRows() {
 beforeAll(async () => {
   if (!localDatabase) return;
   const row = await prisma.adminUser.create({ data: { name: 'Admin Teste Resgate', phone: `${TAG}-admin`, pinHash: 'x', role: 'ADMIN', active: true } });
+  await grantAllCompaniesForTest(prisma, row.id); // a política exige vínculo para ADMIN resgatar
   admin = { id: row.id, name: row.name, role: 'ADMIN' };
   const staffRow = await prisma.adminUser.create({ data: { name: staff.name, phone: `${TAG}-staff`, pinHash: 'x', role: 'STAFF', active: true } });
   staff.id = staffRow.id;
@@ -428,7 +429,7 @@ localDescribe('auditoria, trilhas e falhas', () => {
 
   test('falha no meio (auditoria não consegue gravar): a transação inteira é desfeita — saldo, lançamento e status intactos; resposta 503 neutra', async () => {
     const u = await newUnit();
-    const ghost: Actor = { id: randomUUID(), name: 'Operador removido', role: 'ADMIN' }; // sem linha em admin_users: a auditoria falha
+    const ghost: Actor = { id: randomUUID(), name: 'Operador removido', role: 'SUPER_ADMIN' }; // sem linha em admin_users (o proprietário passa pela autorização): a auditoria falha
     const err = await rejection(service.confirmRedeem(u.closet.code, { company: 'VS_BY_CLOSET', amountCents: 5_000, reference: REF, operationId: op(), expectedBalanceCents: 5_000, confirmAmountCents: 5_000 }, ghost));
     expect(err).toBeInstanceOf(ServiceUnavailableException);
     expect(err?.message).not.toMatch(/VALLE-|vale_pass|prisma/i);

@@ -9,7 +9,7 @@ import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { ShopifyOrderSyncService } from '../webhooks/shopify-order-sync.service';
 import type { ShopifyOrderPayload } from '../webhooks/shopify-order-payload';
-import { purgeLedgerForTest } from './ledger/ledger-test-utils';
+import { grantAllCompaniesForTest, purgeLedgerForTest } from './ledger/ledger-test-utils';
 import { ValePassLedgerService } from './ledger/ledger.service';
 import { ValePassRedemptionService, type Actor } from './ledger/redemption.service';
 import { ValePassLotsService } from './vale-pass-lots.service';
@@ -91,6 +91,7 @@ async function cleanRows() {
 beforeAll(async () => {
   if (!localDatabase) return;
   const user = await prisma.adminUser.create({ data: { name: 'Admin Teste Alerta', phone: `${TAG}-admin`, pinHash: 'x', role: 'ADMIN', active: true } });
+  await grantAllCompaniesForTest(prisma, user.id); // a política exige vínculo para ADMIN resgatar
   admin = { id: user.id, name: user.name, role: 'ADMIN' };
   staffId = (await prisma.adminUser.create({ data: { name: 'Staff Teste Alerta', phone: `${TAG}-staff`, pinHash: 'x', role: 'STAFF', active: true } })).id;
 });

@@ -150,7 +150,7 @@ localDescribe('isolamento entre Valle Showroom e VS BY CLOSET', () => {
 
   test('os saldos das duas lojas NUNCA se misturam: cada lançamento fica na empresa do voucher e não há caminho para mover valor entre eles', async () => {
     const u = await newUnit();
-    const admin = await newUser('ADMIN');
+    const admin = await owner(); // só o proprietário opera as duas empresas sem vínculo
     await redeem(u.showroom, admin, 7_000);
     await redeem(u.closet, admin, 1_500);
     const showroomRows = await entries(u.showroom.id);
@@ -289,6 +289,7 @@ localDescribe('STAFF: pode RESGATAR só nas empresas vinculadas; nunca reverter,
     const admin = await newUser('ADMIN');
     await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
     await scopes.grant(staff.id, 'VS_BY_CLOSET', boss);
+    await scopes.grant(admin.id, 'VALLE_SHOWROOM', boss);
     const u = await newUnit();
     const done = await redeem(u.showroom, admin, 1_000);
     const blocks = new ValePassBlockService(prisma, redemption);
@@ -300,11 +301,12 @@ localDescribe('STAFF: pode RESGATAR só nas empresas vinculadas; nunca reverter,
     expect((await voucher(u.showroom.id)).blockedAt).toBeNull();
   });
 
-  test('endpoint antigo "usado": STAFF vinculado NÃO consome o voucher por inteiro (nem na própria empresa); só o resgate com prévia e valor; ADMIN segue podendo', async () => {
+  test('endpoint antigo "usado": STAFF vinculado NÃO consome o voucher por inteiro (nem na própria empresa); só o resgate com prévia e valor; ADMIN vinculado segue podendo', async () => {
     const boss = await owner();
     const staff = await newUser('STAFF');
     const admin = await newUser('ADMIN');
     await scopes.grant(staff.id, 'VALLE_SHOWROOM', boss);
+    await scopes.grant(admin.id, 'VALLE_SHOWROOM', boss);
     const u = await newUnit();
     await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(await entries(u.showroom.id)).toHaveLength(0);
@@ -360,14 +362,29 @@ localDescribe('STAFF: pode RESGATAR só nas empresas vinculadas; nunca reverter,
 });
 
 localDescribe('permissões administrativas existentes preservadas', () => {
-  test('ADMIN sem vínculo mantém o acesso atual às duas lojas (política de migração ainda a definir); a base fica registrada na auditoria', async () => {
+  test('ADMIN SEM vínculo é recusado nas DUAS empresas em todos os caminhos (prévia, resgate, reversão, endpoint antigo, API direta com a empresa trocada); o proprietário continua operando as duas', async () => {
+    const boss = await owner();
     const admin = await newUser('ADMIN');
     const u = await newUnit();
-    await redeem(u.showroom, admin, 1_000);
-    await redeem(u.closet, admin, 1_000);
-    const audits = await prisma.adminAuditEvent.findMany({ where: { adminUserId: admin.id, action: 'VALE_PASS_REDEEMED' } });
-    expect(audits).toHaveLength(2);
-    expect(audits.every((a) => (a.detail as { accessBasis?: string }).accessBasis === 'LEGACY_ADMIN')).toBe(true);
+    for (const target of [u.showroom, u.closet]) {
+      expect((await rejection(redeem(target, admin, 1_000)))?.response?.code).toBe('NO_COMPANY_AUTHORIZED');
+      // API direta declarando a empresa do OUTRO voucher não muda nada
+      expect((await rejection(redeem(target, admin, 1_000, { company: target.company === 'VALLE_SHOWROOM' ? 'VS_BY_CLOSET' : 'VALLE_SHOWROOM' })))?.response?.code).toBe('NO_COMPANY_AUTHORIZED');
+      await expect(redemption.prepareRedeem(target.code, { company: target.company as string, amountCents: 100, reference: REF }, admin)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(vouchersService.markUsed(target.code, admin.id, admin.name, { role: 'ADMIN' })).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    // reversão de um resgate feito pelo proprietário: o ADMIN sem vínculo também não reverte
+    const done = await redeem(u.showroom, boss, 1_000);
+    await expect(redemption.prepareReverse(u.showroom.code, done.entry.id, admin)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(await entries(u.showroom.id)).toHaveLength(1); // só o resgate do proprietário
+    expect(await entries(u.closet.id)).toHaveLength(0);
+    expect((await voucher(u.closet.id)).balanceCents).toBe(5_000);
+    await redeem(u.closet, boss, 500); // o proprietário segue operando a outra empresa
+    expect(await ledger.reconcile()).toEqual([]);
+  });
+
+  test('a política padrão do código é ESTRITA: ADMIN e STAFF só operam com vínculo; só o SUPER_ADMIN opera sem vínculo', () => {
+    expect(OPERATOR_POLICY).toEqual({ staffMayRedeem: true, adminRequiresScope: true });
   });
 
   test('ADMIN com vínculo explícito fica restrito a ele; SUPER_ADMIN opera sempre as duas', async () => {
@@ -424,14 +441,14 @@ localDescribe('gestão do vínculo: só o proprietário, auditada, idempotente',
     await prisma.adminUser.update({ where: { id: staff.id }, data: { moduleAccess: ['VALLE_PASS'] } });
     await scopes.grant(scoped.id, 'VALLE_SHOWROOM', boss);
     const u = await newUnit();
-    await redeem(u.closet, admin, 500); // acesso legado (ADMIN sem vínculo)
+    await expect(redeem(u.closet, admin, 500)).rejects.toBeDefined(); // ADMIN sem vínculo não opera mais
     const overview = await scopes.overview(boss);
     const mine = overview.users.filter((x) => [admin.id, scoped.id, staff.id].includes(x.id));
     expect(mine.map((x) => [x.role, x.companies.length]).sort()).toEqual([['ADMIN', 0], ['ADMIN', 1], ['STAFF', 0]]);
     expect(overview.users.some((x) => x.id === boss.id)).toBe(false); // o proprietário não aparece (sempre opera)
-    expect(overview.policy).toEqual({ staffMayRedeem: true, adminRequiresScope: false });
+    expect(overview.policy).toEqual({ staffMayRedeem: true, adminRequiresScope: true });
     expect(overview.summary.adminsWithoutScope).toBeGreaterThanOrEqual(1);
-    expect(overview.summary.legacyAdminOperationsLast30Days).toBeGreaterThanOrEqual(1);
+    expect(overview.summary.legacyAdminOperationsLast30Days).toBeGreaterThanOrEqual(0); // só mede o histórico anterior à política estrita
     for (const actor of [admin, staff]) await expect(scopes.overview(actor)).rejects.toBeInstanceOf(ForbiddenException);
     expect(JSON.stringify(overview)).not.toMatch(/pinHash|phone/i);
   });
@@ -471,7 +488,7 @@ localDescribe('o que a tela recebe (informativo; a decisão é do servidor)', ()
     const op = await newUser('ADMIN');
     const u = await newUnit();
     expect((await redemption.lookup(u.showroom.code, staff)).operatorAccess).toMatchObject({ canOperate: false, companies: [], summary: expect.stringMatching(/Sem estabelecimento/) });
-    expect((await redemption.lookup(u.showroom.code, op)).operatorAccess).toMatchObject({ canOperate: true, companies: ['VALLE_SHOWROOM', 'VS_BY_CLOSET'] }); // legado
+    expect((await redemption.lookup(u.showroom.code, op)).operatorAccess).toMatchObject({ canOperate: false, companies: [], summary: expect.stringMatching(/Sem estabelecimento/) }); // ADMIN sem vínculo não opera
     await scopes.grant(op.id, 'VALLE_SHOWROOM', boss);
     expect((await redemption.lookup(u.showroom.code, op)).operatorAccess).toMatchObject({ canOperate: true, message: null, companies: ['VALLE_SHOWROOM'] });
     expect((await redemption.lookup(u.closet.code, op)).operatorAccess).toMatchObject({ canOperate: false, message: expect.stringMatching(/VS BY CLOSET/) });
