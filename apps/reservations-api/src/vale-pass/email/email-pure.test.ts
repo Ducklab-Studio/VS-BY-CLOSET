@@ -189,6 +189,31 @@ describe('template do e-mail', () => {
     }
   });
 
+  test('link dos termos: NUNCA por padrão (termos ainda não publicados); só com URL https válida; qualquer outra coisa é ignorada e nada promete o que não está aprovado', () => {
+    const render = (termsUrl?: string | null) => renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: 'America/Sao_Paulo', termsUrl, logoUrl: null });
+    for (const none of [undefined, null, '', 'http://inseguro.example/termos', 'javascript:alert(1)', '/termos-valle-pass', 'https://x.example/"onmouseover="x', 'https://x.example/<b>']) {
+      const email = render(none);
+      if (none === undefined) delete process.env.VALE_PASS_EMAIL_TERMS_URL;
+      expect(email.html, String(none)).not.toContain('Ler os termos');
+      expect(email.text, String(none)).not.toContain('Termos e condições do Valle Pass:');
+    }
+    const email = render('https://vsbycloset.example/termos-valle-pass?a=1&b=2');
+    expect(email.html).toContain('<a href="https://vsbycloset.example/termos-valle-pass?a=1&amp;b=2"');
+    expect(email.html).toContain('Ler os termos e condições do Valle Pass');
+    expect(email.text).toContain('Termos e condições do Valle Pass: https://vsbycloset.example/termos-valle-pass?a=1&b=2');
+    for (const text of [email.html, email.text]) expect(text).not.toMatch(/10\s?%|desconto|passeio|parcial|transfer|reembols|saldo/i);
+  });
+
+  test('o link dos termos também pode vir da configuração (VALE_PASS_EMAIL_TERMS_URL), e some quando a variável é removida', () => {
+    process.env.VALE_PASS_EMAIL_TERMS_URL = 'https://vsbycloset.example/termos-valle-pass';
+    try {
+      expect(renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: 'America/Sao_Paulo' }).html).toContain('https://vsbycloset.example/termos-valle-pass');
+    } finally {
+      delete process.env.VALE_PASS_EMAIL_TERMS_URL;
+    }
+    expect(renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: 'America/Sao_Paulo' }).html).not.toContain('Ler os termos');
+  });
+
   test('a validade independe do fuso do servidor e a data final é o último dia (31/12/2027)', () => {
     const tz = (zone: string) => renderVoucherEmail({ customerName: null, orderName: null, vouchers, timeZone: zone }).text;
     expect(tz('America/Sao_Paulo')).toContain('a 31/12/2027');
