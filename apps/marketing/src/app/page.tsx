@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import { FeaturedProducts } from '@/components/FeaturedProducts';
 import { EditorialMotion } from '@/components/EditorialMotion';
 import { WinterCarousel } from '@/components/WinterCarousel';
+import { ValePassHomeCallout } from '@/components/ValePassHomeCallout';
 import { HeroMedia } from '@/components/HeroMedia';
 import { HERO_VIDEO } from '@/lib/hero-media';
 
@@ -112,6 +113,7 @@ export default function HomePage() {
         </div>
         <FeaturedProducts />
       </section>
+      <ValePassHomeCallout />
       <section className="winter-story" aria-labelledby="winter-title">
         <div className="winter-content">
           <div className="winter-header-block">

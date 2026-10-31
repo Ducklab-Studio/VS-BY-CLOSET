@@ -380,6 +380,27 @@ export async function getProductDetail(handle: string): Promise<StorefrontProduc
   };
 }
 
+/**
+ * Variantes de um produto pelo ID (número ou GID), SOMENTE LEITURA: disponibilidade e preço. Usado pela página do Valle Pass, que conhece o produto pelo ID
+ * configurado (`NEXT_PUBLIC_VALE_PASS_PRODUCT_ID`) e não por um handle. `null` = a Shopify não devolveu o produto (por exemplo, não publicado no canal).
+ */
+export async function getProductVariantsById(
+  productId: string,
+): Promise<Pick<StorefrontVariant, 'id' | 'availableForSale' | 'price'>[] | null> {
+  const id = productId.startsWith('gid://') ? productId : `gid://shopify/Product/${productId}`;
+  const data = await storefrontFetch<{
+    product: { variants?: { nodes?: Pick<StorefrontVariant, 'id' | 'availableForSale' | 'price'>[] } } | null;
+  }>(
+    `query ProductVariantsById($id: ID!) {
+      product(id: $id) {
+        variants(first: 20) { nodes { id availableForSale price { amount currencyCode } } }
+      }
+    }`,
+    { id },
+  );
+  return data.product?.variants?.nodes ?? null;
+}
+
 /** Handles de todas as peças — usado pra pré-gerar as páginas no build. */
 export async function listAllProductHandles(first = 250): Promise<string[]> {
   const data = await storefrontFetch<{ products: { nodes: { handle: string }[] } }>(
