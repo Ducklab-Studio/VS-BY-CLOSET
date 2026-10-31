@@ -65,7 +65,7 @@ const flowService = () => new ValePassPaymentFlowService(new ValePassFinancialGu
 const money = (amount: string) => ({ shop_money: { amount, currency_code: 'BRL' }, presentment_money: { amount, currency_code: 'BRL' } });
 
 interface Campaign extends ValePassCampaign { numericVariant: string }
-async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number | null }> = {}): Promise<Campaign> {
+async function newCampaign(withBenefits: boolean, over: Partial<{ globalLimit: number | null; amountCents: number }> = {}): Promise<Campaign> {
   const numericVariant = String(900_000_000_000 + counter++);
   const campaign = await prisma.valePassCampaign.create({
     data: {
@@ -1714,5 +1714,122 @@ localDescribe('injeção de dependências REAL do Nest', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+localDescribe('LANÇAMENTO — emissão automática: valor divergente, quantidade, falha do banco e concorrência entre eventos', () => {
+  const cancelBody = (payload: Record<string, unknown>) => ({ ...payload, financial_status: 'voided', cancelled_at: new Date(clock + 5_000).toISOString(), updated_at: new Date(clock + 5_000).toISOString() });
+  /** O que o WebhooksService faz num orders/cancelled: tratamento do Valle Pass e depois o registro do pedido. */
+  const cancelOrder = (svc: ValePassWebhookService, body: Record<string, unknown>) =>
+    prisma.$transaction(async (tx) => {
+      const orderId = String(body.id);
+      await lockShopifyOrder(tx, orderId);
+      const first = await svc.handleOrderCancelledOrRefunded(tx, orderId, 'orders/cancelled');
+      const second = await svc.handleOrderWebhook(tx, 'orders/cancelled', body);
+      return [...first, ...second];
+    }, { timeout: 30_000, maxWait: 20_000 });
+
+  test('pagamento DIVERGENTE de R$ 0,10 numa campanha de R$ 350: retido por PRICE_MISMATCH + TOTAL_MISMATCH (a validação financeira funciona); nada emitido; repetir não duplica a retenção', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1, { current_total_price: '0.10' });
+    const line = (payload.line_items as { price: string; price_set: unknown }[])[0];
+    line.price = '0.10';
+    line.price_set = money('0.10');
+    const orderId = String(payload.id);
+    await Promise.all([run(service(), 'orders/paid', payload), run(service(), 'orders/paid', payload), run(service(), 'orders/paid', payload)]);
+    const holds = await holdsOf(orderId);
+    expect(holds).toHaveLength(1);
+    expect(holds[0]).toMatchObject({ reason: 'FINANCIAL_MISMATCH', status: 'OPEN', units: 1 });
+    expect(issueCodes(holds[0]).sort()).toEqual(['PRICE_MISMATCH', 'TOTAL_MISMATCH']);
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect(await outboxOf(orderId)).toHaveLength(0);
+  });
+
+  test('CAUSA DA RETENÇÃO DO TESTE: com o preço da campanha igual ao pago (R$ 0,10) a validação FINANCEIRA passa; na política ESTRITA de produção o que retém é só o horário do pagamento (PAYMENT_TIME_UNKNOWN), com o mesmo motivo FINANCIAL_MISMATCH', async () => {
+    flags.twoVoucher = true;
+    paymentTimeCfg.mode = 'strict'; // padrão de produção
+    const campaign = await newCampaign(true, { amountCents: 10 });
+    const payload = paidPayload(campaign, 1, { current_total_price: '0.10' });
+    const line = (payload.line_items as { price: string; price_set: unknown }[])[0];
+    line.price = '0.10';
+    line.price_set = money('0.10');
+    const orderId = String(payload.id);
+    await run(service(), 'orders/paid', payload);
+    const holds = await holdsOf(orderId);
+    expect(holds).toHaveLength(1);
+    expect(holds[0].reason).toBe('FINANCIAL_MISMATCH');
+    expect(issueCodes(holds[0])).toEqual(['PAYMENT_TIME_UNKNOWN']); // nenhum problema de valor, moeda, quantidade ou desconto
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+  });
+
+  test('duas unidades no mesmo pedido (R$ 700): 4 vouchers (2 × R$ 500 + 2 × R$ 50), 2 grupos completos, 2 mensagens', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 2);
+    const orderId = String(payload.id);
+    expect(payload.current_total_price).toBe('700.00');
+    await Promise.all(Array.from({ length: 4 }, () => run(service(), 'orders/paid', payload)));
+    const rows = await vouchersOf(orderId);
+    expect(rows).toHaveLength(4);
+    expect(rows.filter((v) => v.company === 'VALLE_SHOWROOM').map((v) => v.amountCents)).toEqual([50_000, 50_000]);
+    expect(rows.filter((v) => v.company === 'VS_BY_CLOSET').map((v) => v.amountCents)).toEqual([5_000, 5_000]);
+    expect(new Set(rows.map((v) => v.groupId)).size).toBe(2);
+    expect(await outboxOf(orderId)).toHaveLength(2);
+    expect(await holdsOf(orderId)).toHaveLength(0);
+  });
+
+  test('falha temporária do banco DEPOIS do processamento e ANTES do commit: nada fica gravado; a reentrega emite exatamente 2 vouchers e 1 mensagem', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1);
+    const orderId = String(payload.id);
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await lockShopifyOrder(tx, orderId);
+        const events = await service().handleOrderWebhook(tx, 'orders/paid', payload, { triggeredAt: String(payload.updated_at) });
+        expect(events.map((e) => e.type)).toContain('VALE_PASS_UNITS_ISSUED'); // chegou a emitir DENTRO da transação...
+        throw new Error('conexão com o banco caiu antes do commit'); // ...mas a transação não confirmou
+      }, { timeout: 30_000, maxWait: 20_000 }),
+    ).rejects.toThrow('conexão com o banco caiu');
+    expect(await vouchersOf(orderId)).toHaveLength(0);
+    expect(await holdsOf(orderId)).toHaveLength(0);
+    expect(await outboxOf(orderId)).toHaveLength(0);
+    expect(await prisma.valePassOrder.findUnique({ where: { shopifyOrderId: orderId } })).toBeNull();
+    await Promise.all([run(service(), 'orders/paid', payload), run(service(), 'orders/paid', payload)]); // a Shopify reentrega
+    expect(await vouchersOf(orderId)).toHaveLength(2);
+    expect(await outboxOf(orderId)).toHaveLength(1);
+  });
+
+  test('concorrência entre eventos: orders/paid (várias entregas), orders/updated e orders/cancelled ao mesmo tempo → nunca sobra voucher ATIVO, nunca passa de 2 vouchers e a unidade nunca fica pela metade', async () => {
+    flags.twoVoucher = true;
+    for (let round = 0; round < 4; round++) {
+      const campaign = await newCampaign(true);
+      const payload = paidPayload(campaign, 1);
+      const orderId = String(payload.id);
+      await run(service(), 'orders/paid', payload); // pedido já emitido; o cancelamento corre contra reentregas e o orders/updated
+      await Promise.all([
+        cancelOrder(service(), cancelBody(payload)),
+        run(service(), 'orders/paid', payload),
+        run(service(), 'orders/updated', withStatus(payload, 'paid', 3_000)),
+        run(service(), 'orders/paid', payload),
+      ]);
+      const rows = await vouchersOf(orderId);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((v) => v.status)).toEqual(['CANCELLED', 'CANCELLED']);
+      expect(new Set(rows.map((v) => v.groupId)).size).toBe(1);
+    }
+  });
+
+  test('cancelamento ANTES do pagamento chegar (fora de ordem): o orders/paid atrasado não deixa nenhum voucher ativo', async () => {
+    flags.twoVoucher = true;
+    const campaign = await newCampaign(true);
+    const payload = paidPayload(campaign, 1);
+    const orderId = String(payload.id);
+    await cancelOrder(service(), cancelBody(payload));
+    await run(service(), 'orders/paid', payload);
+    const rows = await vouchersOf(orderId);
+    expect(rows.filter((v) => v.status === 'ACTIVE')).toHaveLength(0);
+    expect(rows.length).toBeLessThanOrEqual(2);
   });
 });
