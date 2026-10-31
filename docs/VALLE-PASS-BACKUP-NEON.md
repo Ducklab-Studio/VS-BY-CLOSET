@@ -38,7 +38,10 @@ Esperado: todas as linhas `OK` e `PREFLIGHT: APROVADO (nada foi gravado…)`.
 Aprovação: `"aprovado": true`, `divergentes: 0`, `migracoesOrigem = migracoesCopia`, SHA-256 impresso e arquivos `.dump`, `.dump.sha256`, `.dump.verify.json` na pasta protegida. Registrar o SHA-256 no relatório da homologação.
 **4.3 Depois:** `Remove-Item Env:RESTORE_ADMIN_URL, Env:PG_BIN`; o banco descartável já foi apagado pelo script; apagar o dump quando a janela encerrar.
 
-## 5. Cuidados
+## 5. Primeira execução real (31/10/2026) e o que ela ensinou
+O primeiro backup contra o Neon (`production-20261031T200349Z.dump`, 299.302 bytes) saiu com `aprovado: false`: **contagens iguais nas 35 tabelas, mas hash diferente nas 24 tabelas com dados**. Causa: a comparação por hash usa `linha::text`, e a representação de `timestamptz` depende do **fuso da sessão** (Neon em UTC × postgres local em America/Sao_Paulo) — **não era divergência de dados**. Correção: o script passou a fixar `PGTZ=UTC` em todas as sessões e ganhou `--reuse-dump <arquivo>` (repete só a verificação sobre um dump já existente, sem gerar outro; grava `<dump>.reverify-<data>.json` e não toca no `.verify.json` original). Reverificação do MESMO dump: **aprovado, 0 divergências, 35 tabelas (24 com dados, 1.193 linhas), migrações 47 = 47, mesmo SHA-256**. Os dois relatórios ficam guardados.
+
+## 6. Cuidados
 - O dump contém **dados reais (PII)**: só na pasta protegida, sem nuvem não criptografada, sem commit (`.gitignore` barra `*.dump`, `*.dump.sha256`, `*.dump.verify.json`).
 - **Restaurar em produção NÃO faz parte deste procedimento** (exige autorização separada, janela e comparação com o Neon branch/PITR). O Neon também tem restauração pontual (PITR) no painel; este backup é a rede de segurança independente.
 - Backup anterior (30/10 19:33Z): SHA-256 confere e **restaura sem erro** (47 migrações, 35 tabelas; contagens iguais às da produção em 31/10). Como nada mudou, ele ainda representa a produção, mas o runbook exige o backup novo logo antes da janela.

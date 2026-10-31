@@ -103,6 +103,8 @@ const envFor = (conn, database = conn.database, readOnly = false) => ({
   PGDATABASE: database,
   PGCONNECT_TIMEOUT: '20',
   PGCLIENTENCODING: 'UTF8',
+  // Fuso FIXO em todas as sessões (origem e cópia): a representação em texto de `timestamptz` depende do fuso da sessão, e a comparação por hash precisa ser a mesma dos dois lados.
+  PGTZ: 'UTC',
   ...(conn.sslmode ? { PGSSLMODE: conn.sslmode } : {}),
   ...(readOnly ? { PGOPTIONS: '-c default_transaction_read_only=on' } : {}),
 });
@@ -162,21 +164,29 @@ if (preflight) {
 // ---------------------------------------------------------------- BACKUP + VERIFICAÇÃO
 mkdirSync(resolvedOut, { recursive: true });
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
-const dumpFile = path.join(resolvedOut, `production-${stamp}.dump`);
-const report = { geradoEm: new Date().toISOString(), arquivo: path.basename(dumpFile), etapas: {}, tabelas: [] };
+// `--reuse-dump <arquivo.dump>`: NÃO gera dump novo; repete só a verificação (hash, índice, restauração local e comparação) sobre um dump que já está na pasta de saída.
+const reuse = arg('--reuse-dump');
+let dumpFile = path.join(resolvedOut, `production-${stamp}.dump`);
+if (reuse) {
+  dumpFile = path.resolve(reuse);
+  if (path.dirname(dumpFile) !== resolvedOut || !/\.dump$/.test(dumpFile) || !existsSync(dumpFile)) fail('--reuse-dump precisa apontar para um .dump existente DENTRO da pasta de saída.');
+}
+const report = { geradoEm: new Date().toISOString(), arquivo: path.basename(dumpFile), reverificacao: Boolean(reuse), etapas: {}, tabelas: [] };
 
 // 2) dump (somente leitura)
-run(bin('pg_dump'), ['-Fc', '--no-owner', '--no-privileges', '-f', dumpFile], envFor(source, source.database, true), 'pg_dump');
-try {
-  chmodSync(dumpFile, 0o600); // no Windows o efeito é limitado: a proteção vem da pasta (ver o guia)
-} catch {
-  /* ignora */
+if (!reuse) {
+  run(bin('pg_dump'), ['-Fc', '--no-owner', '--no-privileges', '-f', dumpFile], envFor(source, source.database, true), 'pg_dump');
+  try {
+    chmodSync(dumpFile, 0o600); // no Windows o efeito é limitado: a proteção vem da pasta (ver o guia)
+  } catch {
+    /* ignora */
+  }
 }
 report.etapas.dump = { bytes: statSync(dumpFile).size };
 
 // 3) hash + índice legível
 report.etapas.sha256 = await sha256(dumpFile);
-writeFileSync(`${dumpFile}.sha256`, `${report.etapas.sha256}  ${path.basename(dumpFile)}\n`);
+if (!reuse) writeFileSync(`${dumpFile}.sha256`, `${report.etapas.sha256}  ${path.basename(dumpFile)}\n`);
 const toc = run(bin('pg_restore'), ['--list', dumpFile], process.env, 'pg_restore --list');
 report.etapas.indice = { entradas: toc.split('\n').filter((line) => line && !line.startsWith(';')).length };
 if (report.etapas.indice.entradas < 10) fail('índice do dump suspeitamente pequeno.');
@@ -210,6 +220,6 @@ try {
 } finally {
   runCleanups();
 }
-writeFileSync(`${dumpFile}.verify.json`, JSON.stringify(report, null, 2));
+writeFileSync(reuse ? `${dumpFile}.reverify-${stamp}.json` : `${dumpFile}.verify.json`, JSON.stringify(report, null, 2));
 console.log(JSON.stringify({ aprovado: report.aprovado, arquivo: report.arquivo, sha256: report.etapas.sha256, bytes: report.etapas.dump.bytes, tabelas: report.etapas.comparacao.tabelas, divergentes: report.etapas.comparacao.divergentes, migracoesOrigem: report.etapas.comparacao.migracoesOrigem, migracoesCopia: report.etapas.comparacao.migracoesCopia }, null, 2));
 process.exit(report.aprovado ? 0 : 2);
