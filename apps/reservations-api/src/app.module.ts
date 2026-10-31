@@ -22,6 +22,7 @@ import { RemindersModule } from './reminders/reminders.module';
 import { ShopifyReconciliationModule } from './shopify-reconciliation/shopify-reconciliation.module';
 import { ReservationExpiryModule } from './reservation-expiry/reservation-expiry.module';
 import { AppController } from './app.controller';
+import { ClientIpDiagnosticController } from './diagnostics/client-ip-diagnostic.controller';
 
 @Module({
   imports: [
@@ -51,7 +52,7 @@ import { AppController } from './app.controller';
     PdfModule,
     RemindersModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, ClientIpDiagnosticController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

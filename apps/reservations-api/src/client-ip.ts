@@ -25,10 +25,49 @@ export function normalizeClientIp(raw: string | string[] | null | undefined): st
   return value && value.length <= 45 && isIP(value) ? value : 'unknown';
 }
 
-export function trustedClientIp(req: ClientIpRequest, env: Record<string, string | undefined> = process.env): string {
-  if (env.RAILWAY_DEPLOYMENT_ID) {
-    const edge = normalizeClientIp(req.headers?.['x-real-ip']);
-    if (edge !== 'unknown') return edge;
+/**
+ * Endereço PÚBLICO roteável? Loopback, redes privadas, CGNAT (100.64/10, usado pela rede interna da Railway), link-local, multicast e "não especificado" nunca são o IP de
+ * um visitante da internet: se aparecerem no `X-Real-IP` é um salto interno (ou lixo), e o valor não pode virar a chave de um limite por cliente.
+ */
+export function isPublicAddress(ip: string): boolean {
+  const version = isIP(ip);
+  if (version === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    return true;
   }
-  return normalizeClientIp(req.socket?.remoteAddress ?? undefined);
+  if (version === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === '::' || lower === '::1') return false;
+    if (/^f[cd][0-9a-f]{2}:/.test(lower) || /^fe[89ab][0-9a-f]:/.test(lower) || lower.startsWith('ff')) return false;
+    return true;
+  }
+  return false;
+}
+
+/** Como o IP foi decidido (para o diagnóstico e para os testes): nunca devolve nada que o cliente não tenha mandado sobre si mesmo. */
+export function describeClientIp(req: ClientIpRequest, env: Record<string, string | undefined> = process.env) {
+  const onRailway = Boolean(env.RAILWAY_DEPLOYMENT_ID);
+  const rawRealIp = req.headers?.['x-real-ip'];
+  const realIp = normalizeClientIp(rawRealIp);
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const forwardedText = Array.isArray(forwarded) ? forwarded.join(',') : (forwarded ?? '');
+  const edgeUsable = onRailway && realIp !== 'unknown' && isPublicAddress(realIp);
+  const socketIp = normalizeClientIp(req.socket?.remoteAddress ?? undefined);
+  return {
+    onRailway,
+    derivedIp: edgeUsable ? realIp : socketIp,
+    source: edgeUsable ? ('x-real-ip' as const) : socketIp === 'unknown' ? ('none' as const) : ('socket' as const),
+    xRealIp: { present: rawRealIp !== undefined, validIp: realIp !== 'unknown', public: realIp !== 'unknown' && isPublicAddress(realIp), usedAsClient: edgeUsable },
+    xForwardedFor: { present: forwardedText !== '', hops: forwardedText === '' ? 0 : forwardedText.split(',').length, usedAsClient: false },
+    socketIsPublic: socketIp !== 'unknown' && isPublicAddress(socketIp),
+  };
+}
+
+export function trustedClientIp(req: ClientIpRequest, env: Record<string, string | undefined> = process.env): string {
+  return describeClientIp(req, env).derivedIp;
 }
