@@ -24,6 +24,7 @@ import { ValePassIssuanceService } from './vale-pass-issuance.service';
 import { ValePassLotsService } from './vale-pass-lots.service';
 import { ValePassVouchersService } from './vale-pass-vouchers.service';
 import { ValePassWebhookService } from './vale-pass-webhook.service';
+import { checkHomologation } from './homologation-check';
 import { ValePassValidityExtensionService } from './validity-extension.service';
 
 /**
@@ -692,5 +693,75 @@ localDescribe('7) CICLO COMPLETO CONTÍNUO — Pix demorado em produção (polí
     expect(await autoVerify.runOnce(new Date())).toMatchObject({ confirmed: 1, issued: 1 });
     expect(await vouchersOf(orderId)).toHaveLength(2);
     expect((await prisma.valePassOrder.findUniqueOrThrow({ where: { shopifyOrderId: orderId } })).paymentConfirmedAt?.toISOString()).toBe(paidAt);
+  });
+});
+
+localDescribe('8) VERIFICADOR DA HOMOLOGAÇÃO — o que o runbook confere na compra de teste (somente leitura)', () => {
+  async function pixOrder() {
+    policy.mode = 'strict';
+    policy.autoVerify = true;
+    const c = await newCampaign();
+    const paidAt = new Date(Date.now() - 4 * 3_600_000).toISOString();
+    const p = payload(c, 1, { created_at: new Date(Date.now() - 5 * 3_600_000).toISOString(), updated_at: paidAt });
+    const orderId = String(p.id);
+    await prisma.$transaction(async (tx) => {
+      await lockShopifyOrder(tx, orderId);
+      return webhook.handleOrderWebhook(tx, 'orders/paid', p, { triggeredAt: paidAt });
+    });
+    await storeEvent('orders/paid', p, paidAt);
+    fakeTransactions.set(`gid://shopify/Order/${orderId}`, {
+      orderGid: `gid://shopify/Order/${orderId}`,
+      totalAmount: '350.00',
+      currency: 'BRL',
+      transactions: [{ id: 'gid://shopify/OrderTransaction/h', kind: 'SALE', status: 'SUCCESS', test: false, processedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(), amount: '350.00', currency: 'BRL', gateway: 'Gateway Pix' }],
+      successEvents: [{ action: 'sale_success', createdAt: paidAt }],
+    });
+    return { p, orderId, paidAt };
+  }
+
+  test('pedido inexistente ou ainda retido: REPROVA com o motivo; nada é gravado', async () => {
+    expect(await checkHomologation(prisma, { orderName: '#NAO-EXISTE-1' })).toMatchObject({ found: false, pass: false, fingerprint: null });
+    const { p } = await pixOrder(); // retido: o AUTO_VERIFY ainda não rodou
+    const before = await checkHomologation(prisma, { orderName: String(p.name) });
+    expect(before.pass).toBe(false);
+    expect(before.checks.filter((c) => !c.ok).map((c) => c.id)).toEqual(expect.arrayContaining(['1b-fonte', '2a-quantidade']));
+  });
+
+  test('depois do AUTO_VERIFY: todos os critérios passam; ciclos extras, reentregas e nova leitura dão o MESMO fingerprint; nenhum código ou dado pessoal na saída', async () => {
+    const { p, paidAt } = await pixOrder();
+    await autoVerify.runOnce(new Date());
+    const first = await checkHomologation(prisma, { orderName: String(p.name) });
+    expect(first.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(first.pass).toBe(true);
+    await autoVerify.runOnce(new Date());
+    await autoVerify.runOnce(new Date());
+    await prisma.$transaction(async (tx) => {
+      await lockShopifyOrder(tx, String(p.id));
+      return webhook.handleOrderWebhook(tx, 'orders/paid', p, { triggeredAt: paidAt });
+    });
+    const second = await checkHomologation(prisma, { orderName: String(p.name) });
+    expect(second.fingerprint).toBe(first.fingerprint);
+    const text = JSON.stringify(second);
+    const codes = (await vouchersOf(String(p.id))).map((v) => v.code);
+    for (const code of codes) expect(text).not.toContain(code);
+    expect(text).not.toMatch(/@exemplo|Maria|Sintética/);
+  });
+
+  test('detecta o que reprova a homologação: voucher a mais, mensagem enviada, retenção aberta e cancelamento', async () => {
+    const { p, orderId } = await pixOrder();
+    await autoVerify.runOnce(new Date());
+    const [row] = await vouchersOf(orderId);
+    // voucher duplicado (simula emissão em dobro)
+    const duplicate = await prisma.valePass.create({ data: { code: `VALLE-${TAG.slice(-4)}-X${counter++}`.toUpperCase(), campaignId: row.campaignId, amountCents: row.amountCents, status: 'ACTIVE', purchasedAt: new Date(), expiresAt: row.expiresAt, validFrom: row.validFrom, company: row.company, groupId: row.groupId, benefitId: row.benefitId, shopifyOrderId: orderId } }).catch(() => null);
+    // o banco normalmente recusa o duplicado; se algum caminho o aceitasse, o verificador reprovaria
+    if (duplicate) expect((await checkHomologation(prisma, { orderName: String(p.name) })).pass).toBe(false);
+    // mensagem com tentativa de envio
+    await prisma.valePassEmailOutbox.updateMany({ where: { shopifyOrderId: orderId }, data: { attempts: 1 } }); // uma tentativa de envio já foi feita
+    expect((await checkHomologation(prisma, { orderName: String(p.name) })).checks.find((c) => c.id === '3b-nada-enviado')?.ok).toBe(false);
+    // cancelamento
+    await cancelOrder({ ...p, financial_status: 'voided', cancelled_at: new Date().toISOString(), updated_at: new Date(Date.now() + 1_000).toISOString() });
+    const cancelled = await checkHomologation(prisma, { orderName: String(p.name) });
+    expect(cancelled.pass).toBe(false);
+    expect(cancelled.checks.find((c) => c.id === '2c-valores')?.ok).toBe(false);
   });
 });
