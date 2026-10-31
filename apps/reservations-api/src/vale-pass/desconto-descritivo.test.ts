@@ -41,9 +41,13 @@ describe('o desconto de 10% é só descritivo (nenhum mecanismo de aplicação e
     expect(offenders).toEqual([]);
   });
   test('o e-mail dos vouchers e a página pública não prometem os 10% enquanto não houver texto oficial aprovado', () => {
-    const email = text(join(SRC, 'vale-pass/email/email-template.ts'));
-    const strings = email.split('\n').filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line)).join('\n');
-    expect(strings).not.toMatch(/10\s?%|desconto|passeio|transfer/i);
+    const code = (file: string) => text(file).split('\n').filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line)).join('\n');
+    const customerFacing = [
+      join(SRC, 'vale-pass/email/email-template.ts'),
+      join(SRC, '../../marketing/src/app/valle-pass/page.tsx'), // página pública /valle-pass
+      join(SRC, '../../marketing/src/lib/vale-pass-offer.ts'), // textos da oferta (vouchers, validade, passos)
+    ];
+    for (const file of customerFacing) expect(code(file), file).not.toMatch(/10\s?%|desconto|passeio|transfer/i);
   });
   test('nenhum código da API ou do site cria, aplica ou lê cupom/desconto na Shopify (a integração Admin é só leitura e sem escopo de descontos)', () => {
     const offenders = production.filter((file) => /discountCodeBasic|discountAutomatic|cartDiscountCodesUpdate|priceRuleCreate|discountCodeCreate/i.test(text(file))).map(rel);
