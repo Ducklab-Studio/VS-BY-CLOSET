@@ -62,3 +62,8 @@ Identidade visual*/
 # Pasta local com envs reais prontas pra colar na Vercel/Railway —
 # nunca deve ir pro Git.
 /env-config/
+
+# Dumps de banco (dados reais): nunca versionar
+*.dump
+*.dump.sha256
+*.dump.verify.json
