@@ -92,7 +92,7 @@ describe('nextAttemptAt — escada de novas tentativas', () => {
 describe('decideAutoVerification — Pix com pagamento DEMORADO (a transação traz a cobrança; o evento traz a confirmação)', () => {
   const sale = (at: string) => ({ action: 'sale_success', createdAt: at });
   const pixInput = (chargeAt: string, events: { action: string; createdAt: string }[] | null, over: Partial<AutoVerifyInput> = {}) =>
-    input({ fetched: { orderGid: GID, totalAmount: '350.00', currency: 'BRL', transactions: [tx({ processedAt: chargeAt, gateway: 'Mercado Pago Pix' })], successEvents: events }, ...over });
+    input({ fetched: { orderGid: GID, totalAmount: '350.00', currency: 'BRL', transactions: [tx({ processedAt: chargeAt, gateway: 'Gateway Pix' })], successEvents: events }, ...over });
 
   test('Pix pago 4 h depois da cobrança, webhook no momento da confirmação → CONFIRMA com o instante da confirmação (antes: TRANSACTION_DIVERGENT)', () => {
     const decision = decideAutoVerification(pixInput('2026-10-18T08:00:00Z', [sale(PAID)]));

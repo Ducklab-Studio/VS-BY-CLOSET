@@ -52,7 +52,7 @@ describe('paymentInstantFromTransactions — instante EFETIVO da confirmação (
   const withEvents = (transactions: ShopifyTransaction[], events: { action: string; createdAt: string }[] | null, total = '350.00'): ShopifyOrderTransactions => ({ ...order(transactions, total), successEvents: events });
 
   test('Pix REAL medido em produção (#1013, 30/10/2026): transação em 04:40:01 (cobrança), sale_success em 04:42:00 → vale 04:42:00', () => {
-    const pix = tx({ processedAt: '2026-10-30T04:40:01Z', gateway: 'Mercado Pago Pix' });
+    const pix = tx({ processedAt: '2026-10-30T04:40:01Z', gateway: 'Gateway Pix' });
     const verdict = paymentInstantFromTransactions(withEvents([pix], [sale('2026-10-30T04:42:00Z')]));
     expect(verdict).toMatchObject({ instant: new Date('2026-10-30T04:42:00Z'), reason: 'OK', used: 1, basis: 'SUCCESS_EVENT' });
   });

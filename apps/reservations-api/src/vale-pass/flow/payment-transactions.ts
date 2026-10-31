@@ -34,7 +34,7 @@ export interface ShopifyPaymentSuccessEvent {
 }
 
 /**
- * Eventos da linha do tempo que marcam a CONFIRMAÇÃO EFETIVA do pagamento. Para Pix (Mercado Pago, medido em produção em 30/10/2026) a transação SALE/SUCCESS
+ * Eventos da linha do tempo que marcam a CONFIRMAÇÃO EFETIVA do pagamento. Para Pix (gateway de Pix da loja, medido em produção em 30/10/2026) a transação SALE/SUCCESS
  * carrega `createdAt` = `processedAt` = o instante em que a COBRANÇA foi criada (33 s antes do pedido existir); o pagamento só é confirmado minutos ou horas
  * depois e isso aparece na linha do tempo como `sale_success` (cartão com captura posterior: `capture_success`).
  */
