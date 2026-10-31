@@ -1409,6 +1409,18 @@ body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     max-width: 1100px;
   }
+  /* Centering logic when there are exactly 2 items */
+  .product-grid:has(> :nth-child(2):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 700px;
+    margin-inline: auto;
+  }
+  /* Centering logic when there is exactly 1 item */
+  .product-grid:has(> :nth-child(1):last-child) {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 380px;
+    margin-inline: auto;
+  }
 }
 .product-editorial {
   display: block;
