@@ -32,6 +32,11 @@ export interface VoucherEmailInput {
   readonly timeZone?: string;
   /** URL HTTPS pública do logotipo claro (ex.: /brand/logo-horizontal-cream.png). Ausente/ inválida = monograma em texto. */
   readonly logoUrl?: string | null;
+  /**
+   * Endereço HTTPS dos termos e condições OFICIAIS (padrão: VALE_PASS_EMAIL_TERMS_URL). Ausente/inválido = nenhum link: o e-mail NUNCA aponta para termos que ainda não
+   * foram publicados e aprovados.
+   */
+  readonly termsUrl?: string | null;
   /** Campanha de TESTE (mesmo critério que bloqueia o resgate: `isTestCampaign`): assunto "[TESTE]" e faixa visível. A campanha oficial nunca recebe a marcação. */
   readonly testCampaign?: boolean;
 }
@@ -138,6 +143,7 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
   const greeting = name ? `Olá, ${name}!` : 'Olá!';
   const intro = `${greeting} Obrigada pela sua compra do Valle Pass 2027. Aqui estão os seus vouchers${input.orderName ? ` (pedido ${input.orderName})` : ''}.`;
   const unitLine = multi && input.unit ? `Valle Pass ${input.unit.index} de ${input.unit.total} do seu pedido.` : null;
+  const termsUrl = safeLogoUrl(input.termsUrl !== undefined ? input.termsUrl : process.env.VALE_PASS_EMAIL_TERMS_URL);
   const contactText = input.replyTo ? `Dúvidas? Responda este e-mail ou escreva para ${input.replyTo}.` : 'Dúvidas? Responda este e-mail.';
 
   const brandMark = (size: 'lg' | 'sm') =>
@@ -221,7 +227,12 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
         <div style="height:26px;line-height:26px;font-size:0;">&nbsp;</div>
         <div class="br" style="font-family:${SANS};font-size:11px;line-height:16px;letter-spacing:4px;text-transform:uppercase;color:${C.bronze};font-weight:bold;text-align:center;">Informações importantes</div>
         <h2 class="tx" style="margin:6px 0 20px 0;font-family:${SERIF};font-size:24px;line-height:32px;color:${C.marsala};font-weight:normal;text-align:center;">Como utilizar seus benefícios</h2>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${terms}</table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${terms}</table>${
+          termsUrl
+            ? `
+        <div style="padding:6px 0 0 0;text-align:center;font-family:${SANS};font-size:13px;line-height:20px;"><a href="${escapeHtml(termsUrl)}" class="br" style="color:${C.bronze};text-decoration:underline;">Ler os termos e condições do Valle Pass</a></div>`
+            : ''
+        }
       </td></tr>
       <tr><td class="sheet" bgcolor="${C.cream}" style="background:${C.cream};font-size:0;line-height:0;height:26px;">&nbsp;</td></tr>
       <tr><td align="center" bgcolor="${C.marsalaDark}" class="px" style="background:${C.marsalaDark};padding:34px 30px 30px 30px;">
@@ -261,6 +272,7 @@ export function renderVoucherEmail(input: VoucherEmailInput): { subject: string;
     line,
     'COMO UTILIZAR SEUS BENEFÍCIOS',
     ...EMAIL_TERMS.map((entry) => `- ${entry}`),
+    ...(termsUrl ? ['', `Termos e condições do Valle Pass: ${termsUrl}`] : []),
     '',
     contactText,
     '',
