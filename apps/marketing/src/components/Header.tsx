@@ -7,9 +7,10 @@ import { usePathname } from 'next/navigation';
 import { Menu, X, User, ArrowUpRight } from 'lucide-react';
 import { CartDrawer } from '@/components/CartDrawer';
 
-const navLinks = [
+const navLinks: { href: string; label: string; highlight?: boolean }[] = [
   { href: '/pecas', label: 'Peças' },
   { href: '/como-funciona', label: 'Como funciona' },
+  { href: '/valle-pass', label: 'Valle Pass', highlight: true },
   { href: '/faq', label: 'Dúvidas' },
   { href: '/contato', label: 'Contato' },
 ];
@@ -85,6 +86,7 @@ export function Header() {
               key={link.href}
               href={link.href}
               aria-current={pathname === link.href ? 'page' : undefined}
+              className={link.highlight ? 'is-highlight' : undefined}
             >
               {link.label}
             </Link>
@@ -105,6 +107,7 @@ export function Header() {
               key={link.href}
               href={link.href}
               aria-current={pathname === link.href ? 'page' : undefined}
+              className={link.highlight ? 'is-highlight' : undefined}
               onClick={() => setMobileOpen(false)}
             >
               <span className="boutique-menu-number">0{index + 1}</span>

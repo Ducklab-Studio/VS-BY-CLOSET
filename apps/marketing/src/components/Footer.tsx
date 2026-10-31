@@ -10,6 +10,7 @@ const columns = [
     links: [
       { href: '/pecas', label: 'Todas as peças' },
       { href: '/como-funciona', label: 'Como funciona' },
+      { href: '/valle-pass', label: 'Valle Pass 2027' },
       { href: '/faq', label: 'Perguntas frequentes' },
     ],
   },
