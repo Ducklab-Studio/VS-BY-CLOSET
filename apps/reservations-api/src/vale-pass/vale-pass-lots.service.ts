@@ -34,6 +34,7 @@ export type CapacityAlertCode =
   | 'PAYMENT_TIME_UNKNOWN'
   | 'REFUND_REVIEW_OPEN'
   | 'CANCELLED_ORDER_CREDIT_USED'
+  | 'ACTIVE_VOUCHERS_ORDER_NOT_PAID'
   | 'OPEN_LOT_SOLD_OUT';
 
 /** Retenção aberta há mais que isso pede ação imediata: o cliente já pagou e o prazo de 3 dias para os códigos corre desde o pagamento. */
@@ -169,6 +170,14 @@ export class ValePassLotsService {
       : [];
     const refundOrderNames = new Map(refundOrders.map((order) => [order.shopifyOrderId, order.shopifyOrderName]));
     const cancellationRows = await this.prisma.valePassCancellationAlert.findMany({ where: { status: 'OPEN', campaignId }, orderBy: { createdAt: 'asc' }, take: 50 });
+    // Invariante (só leitura, sem dado pessoal): voucher ATIVO cujo pedido registrado está cancelado, expirado ou pendente (ou tem cancelamento confirmado) nunca deveria existir —
+    // o webhook cancela os ativos na mesma transação. REFUNDED fica de fora: reembolso é decisão do ADMIN e já tem o próprio alerta (REFUND_REVIEW_OPEN).
+    const activeUnpaid = await this.prisma.$queryRaw<{ vouchers: number; orders: number }[]>`
+      SELECT count(*)::int AS vouchers, count(DISTINCT v.shopify_order_id)::int AS orders
+      FROM vale_passes v
+      WHERE v.campaign_id = ${campaignId}::uuid AND v.status = 'ACTIVE' AND v.shopify_order_id IS NOT NULL
+        AND (EXISTS (SELECT 1 FROM vale_pass_orders o WHERE o.shopify_order_id = v.shopify_order_id AND o.status IN ('CANCELLED', 'EXPIRED', 'PENDING'))
+          OR EXISTS (SELECT 1 FROM vale_pass_order_cancellations c WHERE c.shopify_order_id = v.shopify_order_id))`;
     const benefitRows = await this.prisma.valePassCampaignBenefit.findMany({ where: { campaignId }, orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] });
     const issuedByBenefit = await this.prisma.$queryRaw<{ benefitId: string; n: number }[]>`
       SELECT benefit_id::text AS "benefitId", count(*)::int AS n FROM vale_passes WHERE campaign_id = ${campaignId}::uuid AND benefit_id IS NOT NULL GROUP BY benefit_id`;
@@ -251,6 +260,13 @@ export class ValePassLotsService {
         code: 'CANCELLED_ORDER_CREDIT_USED',
         severity: 'critical',
         message: `${cancellationRows.length} pedido(s) foram cancelados ou reembolsados DEPOIS de o crédito ser utilizado (total de ${formatBRL(cancellationRows.reduce((sum, row) => sum + row.usedCents, 0))} já consumido). Os vouchers não utilizados foram cancelados e nada foi alterado em saldos; confira o reembolso e a conciliação com o financeiro e marque como conferido.`,
+      });
+    }
+    if ((activeUnpaid[0]?.vouchers ?? 0) > 0) {
+      alerts.push({
+        code: 'ACTIVE_VOUCHERS_ORDER_NOT_PAID',
+        severity: 'critical',
+        message: `${activeUnpaid[0].vouchers} voucher(s) ATIVO(S) de ${activeUnpaid[0].orders} pedido(s) cujo pagamento não está confirmado (pedido cancelado, expirado ou pendente). Não use esses vouchers: bloqueie ou cancele pelo painel após conferir o pedido na Shopify.`,
       });
     }
     if (refundRows.length > 0) {
