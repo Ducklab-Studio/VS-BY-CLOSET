@@ -7,6 +7,7 @@ import {
   postTermsAcceptance,
   type PublicTermsData,
 } from '@/lib/vale-pass-terms-api';
+import { isOfficialTermsMatch } from '@/lib/vale-pass-official-terms';
 import { valePassCheckoutWithTermsToken } from '@/lib/vale-pass-product';
 import type { ValePassOffer } from '@/lib/vale-pass-offer-data';
 import { valePassClosedNote } from '@/lib/vale-pass-sale';
@@ -31,8 +32,16 @@ export function VallePassTermsBox({ offer, variantId, where }: VallePassTermsBox
     setErrorMessage(null);
     const result = await fetchPublicTerms();
     if (result.ok && result.status === 200) {
-      setTerms(result.terms);
-      setTermsStatus('approved');
+      if (isOfficialTermsMatch(result.terms)) {
+        setTerms(result.terms);
+        setTermsStatus('approved');
+      } else {
+        // Fail closed: hash ou versão retornados pela API não batem com o documento oficial embutido.
+        // Bloqueia a compra e mantém indisponível sem vazar o hash no cliente.
+        setTerms(null);
+        setTermsStatus('error');
+        console.error('[VallePassTermsBox] Hash ou versão da API diverge dos termos oficiais 2027-1 embutidos.');
+      }
     } else if (result.status === 404) {
       setTerms(null);
       setTermsStatus('not_approved');
@@ -60,7 +69,14 @@ export function VallePassTermsBox({ offer, variantId, where }: VallePassTermsBox
   }, []);
 
   async function handleBuy() {
-    if (!accepted || submitting || !terms) return;
+    if (!accepted || submitting || !terms || !isOfficialTermsMatch(terms)) {
+      if (terms && !isOfficialTermsMatch(terms)) {
+        setAccepted(false);
+        setTerms(null);
+        setTermsStatus('error');
+      }
+      return;
+    }
 
     setSubmitting(true);
     setErrorMessage(null);

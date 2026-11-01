@@ -3051,6 +3051,88 @@ body {
   font-weight: 600;
   color: theme('colors.marsala.DEFAULT');
 }
+.legal-section h3 {
+  font:
+    600 20px/1.4 Georgia,
+    serif;
+  letter-spacing: -0.015em;
+  color: theme('colors.marsala.DEFAULT');
+  margin: 24px 0 12px;
+}
+.vp-terms-brand-title {
+  font:
+    600 14px/1.4 Arial,
+    sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: theme('colors.marsala.DEFAULT');
+  margin-top: 18px;
+  margin-bottom: 6px;
+}
+.vp-terms-letter-list {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 14px;
+}
+.vp-terms-letter-list li {
+  margin-bottom: 10px;
+  line-height: 1.85;
+  color: #605650;
+  font-size: 16px;
+}
+.vp-terms-version-badge-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.vp-terms-version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #53131e14;
+  color: theme('colors.marsala.DEFAULT');
+  border: 1px solid #53131e24;
+}
+.vp-terms-validity-badge {
+  font-size: 13px;
+  color: #78594e;
+  font-weight: 500;
+}
+.vp-terms-doc-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #78594e;
+  margin-bottom: 8px;
+}
+.vp-terms-signature {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px dashed #53131e24;
+}
+.vp-terms-signature-group {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  color: theme('colors.marsala.DEFAULT');
+  margin-bottom: 4px;
+}
+.vp-terms-signature-brands {
+  font-size: 14px;
+  color: #78594e;
+  margin-bottom: 8px;
+}
+.vp-terms-signature-tagline {
+  font-size: 15px;
+  font-style: italic;
+  color: #605650;
+}
 .guide-heading {
   padding: 60px 0 45px;
   border-bottom: 1px solid #53131e22;

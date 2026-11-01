@@ -30,7 +30,7 @@ test('a venda só está aberta quando a Shopify diz explicitamente que a variant
 test('a data NUNCA abre a venda: o estado não depende de relógio nem de data prevista', () => {
   assert.equal(sale.valePassSaleState.length, 1, 'o estado recebe só a variante');
   const source = readFileSync(new URL('src/lib/vale-pass-sale.ts', root), 'utf8');
-  const body = /export function valePassSaleState[\s\S]*?\n}\n/.exec(source)[0];
+  const body = /export function valePassSaleState[\s\S]*?\r?\n}\r?\n/.exec(source)[0];
   assert.ok(!/Date|now|VALE_PASS_EXPECTED_SALES_START/.test(body), 'valePassSaleState não pode olhar para datas');
 });
 
