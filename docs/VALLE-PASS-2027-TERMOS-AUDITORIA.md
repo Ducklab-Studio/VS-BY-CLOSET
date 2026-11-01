@@ -19,7 +19,7 @@
 ## 2. Estratégia de versionamento proposta (NÃO implementada)
 Só faz sentido depois de o texto existir. Esboço para revisão:
 1. Constante `VALE_PASS_TERMS_VERSION` (ex.: `2027-1`) vinculada ao texto aprovado; qualquer mudança de conteúdo exige nova versão e preserva a anterior (arquivo/arquivo-histórico), nunca sobrescreve.
-2. Registrar por pedido (atributo do carrinho/nota do pedido na Shopify e linha local em `vale_pass_orders` ou tabela própria): versão, data/hora do aceite e identificador do pedido. Exige **migration** e mudança no carrinho/checkout: decisão e autorização separadas.
+2. Registrar por pedido (atributo do carrinho/nota do pedido na Shopify e linha local em `vale_pass_orders` ou tabela própria): versão, data/hora do aceite e identificador do pedido. O registro do que chegar no pedido dispensa migration (ver PR do aceite, `VALLE-PASS-2027-ACEITE-TERMOS.md`); produzir o aceite exige mudança no carrinho/checkout: decisão e autorização separadas.
 3. Teste de regressão: pedido sem versão aceita não emite voucher *comercial* (decisão do Anderson: bloquear ou apenas alertar).
 Não implementado: criaria schema e fluxo de checkout sobre texto que ainda não existe e dependeria de decisão jurídica sobre o que provar.
 
