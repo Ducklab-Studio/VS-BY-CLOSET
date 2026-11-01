@@ -225,7 +225,7 @@ try {
   assert.equal(redeemAudit.length, 2);
   assert.equal(redeemAudit[1].detail.identityChecked, true, 'e na auditoria administrativa');
   assert.equal(redeemAudit[0].detail.identityChecked, true);
-  pass('3) novo resgate de R$ 100 → saldo R$ 200; histórico com valor, saldo resultante, referência e operador; "Usar saldo total" só preenche o campo; identidade conferida é opcional e fica no histórico e na auditoria');
+  pass('3) novo resgate de R$ 100 → saldo R$ 200; histórico com valor, saldo resultante, referência e operador; "Usar saldo total" só preenche o campo; identidade conferida é obrigatória, refeita a cada resgate, e fica no histórico e na auditoria');
 
   // 3) Outra empresa: R$ 50 − R$ 20 = R$ 30, sem tocar no saldo da Valle Showroom.
   await consult(page, B);
