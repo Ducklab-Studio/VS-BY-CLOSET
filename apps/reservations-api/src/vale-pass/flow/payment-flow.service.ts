@@ -13,6 +13,7 @@ import { ValePassIssuanceService, type IssuanceOrder } from '../vale-pass-issuan
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { absorbedUnissuedUnits } from '../refunds/refund.service';
 import { ValePassRegularizationService, type RegularizationCandidate, type RegularizationOutcome } from '../refunds/regularization.service';
+import { readTermsEvidence, TERMS_EVIDENCE_EVENT } from './terms-evidence';
 import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, QUANTITY_INCREASED_UNPROVEN, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
 
 type Tx = Prisma.TransactionClient;
@@ -128,6 +129,16 @@ export class ValePassPaymentFlowService {
     return units - (rows[0]?.n ?? 0) - (await absorbedUnissuedUnits(tx, orderId));
   }
 
+  /** Grava, no histórico do pedido, o que a vitrine declarou sobre o aceite dos termos (ver terms-evidence.ts). Só grava quando o estado muda: reentrega não duplica. */
+  private async recordTermsEvidence(tx: Tx, valePassOrderId: string, payload: ShopifyOrderPayload): Promise<void> {
+    const evidence = readTermsEvidence(payload);
+    const last = await tx.valePassOrderEvent.findFirst({ where: { valePassOrderId, type: TERMS_EVIDENCE_EVENT }, orderBy: { createdAt: 'desc' }, select: { detail: true } });
+    const previous = (last?.detail ?? null) as { status?: string; version?: string; reason?: string } | null;
+    const same = previous !== null && previous.status === evidence.status && previous.version === ('version' in evidence ? evidence.version : undefined) && previous.reason === ('reason' in evidence ? evidence.reason : undefined);
+    if (same) return;
+    await tx.valePassOrderEvent.create({ data: { valePassOrderId, type: TERMS_EVIDENCE_EVENT, detail: { ...evidence, source: 'order_note_attributes', note: 'declarado pela vitrine; não é prova jurídica por si só' } } });
+  }
+
   async processPaidOrder(
     tx: Tx,
     input: { payload: ShopifyOrderPayload; registry: ValePassOrder | null; campaigns: readonly ValePassCampaign[]; source: string },
@@ -145,6 +156,9 @@ export class ValePassPaymentFlowService {
     };
     // A quantidade confiável é a do REGISTRO do pedido. Sem registro (nunca deveria acontecer neste ponto) usa-se o payload só para dimensionar a retenção.
     const units = registry?.quantity ?? campaigns.reduce((sum, c) => sum + (payload.line_items ?? []).filter((l) => String(l.variant_id) === c.shopifyVariantId.replace(/^.*\//, '')).reduce((s, l) => s + (l.quantity ?? 0), 0), 0);
+
+    // Evidência do aceite dos termos (somente registro; nunca bloqueia nem inventa consentimento).
+    if (registry) await this.recordTermsEvidence(tx, registry.id, payload);
 
     const hold = async (issues: { code: string; detail?: Record<string, unknown> }[], reason: string): Promise<FlowEvent[]> => {
       if (units < 1) return [{ type: 'VALE_PASS_ORDER_WITHOUT_TREATMENT', detail: { orderId, reason: 'sem unidades para reter', issues: issues.map((i) => i.code) } }];
