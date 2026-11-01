@@ -96,14 +96,18 @@
   align-items: start;
 }
 .product-gallery {
+  /* A moldura acompanha a proporção das fotos do catálogo (2:3, 1080×1616): sem faixas vazias nas laterais. A altura-alvo vem de --gallery-h. */
+  --gallery-h: 620px;
   min-width: 0;
+  width: 100%;
+  max-width: calc(var(--gallery-h) * 0.668);
+  margin-inline: auto;
 }
 .gallery-main {
   display: block;
   position: relative;
   width: 100%;
-  aspect-ratio: 3/4;
-  max-height: 620px;
+  aspect-ratio: 1080/1616;
   overflow: hidden;
   background: #f2eee8;
   border-radius: 3px 22px 3px 3px;
@@ -121,22 +125,19 @@ button.gallery-main {
   object-position: center;
 }
 .gallery-expand {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
   color: #53131e;
-  background: #fffcf6ed;
+}
+@media (max-width: 639px) {
+  .gallery-expand {
+    width: 40px;
+    padding: 0;
+  }
 }
 .gallery-caption {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 10px;
+  margin-top: 14px;
   color: #73645b;
   font-size: 11px;
   line-height: 1.5;
@@ -439,12 +440,9 @@ button.gallery-main {
     gap: 24px;
   }
   .product-gallery {
+    --gallery-h: max(360px, min(720px, calc(100dvh - 270px)));
     position: sticky;
     top: 138px;
-  }
-  .gallery-main {
-    max-height: min(720px, calc(100dvh - 270px));
-    min-height: 360px;
   }
   .gallery-thumbnails button {
     width: 64px;
@@ -504,8 +502,8 @@ button.gallery-main {
   .storefront .cart-drawer {
     width: 70vw;
   } /* carrinho cobre só 70% da tela no mobile */
-  .product-gallery .gallery-main {
-    max-height: 480px;
+  .product-gallery {
+    --gallery-h: 480px;
   }
   .product-detail-info > .mt-8 {
     margin-top: 24px;
