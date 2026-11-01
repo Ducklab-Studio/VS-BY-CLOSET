@@ -44,3 +44,20 @@ Dois vouchers independentes por unidade, saldo/ledger com resgate e reversão, b
 4. **Resgate por loja:** quem opera cada loja, se STAFF pode resgatar, se um operador pode atuar nas duas.
 5. Pendências anteriores: data de início da validade, lotes, condições dos 10% em passeios, fuso (Brasil/Chile).
 6. Se, ao fim, "intransferível" também significa **titular fixo** (nome do comprador no ato do resgate): exigir conferência de identidade na loja?
+
+## Registro das decisões confirmadas (26 e 27/10/2026) e onde estão no sistema
+Só entram aqui decisões que o Anderson confirmou (fonte: `VALLE-PASS-2027-APROVACAO-COMERCIAL.md`). O que continua indefinido **não** foi transformado em regra.
+
+| Decisão confirmada | Onde está no sistema | Estado |
+|---|---|---|
+| Preço R$ 350 e limite global de 1.000 | `OFFICIAL_SPEC` (`vale-pass-launch-readiness.ts`) e `VALE_PASS_GLOBAL_LIMIT` | Implementado e testado |
+| Lotes de exatamente 100 unidades (10 lotes) | `VALE_PASS_LOT_UNITS`, validação do DTO e do ClosetAdmin; `OFFICIAL_SPEC.lotUnits` | Implementado; nenhum lote criado ou aberto |
+| Validade 01/04/2027 a 15/10/2027 | Campanha oficial e `OFFICIAL_SPEC` | Configurada |
+| Encerramento em 31/05/2027 **ou** ao esgotar as 1.000 unidades | Data informativa na campanha; o esgotamento é o estoque 0 na Shopify | Registrado; o sistema não encerra a venda sozinho |
+| Dois vouchers independentes: R$ 500 Valle Showroom e R$ 50 VS BY CLOSET | Benefícios da campanha e emissão de dois vouchers por unidade | Implementado e homologado (#1015) |
+| Vouchers intransferíveis | Texto do site, da oferta e do rascunho dos termos; não existe transferência no sistema | Texto aprovado só no rascunho; blindagem no banco **não feita** (exige migration) |
+| Anderson responsável pelas retenções | Checklist e runbook de retenções | Titular registrado; **substituto e canal pendentes** |
+| 10% nos passeios e transfers da Valle Experience, sobre o valor final do orçamento, **aplicado manualmente** | Benefício descritivo (sem código nem saldo) e `OFFICIAL_SPEC.discount*` | Descritivo; **sem automação** |
+| Reembolso integral de R$ 350 em até 3 dias úteis pela mesma forma de pagamento, se faltar roupa ou tamanho | Registrado no checklist e no runbook de reembolsos | **Não automatizado**; depende de parecer jurídico |
+
+**Continua indefinido (não presumir):** frequência de uso dos 10%, número de pessoas cobertas, elegibilidade adicional, efeito de cancelamento ou reembolso sobre os 10%, substituto das retenções, política de STAFF, texto dos termos e parecer jurídico.

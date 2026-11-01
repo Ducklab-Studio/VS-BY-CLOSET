@@ -2,7 +2,7 @@
 
 **Status:** procedimento OPERACIONAL do que o sistema já faz. **Não define política comercial nem jurídica.** Tudo que depende de decisão do Anderson ou de parecer jurídico está marcado como **[DECISÃO PENDENTE]** e permanece sob decisão humana. O sistema nunca reembolsa: o dinheiro só é devolvido na Shopify, por uma pessoa.
 
-Onde: ClosetAdmin → Valle Pass. Quem resolve: **ADMIN** (ou SUPER_ADMIN). STAFF só consulta. Titular e substituto: **[DECISÃO PENDENTE — Anderson]**.
+Onde: ClosetAdmin → Valle Pass. Quem resolve: **ADMIN** (ou SUPER_ADMIN). STAFF só consulta. Titular: **Anderson** (confirmado em 26/10/2026). Substituto e canal de aviso: **[DECISÃO PENDENTE — Anderson]**.
 
 ## 1. Princípios (já garantidos pelo código)
 - Um pagamento confirmado **nunca some**: ou vira vouchers dentro da capacidade, ou fica **retido** na fila "Pagamentos confirmados aguardando resolução".
@@ -73,3 +73,12 @@ O crédito usado **não é desfeito**. O ADMIN confere o reembolso/conciliação
 2. Nunca reembolsar pelo sistema: só na Shopify.
 3. Sempre registrar a justificativa e quem autorizou.
 4. Em dúvida, **manter retido** e escalar ao titular/substituto **[DECISÃO PENDENTE]**.
+
+## Regra comercial informada para reembolso (registro; NÃO automatizada)
+Informada pelo Anderson em 26/10/2026 e ainda **sem validação jurídica**:
+- Quando **não houver roupa ou tamanho disponível**: reembolso **integral de R$ 350,00**, **em até 3 dias úteis**, pela **mesma forma de pagamento** (estorno no cartão ou Pix), após o comparecimento à loja.
+- **Crédito usado (qualquer parte) não tem reembolso**; arrependimento de **7 dias** a validar juridicamente.
+
+**O que o sistema faz hoje:** nada disto é automático. O reembolso é feito **na Shopify** por uma pessoa; o ClosetAdmin só registra a revisão e bloqueia o uso enquanto ela existir. O módulo de reembolso por unidade (PR #107) segue isolado e desligado.
+
+**Não automatizar antes de resolver (decisões do Anderson e do jurídico):** conflito entre crédito já usado e falta de roupa/tamanho, relação com o direito de arrependimento de 7 dias, quem confere e autoriza na loja, e quem executa o estorno dentro dos 3 dias úteis.

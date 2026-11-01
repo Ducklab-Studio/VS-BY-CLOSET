@@ -16,9 +16,15 @@ export const OFFICIAL_SPEC = {
     { company: 'VS_BY_CLOSET', amountCents: 5_000 },
   ],
   discountPercent: 10,
+  /** Desconto de 10% (Anderson, 26/10/2026): passeios e transfers da Valle Experience, sobre o valor final do orçamento, aplicado MANUALMENTE pela equipe. Nada além disto está definido. */
+  discountScope: 'passeios e transfers da Valle Experience',
+  discountBase: 'valor final do orçamento',
+  discountApplication: 'manual',
+  /** Cada lote tem exatamente 100 unidades (10 lotes = 1.000 passes). */
+  lotUnits: 100,
   /** Início das vendas previsto (01/11/2026). O sistema NÃO tem data de início de vendas: a venda é controlada pelo estoque da Shopify. */
   salesStart: '2026-11-01',
-  /** Encerramento previsto: último dia de maio de 2027 (ou esgotamento do estoque — interpretação comercial ainda a confirmar). */
+  /** Encerramento confirmado pelo Anderson (26/10/2026): 31/05/2027 OU ao esgotar as 1.000 unidades, o que vier primeiro. O sistema só registra a data; o esgotamento é o estoque 0 na Shopify. */
   salesEndLastDay: '2027-05-31',
 } as const;
 
@@ -98,7 +104,7 @@ export function evaluateLaunchReadiness(input: ReadinessInput): ReadinessItem[] 
       ? item('discount', 'OK', '10% em passeios/transfers cadastrado (descritivo)')
       : item('discount', 'DIVERGENCE', 'benefício descritivo de 10% em passeios/transfers (Valle Experience) não cadastrado'),
   );
-  if (discount && !discount.terms?.trim()) out.push(item('discount-terms', 'PENDING', 'condições do desconto de 10% sem texto aprovado pelo Anderson'));
+  if (discount && !discount.terms?.trim()) out.push(item('discount-terms', 'PENDING', 'texto das condições do desconto de 10% sem aprovação do Anderson. Confirmado: passeios e transfers da Valle Experience, 10% sobre o valor final do orçamento, aplicado manualmente pela equipe. Indefinido (não presumir): frequência de uso, número de pessoas, elegibilidade adicional e efeito de cancelamento/reembolso'));
 
   out.push(
     campaign.voucherValidUntil === OFFICIAL_SPEC.voucherValidUntil
@@ -117,8 +123,8 @@ export function evaluateLaunchReadiness(input: ReadinessInput): ReadinessItem[] 
   // Janela de vendas: o início não é campo do sistema (a Shopify controla pelo estoque); o encerramento é só informativo.
   out.push(item('sales-start', 'PENDING', `início das vendas previsto em 01/11/2026: o sistema não tem data de início; a venda abre quando o estoque da Shopify for ajustado ao saldo do lote 1 (hoje deve estar em 0)`));
   const salesEnd = campaign.salesEndDate ?? null;
-  if (salesEnd === null) out.push(item('sales-end', 'PENDING', 'encerramento das vendas (último dia de maio de 2027 ou esgotamento do estoque) não registrado: interpretação comercial a confirmar; nenhum encerramento automático existe'));
-  else if (salesEnd === OFFICIAL_SPEC.salesEndLastDay) out.push(item('sales-end', 'OK', 'encerramento informativo registrado em 31/05/2027 (o esgotamento do estoque encerra antes; nada é encerrado automaticamente)'));
+  if (salesEnd === null) out.push(item('sales-end', 'PENDING', 'encerramento das vendas não registrado na campanha: o Anderson confirmou 31/05/2027 ou o esgotamento das 1.000 unidades, o que vier primeiro; falta registrar a data (nenhum encerramento automático existe)'));
+  else if (salesEnd === OFFICIAL_SPEC.salesEndLastDay) out.push(item('sales-end', 'OK', 'encerramento informativo registrado em 31/05/2027, como confirmado pelo Anderson (ou ao esgotar as 1.000 unidades, o que vier primeiro; nada é encerrado automaticamente)'));
   else out.push(item('sales-end', 'DIVERGENCE', `encerramento registrado em ${salesEnd}; previsto: ${OFFICIAL_SPEC.salesEndLastDay}`));
 
   if (!input.hasOpenLot) out.push(item('lot', 'PENDING', 'nenhum lote comercial aberto (quantidades e datas de lote dependem do Anderson); sem lote o estoque recomendado é 0'));
