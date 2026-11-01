@@ -90,6 +90,8 @@ export function holdGuidance(reason: HoldReason, issues: readonly string[] = [])
   }
   if (issues.includes('INTEGRATION_DISABLED')) parts.push('O pagamento chegou com a integração dos dois vouchers desligada: ele só é retomado quando a chave for ligada com autorização.');
   if (issues.includes('PAYMENT_TIME_UNKNOWN')) parts.push('O instante real do pagamento é desconhecido: conferir o horário na Shopify ("Conferir na Shopify", no painel de integração financeira) antes de emitir.');
+  if (issues.includes('SALES_CLOSED')) parts.push('O pedido foi criado depois do encerramento das vendas. Nada foi cancelado nem reembolsado: um administrador decide (emitir com justificativa ou devolver o valor pela Shopify).');
+  if (issues.includes('SALES_ORDER_DATE_UNKNOWN')) parts.push('A data de criação do pedido não pôde ser confirmada: conferir na Shopify se foi criado antes do encerramento das vendas.');
   if (issues.includes('TEST_ORDER')) parts.push('É um pedido de teste da Shopify: não deve gerar voucher comercial.');
   return parts.join(' ');
 }
