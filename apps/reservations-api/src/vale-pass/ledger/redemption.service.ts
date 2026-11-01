@@ -7,6 +7,7 @@ import { lockShopifyOrder } from '../../webhooks/shopify-order-lock';
 import { maskCode, maskEmail } from '../email/email-mask';
 import { maskName, maskPhone } from '../vale-pass-pii-mask';
 import { isTestCampaignVoucher, TEST_CAMPAIGN_BLOCK_MESSAGE } from '../vale-pass-test-campaign';
+import { identityCheckRequired } from '../vale-pass-identity-confirmation';
 import { ledgerRefusal } from './ledger-errors';
 import { formatBRL, parsePositiveCents } from './money';
 import { activeCompanies, authorizeCompany } from './operator-scope.service';
@@ -119,7 +120,7 @@ const conflict = (code: string, message: string, extra: Record<string, unknown> 
  *
  * Autorização por ESTABELECIMENTO (backend, dentro da transação, sob o lock do voucher): o operador só resgata/reverte vouchers da empresa em que está
  * explicitamente autorizado (`vale_pass_operator_scopes`). Sem autorização nenhuma, STAFF não opera; ADMIN sem autorização explícita mantém o acesso administrativo
- * atual até a política de migração ser definida; SUPER_ADMIN opera as duas. Ver `operator-scope.ts`. STAFF só consulta, com dados mascarados.
+ * atual até a política de migração ser definida; SUPER_ADMIN opera as duas. Ver `operator-scope.ts`. STAFF consulta com dados mascarados e só resgata nas empresas explicitamente vinculadas a ele.
  * Nenhum endpoint público; conhecer o código do voucher não dá acesso a nada.
  */
 @Injectable()
@@ -164,6 +165,7 @@ export class ValePassRedemptionService {
     code: string,
     input: { company: string; amountCents: number; reference: string; operationId: string; expectedBalanceCents: number; confirmAmountCents: number; identityChecked?: boolean },
     actor: Actor,
+    options: { requireIdentity?: boolean } = {},
   ): Promise<OperationResult> {
     await this.requireAnyAuthorization(actor);
     const amount = parsePositiveCents(input.amountCents);
@@ -178,6 +180,8 @@ export class ValePassRedemptionService {
       const basis = await this.authorizeVoucher(tx, actor, voucher);
       const replay = await this.replayOf(tx, voucher, input.operationId, requestHash, 'REDEEM');
       if (replay) return replay;
+      // Intransferibilidade: depois da autorização (quem não pode operar continua recebendo 403) e antes de qualquer gravação, o resgate exige o registro da conferência de identidade.
+      if (options.requireIdentity && input.identityChecked !== true) throw identityCheckRequired();
       // Prévia antiga primeiro: se o saldo mudou, o operador precisa rever o voucher antes de qualquer outra coisa.
       if (voucher.balanceCents !== input.expectedBalanceCents) {
         throw conflict('BALANCE_CHANGED', `O saldo mudou desde a prévia (agora ${formatBRL(voucher.balanceCents)}). Confira e tente de novo.`, { balanceCents: voucher.balanceCents });
@@ -185,7 +189,7 @@ export class ValePassRedemptionService {
       const problems = await this.redeemProblems(tx, voucher, input.company, amount);
       if (problems.length > 0) throw conflict(problems[0].code, problems[0].message, { balanceCents: voucher.balanceCents, problems });
       const entry = await this.post(tx, voucher, { kind: 'REDEEM', deltaCents: -amount, operationId: input.operationId, requestHash, reference, reason: null, actor });
-      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference, accessBasis: basis, identityChecked: input.identityChecked ?? null });
+      await this.record(tx, voucher, entry, 'VALE_PASS_REDEEMED', 'REDEEMED', actor, { reference, accessBasis: basis, identityChecked: input.identityChecked ?? null, identityConfirmation: input.identityChecked === true ? 'OPERATOR_IN_PERSON' : null });
       return this.result(tx, voucher.id, entry, false);
     });
   }
