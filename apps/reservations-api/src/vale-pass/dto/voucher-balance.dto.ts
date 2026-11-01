@@ -43,8 +43,9 @@ export class ConfirmRedeemDto extends PrepareRedeemDto {
   confirmAmountCents!: number;
 
   /**
-   * Conferência presencial da identidade do titular, OPCIONAL (nenhuma regra nova de acesso: ausente = não informado). Só vai para o histórico e a
-   * auditoria; não entra na chave de idempotência, não muda o saldo e nunca recusa o resgate.
+   * Conferência presencial da identidade do titular: OBRIGATÓRIA em `POST …/redeem` (o controlador recusa com IDENTITY_CHECK_REQUIRED se não for `true`). É só o
+   * registro de que o operador fez a conferência (não é prova de identidade nem guarda documento): vai para o histórico e a auditoria; não entra na chave de
+   * idempotência e não muda o saldo.
    */
   @IsOptional()
   @IsBoolean()

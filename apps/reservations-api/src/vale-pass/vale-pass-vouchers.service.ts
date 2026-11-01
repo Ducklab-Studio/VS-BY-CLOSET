@@ -3,6 +3,7 @@ import type { AdminRole, Prisma, ValePass, ValePassStatus } from '@prisma/client
 import { PrismaService } from '../prisma/prisma.service';
 import { writeAdminAuditEvent } from '../admin/admin-audit';
 import { ledgerRefusal } from './ledger/ledger-errors';
+import { identityCheckRequired } from './vale-pass-identity-confirmation';
 import { maskCode } from './vale-pass-code-mask';
 import { lockShopifyOrder } from '../webhooks/shopify-order-lock';
 import { authorizeCompany } from './ledger/operator-scope.service';
@@ -72,7 +73,11 @@ export class ValePassVouchersService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(filters: ValePassVoucherFilters): Promise<ValePassVoucherItem[]> {
+  /**
+   * `restricted` (operador que não é administrador): sem busca parcial por código nem por dados do cliente — só código EXATO ou pedido —, para a lista não servir
+   * de catálogo de códigos nem para descobrir clientes por fragmento de e-mail/telefone. Administradores mantêm a busca ampla.
+   */
+  async list(filters: ValePassVoucherFilters, options: { restricted?: boolean } = {}): Promise<ValePassVoucherItem[]> {
     await this.expireStale();
 
     const search = filters.search?.trim();
@@ -80,7 +85,10 @@ export class ValePassVouchersService {
       where: {
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.campaignId ? { campaignId: filters.campaignId } : {}),
-        ...(search
+        ...(search && options.restricted
+          ? { OR: [{ code: search.toUpperCase() }, { shopifyOrderName: { contains: search, mode: 'insensitive' as const } }, { shopifyOrderId: { contains: search, mode: 'insensitive' as const } }] }
+          : {}),
+        ...(search && !options.restricted
           ? {
               OR: [
                 { code: { contains: search, mode: 'insensitive' } },
@@ -106,7 +114,7 @@ export class ValePassVouchersService {
     return this.toItemFresh(await this.requireByCode(code));
   }
 
-  async markUsed(code: string, actorId: string, actorName: string, options: { role?: AdminRole } = {}): Promise<ValePassVoucherItem> {
+  async markUsed(code: string, actorId: string, actorName: string, options: { role?: AdminRole; requireIdentity?: boolean; identityChecked?: boolean } = {}): Promise<ValePassVoucherItem> {
     const updated = await this.inVoucherTransaction(code, 'Não foi possível marcar o Valle Pass como utilizado no momento.', async (tx, target) => {
       // Campanha de TESTE: sem valor comercial; o uso (por qualquer papel) é recusado. Cancelar continua permitido.
       await assertNotTestCampaignVoucher(tx, target);
@@ -144,6 +152,8 @@ export class ValePassVouchersService {
         // Funcionário (STAFF) resgata só pelo fluxo com prévia e valor redigitado (`/redeem`); o "usado" por inteiro, sem essa confirmação, segue exclusivo de administrador.
         if (options.role === 'STAFF') throw new ForbiddenException('Funcionários registram o resgate pelo saldo (informando o valor). A marcação "usado" por inteiro exige um administrador.');
         if (options.role !== undefined) await authorizeCompany(tx, { id: actorId, role: options.role }, target.company);
+        // Intransferibilidade: o "usado" por inteiro também só é gravado com o registro da conferência de identidade (o caminho HTTP sempre exige).
+        if (options.requireIdentity && options.identityChecked !== true) throw identityCheckRequired();
         // Voucher do modelo novo (com empresa) controla SALDO: "marcar como usado" é o resgate INTEGRAL do que resta, e só vale para voucher ainda NÃO tocado
         // (utilização parcial se registra pelo valor). Passa pelo livro-razão — o banco recusa qualquer outro caminho para USED.
         if (target.balanceCents !== target.amountCents || target.balanceCents <= 0) {
@@ -161,6 +171,11 @@ export class ValePassVouchersService {
           throw ledgerRefusal(err) ?? err;
         }
       } else {
+        // Legado (sem empresa): sem saldo nem livro-razão, então nenhum funcionário o consome (sem prévia, sem valor redigitado, sem escopo de empresa): só administrador.
+        // Chamadas internas sem papel não passam por esta checagem; o caminho HTTP sempre informa o papel.
+        if (options.role !== undefined && options.role !== 'ADMIN' && options.role !== 'SUPER_ADMIN') {
+          throw new ForbiddenException('Este voucher é do modelo antigo (sem empresa) e só um administrador pode marcá-lo como utilizado.');
+        }
         // Legado (sem empresa): tudo ou nada, como sempre. Status no WHERE + contagem: dois resgates simultâneos do mesmo código nunca gravam USED os dois.
         const changed = await tx.valePass.updateMany({
           where: { id: target.id, status: 'ACTIVE' },
@@ -169,7 +184,7 @@ export class ValePassVouchersService {
         if (changed.count !== 1) throw new ConflictException(STATUS_CHANGED_MESSAGE);
       }
 
-      await tx.valePassEvent.create({ data: { valePassId: target.id, type: 'USED', detail: { actorId } } });
+      await tx.valePassEvent.create({ data: { valePassId: target.id, type: 'USED', detail: { actorId, ...(options.requireIdentity && target.company !== null ? { identityChecked: true } : {}) } } });
       await writeAdminAuditEvent(tx, {
         adminUserId: actorId,
         adminUserName: actorName,
@@ -178,7 +193,7 @@ export class ValePassVouchersService {
         entityId: target.id,
         before: { status: target.status },
         after: { status: 'USED' },
-        detail: { code: maskCode(target.code) },
+        detail: { code: maskCode(target.code), ...(options.requireIdentity && target.company !== null ? { identityChecked: true } : {}), legacyNoCompany: target.company === null, role: options.role ?? null },
       });
       return tx.valePass.findUniqueOrThrow({ where: { id: target.id } });
     });

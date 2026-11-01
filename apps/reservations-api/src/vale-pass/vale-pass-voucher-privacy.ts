@@ -1,5 +1,6 @@
 import type { AdminRole } from '@prisma/client';
 import { maskEmail } from './email/email-mask';
+import { maskCode } from './vale-pass-code-mask';
 import { maskName, maskPhone } from './vale-pass-pii-mask';
 
 /**
@@ -12,6 +13,25 @@ export interface VoucherCustomerFields {
   readonly customerName: string | null;
   readonly customerPhone: string | null;
   readonly customerEmail: string | null;
+}
+
+/**
+ * LISTA (não a consulta por código): quem não é administrador não recebe o código completo (`VALLE-AB12-****`), para que a lista não sirva de catálogo de códigos
+ * utilizáveis. O atendimento continua: o cliente apresenta o código e o operador o digita na consulta de saldo.
+ */
+export function forListRole<T extends VoucherCustomerFields & { readonly code: string }>(item: T, role: AdminRole): T {
+  const base = forRole(item, role);
+  return canSeeCustomerData(role) ? base : { ...base, code: maskCode(item.code) };
+}
+
+/**
+ * LISTA DE PEDIDOS (`/admin/vale-pass/orders`): além dos dados do cliente (`forRole`), cada `vouchers[].code` sai mascarado para quem não é administrador,
+ * pelo mesmo motivo de `forListRole`. O formato do objeto não muda (só o valor do código). ADMIN e SUPER_ADMIN recebem a lista completa.
+ */
+export function forOrderListRole<T extends VoucherCustomerFields & { readonly vouchers: readonly { readonly code: string }[] }>(item: T, role: AdminRole): T {
+  const base = forRole(item, role);
+  if (canSeeCustomerData(role)) return base;
+  return { ...base, vouchers: base.vouchers.map((voucher) => ({ ...voucher, code: maskCode(voucher.code) })) };
 }
 
 export function forRole<T extends VoucherCustomerFields>(item: T, role: AdminRole): T {

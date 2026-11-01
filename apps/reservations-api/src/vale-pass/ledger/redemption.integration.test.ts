@@ -288,14 +288,17 @@ localDescribe('autorização, privacidade e enumeração', () => {
     expect(full.holder.phoneMasked).toBe('***78'); // telefone e e-mail completos nunca saem nestas respostas
   });
 
-  test('o endpoint legado de "usado": STAFF não consome saldo de voucher novo (403); ADMIN pode (resgate integral pelo ledger); legado segue livre para STAFF', async () => {
+  test('o endpoint legado de "usado": STAFF não consome saldo de voucher novo (403); ADMIN pode (resgate integral pelo ledger); voucher legado (sem empresa) também só ADMIN', async () => {
     const u = await newUnit();
     await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(await entries(u.showroom.id)).toHaveLength(0);
     await expect(vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN' })).resolves.toMatchObject({ status: 'USED', balanceCents: 0 });
     expect(await entries(u.showroom.id)).toMatchObject([{ reference: 'LEGACY_USE_ENDPOINT' }]);
     const legacy = await prisma.valePass.create({ data: { code: `VALLE-${TAG.slice(-4)}-LEG${counter++}`.toUpperCase(), campaignId: u.campaignId, amountCents: 35_000, purchasedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) } });
-    await expect(vouchersService.markUsed(legacy.code, staff.id, staff.name, { role: 'STAFF' })).resolves.toMatchObject({ status: 'USED' });
+    // Legado sem empresa não tem saldo nem ledger: STAFF não o consome mais (B4); ADMIN continua podendo.
+    await expect(vouchersService.markUsed(legacy.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: legacy.id } })).status).toBe('ACTIVE');
+    await expect(vouchersService.markUsed(legacy.code, admin.id, admin.name, { role: 'ADMIN' })).resolves.toMatchObject({ status: 'USED' });
   });
 
   test('código inexistente e código malformado dão a MESMA resposta (404) — nenhuma pista para enumerar; nenhum dado vaza', async () => {
@@ -319,7 +322,7 @@ localDescribe('autorização, privacidade e enumeração', () => {
     expect(guards.map((g) => (g as { name: string }).name)).toEqual(['AdminAuthGuard', 'AdminRoleGuard']);
   });
 
-  test('conferência de identidade é OPCIONAL e auditável: sem informar fica "não informado"; marcada vai para o histórico e a auditoria; nunca recusa nem muda o saldo; não entra na idempotência', async () => {
+  test('o SERVIÇO registra a conferência de identidade (informada ou não) no histórico e na auditoria, sem mudar o saldo nem entrar na idempotência (a exigência vive no controlador HTTP, testado abaixo)', async () => {
     const u = await newUnit();
     const first = await redeem(u.showroom, 10_000); // não informada
     expect(first.balanceCents).toBe(40_000);
@@ -442,5 +445,69 @@ localDescribe('auditoria, trilhas e falhas', () => {
     await expect(prisma.valePass.update({ where: { id: u.showroom.id }, data: { balanceCents: 0 } })).rejects.toThrow(/vale_pass_balance_direct_update/);
     await expect(prisma.valePass.update({ where: { id: u.showroom.id }, data: { status: 'USED' } })).rejects.toThrow(/vale_pass_used_requires_zero_balance/);
     expect(await voucher(u.showroom.id)).toMatchObject({ balanceCents: 50_000, status: 'ACTIVE' });
+  });
+
+  test('HTTP: resgate sem a conferência de identidade é recusado (400 IDENTITY_CHECK_REQUIRED) e NADA é gravado; com a conferência grava, registra o operador e repetir devolve o original', async () => {
+    const u = await newUnit();
+    const controller = new ValePassLedgerController(service, ledger, {} as never);
+    const req = { adminUser: { id: admin.id, name: admin.name, role: 'ADMIN' } } as never;
+    const body = (over: Record<string, unknown> = {}) => ({ company: 'VALLE_SHOWROOM', amountCents: 10_000, reference: REF, operationId: op(), expectedBalanceCents: 50_000, confirmAmountCents: 10_000, ...over });
+    for (const over of [{}, { identityChecked: false }, { identityChecked: 'true' }]) {
+      await expect(controller.redeem(u.showroom.code, body(over) as never, req)).rejects.toMatchObject({ status: 400, response: { code: 'IDENTITY_CHECK_REQUIRED' } });
+    }
+    expect(await voucher(u.showroom.id)).toMatchObject({ balanceCents: 50_000, status: 'ACTIVE' });
+    expect(await entries(u.showroom.id)).toHaveLength(0);
+    expect(await prisma.valePassEvent.count({ where: { valePassId: u.showroom.id, type: 'REDEEMED' } })).toBe(0);
+    // A autorização vem ANTES: STAFF sem vínculo recebe 403 mesmo sem a conferência (a recusa por identidade não substitui a de permissão).
+    const staffReq = { adminUser: { id: staff.id, name: staff.name, role: 'STAFF' } } as never;
+    await expect(controller.redeem(u.showroom.code, body() as never, staffReq)).rejects.toBeInstanceOf(ForbiddenException);
+    // Empresa incorreta, mesmo com a conferência: 409 COMPANY_MISMATCH e nada gravado.
+    await expect(controller.redeem(u.showroom.code, body({ company: 'VS_BY_CLOSET', identityChecked: true }) as never, req)).rejects.toMatchObject({ status: 409, response: { code: 'COMPANY_MISMATCH' } });
+    expect(await entries(u.showroom.id)).toHaveLength(0);
+
+    const same = body({ identityChecked: true });
+    const first = await controller.redeem(u.showroom.code, same as never, req);
+    const again = await controller.redeem(u.showroom.code, same as never, req);
+    expect(first.replayed).toBe(false);
+    expect(again.replayed).toBe(true);
+    expect(again.entry.id).toBe(first.entry.id);
+    expect(await entries(u.showroom.id)).toHaveLength(1);
+    expect((await voucher(u.showroom.id)).balanceCents).toBe(40_000);
+    const event = await prisma.valePassEvent.findFirstOrThrow({ where: { valePassId: u.showroom.id, type: 'REDEEMED' } });
+    expect(event.detail).toMatchObject({ identityChecked: true, identityConfirmation: 'OPERATOR_IN_PERSON' });
+    const audit = await prisma.adminAuditEvent.findFirstOrThrow({ where: { entityId: u.showroom.id, action: 'VALE_PASS_REDEEMED' } });
+    expect(audit).toMatchObject({ adminUserId: admin.id });
+    expect(audit.detail).toMatchObject({ identityChecked: true, identityConfirmation: 'OPERATOR_IN_PERSON' });
+    // Nada de documento, foto ou dado pessoal novo no registro.
+    expect(JSON.stringify([event.detail, audit.detail])).not.toMatch(/cpf|rg\b|documento|foto|maria\.souza|91234/i);
+  });
+
+  test('"usado" por inteiro (caminho HTTP) exige a conferência no voucher com empresa: sem ela, 400 e nada muda; com ela, grava o registro; STAFF segue recusado antes', async () => {
+    const u = await newUnit();
+    const refused = await rejection(vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN', requireIdentity: true, identityChecked: false }));
+    expect(refused).toBeInstanceOf(BadRequestException);
+    expect(refused?.response?.code).toBe('IDENTITY_CHECK_REQUIRED');
+    expect(await voucher(u.showroom.id)).toMatchObject({ balanceCents: 50_000, status: 'ACTIVE' });
+    expect(await entries(u.showroom.id)).toHaveLength(0);
+    // STAFF: a recusa por papel vem antes (não revela nada sobre a conferência).
+    await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF', requireIdentity: true, identityChecked: true })).rejects.toBeInstanceOf(ForbiddenException);
+    const used = await vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN', requireIdentity: true, identityChecked: true });
+    expect(used.status).toBe('USED');
+    const event = await prisma.valePassEvent.findFirstOrThrow({ where: { valePassId: u.showroom.id, type: 'USED' } });
+    expect(event.detail).toMatchObject({ identityChecked: true });
+  });
+
+  test('lista restrita (operador sem privilégio): sem busca parcial por código nem por dados do cliente; código exato e pedido continuam achando', async () => {
+    const u = await newUnit();
+    const fragment = u.showroom.code.slice(0, 11); // "VALLE-XXXX"
+    const restricted = (search: string) => vouchersService.list({ search }, { restricted: true });
+    expect((await restricted(fragment)).filter((v) => v.code === u.showroom.code)).toHaveLength(0);
+    expect((await restricted('maria.souza')).filter((v) => v.shopifyOrderId === u.orderId)).toHaveLength(0);
+    expect((await restricted('91234')).filter((v) => v.shopifyOrderId === u.orderId)).toHaveLength(0);
+    expect((await restricted(u.showroom.code.toLowerCase())).map((v) => v.code)).toEqual([u.showroom.code]);
+    expect((await restricted(u.orderId)).map((v) => v.code).sort()).toEqual([u.closet.code, u.showroom.code].sort());
+    // Administrador mantém a busca ampla.
+    expect((await vouchersService.list({ search: fragment })).some((v) => v.code === u.showroom.code)).toBe(true);
+    expect((await vouchersService.list({ search: 'maria.souza' })).some((v) => v.shopifyOrderId === u.orderId)).toBe(true);
   });
 });
