@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Página /valle-pass — identidade creme, marsala e dourado. Prefixo `vp-` para não colidir com o restante do site.
  * Cores: creme #FFFCF6, areia #F3EEE6, marsala #53131E / #3A0D15, dourado #D4B368 / #F2D9A0. Texto dourado só em tamanho grande (contraste);
  * texto pequeno usa o bronze #7A5A1E. Animações só com `prefers-reduced-motion: no-preference`; a entrada das seções já vem do GlobalScrollReveal.
@@ -436,4 +436,106 @@
   .vp-cta {
     width: 100%;
   }
+}
+
+/* ---------- Aceite eletrônico dos termos ---------- */
+.vp-terms-cta-block {
+  max-width: 480px;
+  margin: 0 auto;
+}
+.vp-terms-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #fffcf6e6;
+  border: 1px solid #d4b36866;
+  border-radius: 12px;
+  text-align: left;
+  box-shadow: 0 4px 18px -6px rgba(83, 19, 30, 0.06);
+}
+.vp-terms-intro {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6a615a;
+  margin: 0;
+}
+.vp-terms-anchor {
+  color: #53131e;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vp-terms-check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.vp-terms-checkbox {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  accent-color: #53131e;
+  cursor: pointer;
+  outline: none;
+}
+.vp-terms-checkbox:focus-visible {
+  outline: 2px solid #53131e;
+  outline-offset: 2px;
+}
+.vp-terms-label {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1f1d1c;
+  cursor: pointer;
+  user-select: none;
+}
+.vp-terms-inline-link {
+  color: #53131e;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vp-terms-error {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+/* Variação visual dentro da seção escura (final da página) */
+.vp-final .vp-terms-box {
+  background: rgba(255, 252, 246, 0.08);
+  border-color: rgba(242, 217, 160, 0.35);
+  box-shadow: none;
+}
+.vp-final .vp-terms-intro {
+  color: #f4ece0;
+}
+.vp-final .vp-terms-anchor,
+.vp-final .vp-terms-inline-link {
+  color: #f2d9a0;
+}
+.vp-final .vp-terms-label {
+  color: #fffcf6;
+}
+.vp-final .vp-terms-checkbox {
+  accent-color: #f2d9a0;
+}
+.vp-final .vp-terms-checkbox:focus-visible {
+  outline-color: #f2d9a0;
+}
+.vp-final .vp-terms-error {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fecaca;
 }
