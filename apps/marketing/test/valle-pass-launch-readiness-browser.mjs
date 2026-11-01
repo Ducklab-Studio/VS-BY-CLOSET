@@ -143,7 +143,8 @@ try {
   assert.equal(byId['flag-two-voucher'].status, 'PENDING');
   assert.equal(byId['email-mode'].status, 'PENDING');
   assert.equal(byId['shopify-stock'].status, 'PENDING');
-  for (const id of ['terms-approved', 'refund-policy', 'legal-review', 'real-purchase-test', 'retention-owner', 'staff-policy', 'validity-confirmed']) assert.equal(byId[id].status, 'PENDING', id);
+  for (const id of ['terms-approved', 'refund-policy', 'legal-review', 'commercial-authorization', 'retention-owner', 'staff-policy', 'validity-confirmed']) assert.equal(byId[id].status, 'PENDING', id);
+  assert.equal(byId['real-purchase-test'].status, 'APPROVED'); // homologação técnica do #1015 (registro no runbook §7); não é autorização comercial
   assert.equal(byId['open-holds'].status, 'APPROVED'); // contagem real: banco de teste sem retenções
   // Classificação: natureza em todos os itens, próximo passo em todo item aberto, fim da validade depende do Anderson e termos são jurídicos.
   assert.ok(body.items.every((i) => ['TECNICO', 'COMERCIAL', 'JURIDICO'].includes(i.nature)));

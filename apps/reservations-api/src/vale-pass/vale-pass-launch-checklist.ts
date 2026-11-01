@@ -181,17 +181,23 @@ function flagItems(f: ChecklistFlags): RawItem[] {
   return out;
 }
 
-/** Itens que o sistema NÃO consegue comprovar: sempre pendentes (nunca presumidos). */
+/** Registro da homologação técnica de 31/10/2026 (pedido #1015); evidência em docs/VALLE-PASS-HOMOLOGACAO-RUNBOOK.md §7. */
+export const REAL_PURCHASE_TEST_MESSAGE =
+  'Homologação TÉCNICA aprovada em 31/10/2026 (pedido #1015, Pix real de R$ 0,10 na campanha de teste: pagamento confirmado automaticamente, dois vouchers emitidos, e-mail real entregue; pedido e vouchers cancelados depois). Registro: docs/VALLE-PASS-HOMOLOGACAO-RUNBOOK.md §7. Isto NÃO é autorização comercial: nada foi aberto à venda e a autorização comercial segue pendente.';
+
+/** Itens que o sistema NÃO consegue comprovar: pendentes (nunca presumidos), exceto a compra de teste real, que é fato registrado. */
 function unprovableItems(): RawItem[] {
   return [
     item('terms-url', 'TERMOS', 'TECNICO', 'PENDING', 'Endereço dos termos configurado', 'Variável da Vercel (NEXT_PUBLIC_VALE_PASS_TERMS_URL): a API não enxerga; a tela confere no site publicado.'),
     item('terms-approved', 'TERMOS', 'ANDERSON', 'PENDING', 'Termos e condições aprovados', 'Texto oficial do Anderson ainda não recebido/publicado. O sistema não guarda aprovação.'),
     item('refund-policy', 'TERMOS', 'ANDERSON', 'PENDING', 'Política de reembolso aprovada', 'Proposta comercial do Anderson ainda sem decisão final registrada.'),
     item('legal-review', 'TERMOS', 'ANDERSON', 'PENDING', 'Validação jurídica das condições', 'Direito de arrependimento, reembolso após uso e informação ao consumidor precisam de parecer jurídico. Nenhum registro no sistema.'),
-    item('validity-confirmed', 'VALIDADE', 'ANDERSON', 'PENDING', 'Datas de validade confirmadas', 'Anderson confirmou por escrito (WhatsApp, 27/10/2026): início 01/04/2027 e fim 15/10/2027, inclusive. Registrado em docs/VALLE-PASS-2027-DECISOES-ANDERSON.md. O sistema não guarda aprovação: este item permanece pendente até a campanha estar configurada com essas datas (itens de validade acima).'),
+    item('validity-confirmed', 'VALIDADE', 'ANDERSON', 'PENDING', 'Datas de validade confirmadas', 'Anderson confirmou por escrito (WhatsApp, 27/10/2026): início 01/04/2027 e fim 15/10/2027, inclusive. Registro: docs/VALLE-PASS-2027-VALIDADE-15-10.md e docs/VALLE-PASS-2027-APROVACAO-COMERCIAL.md. A confirmação existe só como mensagem do Anderson: o sistema não a guarda nem a prova, então este item permanece pendente.'),
     item('retention-owner', 'OPERACAO', 'ANDERSON', 'PENDING', 'Titular e substituto para pagamentos retidos', 'Responsáveis e canal de aviso ainda não definidos.'),
     item('staff-policy', 'OPERACAO', 'ANDERSON', 'PENDING', 'Quem pode resgatar (ADMIN e/ou STAFF)', 'Hoje só ADMIN e SUPER_ADMIN resgatam; STAFF apenas consulta. Decisão do Anderson pendente.'),
-    item('real-purchase-test', 'INTEGRACOES', 'TECNICO', 'PENDING', 'Compra de teste real (Shopify + e-mail)', 'Nenhuma compra de teste real registrada. Os testes locais não substituem a Shopify e a Resend reais.'),
+    // Fato histórico registrado no repositório (o sistema não o recalcula): a homologação técnica NÃO é autorização comercial.
+    item('real-purchase-test', 'INTEGRACOES', 'TECNICO', 'APPROVED', 'Compra de teste real (Shopify + e-mail)', REAL_PURCHASE_TEST_MESSAGE),
+    item('commercial-authorization', 'TERMOS', 'ANDERSON', 'PENDING', 'Autorização comercial para abrir as vendas', 'A homologação técnica aprovada não autoriza vender. Depende das decisões do Anderson, do parecer jurídico e da aprovação final, registradas em docs/VALLE-PASS-2027-APROVACAO-COMERCIAL.md (campos de aprovação ainda em branco). O sistema não guarda essa aprovação.'),
   ];
 }
 
@@ -226,10 +232,10 @@ const NEXT_STEPS: Readonly<Record<string, string>> = {
   'terms-approved': 'Receber o texto oficial do Anderson e a aprovação jurídica antes de publicar qualquer cláusula.',
   'refund-policy': 'O Anderson decide a política e o jurídico valida (direito de arrependimento, reembolso após uso, falta de peça).',
   'legal-review': 'Encaminhar as condições (reembolso, arrependimento, informação ao consumidor) para parecer jurídico.',
-  'validity-confirmed': 'Configurar na campanha exatamente as datas confirmadas pelo Anderson (início 01/04/2027, fim 15/10/2027); a confirmação está nos docs.',
+  'validity-confirmed': 'Configurar na campanha exatamente as datas confirmadas pelo Anderson (início 01/04/2027, fim 15/10/2027); o registro está em docs/VALLE-PASS-2027-VALIDADE-15-10.md.',
   'retention-owner': 'O Anderson indica o titular e o substituto para resolver pagamentos retidos e o canal de aviso.',
   'staff-policy': 'O Anderson decide se STAFF pode resgatar vouchers (hoje só ADMIN e SUPER_ADMIN).',
-  'real-purchase-test': 'Planejar a compra de teste real controlada (Shopify + e-mail) com autorização expressa e as chaves na ordem prevista.',
+  'commercial-authorization': 'Levar ao Anderson o documento docs/VALLE-PASS-2027-APROVACAO-COMERCIAL.md, obter as decisões e o parecer jurídico e registrar a aprovação final antes de qualquer abertura.',
 };
 
 /** Acrescenta natureza e próximo passo. A natureza nunca altera o status: aprovação continua exigindo evidência. */

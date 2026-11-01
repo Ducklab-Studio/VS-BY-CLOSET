@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { buildLaunchChecklist, emptyChecklist, type ChecklistInput, type ChecklistItem } from './vale-pass-launch-checklist';
 import type { ReadinessBenefit } from './vale-pass-launch-readiness';
@@ -15,9 +17,45 @@ const configured: ChecklistInput = {
 };
 const ref = { id: 'c1', name: 'Valle Pass 2027' };
 const byId = (items: readonly ChecklistItem[]) => Object.fromEntries(items.map((i) => [i.id, i]));
-const UNPROVABLE = ['terms-url', 'terms-approved', 'refund-policy', 'legal-review', 'validity-confirmed', 'retention-owner', 'staff-policy', 'real-purchase-test'];
+const UNPROVABLE = ['terms-url', 'terms-approved', 'refund-policy', 'legal-review', 'validity-confirmed', 'retention-owner', 'staff-policy', 'commercial-authorization'];
 
 describe('checklist "Pronta para vender?"', () => {
+  test('homologação técnica (#1015) é reconhecida, mas NÃO vira autorização comercial nem deixa nada jurídico ou comercial aprovado', () => {
+    for (const input of [configured, { ...configured, hasOpenLot: false, flags: { ...configured.flags, twoVoucher: false, autoVerify: false, emailMode: 'off' as const } }]) {
+      const list = buildLaunchChecklist(ref, input);
+      const k = byId(list.items);
+      expect(k['real-purchase-test'].status).toBe('APPROVED');
+      expect(k['real-purchase-test'].owner).toBe('TECNICO');
+      expect(k['real-purchase-test'].nextStep).toBeNull();
+      expect(k['real-purchase-test'].message).toMatch(/#1015/);
+      expect(k['real-purchase-test'].message).toMatch(/NÃO é autorização comercial/);
+      expect(k['commercial-authorization'].status).toBe('PENDING');
+      expect(k['commercial-authorization'].owner).toBe('ANDERSON');
+      expect(k['commercial-authorization'].nature).toBe('COMERCIAL');
+      expect(k['commercial-authorization'].nextStep).toMatch(/APROVACAO-COMERCIAL/);
+      // Nada de Anderson ou jurídico aprovado sem evidência; ainda não pronto para vender.
+      for (const i of list.items.filter((x) => x.owner === 'ANDERSON' && ['terms-approved', 'refund-policy', 'legal-review', 'validity-confirmed', 'retention-owner', 'staff-policy', 'commercial-authorization'].includes(x.id))) expect(i.status, i.id).toBe('PENDING');
+      expect(list.readyToSell).toBe(false);
+    }
+    expect(byId(emptyChecklist().items)['real-purchase-test'].status).toBe('APPROVED');
+    expect(byId(emptyChecklist().items)['commercial-authorization'].status).toBe('PENDING');
+  });
+
+  test('o registro citado existe: runbook §7 aprovado e documentos de validade e aprovação comercial; o arquivo DECISOES-ANDERSON (inexistente na main) não é mais citado', () => {
+    const root = resolve(__dirname, '../../../..');
+    const runbook = readFileSync(resolve(root, 'docs/VALLE-PASS-HOMOLOGACAO-RUNBOOK.md'), 'utf8');
+    const section7 = runbook.split(/\r?\n/).find((l) => l.startsWith('## 7. Registro de resultados')) ?? '';
+    expect(section7).toContain('APROVADA');
+    expect(runbook).toContain('#1015');
+    for (const doc of ['VALLE-PASS-2027-VALIDADE-15-10.md', 'VALLE-PASS-2027-APROVACAO-COMERCIAL.md']) expect(() => readFileSync(resolve(root, 'docs', doc), 'utf8'), doc).not.toThrow();
+    const list = buildLaunchChecklist(ref, configured);
+    const everything = JSON.stringify(list.items);
+    expect(everything).not.toContain('DECISOES-ANDERSON');
+    const k = byId(list.items);
+    expect(k['validity-confirmed'].message).toContain('VALLE-PASS-2027-VALIDADE-15-10.md');
+    expect(k['validity-confirmed'].status).toBe('PENDING');
+  });
+
   test('estado de produção hoje (chaves desligadas, sem validade nem lote): não está pronto e nada é aprovado sem evidência', () => {
     const today: ChecklistInput = {
       ...configured,
@@ -64,6 +102,7 @@ describe('checklist "Pronta para vender?"', () => {
     const k = byId(buildLaunchChecklist(ref, { ...configured, hasOpenLot: false }).items); // sem lote aberto o item "lot" aparece
     for (const id of ['terms-approved', 'refund-policy', 'legal-review', 'valid-from', 'lot', 'retention-owner', 'staff-policy']) expect(k[id]?.owner, id).toBe('ANDERSON');
     for (const id of ['flag-two-voucher', 'real-purchase-test', 'global-limit', 'vouchers', 'terms-url']) expect(k[id]?.owner, id).toBe('TECNICO');
+    expect(k['commercial-authorization']?.owner).toBe('ANDERSON');
   });
 
   test('capacidade: retenções, reembolsos em revisão, alertas e pedidos sem voucher aprovam com zero e ficam pendentes com ocorrências', () => {
@@ -137,10 +176,10 @@ describe('checklist "Pronta para vender?"', () => {
     expect(registered['sales-end'].message).toContain('não a confirmou');
   });
 
-  test('não há falso positivo: com a configuração completa só itens com evidência medida ficam aprovados', () => {
+  test('não há falso positivo: com a configuração completa só itens com evidência medida (e a homologação técnica registrada no runbook) ficam aprovados', () => {
     const approved = buildLaunchChecklist(ref, configured).items.filter((i) => i.status === 'APPROVED').map((i) => i.id).sort();
     expect(approved).toEqual(
-      ['alerts-mode', 'cancellation-alerts', 'discount', 'email-mode', 'flag-auto-verify', 'flag-two-voucher', 'global-limit', 'legacy-limit', 'open-holds', 'paid-without-voucher', 'price', 'refund-reviews', 'valid-from', 'valid-until', 'vouchers'].sort(),
+      ['alerts-mode', 'cancellation-alerts', 'discount', 'email-mode', 'flag-auto-verify', 'flag-two-voucher', 'global-limit', 'legacy-limit', 'open-holds', 'paid-without-voucher', 'price', 'real-purchase-test', 'refund-reviews', 'valid-from', 'valid-until', 'vouchers'].sort(),
     );
   });
 
