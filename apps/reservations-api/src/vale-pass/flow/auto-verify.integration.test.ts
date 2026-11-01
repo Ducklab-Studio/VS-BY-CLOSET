@@ -443,7 +443,7 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — falha de envio e recuperação segu
     const results: SendEmailResult[] = [{ kind: 'rejected', status: 503, reason: 'temporarily unavailable', permanent: false }, { kind: 'accepted', messageId: 'msg-1' }];
     const calls: string[] = [];
     const provider: EmailProvider = { send: async (input: { idempotencyKey: string }) => { calls.push(input.idempotencyKey); return results.shift() ?? { kind: 'accepted', messageId: 'msg-x' }; } } as unknown as EmailProvider;
-    const config = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
+    const config = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
     const worker = new ValePassEmailWorkerService(prisma, new ValePassEmailOutboxService(prisma, config), config, provider);
     worker.rng = () => 0.5;
     await worker.tick(new Date(Date.now() + 5_000));
@@ -462,7 +462,7 @@ localDescribe('VERIFICAÇÃO AUTOMÁTICA — estorno entre a consulta e a emiss�
     refund_line_items: [{ id: 1, line_item_id: 1, quantity: 1, subtotal: 350, total_tax: 0, restock_type: 'return', line_item: { variant_id: Number(campaign.numericVariant), product_id: null, price: '350.00', quantity: 1 } }],
   });
   const workerWith = (provider: EmailProvider) => {
-    const config = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
+    const config = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
     const worker = new ValePassEmailWorkerService(prisma, new ValePassEmailOutboxService(prisma, config), config, provider);
     worker.rng = () => 0.5;
     return worker;

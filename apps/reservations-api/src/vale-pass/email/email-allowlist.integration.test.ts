@@ -39,16 +39,20 @@ describe('VALE_PASS_EMAIL_ALLOWED_RECIPIENTS — leitura e validação da config
 
   test('só a liberação comercial explícita (exatamente "true") libera o envio sem lista', () => {
     for (const raw of ['', 'false', '1', 'yes', 'on', 'verdadeiro']) expect(canSendLive(loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: raw })), raw).toBe(false);
-    const released = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: ' TRUE ' });
+    // A liberação sozinha NÃO basta: exige a referência da autorização comercial (rastreio de quem autorizou).
+    const unreferenced = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: ' TRUE ' });
+    expect(canSendLive(unreferenced)).toBe(false);
+    expect(liveBlockers(unreferenced).join(' ')).toContain('VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF');
+    const released = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: ' TRUE ', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' });
     expect(canSendLive(released)).toBe(true);
     expect(recipientAllowed(released, OTHER)).toBe(true);
   });
 
   test('lista presente SEMPRE restringe, mesmo com a liberação; lista inválida nunca é ignorada pela liberação', () => {
-    const both = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED });
+    const both = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED });
     expect(recipientAllowed(both, ALLOWED)).toBe(true);
     expect(recipientAllowed(both, OTHER)).toBe(false);
-    const invalid = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: 'lixo' });
+    const invalid = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: 'lixo' });
     expect(canSendLive(invalid)).toBe(false);
     expect(recipientAllowed(invalid, ALLOWED)).toBe(false);
     expect(recipientAllowed(invalid, OTHER)).toBe(false);
@@ -353,13 +357,13 @@ localDescribe('Lista de destinatários autorizados — worker', () => {
     expect((await broken.worker.tick(soon())).claimed).toBe(0);
     expect(broken.provider.calls).toHaveLength(0);
     // a decisão comercial é explícita e separada
-    const released = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' }));
+    const released = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' }));
     expect((await released.worker.tick(soon())).accepted).toBe(1);
     expect(released.provider.calls.map((call) => call.to)).toEqual([OTHER]);
   });
 
   test('liberação comercial + lista válida: continua enviando só aos autorizados', async () => {
-    const { outbox, worker, provider } = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    const { outbox, worker, provider } = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
     const ok = await paidOrder(ALLOWED);
     const blocked = await paidOrder(OTHER);
     await enqueue(outbox, ok.orderId);
@@ -391,7 +395,7 @@ localDescribe('Lista de destinatários autorizados — worker', () => {
 
 localDescribe('Lista de destinatários autorizados — reenvio administrativo', () => {
   async function accepted(allowedList: string) {
-    const first = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' })); // a original saiu antes da lista existir
+    const first = stack(config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' })); // a original saiu antes da lista existir
     const { orderId, groupId } = await paidOrder(OTHER);
     await enqueue(first.outbox, orderId);
     await first.worker.tick(soon()); // antes da lista existir: a mensagem original foi aceita
@@ -573,5 +577,105 @@ localDescribe('E-mail da campanha de TESTE — identificação e marcação', ()
     expect(previewOfficial.subject).toBe('Seus vouchers do Valle Pass 2027');
     expect((previewOfficial.html + previewOfficial.text).toUpperCase()).not.toMatch(/TESTE|SEM VALOR COMERCIAL/);
     expect(provider.calls).toHaveLength(0);
+  });
+});
+
+// ---------- liberação comercial segura: referência da autorização, supressão e campanha de teste ----------
+describe('liberação comercial — referência da autorização (puro)', () => {
+  const base = { VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' };
+  test.each([[undefined], [''], ['curta'], ['tem@arroba.invalid'], ['x'.repeat(121)], ['         ']])('referência ausente ou inválida (%s) mantém o envio BLOQUEADO', (ref) => {
+    const cfg = loadEmailConfig({ ...base, ...(ref === undefined ? {} : { VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: ref }) });
+    expect(cfg.commercialAuthorizationRef).toBeNull();
+    expect(canSendLive(cfg)).toBe(false);
+    expect(publicEmailStatus(cfg)).toMatchObject({ canSend: false, commercialAuthorizationRef: null });
+  });
+  test('referência válida libera e fica visível no status (não é segredo); o modo dry-run continua sendo dry-run', () => {
+    const cfg = loadEmailConfig({ ...base, VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-2027-001' });
+    expect(canSendLive(cfg)).toBe(true);
+    expect(publicEmailStatus(cfg)).toMatchObject({ canSend: true, commercialRelease: true, commercialAuthorizationRef: 'AUTORIZACAO-2027-001' });
+    expect(canSendLive(loadEmailConfig({ ...base, VALE_PASS_EMAIL_MODE: 'dry-run', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-2027-001' }))).toBe(false);
+  });
+  test('com lista de destinatários a referência não é exigida (a lista já restringe)', () => {
+    expect(canSendLive(loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }))).toBe(true);
+  });
+});
+
+localDescribe('liberação comercial — supressão de endereço e campanha de teste', () => {
+  const released = () => config({ VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' });
+
+  test('endereço que devolveu (bounce) não recebe novos vouchers: vai para intervenção, sem chamar o provedor; outros endereços seguem normalmente', async () => {
+    const { outbox, worker, provider } = stack(released());
+    const first = await paidOrder(OTHER);
+    await enqueue(outbox, first.orderId);
+    expect((await worker.tick(soon())).accepted).toBe(1);
+    const sent = await rowOf(first.orderId);
+    expect(await outbox.applyProviderEvent('email.bounced', sent.providerMessageId as string)).toBe('applied');
+    expect((await rowOf(first.orderId)).status).toBe('FAILED');
+
+    const second = await paidOrder(OTHER);
+    const healthy = await paidOrder('outro-cliente@exemplo.invalid');
+    await enqueue(outbox, second.orderId);
+    await enqueue(outbox, healthy.orderId);
+    await worker.tick(soon());
+    expect(await rowOf(second.orderId)).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'recipient_suppressed' });
+    expect((await rowOf(healthy.orderId)).status).toBe('ACCEPTED');
+    expect(provider.calls.map((call) => call.to)).toEqual([OTHER, 'outro-cliente@exemplo.invalid']); // nenhum segundo envio ao endereço suprimido
+  });
+
+  test('reclamação (spam) também bloqueia; a comparação ignora maiúsculas', async () => {
+    const { outbox, worker } = stack(released());
+    const first = await paidOrder('Cliente.Spam@Exemplo.invalid');
+    await enqueue(outbox, first.orderId);
+    await worker.tick(soon());
+    await outbox.applyProviderEvent('email.complained', (await rowOf(first.orderId)).providerMessageId as string);
+    const next = await paidOrder('cliente.spam@exemplo.invalid');
+    await enqueue(outbox, next.orderId);
+    await worker.tick(soon());
+    expect(await rowOf(next.orderId)).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'recipient_suppressed' });
+  });
+
+  test('falha genérica do provedor (email.failed) NÃO suprime o endereço', async () => {
+    const { outbox, worker, provider } = stack(released());
+    const first = await paidOrder(OTHER);
+    await enqueue(outbox, first.orderId);
+    await worker.tick(soon());
+    await outbox.applyProviderEvent('email.failed', (await rowOf(first.orderId)).providerMessageId as string);
+    const next = await paidOrder(OTHER);
+    await enqueue(outbox, next.orderId);
+    await worker.tick(soon());
+    expect((await rowOf(next.orderId)).status).toBe('ACCEPTED');
+    expect(provider.calls).toHaveLength(2);
+  });
+
+  test('campanha de TESTE nunca vai para comprador na liberação sem lista (intervenção)', async () => {
+    const open = stack(released());
+    const testOrder = await paidOrder(OTHER, { testVariant: true });
+    await enqueue(open.outbox, testOrder.orderId);
+    await open.worker.tick(soon());
+    expect(await rowOf(testOrder.orderId)).toMatchObject({ status: 'NEEDS_ATTENTION', lastError: 'test_campaign_needs_allowlist' });
+    expect(open.provider.calls).toHaveLength(0);
+  });
+
+  test('campanha de TESTE com lista autorizada continua podendo enviar aos autorizados (fase de testes preservada)', async () => {
+    const listed = stack(config({ VALE_PASS_EMAIL_ALLOWED_RECIPIENTS: ALLOWED }));
+    const own = await paidOrder(ALLOWED, { testVariant: true });
+    await enqueue(listed.outbox, own.orderId);
+    await listed.worker.tick(soon());
+    expect((await rowOf(own.orderId)).status).toBe('ACCEPTED');
+  });
+
+  test('idempotência preservada: duas rodadas seguidas enviam UMA vez, e o dry-run não chama o provedor', async () => {
+    const live = stack(released());
+    const order = await paidOrder(OTHER);
+    await enqueue(live.outbox, order.orderId);
+    await live.worker.tick(soon());
+    await live.worker.tick(soon());
+    expect(live.provider.calls).toHaveLength(1);
+
+    const dry = stack(config({ VALE_PASS_EMAIL_MODE: 'dry-run', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' }));
+    const other = await paidOrder('dry-run@exemplo.invalid');
+    await enqueue(dry.outbox, other.orderId);
+    await dry.worker.tick(soon());
+    expect(dry.provider.calls).toHaveLength(0);
   });
 });

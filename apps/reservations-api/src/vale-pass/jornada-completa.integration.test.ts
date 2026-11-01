@@ -67,7 +67,7 @@ class MockResend implements EmailProvider {
   }
 }
 const provider = new MockResend();
-const emailConfig = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
+const emailConfig = loadEmailConfig({ VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001', VALE_PASS_EMAIL_DAILY_LIMIT: '1000' });
 const outbox = new ValePassEmailOutboxService(prisma, emailConfig);
 const worker = new ValePassEmailWorkerService(prisma, outbox, emailConfig, provider);
 worker.rng = () => 0.5;
