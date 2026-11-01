@@ -612,6 +612,13 @@ try {
     assert.equal(cross.status, 403);
     assert.equal((await cross.json()).code, 'COMPANY_NOT_AUTHORIZED');
     assert.equal((await call('GET', '/admin/vale-pass/operators')).status, 403);
+    // Lista para quem não é administrador: sem código completo (mascarado) e sem busca parcial por código nem por dados do cliente.
+    const staffList = await (await call('GET', '/admin/vale-pass/vouchers?status=ACTIVE')).json();
+    assert.ok(Array.isArray(staffList) && staffList.length > 0, 'a lista existe para o funcionário');
+    assert.ok(staffList.every((v) => v.code.endsWith('-****')), 'nenhum código completo aparece na lista do funcionário');
+    assert.equal(JSON.stringify(staffList).includes(C), false, 'o código completo de um voucher real não vaza na lista');
+    const partial = await (await call('GET', `/admin/vale-pass/vouchers?search=${encodeURIComponent(C.slice(0, 11))}`)).json();
+    assert.equal(partial.length, 0, 'busca parcial por código não retorna nada para o funcionário');
     assert.equal((await call('GET', '/admin/vale-pass/ledger/reconcile')).status, 403);
     assert.equal((await call('POST', `/admin/vale-pass/vouchers/${D}/use`)).status, 403, 'endpoint "usado" cruzado recusado');
     assert.equal((await call('POST', `/admin/vale-pass/vouchers/${C}/use`)).status, 403, 'funcionário não consome o voucher por inteiro pelo endpoint antigo (nem na própria loja)');

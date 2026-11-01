@@ -226,7 +226,7 @@ localDescribe('isolamento entre Valle Showroom e VS BY CLOSET', () => {
     await expect(ledgerController.prepareRedeem(u.closet.code, { company: 'VS_BY_CLOSET', amountCents: 100, reference: REF }, req)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(ledgerController.redeem(u.closet.code, { company: 'VS_BY_CLOSET', amountCents: 100, reference: REF, operationId: `op-${randomUUID()}`, expectedBalanceCents: 5_000, confirmAmountCents: 100 }, req)).rejects.toBeInstanceOf(ForbiddenException);
     await expect(vouchersController.markUsed(u.closet.code, req)).rejects.toBeInstanceOf(ForbiddenException);
-    const done = await ledgerController.redeem(u.showroom.code, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: REF, operationId: `op-${randomUUID()}`, expectedBalanceCents: 50_000, confirmAmountCents: 100 }, req);
+    const done = await ledgerController.redeem(u.showroom.code, { company: 'VALLE_SHOWROOM', amountCents: 100, reference: REF, operationId: `op-${randomUUID()}`, expectedBalanceCents: 50_000, confirmAmountCents: 100, identityChecked: true }, req);
     expect(done.balanceCents).toBe(49_900);
     await expect(ledgerController.prepareReverse(u.closet.code, done.entry.id, req)).rejects.toBeInstanceOf(ForbiddenException);
     expect(await entries(u.closet.id)).toHaveLength(0);
