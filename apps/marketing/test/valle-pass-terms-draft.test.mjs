@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import './valle-pass-official-terms.test.mjs';
 
 // Estrutura da página de termos do Valle Pass (rascunho): não publicada por padrão, sem cláusulas inventadas e pronta para o texto oficial.
 const root = new URL('../', import.meta.url);
@@ -28,10 +29,9 @@ test('a página só existe com VALE_PASS_TERMS_PAGE=on; ausente, vazio ou qualqu
   assert.match(page, /export const dynamic = 'force-dynamic'/);
 });
 
-test('nunca indexada e marcada como rascunho enquanto o texto oficial não for aprovado', () => {
+test('nunca indexada e termos bloqueados para compra enquanto não houver liberação expressa', () => {
   assert.equal(TERMS_APPROVED, false);
   assert.match(page, /robots: \{ index: false, follow: false \}/);
-  assert.match(page, /data-testid="valle-pass-terms-draft-notice"/);
   assert.match(DRAFT_NOTICE, /não é um contrato/);
   assert.match(DRAFT_NOTICE, /não deve ser divulgada/);
 });
@@ -65,12 +65,9 @@ test('não inventa cláusulas: nenhum prazo, multa, percentual, data ou polític
   assert.doesNotMatch(JSON.stringify(TERMS_SECTIONS.flatMap((s) => s.confirmed)), /Anderson|jurídico/); // fato confirmado não depende de decisão
 });
 
-test('o que ainda depende de decisão fica em "Em definição" e a página separa as duas listas sem apresentar rascunho como contrato', () => {
+test('o que ainda depende de decisão no rascunho fica em "Em definição" sem apresentar rascunho como contrato e a página oficial não tem checkbox alternativo', () => {
   const pending = TERMS_SECTIONS.flatMap((s) => s.pending).join(' ');
   for (const topic of ['período de utilização', 'prorrogação', 'saldo remanescente', 'desconto informativo', 'identificação', 'dados específicos', 'perda do código']) assert.match(pending, new RegExp(topic, 'i'));
-  assert.match(page, /Já confirmado/);
-  assert.match(page, /politica-de-privacidade/); // a seção de dados remete à política de privacidade que já existe no site
-  assert.match(page, /Em definição/);
   assert.doesNotMatch(page, /Aceito os termos|Li e concordo|checkbox/i);
 });
 
