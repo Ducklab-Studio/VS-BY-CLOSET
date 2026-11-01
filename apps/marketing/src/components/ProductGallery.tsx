@@ -98,10 +98,10 @@ export function ProductGallery({
           className="object-contain transition-transform duration-500 group-hover:scale-[1.02]"
         />
         <span
-          className="gallery-expand absolute bottom-4 right-4 z-20 flex items-center gap-1.5 rounded-full bg-cream/90 px-3.5 py-2 text-[0.72rem] font-medium text-marsala shadow-md backdrop-blur-md transition-transform duration-300 group-hover:scale-105 pointer-events-none"
+          className="gallery-expand pointer-events-none absolute bottom-5 right-5 z-20 inline-flex h-10 items-center justify-center gap-2 rounded-full border border-ink/10 bg-cream/95 px-3 text-[0.72rem] font-medium tracking-wide text-marsala shadow-lg backdrop-blur-md transition-transform duration-300 group-hover:scale-105 sm:px-4"
           aria-hidden="true"
         >
-          <Expand size={15} />
+          <Expand size={16} />
           <span className="hidden sm:inline">Ampliar</span>
         </span>
 
@@ -113,7 +113,7 @@ export function ProductGallery({
                 e.stopPropagation();
                 move(-1);
               }}
-              className="absolute left-4 top-1/2 -translate-y-1/2 z-20 grid h-10 w-10 place-items-center rounded-full bg-cream/90 text-marsala shadow-md backdrop-blur-md opacity-100 sm:opacity-0 transition-opacity duration-300 group-hover:opacity-100 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-20 grid h-11 w-11 place-items-center rounded-full border border-ink/10 bg-cream/95 text-marsala shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
               aria-label="Foto anterior"
             >
               <ChevronLeft size={20} />
@@ -124,7 +124,7 @@ export function ProductGallery({
                 e.stopPropagation();
                 move(1);
               }}
-              className="absolute right-4 top-1/2 -translate-y-1/2 z-20 grid h-10 w-10 place-items-center rounded-full bg-cream/90 text-marsala shadow-md backdrop-blur-md opacity-100 sm:opacity-0 transition-opacity duration-300 group-hover:opacity-100 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-20 grid h-11 w-11 place-items-center rounded-full border border-ink/10 bg-cream/95 text-marsala shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-marsala"
               aria-label="Próxima foto"
             >
               <ChevronRight size={20} />
@@ -133,11 +133,11 @@ export function ProductGallery({
         )}
       </div>
 
-      <div className="gallery-caption mt-2.5 flex items-center justify-between text-[0.75rem] text-ink/60">
+      <div className="gallery-caption mt-3.5 flex items-center justify-between gap-4 px-1 text-[0.75rem] text-ink/60">
         <span className="truncate font-medium">{title}</span>
         <span
           aria-live="polite"
-          className="shrink-0 rounded-full bg-marsala/10 px-2.5 py-0.5 font-mono text-[0.7rem] font-semibold text-marsala"
+          className="shrink-0 rounded-full bg-marsala/10 px-3 py-1 font-mono text-[0.7rem] font-semibold leading-none tracking-wider text-marsala"
         >
           {selected + 1} / {images.length}
         </span>
