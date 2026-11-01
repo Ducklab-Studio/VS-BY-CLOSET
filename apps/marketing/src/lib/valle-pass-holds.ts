@@ -91,5 +91,6 @@ export function holdGuidance(reason: HoldReason, issues: readonly string[] = [])
   if (issues.includes('INTEGRATION_DISABLED')) parts.push('O pagamento chegou com a integração dos dois vouchers desligada: ele só é retomado quando a chave for ligada com autorização.');
   if (issues.includes('PAYMENT_TIME_UNKNOWN')) parts.push('O instante real do pagamento é desconhecido: conferir o horário na Shopify ("Conferir na Shopify", no painel de integração financeira) antes de emitir.');
   if (issues.includes('TEST_ORDER')) parts.push('É um pedido de teste da Shopify: não deve gerar voucher comercial.');
+  if (issues.includes('TERMS_ACCEPTANCE_REQUIRED')) parts.push('O aceite dos termos não foi comprovado: conferir antes de emitir.');
   return parts.join(' ');
 }

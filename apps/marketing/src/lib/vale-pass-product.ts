@@ -53,3 +53,14 @@ export function isValePassProduct(input: { productId?: string | null; variantId?
 export function valePassCheckoutHref(variantId: string, quantity = 1): string {
   return storeUrl(`/cart/${normalizeShopifyId(variantId)}:${quantity}`);
 }
+
+/**
+ * Constrói o link de checkout Shopify contendo o token de aceite eletrônico assinado como atributo do carrinho.
+ * Contrato de integração: https://{loja}/cart/{variantId}:1?attributes[valle_pass_terms_token]={token}
+ * O token é seguro para URL, mas encodeURIComponent garante a codificação rigorosa de caracteres.
+ */
+export function valePassCheckoutWithTermsToken(variantId: string, token: string, quantity = 1): string {
+  const normalizedVariant = normalizeShopifyId(variantId);
+  const encodedToken = encodeURIComponent(token.trim());
+  return storeUrl(`/cart/${normalizedVariant}:${quantity}?attributes[valle_pass_terms_token]=${encodedToken}`);
+}

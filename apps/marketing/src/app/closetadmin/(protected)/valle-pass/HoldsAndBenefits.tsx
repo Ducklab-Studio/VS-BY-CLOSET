@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import type { ValePassCapacityCancellationAlert, ValePassCapacityRefundReview, ValePassCapacityBenefit, ValePassCapacityHold, ValePassHoldProjection } from '@/lib/admin-data';
@@ -60,6 +60,7 @@ const ISSUE_LABELS: Record<string, string> = {
   MANUAL_PAYMENT: 'pagamento marcado manualmente na Shopify (revisão do administrador)',
   ORDER_NOT_REGISTERED: 'pedido ainda não registrado',
   MULTIPLE_CAMPAIGNS: 'mais de uma campanha no mesmo pedido',
+  TERMS_ACCEPTANCE_REQUIRED: 'aceite dos termos não comprovado — conferir antes de emitir',
 };
 const COMPANY_LABELS = { VALLE_SHOWROOM: 'Valle Showroom', VS_BY_CLOSET: 'VS BY CLOSET' } as const;
 const formatCurrency = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
