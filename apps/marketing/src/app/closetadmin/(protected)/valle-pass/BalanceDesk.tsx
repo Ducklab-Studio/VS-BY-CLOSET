@@ -69,7 +69,8 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
   const [reference, setReference] = useState('');
   const [preview, setPreview] = useState<ValePassRedeemPreview | null>(null);
   const [confirmText, setConfirmText] = useState('');
-  // Conferência presencial da identidade: OPCIONAL (não é regra de acesso). Só registra no histórico e na auditoria.
+  // Conferência presencial da identidade do titular: OBRIGATÓRIA para confirmar (intransferibilidade). Nunca vem marcada e é refeita a cada resgate; é só o
+  // registro de que a equipe conferiu (não é prova de identidade nem guarda documento) e vai para o histórico e a auditoria.
   const [identityChecked, setIdentityChecked] = useState(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemBusy, setRedeemBusy] = useState(false);
@@ -162,10 +163,12 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
     if (!data.canRedeem) return setRedeemError(data.problems.map((p) => describeBalanceError(p.code, p.message)).join(' '));
     setPreview(data);
     setConfirmText('');
+    setIdentityChecked(false); // a conferência vale para ESTE resgate: nunca herdada da prévia anterior
   }
 
   async function confirmRedeem() {
     if (!view || !view.company || !preview || redeemLock.current) return;
+    if (!identityChecked) return setRedeemError('Confirme que a identidade do titular foi conferida presencialmente para registrar o resgate.');
     const typed = parseReaisToCents(confirmText);
     if (typed !== preview.amountCents) return setRedeemError('O valor digitado não confere com o resgate. Digite novamente o valor para confirmar.');
     redeemLock.current = true;
@@ -174,7 +177,7 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
     const { data, error } = await confirmValePassRedeemAction(view.code, {
       company: view.company, amountCents: preview.amountCents, reference: reference.trim(),
       operationId: preview.operationId, expectedBalanceCents: preview.expectedBalanceCents, confirmAmountCents: typed,
-      ...(identityChecked ? { identityChecked: true } : {}),
+      identityChecked: true,
     });
     redeemLock.current = false;
     setRedeemBusy(false);
@@ -183,6 +186,7 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
       // Recusa DEFINITIVA (saldo mudou, restrição…): a prévia perdeu o sentido. Falha de rede: mantém — repetir é seguro (mesma operação, nunca desconta duas vezes).
       if (error?.code) {
         setPreview(null);
+        setIdentityChecked(false);
         void consult(view.code, { keepFlash: true, keepForms: true });
       }
       return;
@@ -423,7 +427,7 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
                   <label className="flex items-start gap-2 text-xs text-ink/70 dark:text-dark-muted">
                     <input type="checkbox" data-testid="redeem-identity" className="mt-0.5" checked={identityChecked} onChange={(e) => setIdentityChecked(e.target.checked)} disabled={redeemBusy} />
                     <span>
-                      Identidade do titular conferida pela equipe (opcional). Fica registrada no histórico e na auditoria; não é exigida para o resgate nem altera o saldo.
+                      Conferi presencialmente a identidade do titular deste voucher (obrigatório). É o registro da conferência feita pela equipe, gravado no histórico e na auditoria com o seu usuário; não guarda documento nem foto e não altera o saldo.
                     </span>
                   </label>
                   <div>
@@ -431,7 +435,7 @@ export function BalanceDesk({ canOperate, canRedeem, request }: { canOperate: bo
                     <input id="redeem-confirm" inputMode="decimal" autoComplete="off" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} className={inputClass} disabled={redeemBusy} />
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" className={primaryButton} onClick={() => void confirmRedeem()} disabled={redeemBusy || parseReaisToCents(confirmText) !== preview.amountCents}>
+                    <button type="button" className={primaryButton} onClick={() => void confirmRedeem()} disabled={redeemBusy || !identityChecked || parseReaisToCents(confirmText) !== preview.amountCents}>
                       {redeemBusy ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />} Confirmar resgate
                     </button>
                     <button type="button" className={secondaryButton} onClick={() => { setPreview(null); setRedeemError(null); }} disabled={redeemBusy}>Voltar</button>

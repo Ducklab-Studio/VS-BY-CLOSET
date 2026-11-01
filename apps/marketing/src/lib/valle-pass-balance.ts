@@ -41,6 +41,7 @@ export type BalanceCompany = keyof typeof COMPANY_LABELS;
 /** Códigos de recusa da API (`code` no corpo do 409) → texto curto para o operador. */
 export const BALANCE_ERROR_TEXT: Record<string, string> = {
   COMPANY_MISMATCH: 'Este voucher é de outra empresa. O saldo de uma empresa nunca é usado na outra.',
+  IDENTITY_CHECK_REQUIRED: 'Confirme que a identidade do titular foi conferida presencialmente para registrar o resgate.',
   INSUFFICIENT_BALANCE: 'Saldo insuficiente para este valor.',
   BALANCE_CHANGED: 'O saldo mudou desde a conferência. Confira o novo saldo e tente de novo.',
   IDEMPOTENCY_CONFLICT: 'Esta operação já foi enviada com outro conteúdo. Refaça a conferência.',
