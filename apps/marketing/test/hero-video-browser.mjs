@@ -50,7 +50,7 @@ const buildAndStart = async () => {
   for (let i = 0; i < 60; i++) { try { const r = await fetch(`${BASE}/`); if (r.ok) return; } catch {} await new Promise((ok) => setTimeout(ok, 1000)); }
   throw new Error('next start não subiu');
 };
-const setConfig = (value) => { writeFileSync(libPath, readFileSync(backup, 'utf8').replace('export const HERO_VIDEO: HeroVideo | null = null;', `export const HERO_VIDEO: HeroVideo | null = ${value};`)); };
+const setConfig = (value) => { writeFileSync(libPath, readFileSync(backup, 'utf8').replace(/export const HERO_VIDEO: HeroVideo \| null = [^;]+;/, `export const HERO_VIDEO: HeroVideo | null = ${value};`)); };
 
 const SERVE = (page, { missing = false, garbage = false, delayMs = 0, abortWebm = false, requests = [] } = {}) =>
   page.route('**/editorial/video/**', async (route) => {

@@ -1,6 +1,6 @@
 # Vídeo do hero da home — implementação, limites reais e como adicionar o vídeo do Orlando
 
-**Estado atual:** nenhum vídeo recebido, aprovado ou publicado. `HERO_VIDEO = null` em `apps/marketing/src/lib/hero-media.ts`: a home mostra só a imagem. Tudo abaixo já está implementado e testado; ativar o vídeo é copiar arquivos e trocar essa constante.
+**Estado atual:** vídeo oficial do cliente integrado em `apps/marketing/public/editorial/video/hero-v1.mp4` e configurado em `apps/marketing/src/lib/hero-media.ts`. A imagem do hero continua ativa como fallback imediato (LCP) e para conexões lentas / `prefers-reduced-motion`. Rollback: `HERO_VIDEO = null`.
 
 ## 1. Como adicionar o vídeo do Orlando (passo a passo exato)
 1. **Receber** o arquivo mestre (o melhor que existir, ex. ProRes/H.264 de alta qualidade) **e a autorização de uso** (imagem das pessoas e, se houver, trilha — o vídeo vai sempre mudo).

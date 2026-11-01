@@ -32,7 +32,7 @@ export default function HomePage() {
           </p>
         </div>
         <div className="hero-photo">
-          {/* Vídeo do hero: ver `HERO_VIDEO` em lib/hero-media.ts (hoje null = só a imagem) e docs/HERO-VIDEO.md. */}
+          {/* Vídeo do hero: ver `HERO_VIDEO` em lib/hero-media.ts (/editorial/video/hero-v1.mp4) e docs/HERO-VIDEO.md. */}
           <HeroMedia
             image={{ src: '/editorial/winter-campaign.webp', alt: 'Editorial de inverno: look claro em uma paisagem de montanhas nevadas' }}
             video={HERO_VIDEO}
