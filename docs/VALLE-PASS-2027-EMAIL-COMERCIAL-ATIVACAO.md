@@ -14,7 +14,7 @@
 | Item | Situação |
 |---|---|
 | **DMARC** | Ausente no domínio (registrado no runbook). Ação **externa** (DNS), sua. Ver §3. |
-| **Lista de destinatários autorizados** | Hoje é uma trava de *teste* (máx. 20, só endereços listados). Para vender ao público é preciso uma **decisão e uma mudança de código/configuração separadas**: o modo atual **não** envia a clientes arbitrários. Não existe, por design, modo "todos os clientes" sem essa decisão. |
+| **Destinatários** | Há duas vias no código: a **lista autorizada** (fase de testes, máx. 20 endereços) e a **liberação comercial** (`VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true` sem lista), que permite enviar aos compradores. Correção: a versão anterior deste documento dizia, por engano, que não existia modo para compradores. O endurecimento dessa liberação (referência da autorização, supressão, campanha de teste) está em `VALLE-PASS-2027-EMAIL-LIBERACAO-SEGURA.md`. |
 | **Limite diário × volume** | Padrão 80/dia; um lote de 100 vendas no mesmo dia gera 100 e-mails. Alerta `EMAIL_DAILY_LIMIT_NEAR` existe. Conferir também o limite do **plano da Resend** (não verificável daqui). |
 | **Reenvio manual** | ADMIN/SUPER_ADMIN reenviam; quem pode trocar o destinatário é decisão pendente. |
 | **Paleta/estilo do e-mail** | Decisão visual pendente (marsala × preto/branco). |
@@ -42,7 +42,7 @@ Na Resend → *Domains*, o status deve estar **Verified**.
 Ordem tecnicamente segura; cada passo exige um "AUTORIZO" próprio:
 1. [ ] Termos aprovados e publicados; texto do e-mail revisado (sem 10% sem regras; com o que foi aprovado).
 2. [ ] DMARC publicado e verificado; domínio **Verified** na Resend; limite do plano compatível com o lote.
-3. [ ] Decisão de código/configuração sobre **quem pode receber** (hoje só lista autorizada). Alteração em PR próprio, com testes.
+3. [ ] Decisão comercial sobre **quem pode receber** (lista autorizada × liberação comercial com referência da autorização, ver `VALLE-PASS-2027-EMAIL-LIBERACAO-SEGURA.md`).
 4. [ ] Backup do banco antes da abertura (ver plano de lançamento).
 5. [ ] `VALE_PASS_EMAIL_DOMAIN_VERIFIED=true`; limites diário/lote ajustados ao Lote 1.
 6. [ ] Janela curta em `live` com um pedido de teste (como no #1015), conferindo: um e-mail por unidade, dois vouchers, sem dados indevidos, sem código em log.
