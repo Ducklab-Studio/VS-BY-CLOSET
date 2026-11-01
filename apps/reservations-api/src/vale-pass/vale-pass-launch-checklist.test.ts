@@ -173,7 +173,7 @@ describe('checklist "Pronta para vender?"', () => {
     expect(missing['valid-until']).toMatchObject({ status: 'BLOCKED', owner: 'ANDERSON', nature: 'COMERCIAL' });
     const registered = byId(buildLaunchChecklist(ref, configured).items); // salesEndDate = 31/05/2027 (sugestão)
     expect(registered['sales-end']).toMatchObject({ status: 'PENDING', owner: 'ANDERSON' });
-    expect(registered['sales-end'].message).toContain('não a confirmou');
+    expect(registered['sales-end'].message).toContain('não guarda aprovação');
   });
 
   test('não há falso positivo: com a configuração completa só itens com evidência medida (e a homologação técnica registrada no runbook) ficam aprovados', () => {

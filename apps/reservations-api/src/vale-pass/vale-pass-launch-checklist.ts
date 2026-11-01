@@ -118,7 +118,7 @@ function fromBase(entry: ReadinessItem, shopifyStock: number | null): RawItem {
       : entry.message;
   // O encerramento das vendas é só informativo e a data é SUGESTÃO do Anderson: registrada ≠ confirmada, então nunca aprova sozinha.
   if (entry.id === 'sales-end' && entry.kind === 'OK') {
-    return item(entry.id, meta.group, meta.owner, 'PENDING', meta.label, 'Data registrada na campanha conforme a sugestão (31/05/2027), mas o Anderson ainda não a confirmou nem definiu se o esgotamento encerra antes. Nada é encerrado automaticamente.');
+    return item(entry.id, meta.group, meta.owner, 'PENDING', meta.label, 'Data registrada na campanha (31/05/2027), conforme o Anderson confirmou em 26/10/2026: as vendas encerram em 31/05/2027 ou ao esgotar as 1.000 unidades, o que vier primeiro. O sistema não guarda aprovação e não encerra nada sozinho (o esgotamento é o estoque 0 na Shopify): segue pendente até a abertura formal.');
   }
   return item(entry.id, meta.group, meta.owner, STATUS_OF[entry.kind], meta.label, message);
 }
@@ -190,10 +190,10 @@ function unprovableItems(): RawItem[] {
   return [
     item('terms-url', 'TERMOS', 'TECNICO', 'PENDING', 'Endereço dos termos configurado', 'Variável da Vercel (NEXT_PUBLIC_VALE_PASS_TERMS_URL): a API não enxerga; a tela confere no site publicado.'),
     item('terms-approved', 'TERMOS', 'ANDERSON', 'PENDING', 'Termos e condições aprovados', 'Texto oficial do Anderson ainda não recebido/publicado. O sistema não guarda aprovação.'),
-    item('refund-policy', 'TERMOS', 'ANDERSON', 'PENDING', 'Política de reembolso aprovada', 'Proposta comercial do Anderson ainda sem decisão final registrada.'),
+    item('refund-policy', 'TERMOS', 'ANDERSON', 'PENDING', 'Política de reembolso aprovada', 'Regra informada pelo Anderson (26/10/2026), ainda NÃO automatizada nem aprovada: se faltar roupa ou tamanho, reembolso integral de R$ 350,00 em até 3 dias úteis, pela mesma forma de pagamento. Crédito já usado não é reembolsado; arrependimento de 7 dias a validar juridicamente. Pendentes: parecer jurídico e conflitos entre crédito usado, falta de roupa e arrependimento.'),
     item('legal-review', 'TERMOS', 'ANDERSON', 'PENDING', 'Validação jurídica das condições', 'Direito de arrependimento, reembolso após uso e informação ao consumidor precisam de parecer jurídico. Nenhum registro no sistema.'),
     item('validity-confirmed', 'VALIDADE', 'ANDERSON', 'PENDING', 'Datas de validade confirmadas', 'Anderson confirmou por escrito (WhatsApp, 27/10/2026): início 01/04/2027 e fim 15/10/2027, inclusive. Registro: docs/VALLE-PASS-2027-VALIDADE-15-10.md e docs/VALLE-PASS-2027-APROVACAO-COMERCIAL.md. A confirmação existe só como mensagem do Anderson: o sistema não a guarda nem a prova, então este item permanece pendente.'),
-    item('retention-owner', 'OPERACAO', 'ANDERSON', 'PENDING', 'Titular e substituto para pagamentos retidos', 'Responsáveis e canal de aviso ainda não definidos.'),
+    item('retention-owner', 'OPERACAO', 'ANDERSON', 'PENDING', 'Titular e substituto para pagamentos retidos', 'Titular: Anderson (confirmado em 26/10/2026). Substituto e canal de aviso ainda não definidos, por isso o item segue pendente.'),
     item('staff-policy', 'OPERACAO', 'ANDERSON', 'PENDING', 'Quem pode resgatar (ADMIN e/ou STAFF)', 'Hoje só ADMIN e SUPER_ADMIN resgatam; STAFF apenas consulta. Decisão do Anderson pendente.'),
     // Fato histórico registrado no repositório (o sistema não o recalcula): a homologação técnica NÃO é autorização comercial.
     item('real-purchase-test', 'INTEGRACOES', 'TECNICO', 'APPROVED', 'Compra de teste real (Shopify + e-mail)', REAL_PURCHASE_TEST_MESSAGE),
@@ -216,7 +216,7 @@ const NEXT_STEPS: Readonly<Record<string, string>> = {
   'valid-from': 'Configurar início (01/04/2027) e fim (15/10/2027) juntos no painel de campanhas (ADMIN).',
   extension: 'O Anderson decide quem é elegível à prorrogação e a data final; a estrutura já existe (SUPER_ADMIN, só aumenta).',
   'sales-start': 'O Anderson confirma a data; a abertura real é o ajuste do estoque na Shopify, feito pela equipe com autorização.',
-  'sales-end': 'O Anderson confirma a data final e se o esgotamento encerra antes; depois registrar na campanha.',
+  'sales-end': 'Registrar 31/05/2027 na campanha (já confirmado pelo Anderson: ou ao esgotar as 1.000 unidades); a formalização da abertura continua dependendo dele.',
   lot: 'O Anderson informa as datas de abertura; só então criar o lote de 100 unidades e abri-lo.',
   'shopify-stock': 'Conferir no Admin da Shopify: 0 até a abertura autorizada; depois igual ao saldo do lote aberto.',
   active: 'Ativar a campanha no painel de campanhas (ADMIN) quando a abertura for autorizada.',
@@ -233,7 +233,7 @@ const NEXT_STEPS: Readonly<Record<string, string>> = {
   'refund-policy': 'O Anderson decide a política e o jurídico valida (direito de arrependimento, reembolso após uso, falta de peça).',
   'legal-review': 'Encaminhar as condições (reembolso, arrependimento, informação ao consumidor) para parecer jurídico.',
   'validity-confirmed': 'Configurar na campanha exatamente as datas confirmadas pelo Anderson (início 01/04/2027, fim 15/10/2027); o registro está em docs/VALLE-PASS-2027-VALIDADE-15-10.md.',
-  'retention-owner': 'O Anderson indica o titular e o substituto para resolver pagamentos retidos e o canal de aviso.',
+  'retention-owner': 'O Anderson (titular) indica o substituto e o canal de aviso para os pagamentos retidos.',
   'staff-policy': 'O Anderson decide se STAFF pode resgatar vouchers (hoje só ADMIN e SUPER_ADMIN).',
   'commercial-authorization': 'Levar ao Anderson o documento docs/VALLE-PASS-2027-APROVACAO-COMERCIAL.md, obter as decisões e o parecer jurídico e registrar a aprovação final antes de qualquer abertura.',
 };
