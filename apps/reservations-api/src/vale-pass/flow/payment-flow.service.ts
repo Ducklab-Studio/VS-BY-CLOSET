@@ -13,6 +13,7 @@ import { ValePassIssuanceService, type IssuanceOrder } from '../vale-pass-issuan
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { absorbedUnissuedUnits } from '../refunds/refund.service';
 import { ValePassRegularizationService, type RegularizationCandidate, type RegularizationOutcome } from '../refunds/regularization.service';
+import { evaluateSalesClose } from './sales-close';
 import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, QUANTITY_INCREASED_UNPROVEN, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
 
 type Tx = Prisma.TransactionClient;
@@ -161,6 +162,11 @@ export class ValePassPaymentFlowService {
     // Prazo de 3 dias = desde o PAGAMENTO real. Sem esse instante (cabeçalho do orders/paid ausente/inválido, ou pagamento só visto por orders/updated ou
     // reconciliação) o pedido NÃO é emitido às cegas nem recebe horário inventado: fica retido, com alerta, para um administrador.
     if (!registry.paymentConfirmedAt) return hold([{ code: PAYMENT_TIME_UNKNOWN }], 'FINANCIAL_MISMATCH');
+
+    // Encerramento das vendas (chave própria, desligada por padrão): decide pelo MOMENTO DO PEDIDO, nunca do pagamento; só retém para um ADMIN.
+    const createdAt = registry.orderCreatedAt ?? (payload.created_at ? new Date(payload.created_at) : null);
+    const closed = evaluateSalesClose({ enabled: this.flags.salesCloseGuard?.() ?? false, salesEndDate: campaign.salesEndDate, orderCreatedAt: createdAt });
+    if (!closed.ok) return hold([{ code: closed.code, detail: closed.detail }], 'FINANCIAL_MISMATCH');
 
     const verdict = await this.guard.evaluate(tx, factsFromWebhookPayload(payload));
     const issues = verdict.ok

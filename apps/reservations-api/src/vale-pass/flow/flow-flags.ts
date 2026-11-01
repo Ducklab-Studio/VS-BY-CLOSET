@@ -6,6 +6,7 @@ import { paymentTimeConfigFromEnv, STRICT_PAYMENT_TIME_CONFIG, type PaymentTimeC
  *  - VALE_PASS_TWO_VOUCHER_FLOW=on  → pagamento confirmado de campanha COM benefícios cadastrados passa pela validação financeira e pela emissão dos
  *    dois vouchers (+ fila de e-mail). Desligada, esse pagamento vira RETENÇÃO visível (nunca emite voucher único, nunca some).
  *  - VALE_PASS_AUTO_VERIFY=on       → (exige a chave acima) consulta as transações na Shopify e retoma sozinha as retenções PAYMENT_TIME_UNKNOWN que passarem em TODAS as validações.
+ *  - VALE_PASS_SALES_CLOSE_GUARD=on → pedido CRIADO depois do fim do dia `salesEndDate` da campanha NÃO emite: vira retenção `SALES_CLOSED` para um ADMIN (ver sales-close.ts).
  *  - VALE_PASS_UNIT_REFUNDS=on      → `refunds/create` passa pelo tratamento por unidade (ledger, revisão, política ADMIN_CONFIRM). Desligada, vale o
  *    comportamento legado (cancela os vouchers ativos do pedido).
  *
@@ -18,6 +19,8 @@ export interface FlowFlags {
   paymentTime?(): PaymentTimeConfig;
   /** Verificação financeira AUTOMÁTICA do horário do pagamento (consulta as transações na Shopify e retoma sozinha). Ausente = desligada. */
   autoVerify?(): boolean;
+  /** Proteção contra venda depois do encerramento (retém, nunca cancela nem reembolsa). Ausente = desligada. */
+  salesCloseGuard?(): boolean;
 }
 
 /** A verificação automática só roda com a chave própria E a integração dos dois vouchers ligadas. */
@@ -36,6 +39,7 @@ export function envFlowFlags(env: Record<string, string | undefined> = process.e
     unitRefunds: () => isOn(env.VALE_PASS_UNIT_REFUNDS),
     paymentTime: () => paymentTimeConfigFromEnv(env),
     autoVerify: () => isOn(env.VALE_PASS_AUTO_VERIFY),
+    salesCloseGuard: () => isOn(env.VALE_PASS_SALES_CLOSE_GUARD),
   };
 }
 
