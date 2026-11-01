@@ -1,0 +1,2 @@
+# Texto oficial dos termos do Valle Pass: os bytes precisam ser idênticos em qualquer sistema (o SHA-256 é do arquivo). Nunca converter para CRLF.
+docs/termos/oficial/* text eol=lf

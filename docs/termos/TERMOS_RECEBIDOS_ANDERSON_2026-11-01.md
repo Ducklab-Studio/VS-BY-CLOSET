@@ -1,0 +1,142 @@
+# TERMOS_RECEBIDOS_ANDERSON_2026-11-01
+
+> **Estado: RECEBIDO.** Documento-fonte preservado **literalmente**, sem edição. Não é versão publicada, não foi aprovado pelo jurídico dentro do repositório e **não deve ser editado**: qualquer mudança vai em documento separado (ver `docs/termos/VALLE-PASS-2027-TERMOS-PROPOSTA-REVISADA.md`).
+> Recebido em 01/11/2026 pelo encaminhamento do Anderson. O cabeçalho do arquivo original diz: "NÃO PUBLICADO / PENDENTE DE CONFERÊNCIA COMERCIAL E REVISÃO JURÍDICA".
+> O texto abaixo vai da linha "VALLE PASS 2027" até "Sua experiência no Chile começa aqui." (Seção A do arquivo recebido).
+
+---
+
+VALLE PASS 2027
+
+TERMOS E CONDIÇÕES DE COMPRA E UTILIZAÇÃO
+
+Vigência: Temporada de Neve 2027 — Chile
+
+## 1. DO VALLE PASS
+
+1.1. O Valle Pass 2027 é um programa de benefícios do Grupo Valle, destinado a clientes que desejam aproveitar os serviços das marcas participantes durante a temporada de neve de 2027, no Chile.
+
+1.2. O valor de aquisição do Valle Pass é de R$ 350,00 (trezentos e cinquenta reais), mediante pagamento conforme as condições disponibilizadas no ato da compra.
+
+1.3. Ao adquirir o Valle Pass, o cliente declara estar ciente das condições de utilização, validade, benefícios e políticas de cancelamento descritas neste regulamento.
+
+## 2. DOS BENEFÍCIOS INCLUSOS
+
+Cada Valle Pass adquirido garante ao titular:
+
+**VALLE SHOWROOM — ROUPAS DE NEVE**
+
+* R$ 500,00 em crédito para aluguel de roupas de neve na Valle Showroom, em Santiago, Chile.
+
+**VALLE BY CLOSET — ROUPAS CASUAIS**
+
+* R$ 50,00 em crédito para aluguel de roupas casuais e peças disponíveis na Valle By Closet, em Santiago, Chile.
+
+**VALLE EXPERIENCE — PASSEIOS E EXPERIÊNCIAS**
+
+* 10% de desconto nos passeios e serviços participantes oferecidos pela Valle Experience durante a temporada de 2027.
+
+2.1. Os créditos correspondem a benefícios para contratação dos serviços das marcas participantes e não representam valores disponíveis para saque ou conversão em dinheiro.
+
+2.2. Caso o valor do aluguel ultrapasse o crédito disponível, a diferença deverá ser paga pelo cliente.
+
+2.3. Os benefícios deverão ser utilizados dentro do prazo de validade estabelecido neste regulamento.
+
+## 3. DO PERÍODO DE VENDAS
+
+3.1. As vendas do Valle Pass 2027 terão início em 1º de novembro de 2026.
+
+3.2. O encerramento das vendas ocorrerá em 31 de maio de 2027, ou antecipadamente, caso se esgote a quantidade de Valle Pass disponibilizada para comercialização.
+
+3.3. O Grupo Valle poderá encerrar as vendas antecipadamente em caso de esgotamento dos passes, respeitando integralmente os direitos dos clientes que já realizaram suas compras.
+
+## 4. DA VALIDADE E UTILIZAÇÃO
+
+4.1. O Valle Pass será válido exclusivamente durante a temporada de neve de 2027, nas datas de utilização previamente estabelecidas e informadas ao cliente.
+
+4.2. A utilização dos benefícios deverá respeitar o calendário divulgado pelas empresas participantes.
+
+4.3. Os agendamentos para utilização dos vouchers deverão ser realizados pelos canais oficiais das respectivas empresas, conforme disponibilidade de atendimento e operação.
+
+4.4. A aquisição do Valle Pass não representa reserva automática de roupas, tamanhos, modelos específicos ou horários de atendimento.
+
+4.5. Os créditos não utilizados até o encerramento de sua validade expirarão, ressalvados os direitos de reembolso previstos neste regulamento e na legislação aplicável.
+
+## 5. DA POLÍTICA DE CANCELAMENTO E REEMBOLSO
+
+### 5.1. Direito de arrependimento
+
+Nas compras realizadas pela internet, WhatsApp ou outros meios de contratação à distância sujeitos à legislação brasileira, o cliente poderá exercer o direito de arrependimento no prazo legal de 7 (sete) dias, conforme o artigo 49 do Código de Defesa do Consumidor.
+
+O exercício desse direito assegura a restituição dos valores pagos, observadas as disposições legais aplicáveis.
+
+### 5.2. Garantia de satisfação presencial
+
+Além do direito legal de arrependimento, o Grupo Valle oferece uma garantia de satisfação para os clientes que comparecerem presencialmente à Valle Showroom.
+
+O cliente poderá solicitar o cancelamento do Valle Pass com reembolso integral caso, ao comparecer à loja para escolher suas roupas de neve:
+
+* Não encontre roupas disponíveis que atendam às suas necessidades;
+* Não encontre tamanho adequado;
+* Não encontre modelos que sejam de seu agrado;
+* Não fique satisfeito com as opções disponíveis para utilização do voucher.
+
+### 5.3. Condições para reembolso pela garantia presencial
+
+Para solicitar o reembolso previsto na cláusula 5.2, será necessário que:
+
+a) O cliente compareça presencialmente à Valle Showroom durante o período de validade do Valle Pass;
+
+b) Não tenha utilizado, total ou parcialmente, o voucher de R$ 500,00 da Valle Showroom;
+
+c) Não tenha utilizado, total ou parcialmente, o voucher de R$ 50,00 da Valle By Closet;
+
+d) Não tenha utilizado o desconto de 10% da Valle Experience;
+
+e) Solicite o cancelamento pelos canais oficiais de atendimento, para registro e processamento.
+
+### 5.4. Do valor e prazo de reembolso
+
+Uma vez aprovado o reembolso pela garantia presencial, será devolvido 100% do valor efetivamente pago pelo Valle Pass, correspondente a R$ 350,00.
+
+O reembolso será processado em até 3 (três) dias úteis após a formalização da solicitação e confirmação do cumprimento das condições previstas neste regulamento, sem prejuízo dos prazos legais aplicáveis.
+
+A restituição será realizada preferencialmente pelo mesmo meio de pagamento utilizado na compra, observadas as regras da instituição financeira ou operadora responsável.
+
+## 6. DA UTILIZAÇÃO DOS BENEFÍCIOS E NÃO REEMBOLSABILIDADE
+
+6.1. Fora das hipóteses legais de cancelamento e reembolso, a utilização de qualquer benefício do Valle Pass torna a compra não reembolsável pela política comercial de satisfação.
+
+6.2. Considera-se utilização de benefício:
+
+* O uso total ou parcial do voucher da Valle Showroom;
+* O uso total ou parcial do voucher da Valle By Closet;
+* A efetiva utilização do desconto de 10% em uma contratação da Valle Experience.
+
+6.3. A utilização de apenas um dos benefícios será suficiente para encerrar a possibilidade de reembolso voluntário prevista na cláusula 5.2, ainda que existam outros créditos não utilizados.
+
+6.4. Esta política não limita o direito de arrependimento, os direitos decorrentes de falha na prestação dos serviços ou quaisquer outros direitos obrigatórios assegurados pela legislação aplicável.
+
+## 7. DAS DISPOSIÇÕES GERAIS
+
+7.1. O Valle Pass é um produto promocional de benefícios integrados das marcas participantes do Grupo Valle.
+
+7.2. A disponibilidade de peças, tamanhos e modelos poderá variar conforme estoque, procura e período de utilização.
+
+7.3. O cliente deverá observar os procedimentos de reserva, retirada, devolução e demais regras operacionais das empresas participantes, desde que previamente informados e compatíveis com este regulamento.
+
+7.4. Os benefícios são válidos exclusivamente nos estabelecimentos e serviços participantes informados pelo Grupo Valle.
+
+7.5. Eventuais alterações operacionais não poderão prejudicar os benefícios já contratados, salvo mediante solução aceita pelo consumidor ou nas hipóteses permitidas pela legislação aplicável.
+
+7.6. Os casos não previstos neste regulamento serão analisados pelos canais oficiais de atendimento, respeitando os direitos do consumidor e a legislação pertinente.
+
+## 8. DA ACEITAÇÃO DOS TERMOS
+
+Ao concluir a compra, o cliente declara que teve acesso prévio aos presentes Termos e Condições, compreendeu as regras de utilização e está ciente das políticas de cancelamento e reembolso do Valle Pass 2027.
+
+GRUPO VALLE
+
+Valle Showroom | Valle By Closet | Valle Experience
+
+Valle Pass 2027 — Sua experiência no Chile começa aqui.
