@@ -1,0 +1,17 @@
+{
+  "current": "2027-1",
+  "versions": {
+    "2027-1": {
+      "file": "2027-1.md",
+      "sha256": "9d1a283f1ec5c32e96aba3baeb8dd9d56c06f8447bf6a70edb6a3585a8e482ae",
+      "bytes": 7381,
+      "encoding": "UTF-8 sem BOM",
+      "newlines": "LF",
+      "normalization": "Texto da Seção A do documento do Anderson, copiado sem alteração; quebras de linha convertidas para LF; sem espaços ao final do arquivo; exatamente um LF final. O hash é o SHA-256 dos bytes do arquivo.",
+      "source": "docs/termos/TERMOS_RECEBIDOS_ANDERSON_2026-11-01.md (cópia fiel da Seção A de VALLE_PASS_2027_TERMOS_PARA_CLAUDE.md)",
+      "receivedAt": "2026-11-01",
+      "status": "RECEBIDO — autorização do Anderson e do advogado INFORMADA pelo dono do projeto; registro formal ainda não anexado",
+      "published": false
+    }
+  }
+}
