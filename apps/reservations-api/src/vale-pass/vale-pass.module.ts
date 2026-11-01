@@ -43,12 +43,14 @@ import { ValePassFlowController } from './flow/flow.controller';
 import { ValePassLaunchReadinessController } from './vale-pass-launch-readiness.controller';
 import { ValePassLaunchReadinessService } from './vale-pass-launch-readiness.service';
 import { envFlowFlags, FLOW_FLAGS_TOKEN } from './flow/flow-flags';
+import { ValePassTermsAcceptancePublicController, ValePassTermsEvidenceAdminController } from './flow/terms-acceptance.controller';
+import { ValePassTermsAcceptanceService } from './flow/terms-acceptance.service';
 
 /** Sem chave configurada o provedor nunca é chamado (o worker bloqueia antes); se for, devolve resultado desconhecido em vez de fingir sucesso. */
 const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailResult> => ({ kind: 'unknown', reason: 'provider_not_configured' }) };
 
 @Module({
-  controllers: [ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController, ValePassCancellationAlertsController, ValePassLaunchReadinessController],
+  controllers: [ValePassTermsAcceptancePublicController, ValePassTermsEvidenceAdminController, ValePassCampaignsController, ValePassVouchersController, ValePassOrdersController, ValePassHoldsController, ValePassEmailController, ResendWebhookController, ValePassRefundReviewsController, ValePassFlowController, ValePassLedgerController, ValePassOperatorScopeController, ValePassValidityExtensionController, ValePassCancellationAlertsController, ValePassLaunchReadinessController],
   providers: [
     AdminRoleGuard,
     ShopifyAdminClient,
@@ -60,6 +62,7 @@ const unconfiguredProvider: EmailProvider = { send: async (): Promise<SendEmailR
     ValePassHoldsService,
     ValePassVouchersService,
     ValePassOrdersService,
+    ValePassTermsAcceptanceService,
     ValePassOrdersScheduler,
     { provide: EMAIL_CONFIG_TOKEN, useFactory: (): EmailConfig => loadEmailConfig() },
     {

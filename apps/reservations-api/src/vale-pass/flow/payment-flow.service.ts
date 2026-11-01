@@ -13,6 +13,8 @@ import { ValePassIssuanceService, type IssuanceOrder } from '../vale-pass-issuan
 import { financialIssueCodes } from '../vale-pass-lots.service';
 import { absorbedUnissuedUnits } from '../refunds/refund.service';
 import { ValePassRegularizationService, type RegularizationCandidate, type RegularizationOutcome } from '../refunds/regularization.service';
+import { evaluateTermsEvidence, TERMS_ACCEPTANCE_REQUIRED, TERMS_EVIDENCE_EVENT, termsEvidenceKey, type TermsEvidence } from './terms-evidence';
+import { loadTermsAcceptanceConfig, TERMS_ACCEPTANCE_CONFIG, type TermsAcceptanceConfig } from './terms-acceptance-config';
 import { envFlowFlags, FLOW_FLAGS_TOKEN, INTEGRATION_DISABLED, PAYMENT_TIME_UNKNOWN, QUANTITY_INCREASED, QUANTITY_INCREASED_UNPROVEN, RESUMABLE_HOLD_CODES, type FlowFlags } from './flow-flags';
 
 type Tx = Prisma.TransactionClient;
@@ -81,6 +83,8 @@ export class ValePassPaymentFlowService {
     @Optional() @Inject(FLOW_FLAGS_TOKEN) private readonly flags: FlowFlags = envFlowFlags(),
     @Optional() @Inject(PrismaService) private readonly prisma: PrismaService | null = null,
     @Optional() @Inject(ValePassRegularizationService) private readonly regularization: ValePassRegularizationService | null = null,
+    // Configuração do aceite dos termos (tudo desligado por padrão). Lida a cada uso.
+    @Optional() @Inject(TERMS_ACCEPTANCE_CONFIG) private readonly termsConfig: () => TermsAcceptanceConfig = () => loadTermsAcceptanceConfig(),
   ) {}
 
   enabled(): boolean {
@@ -128,6 +132,39 @@ export class ValePassPaymentFlowService {
     return units - (rows[0]?.n ?? 0) - (await absorbedUnissuedUnits(tx, orderId));
   }
 
+  /**
+   * Grava, no histórico do pedido, a evidência do aceite dos termos (ver terms-evidence.ts) e devolve o estado FINAL. Só VERIFIED (token assinado pelo servidor,
+   * versão/hash/variante/validade conferidos e nonce de uso único) conta como comprovado. Só grava quando o estado muda: reentrega não duplica. Sem dado pessoal.
+   */
+  private async recordTermsEvidence(tx: Tx, valePassOrderId: string, payload: ShopifyOrderPayload): Promise<TermsEvidence> {
+    let evidence = evaluateTermsEvidence(payload, this.termsConfig());
+    if (evidence.status === 'VERIFIED') {
+      // Uso único: serializa por nonce (dois pedidos simultâneos com o mesmo token não passam os dois) e recusa o que OUTRO pedido já consumiu.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`terms-nonce:${evidence.nonce}`}, 0))`;
+      const reused = await tx.$queryRaw<{ n: number }[]>`
+        SELECT 1 AS n FROM vale_pass_order_events
+        WHERE type = ${TERMS_EVIDENCE_EVENT} AND detail->>'status' = 'VERIFIED' AND detail->>'nonce' = ${evidence.nonce} AND vale_pass_order_id <> ${valePassOrderId}::uuid LIMIT 1`;
+      if (reused.length > 0) evidence = { status: 'REJECTED', reason: 'reused', nonce: evidence.nonce };
+    }
+    const last = await tx.valePassOrderEvent.findFirst({ where: { valePassOrderId, type: TERMS_EVIDENCE_EVENT }, orderBy: { createdAt: 'desc' }, select: { detail: true } });
+    const previous = last?.detail as TermsEvidence | null | undefined;
+    if (previous && typeof previous === 'object' && termsEvidenceKey(previous) === termsEvidenceKey(evidence)) return evidence;
+    const signed = evidence.status === 'VERIFIED' || evidence.status === 'REJECTED';
+    await tx.valePassOrderEvent.create({
+      data: {
+        valePassOrderId,
+        type: TERMS_EVIDENCE_EVENT,
+        detail: {
+          ...evidence,
+          source: signed ? 'signed_token' : 'order_note_attributes',
+          ...(evidence.status === 'VERIFIED' ? { verifiedAt: new Date().toISOString() } : {}),
+          note: signed ? 'token assinado pelo servidor; não prova quem clicou' : 'declarado pela vitrine; não é prova jurídica por si só',
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return evidence;
+  }
+
   async processPaidOrder(
     tx: Tx,
     input: { payload: ShopifyOrderPayload; registry: ValePassOrder | null; campaigns: readonly ValePassCampaign[]; source: string },
@@ -146,6 +183,9 @@ export class ValePassPaymentFlowService {
     // A quantidade confiável é a do REGISTRO do pedido. Sem registro (nunca deveria acontecer neste ponto) usa-se o payload só para dimensionar a retenção.
     const units = registry?.quantity ?? campaigns.reduce((sum, c) => sum + (payload.line_items ?? []).filter((l) => String(l.variant_id) === c.shopifyVariantId.replace(/^.*\//, '')).reduce((s, l) => s + (l.quantity ?? 0), 0), 0);
 
+    // Evidência do aceite dos termos: registra sempre; só retém antes da emissão se VALE_PASS_TERMS_REQUIRED=on (abaixo). Nunca inventa consentimento.
+    const termsEvidence = registry ? await this.recordTermsEvidence(tx, registry.id, payload) : null;
+
     const hold = async (issues: { code: string; detail?: Record<string, unknown> }[], reason: string): Promise<FlowEvent[]> => {
       if (units < 1) return [{ type: 'VALE_PASS_ORDER_WITHOUT_TREATMENT', detail: { orderId, reason: 'sem unidades para reter', issues: issues.map((i) => i.code) } }];
       const missing = await this.missingUnits(tx, orderId, campaign.id, units);
@@ -161,6 +201,12 @@ export class ValePassPaymentFlowService {
     // Prazo de 3 dias = desde o PAGAMENTO real. Sem esse instante (cabeçalho do orders/paid ausente/inválido, ou pagamento só visto por orders/updated ou
     // reconciliação) o pedido NÃO é emitido às cegas nem recebe horário inventado: fica retido, com alerta, para um administrador.
     if (!registry.paymentConfirmedAt) return hold([{ code: PAYMENT_TIME_UNKNOWN }], 'FINANCIAL_MISMATCH');
+    // Aceite dos termos (SÓ com VALE_PASS_TERMS_REQUIRED=on; desligado por padrão): sem aceite VERIFICADO o pedido pago fica RETIDO antes de qualquer emissão.
+    // Nunca cancela, reembolsa, emite nem concede crédito por causa do aceite; a liberação é decisão de um ADMIN (emissão excepcional, não retomada automática).
+    if (this.termsConfig().required && termsEvidence?.status !== 'VERIFIED') {
+      const reason = termsEvidence && 'reason' in termsEvidence ? { reason: termsEvidence.reason } : {};
+      return hold([{ code: TERMS_ACCEPTANCE_REQUIRED, detail: { evidence: termsEvidence?.status ?? 'ABSENT', ...reason } }], 'FINANCIAL_MISMATCH');
+    }
 
     const verdict = await this.guard.evaluate(tx, factsFromWebhookPayload(payload));
     const issues = verdict.ok
