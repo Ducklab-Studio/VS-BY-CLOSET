@@ -20,6 +20,8 @@ A lista de vouchers (`GET /admin/vale-pass/vouchers`) devolvia o código complet
 - o código aparece parcialmente oculto (`VALLE-AB12-****`);
 - a busca só encontra por **código exato** ou por **pedido**: nada de fragmento de código, nome, e-mail ou telefone.
 
+**Lista de pedidos (`GET /admin/vale-pass/orders`):** também devolvia `vouchers[].code` completo a qualquer perfil do módulo (achado da revisão final). Agora, para quem não é ADMIN/SUPER_ADMIN, cada código sai mascarado (`VALLE-AB12-****`) **na resposta da API** (`forOrderListRole`), com o mesmo formato de objeto; ADMIN e SUPER_ADMIN seguem recebendo o código completo. Varredura dos demais endpoints administrativos de listagem: e-mails (`toMasked`/`codesMasked`), reembolsos, retenções, alertas de cancelamento e campanhas **não** trazem código de voucher; a consulta por código (`GET vouchers/:code`, saldo, histórico) devolve o código que o operador acabou de digitar.
+
 O atendimento continua: o cliente apresenta o código e o operador o digita em "Saldo e resgate" (a consulta por código digitado segue funcionando, com dados pessoais mascarados). Na lista, o botão "Ver saldo e resgatar" fica oculto para código mascarado, com uma dica.
 
 ## 3. Política de STAFF (texto corrigido, sem nova permissão)

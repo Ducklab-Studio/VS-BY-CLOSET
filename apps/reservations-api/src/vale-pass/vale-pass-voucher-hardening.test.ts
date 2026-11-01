@@ -4,7 +4,7 @@ import { ValePassLedgerController } from './ledger/ledger.controller';
 import { decideCompanyAccess } from './ledger/operator-scope';
 import { buildLaunchChecklist, type ChecklistInput } from './vale-pass-launch-checklist';
 import { IDENTITY_CHECK_REQUIRED, identityCheckRequired, isIdentityConfirmed } from './vale-pass-identity-confirmation';
-import { forListRole, forRole } from './vale-pass-voucher-privacy';
+import { forListRole, forRole, forOrderListRole } from './vale-pass-voucher-privacy';
 import { ValePassVouchersController } from './vale-pass-vouchers.controller';
 
 // Hardening dos vouchers (auditoria de segurança): conferência de identidade obrigatória, código mascarado na lista e política de STAFF.
@@ -111,5 +111,40 @@ describe('checklist: política de STAFF descrita corretamente e sem aprovação 
     expect(staff.message).toMatch(/NÃO é aprovação comercial/);
     expect(staff.message).not.toMatch(/só ADMIN e SUPER_ADMIN resgatam/);
     expect(staff.nextStep).toMatch(/vínculo explícito/);
+  });
+});
+
+describe('lista de pedidos: forOrderListRole (código dos vouchers e dados do cliente)', () => {
+  const order = {
+    shopifyOrderId: '1001',
+    customerName: 'Maria da Silva',
+    customerPhone: '+5587999990000',
+    customerEmail: 'maria.silva@exemplo.invalid',
+    vouchers: [
+      { code: 'VALLE-AB12-CD34', status: 'ACTIVE' },
+      { code: 'VALLE-EF56-GH78', status: 'USED' },
+      { code: 'VALLE-IJ90-KL12', status: 'CANCELLED' },
+    ],
+  };
+
+  test('STAFF: todos os códigos saem mascarados, o status e as chaves ficam iguais, e o objeto original não é alterado', () => {
+    const result = forOrderListRole(order, 'STAFF');
+    expect(result.vouchers.map((v) => v.code)).toEqual(['VALLE-AB12-****', 'VALLE-EF56-****', 'VALLE-IJ90-****']);
+    expect(result.vouchers.map((v) => v.status)).toEqual(['ACTIVE', 'USED', 'CANCELLED']);
+    expect(Object.keys(result).sort()).toEqual(Object.keys(order).sort());
+    expect(order.vouchers[0].code).toBe('VALLE-AB12-CD34');
+    expect(JSON.stringify(result)).not.toMatch(/CD34|GH78|KL12|maria\.silva@/);
+  });
+
+  test('ADMIN e SUPER_ADMIN recebem tudo completo', () => {
+    for (const role of ['ADMIN', 'SUPER_ADMIN'] as const) expect(forOrderListRole(order, role)).toEqual(order);
+  });
+
+  test('pedido sem vouchers segue com lista vazia (qualquer perfil)', () => {
+    for (const role of ['STAFF', 'ADMIN', 'SUPER_ADMIN'] as const) expect(forOrderListRole({ ...order, vouchers: [] }, role).vouchers).toEqual([]);
+  });
+
+  test('código malformado nunca vaza inteiro', () => {
+    expect(forOrderListRole({ ...order, vouchers: [{ code: 'SEMTRACO', status: 'ACTIVE' }] }, 'STAFF').vouchers[0].code).toBe('****');
   });
 });

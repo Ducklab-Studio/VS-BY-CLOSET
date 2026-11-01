@@ -24,6 +24,16 @@ export function forListRole<T extends VoucherCustomerFields & { readonly code: s
   return canSeeCustomerData(role) ? base : { ...base, code: maskCode(item.code) };
 }
 
+/**
+ * LISTA DE PEDIDOS (`/admin/vale-pass/orders`): além dos dados do cliente (`forRole`), cada `vouchers[].code` sai mascarado para quem não é administrador,
+ * pelo mesmo motivo de `forListRole`. O formato do objeto não muda (só o valor do código). ADMIN e SUPER_ADMIN recebem a lista completa.
+ */
+export function forOrderListRole<T extends VoucherCustomerFields & { readonly vouchers: readonly { readonly code: string }[] }>(item: T, role: AdminRole): T {
+  const base = forRole(item, role);
+  if (canSeeCustomerData(role)) return base;
+  return { ...base, vouchers: base.vouchers.map((voucher) => ({ ...voucher, code: maskCode(voucher.code) })) };
+}
+
 export function forRole<T extends VoucherCustomerFields>(item: T, role: AdminRole): T {
   if (canSeeCustomerData(role)) return item;
   return { ...item, customerName: maskName(item.customerName), customerPhone: maskPhone(item.customerPhone), customerEmail: item.customerEmail ? maskEmail(item.customerEmail) : null };
