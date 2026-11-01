@@ -120,8 +120,8 @@ Este documento não dá parecer jurídico. As questões abaixo só podem ser fec
 
 ## 7. Permissões dos funcionários para resgates
 **Confirmado**
-- O Anderson disse que os **funcionários também podem validar** vouchers (26/10).
-- Hoje só **ADMIN e SUPER_ADMIN** resgatam; STAFF apenas consulta. Mudar isso exige alteração de código e publicação, com autorização separada.
+- O Anderson mencionou em 26/10 que os **funcionários também podem validar** vouchers. Isso **não** fechou a permissão: quais funcionários, em quais empresas e a aprovação formal seguem abaixo, em "Falta decidir".
+- **Política técnica atual** (código): STAFF com **vínculo explícito do proprietário a uma empresa** pode resgatar só nessa empresa; sem vínculo, STAFF apenas consulta, com dados mascarados. Reversão, bloqueio e conciliação são só de ADMIN. Nenhum vínculo existe por padrão, e hoje há apenas SUPER_ADMIN cadastrados. Isto **não é aprovação comercial** do Anderson.
 
 **Falta decidir**
 - **Todos** os funcionários, ou só alguns? Em todas as lojas ou **cada um só na sua** (Valle Showroom ou VS BY CLOSET)? O desenho recomendado é um escopo por empresa por usuário, sem escopo = sem resgate.

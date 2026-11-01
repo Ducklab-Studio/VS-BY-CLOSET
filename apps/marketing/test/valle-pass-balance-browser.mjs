@@ -186,6 +186,10 @@ try {
   await page.getByLabel(/Digite novamente o valor/).fill('150');
   assert.equal(await confirm.isDisabled(), true, 'valor diferente não habilita');
   await page.getByLabel(/Digite novamente o valor/).fill('200');
+  assert.equal(await confirm.isDisabled(), true, 'sem a conferência de identidade marcada o resgate não pode ser confirmado');
+  assert.equal(await page.getByTestId('redeem-identity').isChecked(), false, 'a conferência nunca vem marcada');
+  await page.getByTestId('redeem-identity').check();
+  assert.equal(await confirm.isDisabled(), false);
   await confirm.dblclick(); // duplo clique: só UM resgate
   await page.getByText('Resgate de R$ 200,00 registrado. Saldo disponível: R$ 300,00.').waitFor();
   assert.equal((await metric(page, 'Saldo disponível').innerText()).trim(), 'R$ 300,00');
@@ -202,8 +206,9 @@ try {
   await page.getByLabel('Referência da utilização').fill('Nota 124');
   await page.getByRole('button', { name: 'Conferir' }).click();
   await page.getByLabel(/Digite novamente o valor/).fill('100,00');
-  // Conferência de identidade: OPCIONAL (aqui marcada; no resgate anterior ficou desmarcada e o resgate foi aceito do mesmo jeito).
-  assert.equal(await page.getByTestId('redeem-identity').isChecked(), false, 'a conferência nunca vem marcada');
+  // Conferência de identidade: OBRIGATÓRIA e refeita a cada resgate (a do resgate anterior não é herdada).
+  assert.equal(await page.getByTestId('redeem-identity').isChecked(), false, 'a conferência nunca vem marcada nem é herdada do resgate anterior');
+  assert.equal(await page.getByRole('button', { name: 'Confirmar resgate' }).isDisabled(), true);
   await page.getByTestId('redeem-identity').check();
   await page.getByRole('button', { name: 'Confirmar resgate' }).click();
   await page.getByText('Saldo disponível: R$ 200,00.').waitFor();
@@ -214,12 +219,12 @@ try {
   assert.deepEqual(ledger.map((e) => [e.seq, e.deltaCents, e.balanceAfterCents]), [[1, -20_000, 30_000], [2, -10_000, 20_000]]);
   const redeemedEvents = await db.valePassEvent.findMany({ where: { valePass: { code: A }, type: 'REDEEMED' }, orderBy: { createdAt: 'asc' } });
   assert.equal(redeemedEvents.length, 2);
-  assert.equal(redeemedEvents[0].detail.identityChecked, null, 'sem marcar: registrado como "não informado", sem recusar o resgate');
+  assert.equal(redeemedEvents[0].detail.identityChecked, true, 'o primeiro resgate também só foi gravado com a conferência marcada');
   assert.equal(redeemedEvents[1].detail.identityChecked, true, 'marcada: fica no histórico do voucher');
   const redeemAudit = await db.adminAuditEvent.findMany({ where: { action: 'VALE_PASS_REDEEMED', entityId: redeemedEvents[1].valePassId }, orderBy: { createdAt: 'asc' } });
   assert.equal(redeemAudit.length, 2);
   assert.equal(redeemAudit[1].detail.identityChecked, true, 'e na auditoria administrativa');
-  assert.deepEqual(redeemAudit[0].detail.identityChecked, null);
+  assert.equal(redeemAudit[0].detail.identityChecked, true);
   pass('3) novo resgate de R$ 100 → saldo R$ 200; histórico com valor, saldo resultante, referência e operador; "Usar saldo total" só preenche o campo; identidade conferida é opcional e fica no histórico e na auditoria');
 
   // 3) Outra empresa: R$ 50 − R$ 20 = R$ 30, sem tocar no saldo da Valle Showroom.
@@ -230,6 +235,7 @@ try {
   await page.getByLabel('Referência da utilização').fill('Comanda 7');
   await page.getByRole('button', { name: 'Conferir' }).click();
   await page.getByLabel(/Digite novamente o valor/).fill('20');
+  await page.getByTestId('redeem-identity').check();
   await page.getByRole('button', { name: 'Confirmar resgate' }).click();
   await page.getByText('Saldo disponível: R$ 30,00.').waitFor();
   assert.equal((await db.valePass.findUniqueOrThrow({ where: { code: A } })).balanceCents, 20_000);
@@ -582,6 +588,7 @@ try {
     await sp.getByLabel('Referência da utilização').fill('Comanda STAFF 1');
     await sp.getByRole('button', { name: 'Conferir' }).click();
     await sp.getByLabel(/Digite novamente o valor/).fill('5');
+    await sp.getByTestId('redeem-identity').check();
     await sp.getByRole('button', { name: 'Confirmar resgate' }).click();
     await sp.getByText('Saldo disponível: R$ 45,00.').waitFor();
     assert.equal(await sp.getByRole('button', { name: /Reverter este resgate/ }).count(), 0, 'funcionário não reverte o que registrou');
@@ -590,6 +597,7 @@ try {
     const audit = await db.adminAuditEvent.findMany({ where: { adminUserId: scopedStaff.id, action: 'VALE_PASS_REDEEMED' } });
     assert.equal(audit.length, 1);
     assert.equal(audit[0].detail.accessBasis, 'SCOPE');
+    assert.equal(audit[0].detail.identityChecked, true, 'o resgate do funcionário só foi gravado com a conferência de identidade registrada');
     await consult(sp, D); // a outra loja
     await sp.getByText(/não está autorizado a resgatar vouchers da Valle Showroom/).waitFor();
     assert.equal(await sp.getByLabel('Valor a utilizar (R$)').count(), 0, 'sem formulário na loja não autorizada');
