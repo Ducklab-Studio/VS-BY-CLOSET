@@ -139,3 +139,131 @@ test('sem permissão ou sem sessão: esconde o badge e para de perguntar', async
   await tab.poller.refresh();
   assert.equal(tab.calls, 2);
 });
+
+// Cada teste novo tem prazo curto: com o código antigo uma espera que nunca resolve reprova em vez de travar a suíte.
+const t = (name, fn) => test(name, { timeout: 4000 }, fn);
+
+// ---- Pedido de atualização durante uma consulta em andamento (condição de corrida do contador do menu) ----
+// Antes, `refresh()` durante uma consulta devolvia a MESMA consulta, que podia ter lido o servidor antes da mudança: a contagem velha ficava na tela até
+// o ciclo de 30 s. Agora o pedido vira UMA nova consulta ao terminar a atual (vários pedidos viram uma só), sem laço e respeitando `stop()`.
+function manualTab() {
+  const pending = [];
+  const states = [];
+  let intervalFn = null;
+  const tab = {
+    states,
+    pending,
+    get calls() { return pending.length; },
+    tick: async () => { intervalFn(); await settle(); },
+    answer: async (index, result) => { pending[index].resolve(result); await settle(); },
+    fail: async (index, error) => { pending[index].reject(error); await settle(); },
+  };
+  tab.poller = startAttentionPoller({
+    fetchCount: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+    isVisible: () => true,
+    setInterval: (fn) => ((intervalFn = fn), 'timer'),
+    clearInterval: () => {},
+    onChange: (state) => states.push(state),
+  });
+  return tab;
+}
+
+t('refresh durante consulta lenta: a consulta atual NÃO cobre o pedido; ao terminar, uma nova traz o valor atualizado', async () => {
+  const tab = manualTab();
+  await settle();
+  assert.equal(tab.calls, 1); // abertura: consulta lenta em andamento (leu o servidor com 0)
+  let done = false;
+  const refreshed = tab.poller.refresh().then(() => (done = true)); // o menu foi avisado de que algo mudou (agora o servidor tem 1)
+  await settle();
+  assert.equal(tab.calls, 1); // ainda não pergunta de novo: uma consulta por vez
+  await tab.answer(0, { count: 0 }); // a consulta velha termina com o valor velho
+  assert.equal(tab.calls, 2); // e a nova começa logo, sem esperar os 30 s
+  assert.equal(done, false); // o `refresh()` só resolve com a consulta nova
+  await tab.answer(1, { count: 1 });
+  await refreshed;
+  assert.equal(done, true);
+  assert.deepEqual(tab.states.map((s) => s.count), [0, 1]);
+});
+
+t('vários refreshes durante a mesma consulta viram UMA consulta adicional, e só uma', async () => {
+  const tab = manualTab();
+  await settle();
+  const all = Promise.all([1, 2, 3, 4, 5].map(() => tab.poller.refresh()));
+  await tab.answer(0, { count: 0 });
+  assert.equal(tab.calls, 2);
+  await tab.answer(1, { count: 7 });
+  await all;
+  await settle();
+  await settle();
+  assert.equal(tab.calls, 2); // nenhuma consulta extra depois da adicional
+  assert.equal(tab.states.at(-1).count, 7);
+});
+
+t('pedidos no mesmo instante em que a consulta começa continuam sendo uma só (sem consulta adicional)', async () => {
+  const tab = manualTab();
+  await settle();
+  await tab.answer(0, { count: 2 });
+  const all = Promise.all([tab.poller.refresh(), tab.poller.refresh(), tab.poller.refresh()]);
+  await settle();
+  assert.equal(tab.calls, 2); // abertura + um único refresh para os três pedidos simultâneos
+  await tab.answer(1, { count: 2 });
+  await all;
+  await settle();
+  assert.equal(tab.calls, 2); // e nenhuma consulta adicional depois
+});
+
+t('depois da consulta adicional o ciclo volta ao normal: novo refresh pergunta de novo e o intervalo de 30 s segue valendo', async () => {
+  const tab = manualTab();
+  await settle();
+  void tab.poller.refresh();
+  await tab.answer(0, { count: 0 });
+  await tab.answer(1, { count: 1 });
+  assert.equal(tab.calls, 2);
+  void tab.poller.refresh();
+  await settle();
+  assert.equal(tab.calls, 3);
+  await tab.answer(2, { count: 1 });
+  await tab.tick();
+  assert.equal(tab.calls, 4);
+});
+
+t('stop() durante a consulta cancela a consulta adicional e nada é publicado depois', async () => {
+  const tab = manualTab();
+  await settle();
+  const refreshed = tab.poller.refresh();
+  tab.poller.stop();
+  await tab.answer(0, { count: 9 });
+  await refreshed;
+  await settle();
+  assert.equal(tab.calls, 1); // sem consulta adicional
+  assert.equal(tab.states.length, 0); // resposta chegou depois do stop: descartada
+  await tab.poller.refresh();
+  assert.equal(tab.calls, 1);
+});
+
+t('falha na consulta com refresh pendente: UMA tentativa adicional, sem laço; mantém o último valor, esmaecido', async () => {
+  const tab = manualTab();
+  await settle();
+  await tab.answer(0, { count: 3 });
+  void tab.poller.refresh();
+  await settle();
+  void tab.poller.refresh(); // durante a consulta que vai falhar
+  await tab.fail(1, new Error('offline'));
+  assert.equal(tab.calls, 3); // a adicional foi feita...
+  await tab.fail(2, new Error('offline')); // ...e também falhou
+  for (let i = 0; i < 5; i++) await settle();
+  assert.equal(tab.calls, 3); // sem nova tentativa por conta própria
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.states.at(-1))), { count: 3, stale: true, stopped: false });
+  await tab.tick(); // só o próximo ciclo de 30 s pergunta de novo
+  assert.equal(tab.calls, 4);
+});
+
+t('sem permissão na consulta que estava em andamento: para de vez, mesmo com refresh pendente', async () => {
+  const tab = manualTab();
+  await settle();
+  void tab.poller.refresh();
+  await tab.answer(0, { forbidden: true });
+  await settle();
+  assert.equal(tab.calls, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(tab.states.at(-1))), { count: null, stale: false, stopped: true });
+});

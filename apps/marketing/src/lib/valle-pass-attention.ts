@@ -72,10 +72,21 @@ export interface AttentionPoller {
  * aba estiver visível. Nunca duas perguntas ao mesmo tempo. Falha: mantém o
  * último valor (esmaecido) e tenta de novo no próximo ciclo. Sem permissão
  * ou sem sessão: esconde o badge e para de vez.
+ *
+ * `refresh()` pedido DURANTE uma pergunta já enviada não é descartado: aquela
+ * pergunta pode ter lido o servidor antes da mudança que motivou o pedido (o
+ * contador ficaria velho até o ciclo seguinte). Ao terminar, é feita UMA nova
+ * pergunta — vários pedidos durante a mesma pergunta viram uma só — e o
+ * `refresh()` só resolve depois dela. Pedidos do mesmo instante em que a
+ * pergunta começa já são cobertos por ela. O ciclo de 30 s não enfileira nada.
  */
 export function startAttentionPoller(deps: AttentionPollerDeps): AttentionPoller {
   let state = INITIAL_ATTENTION_STATE;
   let inFlight: Promise<void> | null = null;
+  /** A pergunta em andamento já foi enviada ao servidor. */
+  let sent = false;
+  /** Chegou um pedido depois do envio: falta uma nova pergunta. */
+  let again = false;
   let stopped = false;
 
   const publish = (next: AttentionState) => {
@@ -99,14 +110,39 @@ export function startAttentionPoller(deps: AttentionPollerDeps): AttentionPoller
     } else publish({ ...state, stale: true });
   }
 
-  function refresh(): Promise<void> {
+  /** Perguntas em sequência enquanto houver pedido novo depois do envio; no máximo uma extra por pergunta, e nenhuma depois do `stop()`. */
+  async function drain(): Promise<void> {
+    try {
+      await Promise.resolve(); // pedidos do mesmo instante entram nesta mesma pergunta
+      do {
+        if (stopped) return;
+        again = false;
+        sent = true;
+        await ask();
+      } while (again && !stopped);
+    } finally {
+      inFlight = null;
+      sent = false;
+      again = false;
+    }
+  }
+
+  function request(queueIfBusy: boolean): Promise<void> {
     if (stopped) return Promise.resolve();
-    if (!inFlight) inFlight = ask().finally(() => (inFlight = null));
+    if (inFlight) {
+      if (queueIfBusy && sent) again = true;
+      return inFlight;
+    }
+    inFlight = drain();
     return inFlight;
   }
 
+  function refresh(): Promise<void> {
+    return request(true);
+  }
+
   const timer = deps.setInterval(() => {
-    if (deps.isVisible()) void refresh();
+    if (deps.isVisible()) void request(false);
   }, VALLE_PASS_ATTENTION_POLL_MS);
 
   function stop(): void {
