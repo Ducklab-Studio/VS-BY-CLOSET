@@ -288,14 +288,17 @@ localDescribe('autorização, privacidade e enumeração', () => {
     expect(full.holder.phoneMasked).toBe('***78'); // telefone e e-mail completos nunca saem nestas respostas
   });
 
-  test('o endpoint legado de "usado": STAFF não consome saldo de voucher novo (403); ADMIN pode (resgate integral pelo ledger); legado segue livre para STAFF', async () => {
+  test('o endpoint legado de "usado": STAFF não consome saldo de voucher novo (403); ADMIN pode (resgate integral pelo ledger); voucher legado (sem empresa) também só ADMIN', async () => {
     const u = await newUnit();
     await expect(vouchersService.markUsed(u.showroom.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(await entries(u.showroom.id)).toHaveLength(0);
     await expect(vouchersService.markUsed(u.showroom.code, admin.id, admin.name, { role: 'ADMIN' })).resolves.toMatchObject({ status: 'USED', balanceCents: 0 });
     expect(await entries(u.showroom.id)).toMatchObject([{ reference: 'LEGACY_USE_ENDPOINT' }]);
     const legacy = await prisma.valePass.create({ data: { code: `VALLE-${TAG.slice(-4)}-LEG${counter++}`.toUpperCase(), campaignId: u.campaignId, amountCents: 35_000, purchasedAt: new Date(), expiresAt: new Date(Date.now() + 86_400_000) } });
-    await expect(vouchersService.markUsed(legacy.code, staff.id, staff.name, { role: 'STAFF' })).resolves.toMatchObject({ status: 'USED' });
+    // Legado sem empresa não tem saldo nem ledger: STAFF não o consome mais (B4); ADMIN continua podendo.
+    await expect(vouchersService.markUsed(legacy.code, staff.id, staff.name, { role: 'STAFF' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect((await prisma.valePass.findUniqueOrThrow({ where: { id: legacy.id } })).status).toBe('ACTIVE');
+    await expect(vouchersService.markUsed(legacy.code, admin.id, admin.name, { role: 'ADMIN' })).resolves.toMatchObject({ status: 'USED' });
   });
 
   test('código inexistente e código malformado dão a MESMA resposta (404) — nenhuma pista para enumerar; nenhum dado vaza', async () => {

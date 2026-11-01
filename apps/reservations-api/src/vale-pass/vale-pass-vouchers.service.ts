@@ -171,6 +171,11 @@ export class ValePassVouchersService {
           throw ledgerRefusal(err) ?? err;
         }
       } else {
+        // Legado (sem empresa): sem saldo nem livro-razão, então nenhum funcionário o consome (sem prévia, sem valor redigitado, sem escopo de empresa): só administrador.
+        // Chamadas internas sem papel não passam por esta checagem; o caminho HTTP sempre informa o papel.
+        if (options.role !== undefined && options.role !== 'ADMIN' && options.role !== 'SUPER_ADMIN') {
+          throw new ForbiddenException('Este voucher é do modelo antigo (sem empresa) e só um administrador pode marcá-lo como utilizado.');
+        }
         // Legado (sem empresa): tudo ou nada, como sempre. Status no WHERE + contagem: dois resgates simultâneos do mesmo código nunca gravam USED os dois.
         const changed = await tx.valePass.updateMany({
           where: { id: target.id, status: 'ACTIVE' },
@@ -188,7 +193,7 @@ export class ValePassVouchersService {
         entityId: target.id,
         before: { status: target.status },
         after: { status: 'USED' },
-        detail: { code: maskCode(target.code), ...(options.requireIdentity && target.company !== null ? { identityChecked: true } : {}) },
+        detail: { code: maskCode(target.code), ...(options.requireIdentity && target.company !== null ? { identityChecked: true } : {}), legacyNoCompany: target.company === null, role: options.role ?? null },
       });
       return tx.valePass.findUniqueOrThrow({ where: { id: target.id } });
     });
