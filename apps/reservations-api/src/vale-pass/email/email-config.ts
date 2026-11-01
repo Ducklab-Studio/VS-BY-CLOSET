@@ -9,6 +9,8 @@
  * Fase de testes (FAIL CLOSED): o envio real exige uma lista VÁLIDA de destinatários (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS) e vai SOMENTE a esses endereços.
  * Sem lista, ou com lista vazia/inválida, NADA é enviado — a menos que exista a liberação comercial explícita e separada
  * VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true (ainda não habilitada). Mesmo com a liberação, uma lista presente continua restringindo; lista inválida nunca é ignorada.
+ * A liberação comercial SEM lista exige também a REFERÊNCIA DA AUTORIZAÇÃO (VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF, 8–120 caracteres, ex.: um código interno da aprovação):
+ * sem ela o envio real continua bloqueado, e a referência fica visível no status (rastreio de quem autorizou o quê). Nunca coloque nome ou e-mail de pessoa nela.
  * Vale para o worker e para reenvios administrativos.
  * Cadastrar o domínio na Resend, ou já existir RESEND_API_KEY para os lembretes de retirada, NÃO liga o envio de vouchers.
  */
@@ -42,9 +44,18 @@ export interface EmailConfig {
   readonly allowlistProblems: readonly string[];
   /** Liberação comercial explícita (VALE_PASS_EMAIL_COMMERCIAL_RELEASE=true): só ela permite envio real SEM lista de destinatários. */
   readonly commercialRelease: boolean;
+  /** Referência (não secreta) da autorização comercial registrada para a liberação sem lista; `null` = ausente ou inválida. */
+  readonly commercialAuthorizationRef: string | null;
 }
 
 export const MAX_ALLOWED_RECIPIENTS = 20;
+
+const AUTH_REF = /^[A-Za-z0-9][A-Za-z0-9 ._:-]{7,119}$/;
+/** Referência da autorização: só letras, números e `._:- `, 8 a 120 caracteres, sem `@` (não deve conter e-mail). */
+export function parseAuthorizationRef(raw: string | undefined): string | null {
+  const value = raw?.trim() ?? '';
+  return AUTH_REF.test(value) ? value : null;
+}
 
 const ADDRESS = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
 
@@ -110,6 +121,7 @@ export function loadEmailConfig(env: Record<string, string | undefined> = proces
     webhookSecret: env.RESEND_WEBHOOK_SECRET?.trim() || null,
     ...parseAllowedRecipients(env.VALE_PASS_EMAIL_ALLOWED_RECIPIENTS),
     commercialRelease: env.VALE_PASS_EMAIL_COMMERCIAL_RELEASE?.trim().toLowerCase() === 'true',
+    commercialAuthorizationRef: parseAuthorizationRef(env.VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF),
   };
 }
 
@@ -128,6 +140,7 @@ export function liveBlockers(config: EmailConfig): string[] {
   if (!config.domainVerified) reasons.push('domínio ainda não marcado como verificado (VALE_PASS_EMAIL_DOMAIN_VERIFIED)');
   if (!senderAddress(config.from)) reasons.push('remetente inválido (VALE_PASS_EMAIL_FROM)');
   if (config.allowedRecipients === null && !config.commercialRelease) reasons.push('sem lista de destinatários autorizados (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS) e sem liberação comercial explícita (VALE_PASS_EMAIL_COMMERCIAL_RELEASE)');
+  if (config.allowedRecipients === null && config.commercialRelease && !config.commercialAuthorizationRef) reasons.push('liberação comercial sem a referência da autorização (VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF, 8 a 120 caracteres)');
   for (const problem of config.allowlistProblems) reasons.push(`lista de destinatários autorizados inválida (VALE_PASS_EMAIL_ALLOWED_RECIPIENTS): ${problem}`);
   return reasons;
 }
@@ -150,6 +163,8 @@ export function publicEmailStatus(config: EmailConfig): {
   recipientAllowlist: { active: boolean; size: number; valid: boolean };
   /** Sem lista e sem liberação comercial: o envio real fica bloqueado (fase de testes). */
   commercialRelease: boolean;
+  /** Referência da autorização comercial (não secreta); `null` = ausente. */
+  commercialAuthorizationRef: string | null;
 } {
   const blockers = liveBlockers(config);
   return {
@@ -163,5 +178,6 @@ export function publicEmailStatus(config: EmailConfig): {
     sender: senderAddress(config.from),
     recipientAllowlist: { active: config.allowedRecipients !== null, size: config.allowedRecipients?.length ?? 0, valid: config.allowlistProblems.length === 0 },
     commercialRelease: config.commercialRelease,
+    commercialAuthorizationRef: config.commercialAuthorizationRef,
   };
 }

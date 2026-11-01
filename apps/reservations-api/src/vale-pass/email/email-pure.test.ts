@@ -8,7 +8,7 @@ import { BACKOFF_MINUTES, backoffMs } from './email-worker.service';
 import { parseResendEvent, verifySvixSignature } from './resend-webhook';
 import { isValidRecipient } from './email-outbox.service';
 
-const liveEnv = { VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key_123', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true' };
+const liveEnv = { VALE_PASS_EMAIL_MODE: 'live', RESEND_API_KEY: 're_test_key_123', VALE_PASS_EMAIL_DOMAIN_VERIFIED: 'true', VALE_PASS_EMAIL_COMMERCIAL_RELEASE: 'true', VALE_PASS_EMAIL_COMMERCIAL_AUTH_REF: 'AUTORIZACAO-TESTE-001' };
 
 describe('configuração: fail closed', () => {
   test('o padrão é DESLIGADO e nenhum envio real é possível', () => {

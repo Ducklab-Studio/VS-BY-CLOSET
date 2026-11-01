@@ -7,6 +7,9 @@ import { renderVoucherEmail } from './email-template';
 import { IN_FLIGHT_STATUSES, ValePassEmailOutboxService, evaluateGroup, isValidRecipient } from './email-outbox.service';
 
 /** Espera entre tentativas (minutos): 1, 5, 15, 60, 3 h, 6 h, 12 h, 24 h. Com 8 tentativas a mensagem tenta por cerca de 2 dias. */
+/** Motivos gravados pelo webhook da Resend que tornam o ENDEREÇO inelegível para novos envios. */
+export const SUPPRESSING_REASONS: string[] = ['bounced', 'complained', 'suppressed'];
+
 export const BACKOFF_MINUTES: readonly number[] = [1, 5, 15, 60, 180, 360, 720, 1440];
 /** Reserva (lease) enquanto o lote é preparado e enquanto a chamada à Resend está em andamento. Vencida = o processo caiu. */
 const CLAIM_LEASE_MS = 2 * 60_000;
@@ -243,6 +246,17 @@ export class ValePassEmailWorkerService {
     // 2) Destinatário e limites de tentativa.
     if (!isValidRecipient(row.toEmail)) {
       await this.finish(id, waiting, { status: 'NEEDS_ATTENTION', lastError: 'no_recipient' }, 'NEEDS_ATTENTION', { reason: 'no_recipient' });
+      return 'needsAttention';
+    }
+    // Envio sem lista (liberação comercial): mensagem de campanha de TESTE nunca vai para endereço de comprador; só com lista autorizada.
+    if (verdict.testCampaign && recipientsUnrestricted(this.config)) {
+      await this.finish(id, waiting, { status: 'NEEDS_ATTENTION', lastError: 'test_campaign_needs_allowlist' }, 'NEEDS_ATTENTION', { reason: 'test_campaign_needs_allowlist' });
+      return 'needsAttention';
+    }
+    // Endereço que já devolveu (bounce), reclamou (spam) ou foi suprimido pelo provedor: não se insiste (reputação do domínio); uma pessoa decide.
+    const suppressed = await this.prisma.valePassEmailOutbox.count({ where: { id: { not: id }, toEmail: { equals: row.toEmail, mode: 'insensitive' }, status: 'FAILED', lastError: { in: SUPPRESSING_REASONS } } });
+    if (suppressed > 0) {
+      await this.finish(id, waiting, { status: 'NEEDS_ATTENTION', lastError: 'recipient_suppressed' }, 'NEEDS_ATTENTION', { reason: 'recipient_suppressed' });
       return 'needsAttention';
     }
     // Defesa em profundidade (a reserva já filtra): fora da lista autorizada nada chega ao provedor; a reserva é devolvida e a mensagem continua na fila.
