@@ -63,7 +63,8 @@ export class ValePassLedgerController {
   @HttpCode(200)
   @Throttle(WRITE_LIMIT)
   redeem(@Param('code') code: string, @Body() dto: ConfirmRedeemDto, @Req() req: RequestWithAdminUser): Promise<OperationResult> {
-    return this.redemption.confirmRedeem(code, dto, actorOf(req));
+    // Intransferibilidade: no caminho HTTP o serviço só grava com o registro de que a identidade do titular foi conferida na hora (vale-pass-identity-confirmation.ts).
+    return this.redemption.confirmRedeem(code, dto, actorOf(req), { requireIdentity: true });
   }
 
   @Post('vouchers/:code/ledger/:entryId/reverse/prepare')

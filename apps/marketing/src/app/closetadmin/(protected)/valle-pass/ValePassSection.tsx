@@ -915,7 +915,11 @@ function VoucherCard({
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-ink/5 pt-3.5 dark:border-white/5">
         {voucher.status === 'ACTIVE' ? (
           <>
-            {voucher.company !== null ? (
+            {voucher.company !== null && voucher.code.includes('*') ? (
+              <p className="text-xs text-ink/55 dark:text-dark-muted" data-testid="voucher-code-masked-hint">
+                Código parcialmente oculto para o seu perfil. Para consultar o saldo ou resgatar, digite o código que o cliente apresentar em &quot;Saldo e resgate&quot;.
+              </p>
+            ) : voucher.company !== null ? (
               <button
                 type="button"
                 onClick={() => onOpenDesk(voucher.code)}

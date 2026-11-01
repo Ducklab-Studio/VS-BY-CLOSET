@@ -7,7 +7,8 @@ import { RequireModule } from '../admin/require-module.decorator';
 import { ValePassVouchersService, type ValePassVoucherItem } from './vale-pass-vouchers.service';
 import { CancelValePassDto } from './dto/cancel-vale-pass.dto';
 import { RestoreValePassDto } from './dto/restore-vale-pass.dto';
-import { forRole } from './vale-pass-voucher-privacy';
+import { canSeeCustomerData, forListRole, forRole } from './vale-pass-voucher-privacy';
+import { isIdentityConfirmed } from './vale-pass-identity-confirmation';
 
 interface RequestWithAdminUser {
   adminUser?: { id: string; name: string; role: AdminRole };
@@ -30,8 +31,9 @@ export class ValePassVouchersController {
   @Get()
   async list(@Req() req: RequestWithAdminUser, @Query('status') status?: string, @Query('campaignId') campaignId?: string, @Query('search') search?: string): Promise<ValePassVoucherItem[]> {
     const parsedStatus = status && (VALID_STATUSES as readonly string[]).includes(status) ? (status as ValePassStatus) : undefined;
-    const items = await this.vouchers.list({ status: parsedStatus, campaignId: campaignId || undefined, search: search || undefined });
-    return items.map((item) => forRole(item, req.adminUser!.role));
+    // Quem não é administrador consulta a lista SEM os códigos completos e só encontra voucher por código exato (ver ValePassVouchersService.list).
+    const items = await this.vouchers.list({ status: parsedStatus, campaignId: campaignId || undefined, search: search || undefined }, { restricted: !canSeeCustomerData(req.adminUser!.role) });
+    return items.map((item) => forListRole(item, req.adminUser!.role));
   }
 
   @Get(':code')
@@ -40,8 +42,12 @@ export class ValePassVouchersController {
   }
 
   @Post(':code/use')
-  async markUsed(@Param('code') code: string, @Req() req: RequestWithAdminUser): Promise<ValePassVoucherItem> {
-    return forRole(await this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name, { role: req.adminUser!.role }), req.adminUser!.role);
+  async markUsed(@Param('code') code: string, @Req() req: RequestWithAdminUser, @Body('identityChecked') identityChecked?: unknown): Promise<ValePassVoucherItem> {
+    // Voucher com empresa: o "usado" por inteiro também exige o registro da conferência de identidade (o serviço aplica; legado sem empresa não tem esse conceito).
+    return forRole(
+      await this.vouchers.markUsed(code, req.adminUser!.id, req.adminUser!.name, { role: req.adminUser!.role, requireIdentity: true, identityChecked: isIdentityConfirmed(identityChecked) }),
+      req.adminUser!.role,
+    );
   }
 
   @Post(':code/cancel')
