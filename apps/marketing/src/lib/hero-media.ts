@@ -31,7 +31,10 @@ export interface HeroVideo extends HeroVideoSet {
   readonly stallMs?: number;
 }
 
-export const HERO_VIDEO: HeroVideo | null = null;
+export const HERO_VIDEO: HeroVideo | null = {
+  mp4: '/editorial/video/hero-v1.mp4',
+  position: { desktop: '67% center', mobile: '50% 30%' },
+};
 
 export const HERO_VIDEO_DEFAULT_TIMEOUT_MS = 8000;
 export const HERO_VIDEO_DEFAULT_STALL_MS = 2500;

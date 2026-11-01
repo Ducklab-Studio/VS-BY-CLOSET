@@ -20,8 +20,8 @@ const j = (v) => JSON.parse(JSON.stringify(v));
 const play = (events, start = initialHeroState()) => events.reduce((s, e) => heroReducer(s, e), start);
 const AUTO = { type: 'INIT', decision: decideHeroVideo(VIDEO, GOOD) };
 
-test('16) vídeo desativado: estado entregue = nenhum vídeo, fase "off", nada montado, nenhum botão', () => {
-  assert.equal(HERO_VIDEO, null);
+test('16) vídeo oficial ativo e fallback quando desativado (null)', () => {
+  assert.deepEqual(j(HERO_VIDEO), { mp4: '/editorial/video/hero-v1.mp4', position: { desktop: '67% center', mobile: '50% 30%' } });
   assert.deepEqual(j(decideHeroVideo(null, GOOD)), { mode: 'off', reason: null });
   const s = play([{ type: 'INIT', decision: decideHeroVideo(null, GOOD) }]);
   assert.equal(s.phase, 'off');
